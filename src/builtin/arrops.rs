@@ -39,14 +39,18 @@ trait ArrOp {
 
     for (val, span) in arguments {
       Shed::vars_mut(|v| {
-        if let Ok(arr) = v.get_arr_mut(name) {
+        if let Ok(arr) = v.get_arr_mut(&name.to_str_lossy()) {
           match end {
             End::Front => arr.push_front(val.clone()),
             End::Back => arr.push_back(val.clone()),
           }
           Ok(())
         } else {
-          v.set_var(name, VarKind::arr([val]), VarFlags::empty())
+          v.set_var(
+            &name.to_str_lossy(),
+            VarKind::arr([val.clone()]),
+            VarFlags::empty(),
+          )
         }
       })
       .promote_err(span.clone())?;
@@ -86,7 +90,9 @@ trait ArrOp {
           End::Front => arr.pop_front(),
           End::Back => arr.pop_back(),
         };
-        let Some(popped_val) = Shed::vars_mut(|v| v.get_arr_mut(arg).ok().and_then(pop)) else {
+        let Some(popped_val) =
+          Shed::vars_mut(|v| v.get_arr_mut(&arg.to_str_lossy()).ok().and_then(pop))
+        else {
           return with_status(1);
         };
         popped.push_back(popped_val);
@@ -222,7 +228,9 @@ impl super::Builtin for Rotate {
 
     for (arg, _) in args.arguments() {
       Shed::vars_mut(|v| -> ShResult<()> {
-        let arr = v.get_arr_mut(arg).promote_err(args.span())?;
+        let arr = v
+          .get_arr_mut(&arg.to_str_lossy())
+          .promote_err(args.span())?;
         if reverse {
           arr.rotate_right(count.min(arr.len()));
         } else {
@@ -253,7 +261,14 @@ mod tests {
       .iter()
       .map(ToString::to_string)
       .collect::<VecDeque<_>>();
-    Shed::vars_mut(|v| v.set_var(name, VarKind::arr(arr), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| {
+      v.set_var(
+        name,
+        VarKind::arr(arr.into_iter().map(Into::into)),
+        VarFlags::empty(),
+      )
+    })
+    .unwrap();
   }
 
   fn get_arr(name: &str) -> Vec<VarStr> {

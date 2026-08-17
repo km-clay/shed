@@ -229,7 +229,7 @@ impl Terminal {
     }
 
     if let Some(val) = try_var!("SHED_COLOR_MODE") {
-      match val.as_str() {
+      match val.to_str_lossy().as_ref() {
         "truecolor" | "24bit" => return Some(ColorMode::Truecolor),
         "256" | "256color" => return Some(ColorMode::Palette256),
         "16" | "8" => return Some(ColorMode::Palette16),
@@ -247,7 +247,7 @@ impl Terminal {
         return None;
       }
 
-      if term.contains("256color") {
+      if term.to_str_lossy().contains("256color") {
         return Some(ColorMode::Palette256);
       }
     }
@@ -468,7 +468,7 @@ impl Terminal {
     }
 
     if let Some(val) = try_var!("COLORTERM")
-      && matches!(val.as_str(), "truecolor" | "24bit")
+      && matches!(val.to_str_lossy().as_ref(), "truecolor" | "24bit")
     {
       caps.insert(TermCap::TRUECOLOR);
     }

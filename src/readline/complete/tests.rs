@@ -1699,8 +1699,14 @@ mod bash_comp_spec_tests {
     // a fresh var name avoids collisions with whatever TestGuard or the host
     // already set for HOME / TMPDIR / etc.
     let dir_path = dir.path().to_string_lossy().to_string();
-    state::Shed::vars_mut(|v| v.set_var("TESTDIR", VarKind::string(&dir_path), VarFlags::EXPORT))
-      .unwrap();
+    state::Shed::vars_mut(|v| {
+      v.set_var(
+        "TESTDIR",
+        VarKind::string(dir_path.clone().into()),
+        VarFlags::EXPORT,
+      )
+    })
+    .unwrap();
 
     let spec = BashCompSpec::new().files(true).dirs(true);
     let ctx = CompContext {

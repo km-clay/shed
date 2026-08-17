@@ -109,14 +109,15 @@ impl super::Builtin for GetOpts {
       ));
     };
 
-    let opts_spec = GetOptsSpec::from_str(arg_string.as_str()).promote_err(arg_span.clone())?;
+    let opts_spec =
+      GetOptsSpec::from_str(&arg_string.to_str_lossy()).promote_err(arg_span.clone())?;
 
     let explicit_args: Vec<VarStr> = arg_vec.map(|(word, _)| word.clone()).collect();
     if explicit_args.is_empty() {
       let pos_params: Vec<VarStr> = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect());
-      getopts_inner(&opts_spec, opt_var.as_str(), &pos_params, &span)
+      getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &pos_params, &span)
     } else {
-      getopts_inner(&opts_spec, opt_var.as_str(), &explicit_args, &span)
+      getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &explicit_args, &span)
     }
   }
 }
@@ -136,7 +137,7 @@ fn getopts_inner(
   argv: &[VarStr],
   blame: &Span,
 ) -> ShResult<()> {
-  let opt_index = var!("OPTIND").parse::<usize>().unwrap_or(1);
+  let opt_index = var!("OPTIND").to_str_lossy().parse::<usize>().unwrap_or(1);
   // OPTIND is 1-based
   let arr_idx = opt_index.saturating_sub(1);
 
@@ -144,9 +145,10 @@ fn getopts_inner(
     state::Shed::set_status(1);
     return Ok(());
   };
+  let arg = arg.to_str_lossy();
 
   // "--" stops option processing
-  if arg.as_str() == "--" {
+  if arg == "--" {
     advance_optind(opt_index, 1)?;
     Shed::meta_mut(MetaTab::reset_getopts_char_offset);
     return with_status(1);
@@ -226,11 +228,17 @@ fn getopts_inner(
       if !last_char_in_arg {
         // Remaining chars in this arg are the argument: -bVALUE
         let optarg: String = opt_str.chars().skip(char_idx + 1).collect();
-        Shed::vars_mut(|v| v.set_var("OPTARG", VarKind::string(optarg), VarFlags::empty()))?;
+        Shed::vars_mut(|v| v.set_var("OPTARG", VarKind::string(optarg.into()), VarFlags::empty()))?;
         advance_optind(opt_index, 1)?;
       } else if let Some(next_arg) = argv.get(arr_idx + 1) {
         // Next arg is the argument
-        Shed::vars_mut(|v| v.set_var("OPTARG", VarKind::string(next_arg), VarFlags::empty()))?;
+        Shed::vars_mut(|v| {
+          v.set_var(
+            "OPTARG",
+            VarKind::string(next_arg.clone()),
+            VarFlags::empty(),
+          )
+        })?;
         // Skip both the option arg and its value
         advance_optind(opt_index, 2)?;
       } else {
@@ -371,7 +379,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("getopts ab opt -a").unwrap();
 
-    let optind: usize = var!("OPTIND").parse().unwrap();
+    let optind: usize = var!("OPTIND").to_str_lossy().parse().unwrap();
     assert_eq!(optind, 2); // Advanced past -a
   }
 
@@ -380,7 +388,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("getopts a: opt -a val").unwrap();
 
-    let optind: usize = var!("OPTIND").parse().unwrap();
+    let optind: usize = var!("OPTIND").to_str_lossy().parse().unwrap();
     assert_eq!(optind, 3); // Advanced past both -a and val
   }
 

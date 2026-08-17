@@ -265,7 +265,7 @@ impl super::LineBuf {
           status_msg!("Buffer is empty, nothing to stash");
           return Ok(());
         }
-        let name = arg.clone().filter(|a| !a.trim().is_empty());
+        let name = arg.clone().filter(|a| !a.to_str_lossy().trim().is_empty());
         let buffer = self.to_string();
         let (s, e) = (self.row(), self.col());
 
@@ -278,7 +278,7 @@ impl super::LineBuf {
         let stack_len = stash.stack_len();
         let idx = arg
           .as_ref()
-          .map(|a| a.parse::<usize>())
+          .map(|a| a.to_str_lossy().parse::<usize>())
           .transpose()
           .ok()
           .flatten()
@@ -308,9 +308,9 @@ impl super::LineBuf {
           }
         };
 
-        self.set_buffer(&buffer);
+        self.set_buffer(&buffer.to_str_lossy());
 
-        let cursor_pos = match self.parse_pos(&cursor_pos) {
+        let cursor_pos = match self.parse_pos(&cursor_pos.to_str_lossy()) {
           Ok(pos) => pos,
           Err(e) => {
             status_msg!("Failed to parse cursor position from stash: {e}");
@@ -323,7 +323,7 @@ impl super::LineBuf {
       StashArgs::Drop(arg) => {
         let idx = arg
           .as_ref()
-          .map(|a| a.parse::<usize>())
+          .map(|a| a.to_str_lossy().parse::<usize>())
           .transpose()
           .ok()
           .flatten()
@@ -353,9 +353,9 @@ impl super::LineBuf {
           name,
           buffer,
           cursor_pos,
-        }) = stash.get(&name)?
+        }) = stash.get(&name.to_str_lossy())?
         else {
-          if let Ok(idx) = name.parse::<usize>() {
+          if let Ok(idx) = name.to_str_lossy().parse::<usize>() {
             if stack_len == 0 {
               status_msg!("stash: Stash is empty");
             } else {
@@ -371,9 +371,9 @@ impl super::LineBuf {
           status_msg!("stash: Applied stash entry '{}'", name);
         }
 
-        self.set_buffer(&buffer);
+        self.set_buffer(&buffer.to_str_lossy());
 
-        let cursor_pos = match self.parse_pos(&cursor_pos) {
+        let cursor_pos = match self.parse_pos(&cursor_pos.to_str_lossy()) {
           Ok(pos) => pos,
           Err(e) => {
             status_msg!("Failed to parse cursor position from stash: {e}");
@@ -393,9 +393,9 @@ impl super::LineBuf {
           name: _,
           buffer,
           cursor_pos,
-        }) = stash.get(&name)?
+        }) = stash.get(&name.to_str_lossy())?
         else {
-          if let Ok(idx) = name.parse::<usize>() {
+          if let Ok(idx) = name.to_str_lossy().parse::<usize>() {
             if stack_len == 0 {
               status_msg!("stash: Stash is empty");
             } else {
@@ -407,13 +407,13 @@ impl super::LineBuf {
           return Ok(());
         };
 
-        let lines = Lines::to_lines(&buffer);
+        let lines = Lines::to_lines(&buffer.to_str_lossy());
         let num_lines = lines.len();
         let line_range = self.row()..self.row() + num_lines;
 
         self.insert_lines_at(self.cursor.pos, lines);
 
-        let cursor_offset = match self.parse_pos(&cursor_pos) {
+        let cursor_offset = match self.parse_pos(&cursor_pos.to_str_lossy()) {
           Ok(pos) => pos,
           Err(e) => {
             system_msg!("Failed to parse cursor position from stash: {e}");
@@ -436,9 +436,9 @@ impl super::LineBuf {
           name: ent_name,
           buffer: stashed_buf,
           cursor_pos: stashed_cursor,
-        }) = stash.get(&ident)?
+        }) = stash.get(&ident.to_str_lossy())?
         else {
-          if let Ok(idx) = ident.parse::<usize>() {
+          if let Ok(idx) = ident.to_str_lossy().parse::<usize>() {
             if stack_len == 0 {
               status_msg!("stash: Stash is empty");
             } else {
@@ -467,15 +467,16 @@ impl super::LineBuf {
           stash.push(Some(&name), &curr_buf, curr_cursor)?;
         } else {
           let idx = ident
+            .to_str_lossy()
             .parse::<usize>()
             .unwrap_or(stack_len.saturating_sub(1));
           stash.pop(idx)?;
           stash.push(None, &curr_buf, curr_cursor)?;
         }
 
-        self.set_buffer(&stashed_buf);
+        self.set_buffer(&stashed_buf.to_str_lossy());
 
-        let cursor_pos = match self.parse_pos(&stashed_cursor) {
+        let cursor_pos = match self.parse_pos(&stashed_cursor.to_str_lossy()) {
           Ok(pos) => pos,
           Err(e) => {
             status_msg!("Failed to parse cursor position from stash: {e}");
@@ -500,7 +501,7 @@ impl super::LineBuf {
           }
           None => stash.list(/*named_only:*/ false, /*stack_only:*/ false),
         };
-        if output.trim().is_empty() {
+        if output.to_str_lossy().trim().is_empty() {
           match arg {
             Some(StashListArg::Named) => {
               status_msg!("stash: No named stash entries");
@@ -513,7 +514,7 @@ impl super::LineBuf {
             }
           }
         } else {
-          for line in output.lines() {
+          for line in output.to_str_lossy().lines() {
             system_msg!("{line}");
           }
         }
@@ -632,7 +633,7 @@ impl super::LineBuf {
       ReadSrc::Cmd(cmd) => {
         autocmd!(PreCmd);
         defer!(autocmd!(PostCmd));
-        match capture_command(cmd, None, Some(&get_entry_name())) {
+        match capture_command(&cmd.to_str_lossy(), None, Some(&get_entry_name())) {
           Ok(out) => out,
           Err(e) => {
             e.print_error();
@@ -696,18 +697,18 @@ impl super::LineBuf {
     vars.insert("ANCHOR".into());
     let _guard = var_ctx_guard(vars);
 
-    let mut buf = self.to_string().into();
+    let mut buf: crate::state::vars::VarStr = self.to_string().into();
     let cursor_raw = self.cursor_to_flat();
-    let mut cursor = cursor_raw.to_string().into();
+    let mut cursor: crate::state::vars::VarStr = cursor_raw.to_string().into();
     let mut anchor = self.anchor_to_flat();
 
     Shed::vars_mut(|v| -> ShResult<()> {
-      v.set_var("BUFFER", VarKind::string(&buf), VarFlags::EXPORT)?;
-      v.set_var("CURSOR", VarKind::string(&cursor), VarFlags::EXPORT)?;
+      v.set_var("BUFFER", VarKind::string(buf.clone()), VarFlags::EXPORT)?;
+      v.set_var("CURSOR", VarKind::string(cursor.clone()), VarFlags::EXPORT)?;
       if let Some(anchor) = anchor {
         v.set_var(
           "ANCHOR",
-          VarKind::string(anchor.to_string()),
+          VarKind::string(anchor.to_string().into()),
           VarFlags::EXPORT,
         )?;
       }
@@ -741,10 +742,10 @@ impl super::LineBuf {
       v.take_var("KEYS")
     });
 
-    self.set_buffer(&buf);
+    self.set_buffer(&buf.to_str_lossy());
 
     if let Some(new_anchor) = new_anchor {
-      if let Ok(pos) = self.parse_pos(&new_anchor) {
+      if let Ok(pos) = self.parse_pos(&new_anchor.to_str_lossy()) {
         anchor = Some(self.pos_to_flat(pos));
       } else {
         log::warn!("Invalid anchor position returned from shell command: '{new_anchor}'");
@@ -752,7 +753,7 @@ impl super::LineBuf {
       }
     }
 
-    if let Ok(pos) = self.parse_pos(&cursor) {
+    if let Ok(pos) = self.parse_pos(&cursor.to_str_lossy()) {
       self.set_cursor(pos);
     } else {
       log::warn!("Invalid cursor position returned from shell command: '{cursor}'");
@@ -766,7 +767,7 @@ impl super::LineBuf {
       self.set_anchor_from_flat(anchor);
     }
     if !keys.is_empty() {
-      Shed::meta_mut(|m| m.set_pending_widget_keys(&keys));
+      Shed::meta_mut(|m| m.set_pending_widget_keys(&keys.to_str_lossy()));
     }
     Ok(output)
   }

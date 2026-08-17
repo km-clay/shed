@@ -33,14 +33,14 @@ impl super::Builtin for Shopt {
     for (mut arg, span) in arg_vec {
       // Split into key + optional value so the deprecation check works
       // for both `shopt key` and `shopt key=value`.
-      let (key, value) = match arg.split_once('=') {
+      let (key, value) = match arg.to_str_lossy().split_once('=') {
         Some((k, v)) => (k.into(), Some(VarStr::from(v))),
         None => (arg.clone(), None),
       };
 
       if let Some((_, new_key)) = DEPRECATED_SHOPTS
         .iter()
-        .find(|(old, _)| *old == key.as_str())
+        .find(|(old, _)| *old == key.to_str_lossy())
       {
         sherr!(DeprecationWarning @ span.clone(),
           "shopt: '{key}' has been renamed to '{new_key}'"
@@ -52,7 +52,8 @@ impl super::Builtin for Shopt {
         };
       }
 
-      let Some(output) = Shed::shopts_mut(|s| s.query(&arg)).promote_err(span)? else {
+      let Some(output) = Shed::shopts_mut(|s| s.query(&arg.to_str_lossy())).promote_err(span)?
+      else {
         continue;
       };
 

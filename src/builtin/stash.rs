@@ -81,7 +81,9 @@ impl super::Builtin for StashBuiltin {
     }
 
     for cmd in stash_opts.to_delete {
-      stash.delete_cmd(&cmd).promote_err(span.clone())?;
+      stash
+        .delete_cmd(&cmd.to_str_lossy())
+        .promote_err(span.clone())?;
     }
 
     if stash_opts.list || is_empty {

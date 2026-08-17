@@ -103,23 +103,25 @@ fn assignment_value(val: &str, src: &str) -> VarKind {
   if is_array_literal_assignment(src) {
     VarKind::parse(val)
   } else {
-    VarKind::string(val)
+    VarKind::string(val.into())
   }
 }
 
 /// Split `name=value`, building the value's `VarKind` from the raw source token
 pub fn split_assignment<'a>(arg: &'a VarStr, src: &str) -> (&'a str, Option<VarKind>) {
+  let arg = arg.to_str().unwrap_or_default();
   let Some((e, l)) = split_at_unescaped(arg, "=") else {
-    return (arg.as_str(), None);
+    return (arg, None);
   };
   let var = arg[..e].trim();
   let val = &arg[e + l..];
   (var, Some(assignment_value(val, src)))
 }
 
-pub fn split_assignment_raw(arg: &VarStr) -> (&VarStr, Option<&VarStr>) {
+pub fn split_assignment_raw(arg: &VarStr) -> (&str, Option<&str>) {
+  let arg = arg.to_str().unwrap_or_default();
   let Some((e, l)) = split_at_unescaped(arg, "=") else {
-    return (arg.as_str(), None);
+    return (arg, None);
   };
   let var = arg[..e].trim();
   let val = &arg[e + l..];
@@ -174,6 +176,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
       (DeclareKind::Int, Some(v)) => {
         let evaluated = expand_arithmetic(v).promote_err(span.clone())?;
         let n = evaluated
+          .to_str_lossy()
           .parse::<i32>()
           .map_err(|_| sherr!(ExecFail @ span.clone(), "declare -i: invalid arithmetic '{v}'"))?;
         VarKind::Int(n)
@@ -245,10 +248,10 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
         outln!("{output}");
       } else {
         for (name, span) in argv {
-          let val = try_var!(name);
+          let val = try_var!(&name.to_str_lossy());
           match val {
             Some(v) => outln!("{}", display_as_var(name, v)),
-            None if Shed::vars(|v| v.try_get_var_meta(name)).is_some() => {
+            None if Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy())).is_some() => {
               // Declared but unset: it exists, so show it value-less rather than
               // erroring (cf. bash's `declare -- name`).
               outln!("{name}=");
@@ -264,7 +267,10 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
       }
     }
     IntrospectMode::FunctionsFull => {
-      let names: Vec<&str> = argv.iter().map(|(n, _)| n.as_str()).collect();
+      let names: Vec<&str> = argv
+        .iter()
+        .map(|(n, _)| n.to_str().unwrap_or_default())
+        .collect();
 
       // Source any explicitly requested autoload functions so their bodies
       // become visible to the iteration below; otherwise `declare -f name`
@@ -309,7 +315,10 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
       }
     }
     IntrospectMode::FunctionNames => {
-      let names: Vec<&str> = argv.iter().map(|(n, _)| n.as_str()).collect();
+      let names: Vec<&str> = argv
+        .iter()
+        .map(|(n, _)| n.to_str().unwrap_or_default())
+        .collect();
       let dump = Shed::logic(|l| {
         let mut keys: Vec<_> = l.funcs().keys().cloned().collect();
         keys.sort();
@@ -386,7 +395,7 @@ impl super::Builtin for Unset {
         continue;
       }
 
-      let parsed = VarName::parse(&arg, true)?;
+      let parsed = VarName::parse(&arg.to_str_lossy(), true)?;
       if !Shed::vars(|v| v.var_exists(parsed.name())) {
         continue;
       }

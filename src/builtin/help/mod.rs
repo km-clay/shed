@@ -102,7 +102,7 @@ impl super::Builtin for Help {
         // no argument was given. open the index page
         return open_help_index();
       };
-      match get_help_content(&topic) {
+      match get_help_content(&topic.to_str_lossy()) {
         Some((line, content, filename)) => open_help(&content, line, filename),
         None => Err(sherr!(
             NotFound @ span,
@@ -127,7 +127,7 @@ pub fn get_all_tags() -> ShResult<Vec<ScoredTag>> {
   let hpath = var!("SHED_HPATH");
   let mut hpath_names: HashSet<String> = HashSet::default();
 
-  for entry in util::path_list_entries(&hpath) {
+  for entry in util::path_list_entries(&hpath.to_str_lossy()) {
     let path = entry.path();
     if !path.is_file() {
       continue;
@@ -176,7 +176,7 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
   let hpath = var!("SHED_HPATH");
   let mut hpath_names: HashSet<String> = HashSet::default();
 
-  for entry in util::path_list_entries(&hpath) {
+  for entry in util::path_list_entries(&hpath.to_str_lossy()) {
     let path = entry.path();
     if !path.is_file() {
       continue;
@@ -209,7 +209,7 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
   // No filename match, fall through to tag scoring across both sources.
   let mut tags = cached_tags(|| {
     let mut tags = vec![];
-    for entry in util::path_list_entries(&hpath) {
+    for entry in util::path_list_entries(&hpath.to_str_lossy()) {
       let path = entry.path();
       if !path.is_file() {
         continue;

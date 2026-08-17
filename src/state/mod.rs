@@ -550,7 +550,13 @@ impl Shed {
         .map(|s| s.to_string())
         .collect::<VecDeque<String>>();
 
-      Self::vars_mut(|v| v.set_var("PIPESTATUS", VarKind::arr(pipe_status), VarFlags::empty()))?;
+      Self::vars_mut(|v| {
+        v.set_var(
+          "PIPESTATUS",
+          VarKind::arr(pipe_status.into_iter().map(Into::into)),
+          VarFlags::empty(),
+        )
+      })?;
     }
     Ok(())
   }

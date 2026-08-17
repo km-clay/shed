@@ -419,10 +419,11 @@ impl Job {
         }
       }
       JobID::Command(cmd) => {
-        let query_result = self
-          .children
-          .iter_mut()
-          .find(|chld| chld.cmd().is_some_and(|chld_cmd| chld_cmd.contains(&cmd)));
+        let query_result = self.children.iter_mut().find(|chld| {
+          chld
+            .cmd()
+            .is_some_and(|chld_cmd| chld_cmd.to_str_lossy().contains(cmd.as_str()))
+        });
         if let Some(child) = query_result {
           child.set_stat(stat);
         }
@@ -750,9 +751,12 @@ impl JobTab {
       JobID::TableID(id) => self.jobs.get(id).and_then(|job| job.as_ref()),
       JobID::Command(cmd) => self.jobs.iter().find_map(|job| {
         job.as_ref().filter(|j| {
-          j.children()
-            .iter()
-            .any(|child| child.cmd().as_ref().is_some_and(|c| c.contains(&cmd)))
+          j.children().iter().any(|child| {
+            child
+              .cmd()
+              .as_ref()
+              .is_some_and(|c| c.to_str_lossy().contains(cmd.as_str()))
+          })
         })
       }),
     }
@@ -787,9 +791,12 @@ impl JobTab {
       JobID::TableID(id) => self.jobs.get_mut(id).and_then(|job| job.as_mut()),
       JobID::Command(cmd) => self.jobs.iter_mut().find_map(|job| {
         job.as_mut().filter(|j| {
-          j.children()
-            .iter()
-            .any(|child| child.cmd().as_ref().is_some_and(|c| c.contains(&cmd)))
+          j.children().iter().any(|child| {
+            child
+              .cmd()
+              .as_ref()
+              .is_some_and(|c| c.to_str_lossy().contains(cmd.as_str()))
+          })
         })
       }),
     }

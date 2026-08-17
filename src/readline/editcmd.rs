@@ -159,7 +159,7 @@ impl EditCmd {
       match &v.1 {
         Verb::AcceptLineOrNewline => true,
         Verb::InsertChar(ch) => ifs.contains(*ch),
-        Verb::Insert(s) => s.len() == 1 && ifs.contains(s.chars().next().unwrap()),
+        Verb::Insert(s) => s.len() == 1 && ifs.contains(s.to_str_lossy().chars().next().unwrap()),
         _ => false,
       }
     })

@@ -53,9 +53,13 @@ impl Builtin for Echo {
       .arguments()
       .map(|(st, sp)| -> ShResult<VarStr> {
         if use_escape {
-          Ok(expand::expand_ansi_c(st).into())
+          Ok(expand::expand_ansi_c(&st.to_str_lossy()).into())
         } else if use_prompt {
-          Ok(expand::expand_prompt(st).promote_err(sp.clone())?.into())
+          Ok(
+            expand::expand_prompt(&st.to_str_lossy())
+              .promote_err(sp.clone())?
+              .into(),
+          )
         } else {
           Ok(st.clone())
         }

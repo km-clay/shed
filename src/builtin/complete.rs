@@ -64,7 +64,7 @@ impl super::Builtin for Complete {
     if comp_opts.flags.contains(CompFlags::REMOVE) {
       Shed::meta_mut(|m| {
         for (cmd, _) in args.arguments() {
-          m.remove_comp_spec(cmd.as_str());
+          m.remove_comp_spec(&cmd.to_str_lossy());
         }
       });
 
@@ -203,15 +203,13 @@ impl super::Builtin for Compadd {
 
     let mut candidates: Vec<Candidate> = args
       .arguments()
-      .map(|(s, _)| s.as_str())
-      .map(make_candidate)
+      .map(|(s, _)| make_candidate(&s.to_str_lossy()))
       .collect();
 
     if let Some(cand_arr) = cand_arr {
-      let elems: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems(&cand_arr))
+      let elems: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems(&cand_arr.to_str_lossy()))
         .iter()
-        .map(VarStr::as_str)
-        .map(make_candidate)
+        .map(|v| make_candidate(&v.to_str_lossy()))
         .collect();
 
       candidates.extend(elems);
@@ -220,7 +218,7 @@ impl super::Builtin for Compadd {
     let descriptions = if let Some(desc) = desc {
       vec![desc; candidates.len()]
     } else if let Some(desc_arr) = desc_arr {
-      Shed::vars(|v| v.get_arr_elems(&desc_arr))
+      Shed::vars(|v| v.get_arr_elems(&desc_arr.to_str_lossy()))
     } else {
       vec![]
     };
@@ -229,18 +227,18 @@ impl super::Builtin for Compadd {
       .into_iter()
       .zip_longest(descriptions)
       .filter_map(|pair| match pair {
-        EitherOrBoth::Both(cand, desc) => Some(cand.with_desc(desc)),
+        EitherOrBoth::Both(cand, desc) => Some(cand.with_desc(&desc)),
         EitherOrBoth::Left(cand) => Some(cand),
         EitherOrBoth::Right(_) => None,
       })
       .collect();
 
     if let Some(assoc_arr) = assoc_arr
-      && let Some(assoc_arr) = Shed::vars(|v| v.try_get_var_meta(&assoc_arr))
+      && let Some(assoc_arr) = Shed::vars(|v| v.try_get_var_meta(&assoc_arr.to_str_lossy()))
       && let VarKind::AssocArr(arr) = assoc_arr.kind()
     {
       for (cand, desc) in arr {
-        let cand = make_candidate(cand.as_str()).with_desc(desc.clone());
+        let cand = make_candidate(&cand.to_str_lossy()).with_desc(desc);
 
         described.push(cand);
       }

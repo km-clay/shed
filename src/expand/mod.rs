@@ -218,13 +218,13 @@ impl Expander {
     let mut glob_words: Vec<VarStr> = Vec::with_capacity(words.len());
 
     for mut word in words {
-      if !glob::might_be_glob(&word) {
+      if !glob::might_be_glob(&word.to_str_lossy()) {
         escape::strip_escape_markers(&mut word);
         glob_words.push(word);
         continue;
       }
 
-      let expansions = expand_glob(&word).unwrap_or_else(|_| vec![word.to_string()]);
+      let expansions = expand_glob(&word.to_str_lossy()).unwrap_or_else(|_| vec![word.to_string()]);
 
       if expansions.is_empty() {
         if !nullglob {
@@ -235,7 +235,7 @@ impl Expander {
       }
 
       for exp in expansions {
-        let mut exp = glob::restore_glob_prefix(&word, exp).into();
+        let mut exp = glob::restore_glob_prefix(&word.to_str_lossy(), exp).into();
         escape::strip_escape_markers(&mut exp);
         glob_words.push(exp);
       }
@@ -328,7 +328,7 @@ impl Expander {
             }
           });
         }
-        _ if (expansion_depth > 0 && ifs.contains(ch)) || ch == markers::ARG_SEP => {
+        _ if (expansion_depth > 0 && ifs.to_str_lossy().contains(ch)) || ch == markers::ARG_SEP => {
           let is_ws = matches!(ch, ' ' | '\t' | '\n') || ch == markers::ARG_SEP;
           if !in_delim_run {
             // Just exited a field (or saw leading IFS). Decide whether to emit.
@@ -348,7 +348,7 @@ impl Expander {
             // Already in a delimiter run and we hit another non-WS IFS char.
             if delim_has_non_ws {
               // Second non-WS in this run -> emit an empty field.
-              words.push(VarStr::new());
+              words.push(VarStr::default());
             } else {
               // First non-WS adjacent to WS in the run -> just absorb into the run.
               delim_has_non_ws = true;
@@ -372,8 +372,9 @@ impl Expander {
     let null_exp = markers::NULL_EXPAND.to_string();
     words.retain(|w| w != &null_exp);
     for w in &mut words {
-      if w.contains(markers::NULL_EXPAND) {
-        *w = w.replace(markers::NULL_EXPAND, "").into();
+      if w.to_str_lossy().contains(markers::NULL_EXPAND) {
+        let replaced = w.to_str_lossy().replace(markers::NULL_EXPAND, "");
+        *w = replaced.into();
       }
     }
     words
@@ -528,7 +529,14 @@ mod tests {
   #[test]
   fn array_index_first() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("arr", VarKind::arr(["a", "b", "c"]), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "arr",
+        VarKind::arr(["a", "b", "c"].map(VarStr::from)),
+        VarFlags::empty(),
+      )
+    })
+    .unwrap();
 
     let val = Shed::vars(|v| v.index_var("arr", &ArrIndex::Literal(0))).unwrap();
     assert_eq!(val, "a");
@@ -537,7 +545,14 @@ mod tests {
   #[test]
   fn array_index_second() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("arr", VarKind::arr(["x", "y", "z"]), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "arr",
+        VarKind::arr(["x", "y", "z"].map(VarStr::from)),
+        VarFlags::empty(),
+      )
+    })
+    .unwrap();
 
     let val = Shed::vars(|v| v.index_var("arr", &ArrIndex::Literal(1))).unwrap();
     assert_eq!(val, "y");
@@ -546,7 +561,14 @@ mod tests {
   #[test]
   fn array_all_elems() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("arr", VarKind::arr(["a", "b", "c"]), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "arr",
+        VarKind::arr(["a", "b", "c"].map(VarStr::from)),
+        VarFlags::empty(),
+      )
+    })
+    .unwrap();
 
     let elems = Shed::vars(|v| v.try_get_arr_elems("arr")).unwrap();
     assert_eq!(elems, vec!["a", "b", "c"]);
@@ -555,7 +577,14 @@ mod tests {
   #[test]
   fn array_elem_count() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("arr", VarKind::arr(["a", "b", "c"]), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "arr",
+        VarKind::arr(["a", "b", "c"].map(VarStr::from)),
+        VarFlags::empty(),
+      )
+    })
+    .unwrap();
 
     let elems = Shed::vars(|v| v.try_get_arr_elems("arr")).unwrap();
     assert_eq!(elems.len(), 3);

@@ -440,7 +440,7 @@ impl ShErr {
     let cache = ariadne::FnCache::new(move |src: &SpanSource| {
       sources
         .get(src)
-        .cloned()
+        .map(|s| s.to_str_lossy().into_owned())
         .ok_or_else(|| format!("Failed to fetch source '{}'", src.name()))
     });
     writeln!(fd).ok();
@@ -548,7 +548,7 @@ impl Display for ShErrKind {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let output = match self {
       Self::IoErr(e) => &format!("I/O Error: {e}"),
-      Self::Custom(msg, _) => msg.as_str(),
+      Self::Custom(msg, _) => msg.to_str().unwrap_or_default(),
       Self::InvalidOpt => "Invalid option",
       Self::ParseErr => "Parse Error",
       Self::InternalErr => "Internal Error",

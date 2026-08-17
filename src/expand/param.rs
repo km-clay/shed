@@ -309,11 +309,13 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
     match expansion {
       ParamExp::ToUpperAll => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let new = value.to_uppercase();
         Ok(new.into())
       }
       ParamExp::ToUpperFirst => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let mut chars = value.chars();
         let first = chars
           .next()
@@ -325,11 +327,13 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::ToLowerAll => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let new = value.to_lowercase();
         Ok(new.into())
       }
       ParamExp::ToLowerFirst => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let mut chars = value.chars();
         let first = chars
           .next()
@@ -359,7 +363,11 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
             if allow_side_effects {
               let stored = strip_markers(&expanded);
               Shed::vars_mut(|v| {
-                v.set_var(parsed.name(), VarKind::string(&stored), VarFlags::empty())
+                v.set_var(
+                  parsed.name(),
+                  VarKind::string(stored.clone().into()),
+                  VarFlags::empty(),
+                )
               })?;
             }
             Ok(expanded.into())
@@ -374,7 +382,11 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           if allow_side_effects {
             let stored = strip_markers(&expanded);
             Shed::vars_mut(|v| {
-              v.set_var(parsed.name(), VarKind::string(&stored), VarFlags::empty())
+              v.set_var(
+                parsed.name(),
+                VarKind::string(stored.clone().into()),
+                VarFlags::empty(),
+              )
             })?;
           }
           Ok(expanded.into())
@@ -384,19 +396,19 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         Some(_) => {
           expand_raw_inner(&mut alt.chars().peekable(), allow_side_effects, false).map(VarStr::from)
         }
-        None => Ok(VarStr::new()),
+        None => Ok(VarStr::default()),
       },
       ParamExp::AltNotNull(alt) => match Shed::vars(try_get) {
         Some(_) => {
           expand_raw_inner(&mut alt.chars().peekable(), allow_side_effects, false).map(VarStr::from)
         }
-        None => Ok(VarStr::new()),
+        None => Ok(VarStr::default()),
       },
       ParamExp::ErrUnsetOrNull(err) => match Shed::vars(try_get).filter(|v| !v.is_empty()) {
         Some(val) => Ok(val),
         None => {
           if !allow_side_effects {
-            return Ok(VarStr::new());
+            return Ok(VarStr::default());
           }
           let expanded = expand_raw_inner(&mut err.chars().peekable(), allow_side_effects, false)?;
           Err(sherr!(ExecFail, "{expanded}"))
@@ -406,7 +418,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         Some(val) => Ok(val),
         None => {
           if !allow_side_effects {
-            return Ok(VarStr::new());
+            return Ok(VarStr::default());
           }
           let expanded = expand_raw_inner(&mut err.chars().peekable(), allow_side_effects, false)?;
           Err(sherr!(ExecFail, "{expanded}"))
@@ -414,6 +426,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       },
       ParamExp::SliceOpen(pos) => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let chars: Vec<char> = value.chars().collect();
         let n = chars.len() as i64;
         let start = resolve_offset(pos, n) as usize;
@@ -422,6 +435,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::SliceClosed(pos, len) => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let chars: Vec<char> = value.chars().collect();
         let n = chars.len() as i64;
         let start = resolve_offset(pos, n);
@@ -441,24 +455,26 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::RemShortestPrefix(prefix) => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let expanded = Expander::from_raw_no_brace_pattern(&prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex(&expanded, false);
+        let pattern = glob_to_regex(&expanded.to_str_lossy(), true);
         for i in (0..=value.len()).filter(|&i| value.is_char_boundary(i)) {
           let sliced = &value[..i];
           if pattern.is_match(sliced) {
             return Ok(value[i..].into());
           }
         }
-        Ok(value)
+        Ok(value.into())
       }
       ParamExp::RemLongestPrefix(prefix) => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let expanded = Expander::from_raw_no_brace_pattern(&prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex(&expanded, false);
+        let pattern = glob_to_regex(&expanded.to_str_lossy(), true);
         for i in (0..=value.len())
           .rev()
           .filter(|&i| value.is_char_boundary(i))
@@ -468,14 +484,15 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
             return Ok(value[i..].into());
           }
         }
-        Ok(value) // no match
+        Ok(value.into()) // no match
       }
       ParamExp::RemShortestSuffix(suffix) => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let expanded = Expander::from_raw_no_brace_pattern(&suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex(&expanded, false);
+        let pattern = glob_to_regex(&expanded.to_str_lossy(), true);
         for i in (0..=value.len())
           .rev()
           .filter(|&i| value.is_char_boundary(i))
@@ -485,31 +502,33 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
             return Ok(value[..i].into());
           }
         }
-        Ok(value)
+        Ok(value.into())
       }
       ParamExp::RemLongestSuffix(suffix) => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let expanded_suffix = Expander::from_raw_no_brace_pattern(&suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex(&expanded_suffix, false);
+        let pattern = glob_to_regex(&expanded_suffix.to_str_lossy(), true);
         for i in (0..=value.len()).filter(|&i| value.is_char_boundary(i)) {
           let sliced = &value[i..];
           if pattern.is_match(sliced) {
             return Ok(value[..i].into());
           }
         }
-        Ok(value)
+        Ok(value.into())
       }
       ParamExp::ReplaceFirstMatch(search, replace) => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let expanded_search = Expander::from_raw_pattern(&search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let expanded_replace = Expander::from_raw_pattern(&replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let regex = glob_to_regex(&expanded_search, false); // unanchored pattern
+        let regex = glob_to_regex(&expanded_search.to_str_lossy(), false); // unanchored pattern
 
         if let Some(mat) = regex.find(&value) {
           let before = &value[..mat.start()];
@@ -517,24 +536,25 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
           let result = varstr!("{before}{expanded_replace}{after}");
           Ok(result)
         } else {
-          Ok(value)
+          Ok(value.into())
         }
       }
       ParamExp::ReplaceAllMatches(search, replace) => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let expanded_search = Expander::from_raw_pattern(&search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let expanded_replace = Expander::from_raw_pattern(&replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let regex = glob_to_regex(&expanded_search, false);
+        let regex = glob_to_regex(&expanded_search.to_str_lossy(), false);
         let mut result = String::new();
         let mut last_match_end = 0;
 
         for mat in regex.find_iter(&value) {
           result.push_str(&value[last_match_end..mat.start()]);
-          result.push_str(&expanded_replace);
+          result.push_str(&expanded_replace.to_str_lossy());
           last_match_end = mat.end();
         }
 
@@ -544,37 +564,39 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       }
       ParamExp::ReplacePrefix(search, replace) => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let expanded_search = Expander::from_raw_pattern(&search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let expanded_replace = Expander::from_raw_pattern(&replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let pattern = glob_to_regex(&expanded_search, false);
+        let pattern = glob_to_regex(&expanded_search.to_str_lossy(), true);
         for i in (0..=value.len()).rev() {
           let sliced = &value[..i];
           if pattern.is_match(sliced) {
             return Ok(varstr!("{}{}", expanded_replace, &value[i..]));
           }
         }
-        Ok(value)
+        Ok(value.into())
       }
       ParamExp::ReplaceSuffix(search, replace) => {
         let value = Shed::vars(get);
+        let value = value.to_str_lossy();
         let expanded_search = Expander::from_raw_pattern(&search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let expanded_replace = Expander::from_raw_pattern(&replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let pattern = glob_to_regex(&expanded_search, false);
+        let pattern = glob_to_regex(&expanded_search.to_str_lossy(), true);
         for i in (0..=value.len()).rev() {
           let sliced = &value[i..];
           if pattern.is_match(sliced) {
             return Ok(varstr!("{}{}", &value[..i], expanded_replace));
           }
         }
-        Ok(value)
+        Ok(value.into())
       }
       ParamExp::VarNamesWithPrefix(prefix) => {
         let flat = Shed::vars(ScopeStack::flatten_vars);
@@ -597,7 +619,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         } else {
           let inner_name = VarName::parse(&inner, allow_side_effects)?;
           let value = Shed::vars(|v| v.resolve_var(&inner_name).unwrap_or_default());
-          Ok(var!(&value))
+          Ok(var!(&value.to_str_lossy()))
         }
       }
     }
@@ -834,8 +856,14 @@ mod tests {
   #[test]
   fn param_default_unset_or_null_null() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("EMPTY", VarKind::string(String::new()), VarFlags::empty()))
-      .unwrap();
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "EMPTY",
+        VarKind::string(VarStr::default()),
+        VarFlags::empty(),
+      )
+    })
+    .unwrap();
 
     let result = test_param_expansion("EMPTY:-fallback").unwrap();
     assert_eq!(result, "fallback");
@@ -853,8 +881,14 @@ mod tests {
   #[test]
   fn param_default_unset_only() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("EMPTY", VarKind::string(String::new()), VarFlags::empty()))
-      .unwrap();
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "EMPTY",
+        VarKind::string(VarStr::default()),
+        VarFlags::empty(),
+      )
+    })
+    .unwrap();
 
     // ${EMPTY-fallback} - EMPTY is set (even if null), so returns null
     let result = test_param_expansion("EMPTY-fallback").unwrap();
@@ -1553,7 +1587,7 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "discount — does it apply?");
     let result = test_param_expansion("x#discount — ").unwrap();
-    assert_eq!(result.as_str(), "does it apply?");
+    assert_eq!(result, "does it apply?");
   }
 
   #[test]
@@ -1561,7 +1595,7 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "café au lait");
     let result = test_param_expansion("x##*é ").unwrap();
-    assert_eq!(result.as_str(), "au lait");
+    assert_eq!(result, "au lait");
   }
 
   #[test]
@@ -1569,7 +1603,7 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "café au lait");
     let result = test_param_expansion("x% au lait").unwrap();
-    assert_eq!(result.as_str(), "café");
+    assert_eq!(result, "café");
   }
 
   #[test]
@@ -1577,7 +1611,7 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "Müller, Hans");
     let result = test_param_expansion("x%%, *").unwrap();
-    assert_eq!(result.as_str(), "Müller");
+    assert_eq!(result, "Müller");
   }
 
   // Substring slicing must be char-based, not byte-based. With byte-based
@@ -1591,7 +1625,7 @@ mod tests {
     set("x", "Müller");
     // Skip the first char, take the rest.
     let result = test_param_expansion("x:1").unwrap();
-    assert_eq!(result.as_str(), "üller");
+    assert_eq!(result, "üller");
   }
 
   #[test]
@@ -1602,7 +1636,7 @@ mod tests {
     // must always return exactly one char, never the whole string.
     for (i, expected) in ["M", "ü", "l", "l", "e", "r"].iter().enumerate() {
       let result = test_param_expansion(&format!("x:{i}:1")).unwrap();
-      assert_eq!(result.as_str(), *expected, "at index {i}");
+      assert_eq!(result.to_str_lossy(), *expected, "at index {i}");
     }
   }
 
@@ -1611,9 +1645,9 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "田中さん");
     // Each char is 3 bytes in UTF-8.
-    assert_eq!(test_param_expansion("x:0:1").unwrap().as_str(), "田");
-    assert_eq!(test_param_expansion("x:1:1").unwrap().as_str(), "中");
-    assert_eq!(test_param_expansion("x:2:2").unwrap().as_str(), "さん");
+    assert_eq!(test_param_expansion("x:0:1").unwrap(), "田");
+    assert_eq!(test_param_expansion("x:1:1").unwrap(), "中");
+    assert_eq!(test_param_expansion("x:2:2").unwrap(), "さん");
   }
 
   // ─── pattern operands must not treat `(` as a subshell ────────────
@@ -1625,7 +1659,7 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "abc(x)");
     let result = test_param_expansion("x%(x)").unwrap();
-    assert_eq!(result.as_str(), "abc");
+    assert_eq!(result, "abc");
   }
 
   #[test]
@@ -1633,7 +1667,7 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "(x)abc");
     let result = test_param_expansion("x#(x)").unwrap();
-    assert_eq!(result.as_str(), "abc");
+    assert_eq!(result, "abc");
   }
 
   #[test]
@@ -1641,7 +1675,7 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "abc(x)(x)");
     let result = test_param_expansion("x%%(x)").unwrap();
-    assert_eq!(result.as_str(), "abc(x)");
+    assert_eq!(result, "abc(x)");
   }
 
   #[test]
@@ -1649,7 +1683,7 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "(x)(x)abc");
     let result = test_param_expansion("x##(x)").unwrap();
-    assert_eq!(result.as_str(), "(x)abc");
+    assert_eq!(result, "(x)abc");
   }
 
   #[test]
@@ -1657,7 +1691,7 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "abc(x)");
     let result = test_param_expansion("x%(*)").unwrap();
-    assert_eq!(result.as_str(), "abc");
+    assert_eq!(result, "abc");
   }
 
   #[test]
@@ -1665,7 +1699,7 @@ mod tests {
     let _g = TestGuard::new();
     set("x", "abc(x)");
     let result = test_param_expansion("x/abc(x)/X").unwrap();
-    assert_eq!(result.as_str(), "X");
+    assert_eq!(result, "X");
   }
 
   #[test]
@@ -1674,7 +1708,7 @@ mod tests {
     set("x", "abc(x)");
     // Anchored suffix replace uses `${v/%pat/rep}`.
     let result = test_param_expansion("x/%abc(x)/X").unwrap();
-    assert_eq!(result.as_str(), "X");
+    assert_eq!(result, "X");
   }
 
   #[test]
@@ -1683,6 +1717,6 @@ mod tests {
     set("x", "abc");
     // A bare `(` in the replacement is literal, not a subshell.
     let result = test_param_expansion("x/abc/(x)").unwrap();
-    assert_eq!(result.as_str(), "(x)");
+    assert_eq!(result, "(x)");
   }
 }

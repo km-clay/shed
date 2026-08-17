@@ -422,12 +422,12 @@ impl Register {
         let rendered: VarStr = b
           .iter()
           .fold(util::scratch_buf(), |mut buf, key| {
-            buf.push_str(key.as_vim_seq().as_str());
+            buf.push_str(&key.as_vim_seq().to_str_lossy());
             buf
           })
           .into();
         let mut line = crate::readline::linebuf::Line::default();
-        line.push_str(&rendered);
+        line.push_str(&rendered.to_str_lossy());
         a.push(line);
       }
       // both Empty cases handled above

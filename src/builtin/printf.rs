@@ -1,9 +1,12 @@
 use std::{iter::Peekable, str::Chars};
 
 use bitflags::bitflags;
+use bstr::{ByteSlice, ByteVec};
 
 use crate::{
-  ShResult, expand, match_loop, out, sherr,
+  ShResult, expand, match_loop,
+  procio::out_bytes,
+  sherr,
   state::vars::VarStr,
   util::{self, with_status},
 };
@@ -78,11 +81,11 @@ impl PrintFormatter {
     Ok(Self(segments.into_boxed_slice()))
   }
 
-  pub fn apply_once<I: Iterator<Item = String>>(
+  pub fn apply_once<I: Iterator<Item = Vec<u8>>>(
     &self,
     args: &mut Peekable<I>,
   ) -> ShResult<Rendered> {
-    let mut out = Rendered::new(String::new());
+    let mut out = Rendered::default();
     for seg in &self.0 {
       match seg {
         Segment::Literal(s) => out.text.push_str(s),
@@ -118,13 +121,16 @@ pub struct FmtSpec {
 /// a *present* argument that fails to parse yields `0` plus a
 /// [`PrintfErr::BadNumber`], so the caller still substitutes `0` and continues
 /// formatting while the run is flagged to exit non-zero.
-fn parse_num_arg<T: std::str::FromStr + Default>(arg: Option<String>) -> (T, Option<PrintfErr>) {
+fn parse_num_arg<T: std::str::FromStr + Default>(arg: Option<Vec<u8>>) -> (T, Option<PrintfErr>) {
   let Some(arg) = arg else {
     return (T::default(), None);
   };
-  match arg.parse() {
+  match arg.to_str_lossy().parse() {
     Ok(v) => (v, None),
-    Err(_) => (T::default(), Some(PrintfErr::BadNumber(arg))),
+    Err(_) => (
+      T::default(),
+      Some(PrintfErr::BadNumber(arg.to_str_lossy().into())),
+    ),
   }
 }
 
@@ -149,7 +155,7 @@ impl FmtSpec {
     })
   }
 
-  pub fn apply<I: Iterator<Item = String>>(&self, args: &mut Peekable<I>) -> ShResult<Rendered> {
+  pub fn apply<I: Iterator<Item = Vec<u8>>>(&self, args: &mut Peekable<I>) -> ShResult<Rendered> {
     // Resolve dynamic width/precision. Negative width means left-justify
     // with abs(width); negative precision is treated as absent.
     let (flags, width) = self.resolve_width(args)?;
@@ -173,15 +179,18 @@ impl FmtSpec {
       Conversion::RepeatStr => Rendered::new(Self::apply_repeat_str(args, width)?),
       Conversion::AnsiC => Rendered::new(Self::apply_ansi_c(args, flags, width, prec)?),
       Conversion::ShellQuote => Rendered::new(Self::apply_shell_quote(args, flags, width)?),
-      Conversion::StrfTime(format) => {
-        Rendered::new(Self::apply_strftime(args, flags, width, format.as_str())?)
-      }
+      Conversion::StrfTime(format) => Rendered::new(Self::apply_strftime(
+        args,
+        flags,
+        width,
+        &format.to_str_lossy(),
+      )?),
     };
 
     Ok(out)
   }
 
-  fn resolve_width<I: Iterator<Item = String>>(
+  fn resolve_width<I: Iterator<Item = Vec<u8>>>(
     &self,
     args: &mut Peekable<I>,
   ) -> ShResult<(PrintFlags, Option<usize>)> {
@@ -200,7 +209,7 @@ impl FmtSpec {
     }
   }
 
-  fn resolve_precision<I: Iterator<Item = String>>(
+  fn resolve_precision<I: Iterator<Item = Vec<u8>>>(
     &self,
     args: &mut Peekable<I>,
   ) -> ShResult<Option<usize>> {
@@ -216,7 +225,7 @@ impl FmtSpec {
     }
   }
 
-  fn apply_signed_int<I: Iterator<Item = String>>(
+  fn apply_signed_int<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -226,20 +235,22 @@ impl FmtSpec {
     let abs = n.unsigned_abs();
     let sign = pick_sign(n.is_negative(), flags);
 
-    let mut digits = abs.to_string();
+    let mut digits: String = abs.to_string();
     if let Some(p) = prec {
       while digits.chars().count() < p {
         digits.insert(0, '0');
       }
     }
 
+    let digits = digits.as_bytes();
+
     Ok(Rendered {
-      text: pad_to_width(&digits, sign, flags, width, prec.is_none()),
+      text: pad_to_width(digits, sign, flags, width, prec.is_none()),
       errors: err.into_iter().collect(),
     })
   }
 
-  fn apply_unsigned_int<I: Iterator<Item = String>>(
+  fn apply_unsigned_int<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -254,13 +265,15 @@ impl FmtSpec {
       }
     }
 
+    let digits = digits.as_bytes();
+
     Ok(Rendered {
-      text: pad_to_width(&digits, "", flags, width, prec.is_none()),
+      text: pad_to_width(digits, b"", flags, width, prec.is_none()),
       errors: err.into_iter().collect(),
     })
   }
 
-  fn apply_unsigned_octal<I: Iterator<Item = String>>(
+  fn apply_unsigned_octal<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -282,13 +295,15 @@ impl FmtSpec {
       ""
     };
 
+    let digits = digits.as_bytes();
+
     Ok(Rendered {
-      text: pad_to_width(&digits, prefix, flags, width, prec.is_none()),
+      text: pad_to_width(digits, prefix.as_bytes(), flags, width, prec.is_none()),
       errors: err.into_iter().collect(),
     })
   }
 
-  fn apply_unsigned_hex<I: Iterator<Item = String>>(
+  fn apply_unsigned_hex<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -317,13 +332,15 @@ impl FmtSpec {
       ""
     };
 
+    let digits = digits.as_bytes();
+
     Ok(Rendered {
-      text: pad_to_width(&digits, prefix, flags, width, prec.is_none()),
+      text: pad_to_width(digits, prefix.as_bytes(), flags, width, prec.is_none()),
       errors: err.into_iter().collect(),
     })
   }
 
-  fn apply_fixed_float<I: Iterator<Item = String>>(
+  fn apply_fixed_float<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -333,18 +350,18 @@ impl FmtSpec {
     let p = prec.unwrap_or(6);
 
     let body = format!("{f:.p$}");
-    let abs_body = body.trim_start_matches('-').to_string();
+    let abs_body = body.trim_start_matches('-').as_bytes();
     let sign = pick_sign(f.is_sign_negative() && f != 0.0, flags);
 
     // For floats, ZERO_PAD applies independent of precision (precision
     // controls digits after decimal point, not minimum total digits).
     Ok(Rendered {
-      text: pad_to_width(&abs_body, sign, flags, width, true),
+      text: pad_to_width(abs_body, sign, flags, width, true),
       errors: err.into_iter().collect(),
     })
   }
 
-  fn apply_scientific<I: Iterator<Item = String>>(
+  fn apply_scientific<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -358,17 +375,17 @@ impl FmtSpec {
       Case::Lower => format!("{f:.p$e}"),
       Case::Upper => format!("{f:.p$E}"),
     };
-    let normalized = normalize_exponent(&raw);
-    let abs_body = normalized.trim_start_matches('-').to_string();
+    let normalized = normalize_exponent(raw.as_bytes());
+    let abs_body = normalized.trim_start_with(|c| c == '-');
     let sign = pick_sign(f.is_sign_negative() && f != 0.0, flags);
 
     Ok(Rendered {
-      text: pad_to_width(&abs_body, sign, flags, width, true),
+      text: pad_to_width(abs_body, sign, flags, width, true),
       errors: err.into_iter().collect(),
     })
   }
 
-  fn apply_shortest_float<I: Iterator<Item = String>>(
+  fn apply_shortest_float<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
@@ -394,7 +411,8 @@ impl FmtSpec {
         Case::Lower => format!("{f:.mantissa_prec$e}"),
         Case::Upper => format!("{f:.mantissa_prec$E}"),
       };
-      let normalized = normalize_exponent(&raw);
+      let normalized = normalize_exponent(raw.as_bytes());
+
       if flags.contains(PrintFlags::ALT_FORM) {
         normalized
       } else {
@@ -402,14 +420,14 @@ impl FmtSpec {
       }
     } else {
       let fp = (p as i32 - 1 - exp).max(0) as usize;
-      let raw = format!("{f:.fp$}");
+      let raw = format!("{f:.fp$}").as_bytes().to_vec();
       if flags.contains(PrintFlags::ALT_FORM) {
         raw
       } else {
         strip_trailing_zeros(&raw)
       }
     };
-    let abs_body = body.trim_start_matches('-').to_string();
+    let abs_body = body.trim_start_with(|c| c == '-');
     let sign = pick_sign(f.is_sign_negative() && f != 0.0, flags);
 
     Ok(Rendered {
@@ -418,47 +436,47 @@ impl FmtSpec {
     })
   }
 
-  fn apply_char<I: Iterator<Item = String>>(
+  fn apply_char<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
-  ) -> ShResult<String> {
+  ) -> ShResult<Vec<u8>> {
     let arg = args.next().unwrap_or_default();
     // POSIX %c: take first character of the argument.
-    let c: String = arg.chars().take(1).collect();
-    Ok(pad_to_width(&c, "", flags, width, false))
+    let c = arg.get(1..).unwrap_or_default();
+    Ok(pad_to_width(c, b"", flags, width, false))
   }
 
-  fn apply_str<I: Iterator<Item = String>>(
+  fn apply_str<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
     prec: Option<usize>,
-  ) -> ShResult<String> {
+  ) -> ShResult<Vec<u8>> {
     let s = args.next().unwrap_or_default();
     let s = match prec {
-      Some(p) => s.chars().take(p).collect::<String>(),
+      Some(p) => s.get(..p).unwrap_or(&s).to_vec(),
       None => s,
     };
-    Ok(pad_to_width(&s, "", flags, width, false))
+    Ok(pad_to_width(&s, b"", flags, width, false))
   }
 
-  fn apply_repeat_str<I: Iterator<Item = String>>(
+  fn apply_repeat_str<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     width: Option<usize>,
-  ) -> ShResult<String> {
+  ) -> ShResult<Vec<u8>> {
     // The width slot is the repeat count (`%*r` / `%5r`), not a field width, so
     // there is no padding. A bare `%r` with no count degrades to a single copy.
     let s = args.next().unwrap_or_default();
     Ok(s.repeat(width.unwrap_or(1)))
   }
 
-  fn apply_ansi_c<I: Iterator<Item = String>>(
+  fn apply_ansi_c<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
     prec: Option<usize>,
-  ) -> ShResult<String> {
+  ) -> ShResult<Vec<u8>> {
     let s = args.next().unwrap_or_default();
     let expanded = expand::expand_ansi_c(&s);
     let truncated = match prec {
@@ -468,22 +486,22 @@ impl FmtSpec {
     Ok(pad_to_width(&truncated, "", flags, width, false))
   }
 
-  fn apply_shell_quote<I: Iterator<Item = String>>(
+  fn apply_shell_quote<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
-  ) -> ShResult<String> {
+  ) -> ShResult<Vec<u8>> {
     let s = args.next().unwrap_or_default();
     let quoted = crate::expand::shell_quote(&s);
     Ok(pad_to_width(&quoted, "", flags, width, false))
   }
 
-  fn apply_strftime<I: Iterator<Item = String>>(
+  fn apply_strftime<I: Iterator<Item = Vec<u8>>>(
     args: &mut Peekable<I>,
     flags: PrintFlags,
     width: Option<usize>,
     format: &str,
-  ) -> ShResult<String> {
+  ) -> ShResult<Vec<u8>> {
     use crate::state::{Shed, meta::MetaTab};
     use chrono::{Local, TimeZone};
     let arg = args.next().unwrap_or_else(|| "-1".to_string());
@@ -513,10 +531,10 @@ impl FmtSpec {
     };
 
     let formatted = dt.format(format).to_string();
-    Ok(pad_to_width(&formatted, "", flags, width, false))
+    Ok(pad_to_width(&formatted, b"", flags, width, false))
   }
 
-  fn parse_int_arg<I: Iterator<Item = String>>(args: &mut Peekable<I>) -> ShResult<i32> {
+  fn parse_int_arg<I: Iterator<Item = Vec<u8>>>(args: &mut Peekable<I>) -> ShResult<i32> {
     // Missing or non-numeric args default to 0 (matches bash printf).
     let Some(arg) = args.next() else {
       return Ok(0);
@@ -643,15 +661,15 @@ impl FmtSpec {
 
 /// Pick the appropriate sign prefix character based on whether the value
 /// is negative and which sign-flag is set.
-fn pick_sign(negative: bool, flags: PrintFlags) -> &'static str {
+fn pick_sign(negative: bool, flags: PrintFlags) -> &'static [u8] {
   if negative {
-    "-"
+    b"-"
   } else if flags.contains(PrintFlags::SHOW_SIGN) {
-    "+"
+    b"+"
   } else if flags.contains(PrintFlags::SPACE_SIGN) {
-    " "
+    b" "
   } else {
-    ""
+    b""
   }
 }
 
@@ -667,36 +685,36 @@ fn pick_sign(negative: bool, flags: PrintFlags) -> &'static str {
 /// integer conversions with explicit precision (precision already supplies
 /// the leading zeros).
 fn pad_to_width(
-  body: &str,
-  prefix: &str,
+  body: &[u8],
+  prefix: &[u8],
   flags: PrintFlags,
   width: Option<usize>,
   zero_pad_allowed: bool,
-) -> String {
+) -> Vec<u8> {
   let total_chars = prefix.chars().count() + body.chars().count();
   let Some(w) = width else {
-    return format!("{prefix}{body}");
+    return [prefix, body].concat();
   };
   if total_chars >= w {
-    return format!("{prefix}{body}");
+    return [prefix, body].concat();
   }
   let pad = w - total_chars;
 
   if flags.contains(PrintFlags::JUST_LEFT) {
-    format!("{prefix}{body}{}", " ".repeat(pad))
+    [prefix, body, &b" ".repeat(pad)].concat()
   } else if zero_pad_allowed && flags.contains(PrintFlags::ZERO_PAD) {
-    format!("{prefix}{}{body}", "0".repeat(pad))
+    [prefix, &b"0".repeat(pad), body].concat()
   } else {
-    format!("{}{prefix}{body}", " ".repeat(pad))
+    [&b" ".repeat(pad), prefix, body].concat()
   }
 }
 
 /// Convert Rust's exponent format (`1e2`, `1.5e-3`) to POSIX printf style
 /// (`1e+02`, `1.5e-03`): sign always present, exponent zero-padded to at
 /// least two digits.
-fn normalize_exponent(s: &str) -> String {
-  let Some(epos) = s.find(['e', 'E']) else {
-    return s.to_string();
+fn normalize_exponent(s: &[u8]) -> Vec<u8> {
+  let Some(epos) = s.find([b'e', b'E']) else {
+    return s.to_vec();
   };
   let (mantissa, exp_part) = s.split_at(epos);
   let exp_char = exp_part.chars().next().unwrap();
@@ -709,41 +727,51 @@ fn normalize_exponent(s: &str) -> String {
   };
 
   let padded = if digits.chars().count() < 2 {
-    format!("0{digits}")
+    [b"0", digits.as_bytes()].concat()
   } else {
-    digits.to_string()
+    digits.as_bytes().to_vec()
   };
 
-  format!("{mantissa}{exp_char}{sign}{padded}")
+  [
+    mantissa.as_bytes(),
+    &[exp_char as u8],
+    &[sign as u8],
+    &padded,
+  ]
+  .concat()
 }
 
-fn strip_trailing_zeros(s: &str) -> String {
-  if let Some(epos) = s.find(['e', 'E']) {
+fn strip_trailing_zeros(s: &[u8]) -> Vec<u8> {
+  if let Some(epos) = s.find([b'e', b'E']) {
     let (mantissa, exp) = s.split_at(epos);
-    let trimmed = if mantissa.contains('.') {
-      mantissa.trim_end_matches('0').trim_end_matches('.')
+
+    let trimmed = if mantissa.contains(&b'.') {
+      mantissa.trim_end_with(|c| c == '0' || c == '.')
     } else {
       mantissa
     };
-    format!("{trimmed}{exp}")
-  } else if s.contains('.') {
-    s.trim_end_matches('0').trim_end_matches('.').to_string()
+
+    [trimmed, exp].concat()
+  } else if s.contains(&b'.') {
+    s.trim_end_with(|c| c == '0' || c == '.').to_vec()
   } else {
-    s.to_string()
+    s.to_vec()
   }
 }
 
+#[derive(Debug, Clone)]
 pub(super) enum PrintfErr {
   BadNumber(String),
 }
 
+#[derive(Debug, Default, Clone)]
 pub(super) struct Rendered {
-  text: String,
+  text: Vec<u8>,
   errors: Vec<PrintfErr>,
 }
 
 impl Rendered {
-  pub fn new(text: String) -> Self {
+  pub fn new(text: Vec<u8>) -> Self {
     Self {
       text,
       errors: vec![],
@@ -773,15 +801,15 @@ impl super::Builtin for Printf {
       .next()
       .ok_or_else(|| sherr!(ExecFail, "printf: missing format string"))?;
     // A single leading `--` ends option processing (POSIX utility syntax).
-    if first.0.as_str() == "--" {
+    if first.0 == "--" {
       first = arg_iter
         .next()
         .ok_or_else(|| sherr!(ExecFail, "printf: missing format string"))?;
     }
     let (format_str, _) = first;
 
-    let formatter = PrintFormatter::parse(&format_str)?;
-    let remaining: Vec<String> = arg_iter.map(|(s, _)| s.to_string()).collect();
+    let formatter = PrintFormatter::parse(&format_str.to_str_lossy())?;
+    let remaining: Vec<Vec<u8>> = arg_iter.map(|(s, _)| s.to_string()).collect();
 
     let mut values = remaining.into_iter().peekable();
 
@@ -796,7 +824,7 @@ impl super::Builtin for Printf {
       loop {
         let before = values.len();
         let rendered = formatter.apply_once(&mut values)?;
-        out!("{}", rendered.text);
+        out_bytes(&rendered.text);
         had_error |= emit_printf_errors(&rendered.errors);
         if values.peek().is_none() || values.len() == before {
           break;
@@ -805,7 +833,7 @@ impl super::Builtin for Printf {
     } else {
       // No specs: emit format once, ignore extra args.
       let rendered = formatter.apply_once(&mut values)?;
-      out!("{}", rendered.text);
+      out_bytes(&rendered.text);
       had_error |= emit_printf_errors(&rendered.errors);
     }
 

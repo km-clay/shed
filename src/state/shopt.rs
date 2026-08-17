@@ -1,5 +1,6 @@
 #![expect(clippy::struct_excessive_bools, clippy::trivially_copy_pass_by_ref)]
 
+use bstr::ByteSlice;
 use std::{
   cell::RefCell, collections::HashSet, fmt::Display, ops::Deref, str::FromStr, time::Duration,
 };
@@ -26,7 +27,10 @@ use crate::{
 /// Trace a command: shell-quote each argv word (like bash) and emit.
 pub(crate) fn xtrace_print_raw(argv: &[VarStr]) {
   if shopt!(set.xtrace) {
-    let words = argv.iter().map(expand::xtrace_quote).join(" ");
+    let words = argv
+      .iter()
+      .map(|i| expand::xtrace_quote(&i.to_str_lossy()))
+      .join(" ");
 
     xtrace_line(&words);
   }
@@ -36,7 +40,7 @@ pub(crate) fn xtrace_print(argv: &[(VarStr, Span)]) {
   if shopt!(set.xtrace) {
     let words = argv
       .iter()
-      .map(|(word, _span)| expand::xtrace_quote(word))
+      .map(|(word, _span)| expand::xtrace_quote(&word.to_str_lossy()))
       .join(" ");
 
     xtrace_line(&words);
@@ -47,7 +51,7 @@ pub(crate) fn xtrace_print_tokens(argv: &[Tk]) {
   if shopt!(set.xtrace) {
     let words = argv
       .iter()
-      .map(|tk| expand::xtrace_quote(tk.word()))
+      .map(|tk| expand::xtrace_quote(&tk.word().to_str_lossy()))
       .join(" ");
 
     xtrace_line(&words);
@@ -68,12 +72,12 @@ pub(crate) fn xtrace_line(rendered: &str) {
     .unwrap_or_default();
 
   let depth = Shed::meta(MetaTab::xtrace_depth);
-  let prefix = prefix_char.repeat(depth);
+  let prefix = prefix_char.to_str_lossy().repeat(depth);
 
   let output = varstr!("{prefix}{ps4}{rendered}");
 
   log::debug!("xtrace: {output:?}");
-  errln!("{}", output.trim());
+  errln!("{}", output.to_str_lossy().trim());
 }
 
 /// Renamed shopts mapped to their old names

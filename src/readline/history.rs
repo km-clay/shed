@@ -52,8 +52,8 @@ impl Default for HistEntry {
     Self {
       runtime: Duration::default(),
       timestamp: SystemTime::now(),
-      command: VarStr::new(),
-      cwd: VarStr::new(),
+      command: VarStr::default(),
+      cwd: VarStr::default(),
       status: 0,
       token: Uuid::new_v4(),
     }
@@ -62,7 +62,7 @@ impl Default for HistEntry {
 
 impl HistEntry {
   pub fn command(&self) -> &str {
-    &self.command
+    self.command.to_str().unwrap_or_default()
   }
 }
 
@@ -734,7 +734,7 @@ impl History {
           |row| row.get(0),
         )
         .ok();
-      if last.as_deref() == Some(&command) {
+      if last.as_deref() == Some(command.to_str_lossy().as_ref()) {
         return Ok(false);
       }
     }

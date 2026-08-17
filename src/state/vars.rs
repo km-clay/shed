@@ -60,7 +60,7 @@ pub(crate) fn display_as_vars(
 
 #[expect(clippy::needless_pass_by_value)]
 pub(crate) fn display_as_var(name: impl ToString, value: impl ToString) -> String {
-  format!("{}={}", name.to_string(), shell_quote(value.to_string()))
+  format!("{}={}", name.to_string(), shell_quote(&value.to_string()))
 }
 
 fn display_vars_internal(vars: &ScopeStack, filter: Option<VarFlags>) -> String {
@@ -457,7 +457,12 @@ impl Deref for VarStr {
 
 impl ToSql for VarStr {
   fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-    Ok(rusqlite::types::ToSqlOutput::from(self.as_bytes()))
+    // Bind valid UTF-8 as TEXT so callers reading columns back as `String`
+    // keep working; fall back to BLOB only when the bytes aren't UTF-8.
+    match self.to_str() {
+      Some(s) => Ok(rusqlite::types::ToSqlOutput::from(s)),
+      None => Ok(rusqlite::types::ToSqlOutput::from(self.as_bytes())),
+    }
   }
 }
 
@@ -482,7 +487,12 @@ impl From<VarStr> for PathBuf {
 
 impl From<Vec<u8>> for VarStr {
   fn from(value: Vec<u8>) -> Self {
-    // Owning conversion: reuses the allocation for large values, inlines small.
+    Self::from(value.as_slice())
+  }
+}
+
+impl From<&[u8]> for VarStr {
+  fn from(value: &[u8]) -> Self {
     Self(HipByt::from(value))
   }
 }
@@ -547,6 +557,18 @@ impl_varstr_from!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 impl AsRef<std::ffi::OsStr> for VarStr {
   fn as_ref(&self) -> &std::ffi::OsStr {
     std::ffi::OsStr::from_bytes(self.as_bytes())
+  }
+}
+
+impl AsRef<Path> for VarStr {
+  fn as_ref(&self) -> &Path {
+    Path::new(OsStr::from_bytes(self.as_bytes()))
+  }
+}
+
+impl From<VarStr> for Rc<str> {
+  fn from(value: VarStr) -> Self {
+    Rc::from(value.to_str_lossy().as_ref())
   }
 }
 
@@ -702,10 +724,12 @@ impl VarKind {
     Self::Arr(vec)
   }
 
-  pub fn assoc_arr<K: AsRef<str>, V: AsRef<str>, I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
+  pub fn assoc_arr<K: Into<VarStr>, V: Into<VarStr>, I: IntoIterator<Item = (K, V)>>(
+    iter: I,
+  ) -> Self {
     let pairs = iter
       .into_iter()
-      .map(|(k, v)| (VarStr::from(k.as_ref()), VarStr::from(v.as_ref())))
+      .map(|(k, v)| (k.into(), v.into()))
       .collect();
     Self::AssocArr(pairs)
   }
@@ -812,7 +836,7 @@ impl VarKind {
   }
 }
 
-impl<K: AsRef<str>, V: AsRef<str>> From<Vec<(K, V)>> for VarKind {
+impl<K: Into<VarStr>, V: Into<VarStr>> From<Vec<(K, V)>> for VarKind {
   fn from(value: Vec<(K, V)>) -> Self {
     Self::assoc_arr(value)
   }
@@ -837,8 +861,8 @@ impl Display for VarKind {
         let mut item_iter = items.iter().peekable();
         while let Some(item) = item_iter.next() {
           let (k, v) = item;
-          let key = super::expand::shell_quote(k);
-          let val = super::expand::shell_quote(v);
+          let key = super::expand::shell_quote(&k.to_str_lossy());
+          let val = super::expand::shell_quote(&v.to_str_lossy());
           write!(f, "{key}={val}")?;
           if item_iter.peek().is_some() {
             write!(f, " ")?;
@@ -1019,7 +1043,7 @@ impl VarTab {
     let mut params = HashMap::default();
     params.insert(ShellParam::ArgCount, "0".into()); // Number of positional parameters
     params.insert(ShellParam::ShPid, Pid::this().to_string().into()); // PID of the shell
-    params.insert(ShellParam::LastJob, VarStr::new()); // PID of the last background job (if any)
+    params.insert(ShellParam::LastJob, VarStr::default()); // PID of the last background job (if any)
     params
   }
   fn init_sh_vars() -> HashMap<String, Var> {
@@ -1186,7 +1210,7 @@ impl VarTab {
       .join_with(&markers::ARG_SEP.to_string());
 
     self.set_param(ShellParam::AllArgs, &positional_join);
-    self.set_param(ShellParam::ArgCount, &positional_count.to_string());
+    self.set_param(ShellParam::ArgCount, &positional_count.to_string().into());
   }
   /// Push an arg to the back of the arg deque
   pub fn bpush_arg(&mut self, arg: VarStr) {
@@ -1406,10 +1430,11 @@ impl VarTab {
       ShellParam::Pos(n) => self.sh_argv().get(n).cloned(),
       ShellParam::AllArgsStr => {
         let ifs = get_separator();
-        self
-          .params
-          .get(&ShellParam::AllArgs)
-          .map(|s| s.replace(markers::ARG_SEP, &ifs).into())
+        self.params.get(&ShellParam::AllArgs).map(|s| {
+          let mut buf = [0u8; 4];
+          s.replace(markers::ARG_SEP.encode_utf8(&mut buf), ifs.as_bytes())
+            .into()
+        })
       }
 
       _ => self.params.get(&param).cloned(),

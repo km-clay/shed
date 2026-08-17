@@ -98,7 +98,7 @@ pub fn umask_guard() -> impl Drop {
   guard(saved, |saved| {
     if let Some(umask) = saved
       && var!("UMASK") != umask
-      && let Ok(bits) = stat::mode_t::from_str_radix(&umask, 8)
+      && let Ok(bits) = stat::mode_t::from_str_radix(&umask.to_str_lossy(), 8)
     {
       let _ = stat::umask(stat::Mode::from_bits_truncate(bits));
     }
@@ -125,7 +125,7 @@ pub fn var_ctx_guard(
   guard(vars, |vars| {
     Shed::vars_mut(|v| {
       for var in &vars {
-        v.unset_var(var).ok();
+        v.unset_var(&var.to_str_lossy()).ok();
       }
     });
   })

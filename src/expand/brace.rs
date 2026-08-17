@@ -98,12 +98,12 @@ fn expand_one_brace(word: &str) -> Vec<String> {
   };
 
   // Split the inner content on top-level commas, or expand as range
-  let parts = split_brace_inner(&inner);
+  let parts = split_brace_inner(&inner.to_str_lossy());
 
   // If we got back a single part with no expansion, treat as literal
   if parts.len() == 1 && inner == parts[0] {
     // Check if it's a range
-    if let Some(range_parts) = try_expand_range(&inner) {
+    if let Some(range_parts) = try_expand_range(&inner.to_str_lossy()) {
       return range_parts
         .into_iter()
         .map(|p| format!("{prefix}{p}{suffix}"))

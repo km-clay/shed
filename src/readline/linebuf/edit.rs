@@ -54,7 +54,7 @@ impl Edit {
   }
   /// An empty step, used to break a merge chain without recording a change.
   pub(super) fn barrier(cursor: Pos) -> Self {
-    Edit::delta(cursor, VarStr::new(), VarStr::new(), cursor, cursor)
+    Edit::delta(cursor, VarStr::default(), VarStr::default(), cursor, cursor)
   }
   pub fn is_empty(&self) -> bool {
     match &self.body {
@@ -100,7 +100,12 @@ impl Edit {
         inserted,
       } => {
         let mut old = current.clone();
-        splice_lines(&mut old, *at, inserted, removed); // revert this delta
+        splice_lines(
+          &mut old,
+          *at,
+          &inserted.to_str_lossy(),
+          &removed.to_str_lossy(),
+        ); // revert this delta
         Some((old, current.clone()))
       }
       EditBody::Snapshot { .. } => None,
@@ -128,9 +133,19 @@ impl Edit {
         inserted,
       } => {
         if is_undo {
-          splice_lines(lines, *at, inserted, removed);
+          splice_lines(
+            lines,
+            *at,
+            &inserted.to_str_lossy(),
+            &removed.to_str_lossy(),
+          );
         } else {
-          splice_lines(lines, *at, removed, inserted);
+          splice_lines(
+            lines,
+            *at,
+            &removed.to_str_lossy(),
+            &inserted.to_str_lossy(),
+          );
         }
       }
     }
@@ -162,8 +177,8 @@ impl Diff {
         None => {
           return Self {
             start: Pos::default(),
-            removed: VarStr::new(),
-            inserted: VarStr::new(),
+            removed: VarStr::default(),
+            inserted: VarStr::default(),
           };
         } // identical
         _ => {} // >1 differing rows: fall through to the flat diff

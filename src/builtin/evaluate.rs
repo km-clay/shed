@@ -27,7 +27,7 @@ impl super::Builtin for Eval {
       .arguments()
       .map(|(s, _)| s)
       .collect::<Vec<_>>()
-      .join_with(&sep);
+      .join_with(&sep.to_str_lossy());
 
     // eval adds an xtrace layer
     let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);

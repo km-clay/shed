@@ -1,5 +1,3 @@
-use bstr::ByteSlice;
-
 use crate::opt;
 
 use super::{
@@ -31,8 +29,8 @@ impl super::Builtin for Alias {
       }
 
       if let Some(value) = value {
-        Shed::logic_mut(|l| l.insert_alias(&name.to_str_lossy(), value, span.clone()));
-      } else if let Some(alias) = Shed::logic(|l| l.get_alias(&name.to_str_lossy())) {
+        Shed::logic_mut(|l| l.insert_alias(name, &value.into(), span.clone()));
+      } else if let Some(alias) = Shed::logic(|l| l.get_alias(name)) {
         outln!("{}", display_as_var(name, alias.body()));
       } else {
         return Err(sherr!(
@@ -98,10 +96,10 @@ impl super::Builtin for ExCmd {
       let (name, value) = split_assignment_raw(arg);
 
       if !remove && let Some(value) = value {
-        Shed::logic_mut(|l| l.insert_ex_alias(&name.to_str_lossy(), value, span.clone()));
-      } else if let Some(alias) = Shed::logic(|l| l.get_ex_alias(&name.to_str_lossy())) {
+        Shed::logic_mut(|l| l.insert_ex_alias(name, &value.into(), span.clone()));
+      } else if let Some(alias) = Shed::logic(|l| l.get_ex_alias(name)) {
         if remove {
-          Shed::logic_mut(|l| l.remove_ex_alias(&name.to_str_lossy()));
+          Shed::logic_mut(|l| l.remove_ex_alias(name));
         } else {
           outln!("{}", display_as_var(name, alias.body()));
         }

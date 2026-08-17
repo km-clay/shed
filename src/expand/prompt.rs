@@ -198,10 +198,10 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
   let mut result = String::new();
 
   match_loop!(tokens.next()    => token, {
-    PromptTk::Text(txt)        => result.push_str(&txt),
-    PromptTk::AnsiSeq(params)  => result.push_str(&params),
+    PromptTk::Text(txt)        => result.push_str(&txt.to_str_lossy()),
+    PromptTk::AnsiSeq(params)  => result.push_str(&params.to_str_lossy()),
     PromptTk::ShellName        => result.push_str("shed"),
-    PromptTk::Color(c)         => ansi_color(&c, &mut result),
+    PromptTk::Color(c)         => ansi_color(&c.to_str_lossy(), &mut result),
     PromptTk::RuntimeMillis    => runtime(false, &mut result),
     PromptTk::RuntimeFormatted => runtime(true, &mut result),
     PromptTk::Pwd              => prompt_pwd(false, &mut result),
@@ -212,7 +212,7 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
     PromptTk::HostnameShort    => hostname(true, &mut result),
     PromptTk::JobCount         => job_count(&mut result),
     PromptTk::AsciiOct(n)      => ascii_oct(n, &mut result),
-    PromptTk::Function(f)      => func_expand(&f, &mut result)?,
+    PromptTk::Function(f)      => func_expand(&f.to_str_lossy(), &mut result)?,
   });
 
   if shopt!(prompt.substitute) {
@@ -270,7 +270,7 @@ fn prompt_pwd(short: bool, out: &mut String) {
 
 fn username(out: &mut String) {
   let username = var!("USER");
-  out.push_str(&username);
+  out.push_str(&username.to_str_lossy());
 }
 
 fn prompt_symbol(out: &mut String) {
@@ -314,17 +314,17 @@ fn func_expand(input: &str, out: &mut String) -> ShResult<()> {
   shopt_mut!(set.noexec = noexec);
   shopt_mut!(set.xtrace = xtrace);
 
-  out.push_str(&res?);
+  out.push_str(&res?.to_str_lossy());
   Ok(())
 }
 
 fn hostname(short: bool, out: &mut String) {
   let hostname = var!("HOST");
 
-  if short && let Some(first) = hostname.split('.').next() {
+  if short && let Some(first) = hostname.to_str_lossy().split('.').next() {
     out.push_str(first);
   } else {
-    out.push_str(&hostname);
+    out.push_str(&hostname.to_str_lossy());
   }
 }
 
@@ -608,13 +608,13 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         "PWD",
-        crate::state::vars::VarKind::string("/home/testuser/proj"),
+        crate::state::vars::VarKind::string("/home/testuser/proj".into()),
         crate::state::vars::VarFlags::empty(),
       )
       .unwrap();
       v.set_var(
         "HOME",
-        crate::state::vars::VarKind::string("/home/testuser"),
+        crate::state::vars::VarKind::string("/home/testuser".into()),
         crate::state::vars::VarFlags::empty(),
       )
       .unwrap();
@@ -630,13 +630,13 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         "PWD",
-        crate::state::vars::VarKind::string("/a/b/c/d/e"),
+        crate::state::vars::VarKind::string("/a/b/c/d/e".into()),
         crate::state::vars::VarFlags::empty(),
       )
       .unwrap();
       v.set_var(
         "HOME",
-        crate::state::vars::VarKind::string("/nowhere"),
+        crate::state::vars::VarKind::string("/nowhere".into()),
         crate::state::vars::VarFlags::empty(),
       )
       .unwrap();
@@ -659,13 +659,13 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         "PWD",
-        crate::state::vars::VarKind::string("/home/testuser/proj"),
+        crate::state::vars::VarKind::string("/home/testuser/proj".into()),
         crate::state::vars::VarFlags::empty(),
       )
       .unwrap();
       v.set_var(
         "HOME",
-        crate::state::vars::VarKind::string("/home/testuser"),
+        crate::state::vars::VarKind::string("/home/testuser".into()),
         crate::state::vars::VarFlags::empty(),
       )
       .unwrap();
@@ -680,7 +680,7 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         "HOST",
-        crate::state::vars::VarKind::string("box.example.com"),
+        crate::state::vars::VarKind::string("box.example.com".into()),
         crate::state::vars::VarFlags::empty(),
       )
       .unwrap();
@@ -695,7 +695,7 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         "HOST",
-        crate::state::vars::VarKind::string("box.example.com"),
+        crate::state::vars::VarKind::string("box.example.com".into()),
         crate::state::vars::VarFlags::empty(),
       )
       .unwrap();
@@ -741,7 +741,7 @@ mod tests {
 
   fn set_var(name: &str, value: &str) {
     use crate::state::vars::{VarFlags, VarKind};
-    Shed::vars_mut(|v| v.set_var(name, VarKind::string(value), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| v.set_var(name, VarKind::string(value.into()), VarFlags::empty())).unwrap();
   }
 
   #[test]

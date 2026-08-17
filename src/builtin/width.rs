@@ -15,7 +15,7 @@ impl super::Builtin for Width {
     }
     .map_or_else(|| super::join_raw_args(arg_vec).0, VarStr::from);
 
-    let width = calc_str_width(&input);
+    let width = calc_str_width(&input.to_str_lossy());
 
     outln!("{width}");
 

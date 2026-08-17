@@ -106,11 +106,17 @@ struct FileInfo {
 impl FileInfo {
   fn new(deref: bool, name: VarStr) -> ShResult<Self> {
     let stat = if deref {
-      stat::stat(name.as_str())
+      stat::stat(&*name.to_str_lossy())
     } else {
-      stat::lstat(name.as_str())
+      stat::lstat(&*name.to_str_lossy())
     }
-    .map_err(|e| sherr!(ExecFail, "stat: Failed to stat '{}': {e}", name.as_str()))?;
+    .map_err(|e| {
+      sherr!(
+        ExecFail,
+        "stat: Failed to stat '{}': {e}",
+        name.to_str_lossy()
+      )
+    })?;
 
     let mut info = Self {
       name,
@@ -250,7 +256,7 @@ impl FileInfo {
 
   #[cfg(linux_like)]
   fn fmt_sec_ctx(&self, f: &mut impl fmt::Write) -> fmt::Result {
-    let Ok(path) = std::ffi::CString::new(self.name.as_str()) else {
+    let Ok(path) = std::ffi::CString::new(self.name.as_bytes()) else {
       return write!(f, "?");
     };
     let attr = c"security.selinux";
@@ -295,7 +301,7 @@ impl FileInfo {
   }
 
   fn fmt_mount_pnt(&self, f: &mut impl fmt::Write) -> fmt::Result {
-    let Ok(canon) = std::fs::canonicalize(self.name.as_str()) else {
+    let Ok(canon) = std::fs::canonicalize(&self.name) else {
       return write!(f, "?");
     };
     let Ok(meta) = std::fs::metadata(&canon) else {
@@ -315,10 +321,10 @@ impl FileInfo {
   }
 
   fn fmt_quoted_name(&self, f: &mut impl fmt::Write) -> fmt::Result {
-    let quoted = expand::shell_quote(self.name.as_str());
+    let quoted = expand::shell_quote(&self.name.to_str_lossy());
 
     if self.st_mode & 0o170_000 == S_IFLNK
-      && let Ok(tgt) = std::fs::read_link(self.name.as_str())
+      && let Ok(tgt) = std::fs::read_link(&self.name)
     {
       write!(f, "{quoted} -> {}", tgt.display())
     } else {
@@ -771,27 +777,27 @@ impl super::Builtin for Stat {
     let mut status = 0;
 
     if fs_stat {
-      let fmt_args = FsFmtArgs::from_str(&format)?;
+      let fmt_args = FsFmtArgs::from_str(&format.to_str_lossy())?;
       for (arg, _) in arg_vec {
-        let stat = match FsInfo::for_path(arg.as_str()) {
+        let stat = match FsInfo::for_path(&arg.to_str_lossy()) {
           Ok(stat) => stat,
           Err(e) => {
-            errln!("stat: Failed to statfs '{}': {e}", arg.as_str());
+            errln!("stat: Failed to statfs '{}': {e}", arg.to_str_lossy());
             status = 1;
             continue;
           }
         };
         for fmt in &fmt_args.0 {
-          fmt.format(&mut buf, arg.as_str(), &stat)?;
+          fmt.format(&mut buf, &arg.to_str_lossy(), &stat)?;
         }
 
         outln!("{}", mem::take(&mut buf));
       }
     } else {
-      let fmt_args = FileFmtArgs::from_str(&format)?;
+      let fmt_args = FileFmtArgs::from_str(&format.to_str_lossy())?;
       for (arg, span) in arg_vec {
-        let Ok(stat) = FileInfo::new(deref, arg.as_str().into()).promote_err(span) else {
-          errln!("stat: Failed to stat '{}'", arg.as_str());
+        let Ok(stat) = FileInfo::new(deref, arg.to_str_lossy().into()).promote_err(span) else {
+          errln!("stat: Failed to stat '{}'", arg.to_str_lossy());
           status = 1;
           continue;
         };

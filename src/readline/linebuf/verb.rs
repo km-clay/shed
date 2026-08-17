@@ -78,7 +78,7 @@ impl super::LineBuf {
       Verb::InsertModeLineBreak(a) /*==*/ => Ok(self.break_line_verb(*a)),
       Verb::IncrementNumber(n) /*======*/ => Ok(self.adjust_number(i64::from(*n))),
       Verb::DecrementNumber(n) /*------*/ => Ok(self.adjust_number(-i64::from(*n))),
-      Verb::Insert(s) /*---------------*/ => Ok(self.insert_str(s)),
+      Verb::Insert(s) /*---------------*/ => Ok(self.insert_str(&s.to_str_lossy())),
       Verb::AcceptLineOrNewline /*=====*/ => Ok(self.insert(Grapheme::from('\n'))),
       Verb::EndOfFile /*---------------*/ => Ok(self.lines.clear()),
       Verb::Expand /*==================*/ => self.expand(cmd, false),
@@ -160,7 +160,7 @@ impl super::LineBuf {
     register.write_to_register(reg_content);
 
     self.fix_cursor();
-    self.insert_str_verbatim(&expanded);
+    self.insert_str_verbatim(&expanded.to_str_lossy());
 
     Ok(())
   }
@@ -500,12 +500,12 @@ impl super::LineBuf {
         let rendered: VarStr = keys
           .iter()
           .fold(util::scratch_buf(), |mut buf, key| {
-            buf.push_str(key.as_vim_seq().as_str());
+            buf.push_str(&key.as_vim_seq().to_str_lossy());
             buf
           })
           .into();
         let mut line = Line::default();
-        line.push_str(&rendered);
+        line.push_str(&rendered.to_str_lossy());
         let pos = Pos {
           row: self.row(),
           col: match effective_anchor {

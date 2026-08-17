@@ -4,9 +4,10 @@ use std::ops::Range;
 use std::str::Chars;
 
 use bitflags::bitflags;
-use bstr::ByteSlice;
+use bstr::{ByteSlice, Bytes};
+use smallvec::SmallVec;
 
-use crate::{eval::lex, state::vars::VarStr, util};
+use crate::{eval::lex, procio::RedirType, state::vars::VarStr, util};
 
 use super::{QuoteState, ShResult, markers, match_loop, sherr, try_var, util::is_var_name_ch};
 
@@ -401,58 +402,82 @@ fn read_dub_quote(chars: &mut Peekable<Chars>, result: &mut String) {
   });
 }
 
-pub fn expand_ansi_c(s: &str) -> String {
-  let mut out = String::new();
-  expand_ansi_c_stream(&mut s.chars().peekable(), &mut out, None);
+enum Quote {
+  Single,
+  Double,
+}
+
+enum ProcSubKind {
+  In,
+  Out,
+}
+
+enum StreamSeg {
+  Bytes(SmallVec<[u8; 32]>),
+  Subsh,
+  VarSub,
+  Escape,
+  Reset,
+  TildeSub,
+  Quote(Quote),
+  ProcSub(ProcSubKind),
+  NullExpand,
+  ArgSep,
+  ExpandStart,
+  ExpandEnd,
+}
+
+pub fn expand_ansi_c(s: &[u8]) -> Vec<u8> {
+  let mut out = Vec::new();
+  expand_ansi_c_stream(&mut s.bytes().peekable(), &mut out, None);
   out
 }
 
-pub fn expand_dollar_quote(chars: &mut Peekable<Chars>, out: &mut String) {
-  expand_ansi_c_stream(chars, out, Some('\''));
+pub fn expand_dollar_quote(chars: &mut Peekable<Bytes>, out: &mut Vec<u8>) {
+  expand_ansi_c_stream(chars, out, Some(b'\''));
 }
 
 pub fn expand_ansi_c_stream(
-  chars: &mut Peekable<Chars>,
-  out: &mut String,
-  terminator: Option<char>,
+  chars: &mut Peekable<Bytes>,
+  out: &mut Vec<u8>,
+  terminator: Option<u8>,
 ) {
   let mut pending: Vec<u8> = Vec::new();
   macro_rules! flush {
     () => {
       if !pending.is_empty() {
-        push_bytes_utf8(&pending, out);
-        pending.clear();
+        out.append(&mut pending);
       }
     };
   }
 
   match_loop!(chars.next() => q_ch, {
     c if Some(c) == terminator => break,
-    '\\' if let Some(esc) = chars.next() => {
+    b'\\' if let Some(esc) = chars.next() => {
       match esc {
         // byte-producing escapes: keep buffering so adjacent ones combine.
-        'x' => read_hex(chars, &mut pending),
-        'o' => read_octal(chars, &mut pending, None),
+        b'x' => read_hex(chars, &mut pending),
+        b'o' => read_octal(chars, &mut pending, None),
         _ if esc.is_ascii_digit() => read_octal(chars, &mut pending, Some(esc)),
         // everything else emits text. flush any pending byte run first.
         _ => {
           flush!();
           match esc {
-            'n' => out.push('\n'),
-            't' => out.push('\t'),
-            'r' => out.push('\r'),
-            '"' => out.push('"'),
-            '\'' => out.push('\''),
-            '\\' => out.push('\\'),
-            'a' => out.push('\x07'),
-            'b' => out.push('\x08'),
-            'c' => read_stty_escape(chars, out),
-            'e' | 'E' => out.push('\x1b'),
-            'f' => out.push('\x0c'),
-            'v' => out.push('\x0b'),
-            'u' | 'U' => read_unicode(chars, out, esc),
+            b'n' => out.push(b'\n'),
+            b't' => out.push(b'\t'),
+            b'r' => out.push(b'\r'),
+            b'"' => out.push(b'"'),
+            b'\'' => out.push(b'\''),
+            b'\\' => out.push(b'\\'),
+            b'a' => out.push(b'\x07'),
+            b'b' => out.push(b'\x08'),
+            b'c' => read_stty_escape(chars, out),
+            b'e' | b'E' => out.push(b'\x1b'),
+            b'f' => out.push(b'\x0c'),
+            b'v' => out.push(b'\x0b'),
+            b'u' | b'U' => read_unicode(chars, out, esc),
             _ => {
-              out.push('\\');
+              out.push(b'\\');
               out.push(esc);
             }
           }
@@ -467,55 +492,64 @@ pub fn expand_ansi_c_stream(
   flush!();
 }
 
-pub fn read_unicode(chars: &mut Peekable<Chars>, result: &mut String, marker: char) {
-  let mut hex = util::scratch_buf();
+pub fn read_unicode(chars: &mut Peekable<Bytes>, result: &mut Vec<u8>, marker: u8) {
+  let mut hex = vec![];
   let max = match marker {
-    'u' => 4,
-    'U' => 8,
+    b'u' => 4,
+    b'U' => 8,
     _ => unreachable!("read_unicode called with non-unicode marker"),
   };
 
-  while hex.len() < max && chars.peek().is_some_and(char::is_ascii_hexdigit) {
+  while hex.len() < max
+    && chars
+      .peek()
+      .is_some_and(|c| (*c as char).is_ascii_hexdigit())
+  {
     hex.push(chars.next().unwrap());
   }
 
-  if let Some(ch) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
-    result.push(ch);
+  if let Some(ch) = u32::from_str_radix(&hex.to_str_lossy(), 16)
+    .ok()
+    .and_then(char::from_u32)
+  {
+    let mut buf = [0u8; 4];
+    result.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
   } else {
     // empty or invalid, just push it literally
-    let _ = write!(result, "\\{marker}{hex}");
+    result.push(b'\\');
+    result.push(marker);
   }
 }
 
-pub fn read_stty_escape(chars: &mut Peekable<Chars>, result: &mut String) {
+pub fn read_stty_escape(chars: &mut Peekable<Bytes>, result: &mut Vec<u8>) {
   let mut peeker = chars.clone();
 
   let Some(first) = peeker.next() else {
-    result.push('\\');
-    result.push('c');
+    result.push(b'\\');
+    result.push(b'c');
     return;
   };
 
-  let (target, consume_count) = if first == '\\' {
+  let (target, consume_count) = if first == b'\\' {
     let Some(second) = peeker.next() else {
-      result.push('\\');
-      result.push('c');
+      result.push(b'\\');
+      result.push(b'c');
       return;
     };
-    if second != '\\' {
-      result.push('\\');
-      result.push('c');
+    if second != b'\\' {
+      result.push(b'\\');
+      result.push(b'c');
       return;
     }
-    ('\\', 2)
+    (b'\\', 2)
   } else {
     (first, 1)
   };
 
   let upper = target.to_ascii_uppercase();
-  if !matches!(upper, '@'..='_' | '?') {
-    result.push('\\');
-    result.push('c');
+  if !matches!(upper, b'@'..=b'_' | b'?') {
+    result.push(b'\\');
+    result.push(b'c');
     return;
   }
 
@@ -528,47 +562,17 @@ pub fn read_stty_escape(chars: &mut Peekable<Chars>, result: &mut String) {
   // so if we xor this char by 0x40, we automagically get our
   // control character
   let code = (upper as u8) ^ 0x40;
-  result.push(code as char);
+  result.push(code);
 }
 
-/// Append a byte run to a UTF-8 `String`, decoding valid UTF-8 sequences to
-/// their characters and mapping each byte that isn't part of a valid sequence
-/// to its Latin-1 code point
-///
-/// This lets adjacent byte escapes reassemble into a multibyte character
-fn push_bytes_utf8(bytes: &[u8], out: &mut String) {
-  let mut rest = bytes;
-  while !rest.is_empty() {
-    match std::str::from_utf8(rest) {
-      Ok(s) => {
-        out.push_str(s);
-        return;
-      }
-      Err(e) => {
-        let valid = e.valid_up_to();
-
-        let left = unsafe { std::str::from_utf8_unchecked(&rest[..valid]) };
-        let mid = rest[valid] as char;
-        let right = &rest[valid + 1..];
-
-        out.push_str(left);
-        // The byte at `valid` starts an invalid/incomplete sequence: emit it as
-        // latin-1 and resume after it.
-        out.push(mid);
-        rest = right;
-      }
-    }
-  }
-}
-
-pub fn read_octal(chars: &mut Peekable<Chars>, result: &mut Vec<u8>, first: Option<char>) {
-  let mut oct = util::scratch_buf();
+pub fn read_octal(chars: &mut Peekable<Bytes>, result: &mut Vec<u8>, first: Option<u8>) {
+  let mut oct = vec![];
   if let Some(first) = first {
     oct.push(first);
   }
   for _ in 0..3 {
     if let Some(o) = chars.peek() {
-      if o.is_digit(8) {
+      if (*o as char).is_digit(8) {
         oct.push(*o);
         chars.next();
       } else {
@@ -578,7 +582,7 @@ pub fn read_octal(chars: &mut Peekable<Chars>, result: &mut Vec<u8>, first: Opti
       break;
     }
   }
-  if let Ok(byte) = u8::from_str_radix(&oct, 8) {
+  if let Ok(byte) = u8::from_str_radix(&oct.to_str_lossy(), 8) {
     result.push(byte);
   } else {
     result.extend_from_slice(b"\\o");
@@ -586,8 +590,8 @@ pub fn read_octal(chars: &mut Peekable<Chars>, result: &mut Vec<u8>, first: Opti
   }
 }
 
-pub fn read_hex(chars: &mut Peekable<Chars>, result: &mut Vec<u8>) {
-  let mut hex = util::scratch_buf();
+pub fn read_hex(chars: &mut Peekable<Bytes>, result: &mut Vec<u8>) {
+  let mut hex = vec![];
   if let Some(h1) = chars.next() {
     hex.push(h1);
   } else {
@@ -601,7 +605,7 @@ pub fn read_hex(chars: &mut Peekable<Chars>, result: &mut Vec<u8>) {
     result.extend_from_slice(hex.as_bytes());
     return;
   }
-  if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+  if let Ok(byte) = u8::from_str_radix(&hex.to_str_lossy(), 16) {
     result.push(byte);
   } else {
     result.extend_from_slice(b"\\x");

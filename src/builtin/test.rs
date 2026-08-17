@@ -177,18 +177,18 @@ fn eval_binary(
   match op {
     BinaryOp::StringEq => {
       if extended {
-        let pattern = expand::glob_to_regex(rhs.0.as_str(), true);
-        Ok(pattern.is_match(lhs.0.as_str()))
+        let pattern = expand::glob_to_regex(&rhs.0.to_str_lossy(), true);
+        Ok(pattern.is_match(&lhs.0.to_str_lossy()))
       } else {
-        Ok(lhs.0.as_str() == rhs.0.as_str())
+        Ok(lhs.0 == rhs.0)
       }
     }
     BinaryOp::StringNeq => {
       if extended {
-        let pattern = expand::glob_to_regex(rhs.0.as_str(), true);
-        Ok(!pattern.is_match(lhs.0.as_str()))
+        let pattern = expand::glob_to_regex(&rhs.0.to_str_lossy(), true);
+        Ok(!pattern.is_match(&lhs.0.to_str_lossy()))
       } else {
-        Ok(lhs.0.as_str() != rhs.0.as_str())
+        Ok(lhs.0 != rhs.0)
       }
     }
     BinaryOp::IntEq
@@ -197,10 +197,10 @@ fn eval_binary(
     | BinaryOp::IntLt
     | BinaryOp::IntGe
     | BinaryOp::IntLe => {
-      let lhs_i = lhs.0.trim().parse::<i64>().map_err(
+      let lhs_i = lhs.0.to_str_lossy().trim().parse::<i64>().map_err(
         |_| sherr!(SyntaxErr @ lhs.1.clone(), "test: integer expected, got '{}'", &lhs.0),
       )?;
-      let rhs_i = rhs.0.trim().parse::<i64>().map_err(
+      let rhs_i = rhs.0.to_str_lossy().trim().parse::<i64>().map_err(
         |_| sherr!(SyntaxErr @ rhs.1.clone(), "test: integer expected, got '{}'", &rhs.0),
       )?;
       Ok(match op {
@@ -214,13 +214,13 @@ fn eval_binary(
       })
     }
     BinaryOp::RegexMatch => {
-      let cleaned = replace_posix_classes(&rhs.0);
+      let cleaned = replace_posix_classes(&rhs.0.to_str_lossy());
       let re = Shed::meta_mut(|m| m.get_regex(&cleaned))
         .map_err(|e| sherr!(SyntaxErr @ rhs.1.clone(), "Invalid regex: {e}"))?;
-      if let Some(caps) = re.captures(&lhs.0) {
-        let groups: VecDeque<String> = caps
+      if let Some(caps) = re.captures(&lhs.0.to_str_lossy()) {
+        let groups: VecDeque<VarStr> = caps
           .iter()
-          .map(|m| m.map(|mat| mat.as_str().to_string()).unwrap_or_default())
+          .map(|m| m.map(|mat| VarStr::from(mat.as_str())).unwrap_or_default())
           .collect();
         Shed::vars_mut(|v| v.set_var("SHED_REMATCH", VarKind::arr(groups), VarFlags::LOCAL))?;
         Ok(true)
@@ -262,7 +262,7 @@ impl<'a> ArgvParser<'a> {
   }
 
   fn peek(&self) -> Option<&str> {
-    self.argv.get(self.pos).map(|s| s.0.as_str())
+    self.argv.get(self.pos).and_then(|s| s.0.to_str())
   }
 
   fn advance(&mut self) {
@@ -314,8 +314,12 @@ impl<'a> ArgvParser<'a> {
       if STOP_TOKENS.contains(&tok) {
         // if this is true, this token refers to the right hand side of a test
         // and is therefore literal.
-        let is_rhs =
-          self.pos - start == 2 && self.argv[start + 1].0.as_str().parse::<BinaryOp>().is_ok();
+        let is_rhs = self.pos - start == 2
+          && self.argv[start + 1]
+            .0
+            .to_str_lossy()
+            .parse::<BinaryOp>()
+            .is_ok();
 
         if is_rhs {
           self.advance();
@@ -349,12 +353,12 @@ fn eval_leaf(leaf: &[(VarStr, Span)], extended: bool) -> ShResult<bool> {
     }
     2 => {
       // Arity-2: `-OP OPERAND`.
-      let op: UnaryOp = leaf[0].0.parse()?;
-      Ok(eval_unary(&op, &leaf[1].0))
+      let op: UnaryOp = leaf[0].0.to_str_lossy().parse()?;
+      Ok(eval_unary(&op, &leaf[1].0.to_str_lossy()))
     }
     3 => {
       // Arity-3: `LHS OP RHS`.
-      let op: BinaryOp = leaf[1].0.parse()?;
+      let op: BinaryOp = leaf[1].0.to_str_lossy().parse()?;
       eval_binary(&op, &leaf[0], &leaf[2], extended)
     }
     _ => Err(sherr!(
@@ -383,7 +387,7 @@ impl super::Builtin for Test {
       .collect::<Vec<_>>();
     let opener = argv
       .first()
-      .map(|(s, _)| s.as_str())
+      .map(|(s, _)| s.to_str_lossy())
       .unwrap_or_default()
       .to_string();
     let want_close: Option<&str> = match opener.as_str() {
@@ -419,7 +423,7 @@ impl super::Builtin for Test {
     // middle is a binary test, whatever the operands look like (`[ -a = -a ]`,
     // `[ b = -a ]`). The general `-a`/`-o` grammar would otherwise misread an
     // operand as the conjunction operator.
-    if arg_vec.len() == 3 && arg_vec[1].0.as_str().parse::<BinaryOp>().is_ok() {
+    if arg_vec.len() == 3 && arg_vec[1].0.to_str_lossy().parse::<BinaryOp>().is_ok() {
       return match eval_leaf(&arg_vec, extended).map_err(|e| e.try_blame(span)) {
         Err(e) => {
           Shed::set_status(2);

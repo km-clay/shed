@@ -38,12 +38,12 @@ impl super::Builtin for Cd {
     }
 
     let (mut new_dir, arg_span) = if let Some((arg, span)) = args.arguments().next() {
-      if arg.as_str() == "-" {
+      if arg == "-" {
         let old_pwd = get_old_pwd();
         print_dir = true;
         (old_pwd, Some(span.clone()))
       } else {
-        try_cd_path = !arg.starts_with(['/', '.']);
+        try_cd_path = !arg.to_str_lossy().starts_with(['/', '.']);
         (PathBuf::from(arg), Some(span.clone()))
       }
     } else {
@@ -103,7 +103,7 @@ impl super::Builtin for Cd {
     if print_dir {
       let mut dir = util::display_path(var!("PWD"));
       if let Some(home) = util::get_home_str()
-        && let Some(home_dir) = dir.strip_prefix(&*home)
+        && let Some(home_dir) = dir.strip_prefix(&*home.to_str_lossy())
       {
         dir = format!("~{home_dir}");
       }
@@ -117,6 +117,7 @@ impl super::Builtin for Cd {
 
 fn search_cd_path(new_dir: impl AsRef<Path>) -> Option<PathBuf> {
   let path = var!("CDPATH");
+  let path = path.to_str_lossy();
   let mut paths = path
     .split(':')
     .filter(|p| !p.trim().is_empty())
@@ -153,6 +154,7 @@ impl super::Builtin for Zd {
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let first = args.arguments().next().map(|(s, _)| s).cloned();
+    let first = first.as_ref().map(|s| s.to_str_lossy());
     match first.as_deref() {
       Some("add") => Self::add(args),
       Some("remove") => Self::remove(args),
@@ -182,7 +184,7 @@ impl Zd {
     let mut dirs: Vec<PathBuf> = args
       .arguments()
       .skip(1) // the "add" subcommand itself
-      .map(|(a, _)| PathBuf::from(a.as_str()))
+      .map(|(a, _)| PathBuf::from(a.clone()))
       .collect();
     if dirs.is_empty()
       && let Ok(cwd) = std::env::current_dir()
@@ -229,7 +231,7 @@ impl Zd {
     let targets: Vec<String> = args
       .arguments()
       .skip(1) // the "remove" subcommand itself
-      .map(|(a, _)| a.as_str().to_string())
+      .map(|(a, _)| a.to_string())
       .collect();
     if targets.is_empty() {
       return Err(sherr!(ExecFail @ args.span, "zd: remove requires a directory"));
@@ -300,7 +302,7 @@ impl Zd {
     let query = args
       .arguments()
       .skip(1)
-      .map(|(a, _)| a.as_str())
+      .map(|(a, _)| a.to_str_lossy())
       .collect::<String>();
 
     let mut rows = load_dir_stats();
@@ -341,9 +343,9 @@ impl Zd {
         } = row;
 
         // Same column order as the bare output (path last), just shell-quoted.
-        entry.push(expand::shell_quote(visits.to_string()));
-        entry.push(expand::shell_quote(last_visit.to_string()));
-        entry.push(expand::shell_quote(frecency.to_string()));
+        entry.push(expand::shell_quote(&visits.to_string()));
+        entry.push(expand::shell_quote(&last_visit.to_string()));
+        entry.push(expand::shell_quote(&frecency.to_string()));
         entry.push(expand::shell_quote(path));
 
         entries.push(entry.join(" ")); // SQR fields are separated by spaces
@@ -460,7 +462,7 @@ impl Zd {
   fn query(args: super::BuiltinArgs) -> ShResult<()> {
     // every positional is concatenated into one subsequence query, so
     // `zd pro fern` still finds `~/projects/fern`.
-    let query: String = args.arguments().map(|(a, _)| a.as_str()).collect();
+    let query: String = args.arguments().map(|(a, _)| a.to_str_lossy()).collect();
     let print_dir = args.options().any(|o| o.key() == "print");
 
     let entries = if query.is_empty() {
@@ -493,7 +495,7 @@ impl Zd {
       && target.starts_with('~')
       && let Some(home) = util::get_home_str()
     {
-      *target = target.replacen('~', &home, 1);
+      *target = target.replacen('~', &home.to_str_lossy(), 1);
     }
 
     match target {

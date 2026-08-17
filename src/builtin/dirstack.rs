@@ -22,9 +22,9 @@ fn parse_dirstack_args(args: &super::BuiltinArgs, cmd: &str) -> ShResult<DirStac
   let mut dir = None;
 
   for (arg, _) in args.arguments() {
-    if is_index_arg(arg) {
-      index = Some(parse_stack_idx(arg, args.span(), cmd)?);
-    } else if arg.starts_with('-') {
+    if is_index_arg(&arg.to_str_lossy()) {
+      index = Some(parse_stack_idx(&arg.to_str_lossy(), args.span(), cmd)?);
+    } else if arg.to_str_lossy().starts_with('-') {
       return Err(sherr!(
         ExecFail @ args.span(),
         "{cmd}: invalid option: '{arg}'",
@@ -225,11 +225,11 @@ impl super::Builtin for Dirs {
     }
 
     for (arg, _) in args.arguments() {
-      match arg.as_str() {
-        _ if is_index_arg(arg) => {
-          target_idx = Some(parse_stack_idx(arg, blame.clone(), "dirs")?);
+      match arg.to_str_lossy().as_ref() {
+        _ if is_index_arg(&arg.to_str_lossy()) => {
+          target_idx = Some(parse_stack_idx(&arg.to_str_lossy(), blame.clone(), "dirs")?);
         }
-        _ if arg.starts_with('-') => {
+        _ if arg.to_str_lossy().starts_with('-') => {
           return Err(sherr!(
             ExecFail @ blame,
             "dirs: invalid option: '{arg}'",
@@ -311,9 +311,9 @@ impl super::Builtin for Dirs {
 
 pub fn truncate_home_path(path: String) -> String {
   if let Some(home) = try_var!("HOME")
-    && path.starts_with(&*home)
+    && path.starts_with(&*home.to_str_lossy())
   {
-    let new = path.strip_prefix(&*home).unwrap();
+    let new = path.strip_prefix(&*home.to_str_lossy()).unwrap();
     return format!("~{new}");
   }
   path

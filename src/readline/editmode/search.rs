@@ -138,7 +138,7 @@ impl<S: SearchMode> EditMode for S {
         let pat = self.pattern();
 
         if let Some(hist) = self.history()
-          && let Err(e) = hist.push(&pat)
+          && let Err(e) = hist.push(&pat.to_str_lossy())
         {
           status_msg!("Failed to save search to history: {e}");
         }

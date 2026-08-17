@@ -831,7 +831,7 @@ mod word_expansions_2_6 {
       setup: {
         Shed::vars_mut(|v| v.set_var(
           "HOME",
-          VarKind::string("/home/test"),
+          VarKind::string("/home/test".into()),
           VarFlags::EXPORT,
         )).unwrap();
       },
@@ -852,7 +852,7 @@ mod word_expansions_2_6 {
       setup: {
         Shed::vars_mut(|v| v.set_var(
           "HOME",
-          VarKind::string("/home with spaces"),
+          VarKind::string("/home with spaces".into()),
           VarFlags::EXPORT,
         )).unwrap();
       },
@@ -864,7 +864,7 @@ mod word_expansions_2_6 {
       setup: {
         Shed::vars_mut(|v| v.set_var(
           "HOME",
-          VarKind::string("/home/test"),
+          VarKind::string("/home/test".into()),
           VarFlags::EXPORT,
         )).unwrap();
       },

@@ -139,10 +139,18 @@ impl WidthCalculator for NoZwj {
 }
 
 pub(crate) fn width_calculator() -> Box<dyn WidthCalculator> {
-  match try_var!("TERM_PROGRAM").as_deref() {
+  match try_var!("TERM_PROGRAM")
+    .as_ref()
+    .map(|v| v.to_str_lossy())
+    .as_deref()
+  {
     Some("Apple_Terminal" | "iTerm.app" | "WezTerm") => Box::new(UnicodeWidth),
     Some(_) => Box::new(WcWidth),
-    None => match try_var!("TERM").as_deref() {
+    None => match try_var!("TERM")
+      .as_ref()
+      .map(|v| v.to_str_lossy())
+      .as_deref()
+    {
       Some("xterm-kitty") => Box::new(NoZwj),
       _ => Box::new(WcWidth),
     },

@@ -31,7 +31,7 @@ impl super::Builtin for AutoCmdBuiltin {
       return display_autocmds(None);
     };
 
-    let Ok(autocmd_kind) = kind.parse::<AutoCmdKind>() else {
+    let Ok(autocmd_kind) = kind.to_str_lossy().parse::<AutoCmdKind>() else {
       return Err(sherr!(
           ExecFail @ kind_span.clone(),
           "invalid autocmd kind: {kind}",

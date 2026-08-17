@@ -12,6 +12,7 @@ use crate::{
   },
   util, varstr,
 };
+use bstr::ByteSlice;
 use std::{
   collections::VecDeque,
   ffi::CString,
@@ -83,6 +84,7 @@ pub fn in_cd_path(name: &Tk) -> bool {
     return true;
   }
   let cd_path = var!("CDPATH");
+  let cd_path = cd_path.to_str_lossy();
   let entries = cd_path.split(':');
   for entry in entries {
     let full_path = Path::new(entry).join(&name);
@@ -100,7 +102,7 @@ pub fn is_in_path(name: &Tk) -> bool {
   let Some(name) = expanded.get_first_word() else {
     return false;
   };
-  if name.starts_with("./") || name.starts_with("../") || name.starts_with('/') {
+  if name.starts_with_str("./") || name.starts_with_str("../") || name.starts_with_str("/") {
     let path = Path::new(&name);
     if path.exists() && path.is_file() && !path.is_dir() {
       let Ok(meta) = path.metadata() else {
@@ -116,6 +118,7 @@ pub fn is_in_path(name: &Tk) -> bool {
     let Some(path) = try_var!("PATH") else {
       return false;
     };
+    let path = path.to_str_lossy();
     let paths = path.split(':');
     for path in paths {
       let full_path = Path::new(path).join(&name);
@@ -184,7 +187,7 @@ impl ExecArgs {
     Self { cmd, argv, envp }
   }
   pub fn get_cmd(argv: &[(VarStr, Span)]) -> (CString, Span) {
-    let cmd = argv[0].0.as_str();
+    let cmd = argv[0].0.as_bytes();
     let span = argv[0].1.clone();
     (CString::new(cmd).unwrap(), span)
   }
@@ -213,7 +216,7 @@ pub fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
     .map_or("<shed -c>".into(), VarStr::from);
 
   Shed::vars_mut(|v| {
-    v.set_param(ShellParam::ShellName, &name); // $0
+    v.set_param(ShellParam::ShellName, &name.to_str_lossy()); // $0
     let scope = v.cur_scope_mut();
     scope.sh_argv_mut().clear();
     // bpush_arg (vs raw push_back) runs update_arg_params, keeping
@@ -313,7 +316,7 @@ pub fn exec_input(mut input: VarStr, source_name: Option<Rc<str>>) -> ShResult<(
   let interactive = Shed::term(Terminal::interactive);
 
   if !interactive || !Shed::shopts(|o| o.prompt.expand_aliases) {
-    input = expand_aliases(&input).into();
+    input = expand_aliases(&input.to_str_lossy()).into();
   }
   let lex_flags = if interactive {
     super::lex::LexFlags::INTERACTIVE
@@ -459,10 +462,12 @@ impl Dispatcher {
 
     let cmd_tk = node.get_command();
 
-    if allow_func && is_func(&cmd_word) {
+    if allow_func && is_func(&cmd_word.to_str_lossy()) {
       self.exec_func(node)
-    } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTIN_NAMES.contains(&cmd_word.as_str()) {
-      self.exec_builtin(node, &cmd_word)
+    } else if cmd.flags.contains(TkFlags::BUILTIN)
+      || BUILTIN_NAMES.contains(&cmd_word.to_str_lossy().as_ref())
+    {
+      self.exec_builtin(node, &cmd_word.to_str_lossy())
     } else if is_arith(cmd_tk) {
       Self::exec_arith(node)
     } else if can_autocd(cmd) {
@@ -600,7 +605,7 @@ impl Dispatcher {
       unreachable!()
     };
     let result = expand_arithmetic_wrapped(body.as_str())?;
-    let val: f64 = result.parse().unwrap_or(0.0);
+    let val: f64 = result.to_str_lossy().parse().unwrap_or(0.0);
     Shed::set_status_from_bool(val != 0.0);
     Ok(())
   }
@@ -1085,13 +1090,19 @@ impl Dispatcher {
       let vars: Vec<VarStr> = to_expanded_strings(vars)?;
 
       'outer: for chunk in arr.chunks(vars.len()) {
-        let empty = VarStr::new();
+        let empty = VarStr::default();
         let chunk_iter = vars
           .iter()
           .zip(chunk.iter().chain(std::iter::repeat(&empty)));
 
         for (var, val) in chunk_iter {
-          Shed::vars_mut(|v| v.set_var(var.as_str(), VarKind::string(val), VarFlags::empty()))?;
+          Shed::vars_mut(|v| {
+            v.set_var(
+              &var.to_str_lossy(),
+              VarKind::string(val.clone()),
+              VarFlags::empty(),
+            )
+          })?;
         }
 
         let _guard = util::shared_scope_guard();
@@ -1398,7 +1409,7 @@ impl Dispatcher {
       Shed::vars_mut(|v| {
         v.set_var(
           "PIPESTATUS",
-          VarKind::arr(codes.iter().map(i32::to_string)),
+          VarKind::arr(codes.iter().map(|c| c.to_string().into())),
           VarFlags::empty(),
         )
       })
@@ -1767,9 +1778,9 @@ impl Dispatcher {
         VarKind::arr_from_tk(val)?
       } else if is_integer {
         let raw = val.expand_no_split()?;
-        let n = expand_arithmetic(&raw)
+        let n = expand_arithmetic(&raw.to_str_lossy())
           .ok()
-          .and_then(|s| s.parse::<i32>().ok())
+          .and_then(|s| s.to_str_lossy().parse::<i32>().ok())
           .unwrap_or(0);
         VarKind::Int(n)
       } else {
@@ -1778,11 +1789,14 @@ impl Dispatcher {
 
       // Parse and expand array index BEFORE entering write_vars borrow
       let indexed = state::util::parse_arr_bracket(var_name)
-        .map(|(name, idx_raw)| state::util::expand_arr_index(&idx_raw, true).map(|idx| (name, idx)))
+        .map(|(name, idx_raw)| {
+          state::util::expand_arr_index(&idx_raw.to_str_lossy(), true).map(|idx| (name, idx))
+        })
         .transpose()?;
 
       let indexed = if let Some((name, idx)) = indexed {
-        let tag = Shed::vars(|v| v.try_get_var_kind_tag(&name)).unwrap_or(VarKindTag::Arr);
+        let tag =
+          Shed::vars(|v| v.try_get_var_kind_tag(&name.to_str_lossy())).unwrap_or(VarKindTag::Arr);
         Some((name, idx.resolve_for(tag)?))
       } else {
         None
@@ -1803,10 +1817,13 @@ impl Dispatcher {
         // line directly (xtrace_line doesn't re-quote).
         let rhs = match &val {
           VarKind::Arr(items) => {
-            let items = items.iter().map(expand::xtrace_quote).join(" ");
+            let items = items
+              .iter()
+              .map(|i| expand::xtrace_quote(&i.to_str_lossy()))
+              .join(" ");
             format!("({items})")
           }
-          other => expand::xtrace_quote(other.to_string()),
+          other => expand::xtrace_quote(&other.to_string()),
         };
         xtrace_line(&format!("{var_name}{op}{rhs}"));
       }
@@ -1814,7 +1831,9 @@ impl Dispatcher {
       match kind {
         AssignKind::Eq => {
           if let Some((name, idx)) = indexed {
-            Shed::vars_mut(|v| v.set_var_indexed(&name, idx, val.to_string(), flags))?;
+            Shed::vars_mut(|v| {
+              v.set_var_indexed(&name.to_str_lossy(), idx, val.to_string(), flags)
+            })?;
           } else {
             Shed::vars_mut(|v| v.set_var(var_name, val.clone(), flags))?;
           }
@@ -1868,13 +1887,13 @@ impl Dispatcher {
           }
 
           let mut var = if let Some((name, idx)) = &indexed {
-            Shed::vars(|v| v.index_var(name, idx))?.into()
+            Shed::vars(|v| v.index_var(&name.to_str_lossy(), idx))?.into()
           } else {
             Shed::vars(|v| v.try_get_var_meta(var_name)).unwrap_or_else(|| {
               let kind = if is_arr {
                 VarKind::Arr(VecDeque::new())
               } else {
-                VarKind::string(String::new())
+                VarKind::string(VarStr::default())
               };
               Var::new(kind, VarFlags::empty())
             })
@@ -1910,7 +1929,7 @@ impl Dispatcher {
             } else if is_arr {
               VarKind::Arr(VecDeque::new())
             } else {
-              VarKind::string(String::new())
+              VarKind::string(VarStr::default())
             };
             *var.kind_mut() = zero;
           }
@@ -1919,9 +1938,9 @@ impl Dispatcher {
             VarKind::Str(s) => {
               if matches!(op, AssignKind::PlusEq) {
                 let other = val.to_string();
-                *s = [s.as_str(), &other].join("").into();
+                *s = format!("{}{other}", s.to_str_lossy()).into();
               } else {
-                let n = s.parse::<i32>().map_err(
+                let n = s.to_str_lossy().parse::<i32>().map_err(
                   |_| sherr!(InvalidAssignment @ span.clone(), "cannot {op_name} string variable"),
                 )?;
                 let other = parse_rhs(&span)?;
@@ -1997,14 +2016,15 @@ impl Dispatcher {
           }
 
           let indexed = if let Some((name, idx)) = indexed {
-            let tag = Shed::vars(|v| v.try_get_var_kind_tag(&name)).unwrap_or(VarKindTag::Arr);
+            let tag = Shed::vars(|v| v.try_get_var_kind_tag(&name.to_str_lossy()))
+              .unwrap_or(VarKindTag::Arr);
             Some((name, idx.resolve_for(tag)?))
           } else {
             None
           };
 
           if let Some((name, idx)) = indexed {
-            Shed::vars_mut(|v| v.update_var_indexed(&name, idx, var.to_string()))?;
+            Shed::vars_mut(|v| v.update_var_indexed(&name.to_str_lossy(), idx, var.to_string()))?;
           } else {
             Shed::vars_mut(|v| v.update_var(var_name, var.kind().clone()))?;
           }
@@ -2135,7 +2155,7 @@ pub fn will_fork(cmd: &Node) -> bool {
 pub fn pipefail_span(spans: &[Span]) -> Option<Span> {
   let pipestatus = Shed::vars(|v| v.try_get_arr_elems("PIPESTATUS")).ok()?;
   for (i, status) in pipestatus.into_iter().enumerate().rev() {
-    let status = status.parse::<usize>().ok()?;
+    let status = status.to_str_lossy().parse::<usize>().ok()?;
     if status != 0 {
       return spans.get(i).cloned();
     }

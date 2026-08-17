@@ -554,6 +554,7 @@ impl RedirSpec {
           ));
         }
         let word_val = words.iter().next().unwrap();
+        let word_val = word_val.to_str_lossy();
         let src = word_val.trim();
 
         // A word that expands to `-` closes the target fd, mirroring `>&-`.
@@ -1110,6 +1111,13 @@ pub(super) fn bytes_to_string(buf: Vec<u8>) -> String {
 
 pub(super) fn out_bytes(buf: &[u8]) {
   let _ = Shed::sinks(|s| s.write_all(buf));
+}
+
+pub(super) fn outln_bytes(buf: &[u8]) {
+  let _ = Shed::sinks(|s| {
+    s.write_all(buf)?;
+    s.write_all(b"\n")
+  });
 }
 
 /// A pipe created before a fork to deliver stdin bytes to the child on fd 0.

@@ -217,7 +217,7 @@ impl Vice {
       .promote_err(span.clone())?;
 
     Ok(if !fields.is_empty() {
-      fields.join(&prog.delim) // captured fields, kept even on abort
+      fields.join(&prog.delim.to_str_lossy()) // captured fields, kept even on abort
     } else if core.editor.search_failed() {
       String::new() // aborted before capturing anything
     } else {
@@ -298,7 +298,8 @@ impl Vice {
     span: &Span,
   ) -> ShResult<()> {
     if let Some(ext) = backup_ext {
-      let slice = ext.strip_prefix('.').unwrap_or(ext);
+      let ext = ext.to_str_lossy();
+      let slice = ext.strip_prefix('.').unwrap_or(&ext);
       std::fs::copy(file, format!("{file}.{slice}"))?;
     }
 
@@ -352,7 +353,7 @@ impl super::Builtin for Vice {
       };
 
       let file_ok = if prog.inplace() {
-        Self::run_inplace(&file, &content, &prog, &span)?
+        Self::run_inplace(&file.to_str_lossy(), &content, &prog, &span)?
       } else {
         Self::run_stream(&content, &prog, &span)?
       };

@@ -3,6 +3,7 @@ use std::{
   io::{Read, Seek, Write as IoWrite},
 };
 
+use bstr::ByteSlice;
 use tempfile::NamedTempFile;
 
 use crate::{state::vars::VarStr, varstr};
@@ -86,7 +87,7 @@ pub fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCmdOpts)>
       break;
     }
 
-    if let Ok(num) = word.parse::<i32>()
+    if let Ok(num) = word.to_str_lossy().parse::<i32>()
       && num != 0
     {
       if opts.first.is_none() {
@@ -127,7 +128,7 @@ pub fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCmdOpts)>
       }
     }
 
-    match word.as_str() {
+    match word.to_str_lossy().as_ref() {
       "-r" => opts.reverse = true,
       "-n" => opts.no_numbers = true,
       "-s" => opts.mode = FixMode::Rerun,
@@ -231,7 +232,7 @@ fn fc_edit(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
     tmp.read_to_string(&mut new_cmd)?;
     new_cmd = new_cmd.trim().into();
 
-    should_push = new_cmd.as_str() != old_cmd.as_str();
+    should_push = new_cmd.as_bytes() != old_cmd.as_bytes();
 
     exec_input(new_cmd.clone().into(), Some("fc re-exec".into()))?;
 
@@ -259,8 +260,10 @@ fn fc_reexec(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
     let mut command = entry.command;
     let mut should_push = false;
     if let Some((old, new)) = &opts.replace {
-      let new_cmd = command.replace(old.as_str(), new);
-      if new_cmd.as_str() != command.as_str() {
+      let new_cmd = command
+        .to_str_lossy()
+        .replace(old.to_str_lossy().as_ref(), new.to_str_lossy().as_ref());
+      if new_cmd.as_bytes() != command.as_bytes() {
         command = new_cmd.into();
         should_push = true;
       }
@@ -268,7 +271,7 @@ fn fc_reexec(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
 
     exec_input(command.clone(), Some("fc re-exec".into()))?;
     if should_push {
-      hist.push(&command)?;
+      hist.push(&command.to_str_lossy())?;
     }
   }
 
@@ -297,7 +300,7 @@ fn fc_list(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
     if !opts.no_numbers {
       write!(buf, "{id}\t").unwrap();
     }
-    buf.push_str(&cmd);
+    buf.push_str(&cmd.to_str_lossy());
     buf.push('\n');
   }
 
@@ -324,7 +327,11 @@ fn get_entry_range(
       // the last command, -2 the one before it, etc.
       RangeArg::Number(n) if *n < 0 => Ok(last_id + 1 + i64::from(*n)),
       RangeArg::Number(n) => Ok(i64::from(*n)),
-      RangeArg::Prefix(p) => Ok(hist.query_by_prefix(p)?.map_or(last_id, |(id, _)| id)),
+      RangeArg::Prefix(p) => Ok(
+        hist
+          .query_by_prefix(&p.to_str_lossy())?
+          .map_or(last_id, |(id, _)| id),
+      ),
     }
   };
 
@@ -435,7 +442,7 @@ mod tests {
   fn fc_dash_e_consumes_next_arg_as_editor() {
     let _g = TestGuard::new();
     let (_, opts) = parse("fc -e vim");
-    assert_eq!(opts.editor.as_deref(), Some("vim"));
+    assert_eq!(opts.editor, Some("vim".into()));
   }
 
   #[test]
@@ -563,7 +570,10 @@ mod tests {
     let (non_opts, opts) = parse("fc -l -- -r foo 42");
     assert_eq!(opts.mode, FixMode::List);
     // Everything after `--`, including the literal `--`, lands in non_opts.
-    let collected: Vec<&str> = non_opts.iter().map(|(s, _)| s.as_str()).collect();
+    let collected: Vec<&str> = non_opts
+      .iter()
+      .map(|(s, _)| s.to_str().unwrap_or_default())
+      .collect();
     assert_eq!(collected, vec!["--", "-r", "foo", "42"]);
     // Importantly: -r AFTER -- should NOT have set the reverse flag.
     assert!(!opts.reverse);
@@ -709,7 +719,10 @@ mod fc_edit_tests {
     .unwrap();
     // History should now contain the opts-editor's rewrite.
     let entries = hist_view().query_range(1, 100).unwrap();
-    let cmds: Vec<&str> = entries.iter().map(|(_, e)| e.command.as_str()).collect();
+    let cmds: Vec<&str> = entries
+      .iter()
+      .map(|(_, e)| e.command.to_str().unwrap_or_default())
+      .collect();
     assert!(cmds.contains(&": picked-opts"), "got: {cmds:?}");
     assert!(!cmds.contains(&": picked-fcedit"), "got: {cmds:?}");
   }
@@ -826,7 +839,10 @@ mod fc_edit_tests {
       false,
     )
     .unwrap();
-    let cmds: Vec<&str> = entries.iter().map(|(_, e)| e.command.as_str()).collect();
+    let cmds: Vec<&str> = entries
+      .iter()
+      .map(|(_, e)| e.command.to_str().unwrap_or_default())
+      .collect();
     assert_eq!(cmds, vec![": b", ": c", ": d"]);
   }
 }
@@ -962,7 +978,7 @@ mod fc_reexec_tests {
       .unwrap()
       .1
       .command;
-    assert!(last.contains("replaced_marker"));
+    assert!(last.to_str_lossy().contains("replaced_marker"));
   }
 
   #[test]

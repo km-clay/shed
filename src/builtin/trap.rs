@@ -51,14 +51,14 @@ impl super::Builtin for Trap {
     if print || arg_vec.is_empty() {
       let filter = arg_vec
         .iter()
-        .map(|(arg, span)| arg.parse::<TrapTarget>().promote_err(span.clone()))
+        .map(|(arg, span)| TrapTarget::parse(arg).promote_err(span.clone()))
         .collect::<ShResult<Vec<_>>>()?;
 
       Shed::logic(|l| -> ShResult<()> {
         for entry in l.traps() {
           let target = entry.0;
           if filter.is_empty() || filter.contains(target) {
-            let command = shell_quote(entry.1);
+            let command = shell_quote(&entry.1.to_str_lossy());
             outln!("trap -- {command} {target}");
           }
         }
@@ -71,10 +71,10 @@ impl super::Builtin for Trap {
     // to reset to its default action. e.g. `trap 0 2`, `trap 2 EXIT`, etc
     if arg_vec
       .first()
-      .is_some_and(|(a, _)| a.parse::<usize>().is_ok())
+      .is_some_and(|(a, _)| a.to_str_lossy().parse::<usize>().is_ok())
     {
       for (arg, span) in arg_vec {
-        let target = arg.parse::<TrapTarget>().promote_err(span)?;
+        let target = TrapTarget::parse(&arg).promote_err(span)?;
         Shed::logic_mut(|l| l.remove_trap(target));
       }
       return with_status(0);
@@ -91,7 +91,7 @@ impl super::Builtin for Trap {
     let mut targets = vec![];
 
     for (arg, span) in arg_iter {
-      let target = arg.parse::<TrapTarget>().promote_err(span)?;
+      let target = TrapTarget::parse(&arg).promote_err(span)?;
       targets.push(target);
     }
 
@@ -113,24 +113,23 @@ mod tests {
   use crate::state::{self, Shed};
   use crate::tests::testutil::{TestGuard, test_input};
   use nix::sys::signal::Signal;
-  use std::str::FromStr;
 
   // ===================== Pure: TrapTarget parsing =====================
 
   #[test]
   fn parse_exit() {
-    assert_eq!(TrapTarget::from_str("EXIT").unwrap(), TrapTarget::Exit);
+    assert_eq!(TrapTarget::parse(&"EXIT".into()).unwrap(), TrapTarget::Exit);
   }
 
   #[test]
   fn parse_err() {
-    assert_eq!(TrapTarget::from_str("ERR").unwrap(), TrapTarget::Error);
+    assert_eq!(TrapTarget::parse(&"ERR".into()).unwrap(), TrapTarget::Error);
   }
 
   #[test]
   fn parse_signal_int() {
     assert_eq!(
-      TrapTarget::from_str("INT").unwrap(),
+      TrapTarget::parse(&"INT".into()).unwrap(),
       TrapTarget::Signal(Signal::SIGINT)
     );
   }
@@ -138,7 +137,7 @@ mod tests {
   #[test]
   fn parse_signal_term() {
     assert_eq!(
-      TrapTarget::from_str("TERM").unwrap(),
+      TrapTarget::parse(&"TERM".into()).unwrap(),
       TrapTarget::Signal(Signal::SIGTERM)
     );
   }
@@ -146,14 +145,14 @@ mod tests {
   #[test]
   fn parse_signal_usr1() {
     assert_eq!(
-      TrapTarget::from_str("USR1").unwrap(),
+      TrapTarget::parse(&"USR1".into()).unwrap(),
       TrapTarget::Signal(Signal::SIGUSR1)
     );
   }
 
   #[test]
   fn parse_invalid() {
-    assert!(TrapTarget::from_str("BOGUS").is_err());
+    assert!(TrapTarget::parse(&"BOGUS".into()).is_err());
   }
 
   // ===================== Pure: Display round-trip =====================
@@ -173,7 +172,7 @@ mod tests {
     for name in &[
       "INT", "QUIT", "TERM", "USR1", "USR2", "ALRM", "CHLD", "WINCH",
     ] {
-      let target = TrapTarget::from_str(name).unwrap();
+      let target = TrapTarget::parse(&crate::state::vars::VarStr::from(*name)).unwrap();
       assert_eq!(target.to_string(), *name);
     }
   }

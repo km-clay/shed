@@ -23,7 +23,7 @@ impl super::Builtin for Quote {
 
     let mut parts: Vec<String> = args
       .arguments()
-      .map(|(s, _)| expand::shell_quote(s))
+      .map(|(s, _)| expand::shell_quote(&s.to_str_lossy()))
       .collect();
 
     for opt in args.options() {
@@ -43,7 +43,7 @@ impl super::Builtin for Quote {
 fn quote_var(name: &str) -> Option<String> {
   let var = Shed::vars(|v| v.try_get_var_meta(name))?;
   match var.kind() {
-    VarKind::Str(var_str) => Some(expand::shell_quote(var_str.as_str())),
+    VarKind::Str(var_str) => Some(expand::shell_quote(&var_str.to_str_lossy())),
     VarKind::Int(int) => {
       let mut buf = itoa::Buffer::new();
       let int_str = buf.format(*int);
@@ -52,18 +52,24 @@ fn quote_var(name: &str) -> Option<String> {
     VarKind::Arr(var_strs) => Some(
       var_strs
         .iter()
-        .map(|v| expand::shell_quote(v.as_str()))
+        .map(|v| expand::shell_quote(&v.to_str_lossy()))
         .join(" "),
     ),
     VarKind::AssocArr(items) => Some(
       items
         .iter()
-        .map(|(k, v)| [expand::shell_quote(k), expand::shell_quote(v)].join(" "))
+        .map(|(k, v)| {
+          [
+            expand::shell_quote(&k.to_str_lossy()),
+            expand::shell_quote(&v.to_str_lossy()),
+          ]
+          .join(" ")
+        })
         .join("\n"),
     ),
     VarKind::Magic(magic_var) => {
       let resolved = magic_var()?;
-      Some(expand::shell_quote(resolved.as_str()))
+      Some(expand::shell_quote(&resolved.to_str_lossy()))
     }
     VarKind::Unset => None,
   }
@@ -114,7 +120,7 @@ impl super::Builtin for Unquote {
       }
     }
 
-    let mut fields = unquote_raw(&input)?.into_iter();
+    let mut fields = unquote_raw(&input.to_str_lossy())?.into_iter();
 
     match target {
       None => {
@@ -129,12 +135,12 @@ impl super::Builtin for Unquote {
         }
       }
       Some(UnquoteTarget::Array(name)) => {
-        let var = VarKind::arr(fields);
-        Shed::vars_mut(|v| v.set_var(&name, var, VarFlags::empty()))?;
+        let var = VarKind::arr(fields.map(Into::into));
+        Shed::vars_mut(|v| v.set_var(&name.to_str_lossy(), var, VarFlags::empty()))?;
       }
       Some(UnquoteTarget::Var(name)) => {
-        let var = VarKind::string(fields.join(" "));
-        Shed::vars_mut(|v| v.set_var(&name, var, VarFlags::empty()))?;
+        let var = VarKind::string(fields.join(" ").into());
+        Shed::vars_mut(|v| v.set_var(&name.to_str_lossy(), var, VarFlags::empty()))?;
       }
     }
 

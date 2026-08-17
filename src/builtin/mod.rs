@@ -507,7 +507,7 @@ pub fn join_raw_args(args: Vec<(VarStr, Span)>) -> (VarStr, Span) {
 }
 
 pub fn join_raw_arg_iter(args: impl Iterator<Item = (VarStr, Span)>) -> (VarStr, Span) {
-  args.fold((VarStr::new(), Span::default()), |mut acc, arg| {
+  args.fold((VarStr::default(), Span::default()), |mut acc, arg| {
     if acc.1 == Span::default() {
       acc.1 = arg.1.clone();
     } else {
@@ -569,8 +569,8 @@ impl Builtin for Let {
     }
     let mut last = 0i64;
     for (expr, _) in args.arguments() {
-      let result = expand::expand_arithmetic(expr.as_str())?;
-      last = result.as_str().trim().parse::<i64>().unwrap_or(0);
+      let result = expand::expand_arithmetic(&expr.to_str_lossy())?;
+      last = result.to_str_lossy().trim().parse::<i64>().unwrap_or(0);
     }
     with_status(i32::from(last == 0))
   }
@@ -647,7 +647,7 @@ impl Builtin for Thru {
 
     let mut sources: Vec<Option<VarStr>> = args
       .arguments()
-      .map(|(a, _)| (a.as_str() != "-").then(|| a.clone()))
+      .map(|(a, _)| (a.to_str_lossy() != "-").then(|| a.clone()))
       .collect();
     if sources.is_empty() {
       // no source operands → read stdin
@@ -735,7 +735,7 @@ impl Builtin for BuiltinBuiltin {
     }
 
     let cmd = inner_argv.first().map(Tk::word).unwrap_or_default();
-    let Some(builtin) = lookup_builtin(&cmd) else {
+    let Some(builtin) = lookup_builtin(&cmd.to_str_lossy()) else {
       sherr!(NotFound @ span, "builtin not found: {cmd}").print_error();
       return with_status(127);
     };
@@ -813,7 +813,7 @@ impl Builtin for CommandBuiltin {
         continue;
       }
 
-      match tk.word().as_str() {
+      match tk.word().to_str_lossy().as_ref() {
         "-p" => use_default_path = true,
 
         "-v" if !print_type => print_path = true,
@@ -886,19 +886,22 @@ impl CommandBuiltin {
         return with_status(2);
       };
       let name_word = name.word();
-      let name_str = name_word.as_str();
-      match state::util::which_util(name_str) {
+      let name_str = name_word.to_str_lossy();
+      match state::util::which_util(&name_str) {
         Some(util) => match util.kind() {
           UtilKind::Alias => {
-            let Some(alias) = Shed::logic(|l| l.get_alias(name_str)) else {
+            let Some(alias) = Shed::logic(|l| l.get_alias(&name_str)) else {
               return with_status(127);
             };
-            outln!("alias {name_str}={}", shell_quote(alias.body()));
+            outln!(
+              "alias {name_str}={}",
+              shell_quote(&alias.body().to_str_lossy())
+            );
           }
           UtilKind::Function | UtilKind::Builtin => outln!("{name_str}"),
           UtilKind::Command(p) | UtilKind::File(p) => outln!("{}", p.display()),
         },
-        None if KEYWORDS.contains(&name_str) => outln!("{name_str}"),
+        None if KEYWORDS.contains(&name_str.as_ref()) => outln!("{name_str}"),
         None => return with_status(127),
       }
 
@@ -909,14 +912,17 @@ impl CommandBuiltin {
         return with_status(2);
       };
       let name_word = name.word();
-      let name_str = name_word.as_str();
-      match state::util::which_util(name_str) {
+      let name_str = name_word.to_str_lossy();
+      match state::util::which_util(&name_str) {
         Some(util) => match util.kind() {
           UtilKind::Alias => {
-            let Some(alias) = Shed::logic(|l| l.get_alias(name_str)) else {
+            let Some(alias) = Shed::logic(|l| l.get_alias(&name_str)) else {
               return with_status(127);
             };
-            outln!("{name_str} is an alias for {}", shell_quote(alias.body()));
+            outln!(
+              "{name_str} is an alias for {}",
+              shell_quote(&alias.body().to_str_lossy())
+            );
           }
           UtilKind::Function => outln!("{name_str} is a function"),
           UtilKind::Builtin => outln!("{name_str} is a shell builtin"),
@@ -924,7 +930,7 @@ impl CommandBuiltin {
             outln!("{name_str} is {}", p.display());
           }
         },
-        None if KEYWORDS.contains(&name_str) => outln!("{name_str} is a shell keyword"),
+        None if KEYWORDS.contains(&name_str.as_ref()) => outln!("{name_str} is a shell keyword"),
         None => {
           errln!("command: {name_str}: not found");
           return with_status(127);

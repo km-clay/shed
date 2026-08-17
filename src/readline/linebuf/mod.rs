@@ -229,19 +229,25 @@ impl LineBuf {
     Shed::vars_mut(|v| {
       v.set_var(
         "EDITOR_LINES",
-        VarKind::string(num_lines.to_string()),
+        VarKind::string(num_lines.to_string().into()),
         VarFlags::READONLY,
       )?;
       v.set_var(
         "EDITOR_LINE",
-        VarKind::string((cursor_line + 1).to_string()),
+        VarKind::string((cursor_line + 1).to_string().into()),
         VarFlags::READONLY,
       )
     })?;
 
     if let Some(file) = &self.open_file {
       let display = state::util::display_path(file);
-      Shed::vars_mut(|v| v.set_var("EDITOR_FILE", VarKind::string(display), VarFlags::READONLY))?;
+      Shed::vars_mut(|v| {
+        v.set_var(
+          "EDITOR_FILE",
+          VarKind::string(display.into()),
+          VarFlags::READONLY,
+        )
+      })?;
     }
 
     if self.is_empty() {
@@ -397,7 +403,7 @@ impl LineBuf {
   pub fn search_match_spans(&self) -> Vec<Range<usize>> {
     if let Some(pat) = self.pending_search.as_ref()
       && !pat.is_empty()
-      && let Ok(re) = Shed::meta_mut(|m| m.get_regex(pat))
+      && let Ok(re) = Shed::meta_mut(|m| m.get_regex(&pat.to_str_lossy()))
     {
       let buf = self.to_string();
       let positions = self.byte_positions();

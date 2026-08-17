@@ -258,7 +258,7 @@ mod tests {
   fn assert_round_trips(code: &KeyCode, mods: ModKeys) {
     let original = KeyEvent(code.clone(), mods);
     let seq = original.as_vim_seq();
-    let parsed = expand_keymap(&seq);
+    let parsed = expand_keymap(&seq.to_str_lossy());
     assert_eq!(
       parsed.len(),
       1,

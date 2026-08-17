@@ -68,7 +68,7 @@ fn build_entry(path: &Path) -> EntryCache {
 impl PathCache {
   pub fn new(name: String) -> Self {
     let path_raw = var!(&name);
-    let entries = Self::build_entries(&path_raw);
+    let entries = Self::build_entries(&path_raw.to_str_lossy());
     Self {
       name,
       path_raw,
@@ -92,7 +92,7 @@ impl PathCache {
     let path_raw = var!(&self.name);
     if path_raw != self.path_raw {
       self.path_raw = path_raw;
-      self.entries = Self::build_entries(&self.path_raw);
+      self.entries = Self::build_entries(&self.path_raw.to_str_lossy());
       return true;
     }
 

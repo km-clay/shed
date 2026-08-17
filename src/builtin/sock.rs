@@ -129,7 +129,7 @@ struct TcpSocket {
 impl TcpSocket {
   fn connect(self) -> io::Result<OwnedFd> {
     let stream = match self.host {
-      TcpHost::Hostname(hostname) => TcpStream::connect((hostname.as_str(), self.port))?,
+      TcpHost::Hostname(hostname) => TcpStream::connect((&*hostname.to_str_lossy(), self.port))?,
       TcpHost::IpAddr(ip)/*-----*/=> TcpStream::connect((ip, self.port))?
     };
 
@@ -137,7 +137,7 @@ impl TcpSocket {
   }
   fn bind(self) -> io::Result<OwnedFd> {
     let listener = match self.host {
-      TcpHost::Hostname(hostname) => TcpListener::bind((hostname.as_str(), self.port))?,
+      TcpHost::Hostname(hostname) => TcpListener::bind((&*hostname.to_str_lossy(), self.port))?,
       TcpHost::IpAddr(ip)/*-----*/=> TcpListener::bind((ip, self.port))?
     };
 
@@ -153,7 +153,7 @@ enum UnixAddr {
 impl UnixAddr {
   pub fn connect(self) -> io::Result<OwnedFd> {
     match self {
-      UnixAddr::Abstract(var_str) => connect_abstract(&var_str),
+      UnixAddr::Abstract(var_str) => connect_abstract(&var_str.to_str_lossy()),
       UnixAddr::Path(path_buf) => UnixStream::connect(&path_buf).map(OwnedFd::from),
     }
   }
@@ -185,7 +185,7 @@ impl UnixAddr {
   }
   pub fn bind(self) -> io::Result<OwnedFd> {
     match self {
-      UnixAddr::Abstract(var_str) => bind_abstract(&var_str),
+      UnixAddr::Abstract(var_str) => bind_abstract(&var_str.to_str_lossy()),
       UnixAddr::Path(ref path_buf) => {
         // a bunch of checks now to make sure we can bind to this address
         // the checks go like this:
@@ -196,7 +196,7 @@ impl UnixAddr {
           Err(e) if e.kind() == std::io::ErrorKind::NotFound => { /* free to bind */ }
           Err(e) => {
             return Err(io::Error::other(
-              varstr!("Failed to stat Unix socket '{}': {e}", path_buf.display()).as_str(),
+              varstr!("Failed to stat Unix socket '{}': {e}", path_buf.display()).to_str_lossy(),
             ));
           }
           Ok(_) if shopt!(set.noclobber) => {
@@ -205,7 +205,7 @@ impl UnixAddr {
                 "Cannot bind to Unix socket '{}': already exists and noclobber is set",
                 path_buf.display()
               )
-              .as_str(),
+              .to_str_lossy(),
             ));
           }
           Ok(m) if !m.file_type().is_socket() => {
@@ -214,7 +214,7 @@ impl UnixAddr {
                 "Cannot bind to Unix socket '{}': path exists and is not a socket",
                 path_buf.display()
               )
-              .as_str(),
+              .to_str_lossy(),
             ));
           }
           Ok(_) if self.poke()? => {
@@ -223,7 +223,7 @@ impl UnixAddr {
                 "Cannot bind to Unix socket '{}': already in use",
                 path_buf.display()
               )
-              .as_str(),
+              .to_str_lossy(),
             ));
           }
           Ok(_) => {
@@ -340,7 +340,7 @@ fn install_socket_fd(
       Shed::vars_mut(|v| v.set_var(default_var, VarKind::Int(fd), VarFlags::empty()))?;
     }
     (_, Some(var)) => {
-      Shed::vars_mut(|v| v.set_var(&var, VarKind::Int(fd), VarFlags::empty()))?;
+      Shed::vars_mut(|v| v.set_var(&var.to_str_lossy(), VarKind::Int(fd), VarFlags::empty()))?;
     }
     _ => {}
   }
@@ -378,14 +378,14 @@ impl super::Builtin for Accept {
       ));
     };
 
-    let Ok(listen) = fd.parse::<u32>() else {
+    let Ok(listen) = fd.to_str_lossy().parse::<u32>() else {
       return Err(sherr!(ExecFail @ span.clone(), "Invalid file descriptor '{fd}'"));
     };
 
     match argv_iter.next() {
       None => Self::bind_mode(listen as i32, None, var),
       Some((arg, _)) => {
-        if let Ok(fd) = arg.parse::<u32>()
+        if let Ok(fd) = arg.to_str_lossy().parse::<u32>()
           && fd < 10
         {
           Self::bind_mode(listen as i32, Some(fd as RawFd), var)
@@ -476,7 +476,7 @@ impl super::Builtin for Listen {
     }
 
     let target_fd = if let Some((arg, span)) = arg_vec.first() {
-      let Ok(arg) = arg.parse::<u32>() else {
+      let Ok(arg) = arg.to_str_lossy().parse::<u32>() else {
         return Err(sherr!(ExecFail @ span.clone(), "Invalid file descriptor '{arg}'"));
       };
 
@@ -539,7 +539,7 @@ impl super::Builtin for Sock {
     }
 
     let target_fd = if let Some((arg, span)) = arg_vec.first() {
-      let Ok(arg) = arg.parse::<u32>() else {
+      let Ok(arg) = arg.to_str_lossy().parse::<u32>() else {
         return Err(sherr!(ExecFail @ span.clone(), "Invalid file descriptor '{arg}'"));
       };
 

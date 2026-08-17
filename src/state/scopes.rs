@@ -1,5 +1,7 @@
 use std::collections::{VecDeque, hash_map::Entry};
 
+use bstr::ByteSlice;
+
 use super::{
   ShResult, Shed,
   meta::MetaTab,
@@ -153,7 +155,7 @@ impl ScopeStack {
     }
     for var in std::env::vars() {
       if let Entry::Vacant(e) = flat_vars.entry(var.0) {
-        e.insert(Var::new(VarKind::string(var.1), VarFlags::EXPORT));
+        e.insert(Var::new(VarKind::string(var.1.into()), VarFlags::EXPORT));
       }
     }
 
@@ -684,7 +686,7 @@ impl ScopeStack {
       }
       ShellParam::Pos(_) | ShellParam::AllArgs | ShellParam::AllArgsStr | ShellParam::ArgCount => {
         let scope = self.sh_argv_scope_mut();
-        scope.set_param(param, val);
+        scope.set_param(param, &val.into());
       }
     }
   }
@@ -701,8 +703,12 @@ mod index_var_sliced_tests {
   fn set_arr(name: &str, items: &[&str]) {
     let vec: VecDeque<String> = items.iter().map(ToString::to_string).collect();
     Shed::vars_mut(|v| {
-      v.set_var(name, VarKind::arr(vec), VarFlags::empty())
-        .unwrap();
+      v.set_var(
+        name,
+        VarKind::arr(vec.into_iter().map(Into::into)),
+        VarFlags::empty(),
+      )
+      .unwrap();
     });
   }
 
@@ -796,9 +802,9 @@ mod index_var_sliced_tests {
     // ARG_SEP is the marker char that splits later. We just check that
     // all values appear.
     let result = index("arr", &ArrIndex::AllSplit, None, None).unwrap();
-    assert!(result.contains('a'));
-    assert!(result.contains('b'));
-    assert!(result.contains('c'));
+    assert!(result.to_str_lossy().contains('a'));
+    assert!(result.to_str_lossy().contains('b'));
+    assert!(result.to_str_lossy().contains('c'));
   }
 
   #[test]
@@ -835,10 +841,10 @@ mod index_var_sliced_tests {
     set_arr("arr", &["a", "b", "c", "d", "e"]);
     // start=1, len=2 → ["b","c"]
     let result = index("arr", &ArrIndex::AllSplit, Some(1), Some(2)).unwrap();
-    assert!(result.contains('b'));
-    assert!(result.contains('c'));
-    assert!(!result.contains('a'));
-    assert!(!result.contains('d'));
+    assert!(result.to_str_lossy().contains('b'));
+    assert!(result.to_str_lossy().contains('c'));
+    assert!(!result.to_str_lossy().contains('a'));
+    assert!(!result.to_str_lossy().contains('d'));
   }
 
   #[test]
@@ -908,8 +914,8 @@ mod index_var_sliced_tests {
     let _g = TestGuard::new();
     set_assoc("amap", &[("a", "1"), ("b", "2")]);
     let result = index("amap", &ArrIndex::AllSplit, None, None).unwrap();
-    assert!(result.contains('1'));
-    assert!(result.contains('2'));
+    assert!(result.to_str_lossy().contains('1'));
+    assert!(result.to_str_lossy().contains('2'));
   }
 
   // ─── Scalar var errors ───────────────────────────────────────────
@@ -944,8 +950,12 @@ mod get_array_keys_tests {
   fn set_arr(name: &str, items: &[&str]) {
     let vec: VecDeque<String> = items.iter().map(ToString::to_string).collect();
     Shed::vars_mut(|v| {
-      v.set_var(name, VarKind::arr(vec), VarFlags::empty())
-        .unwrap();
+      v.set_var(
+        name,
+        VarKind::arr(vec.into_iter().map(Into::into)),
+        VarFlags::empty(),
+      )
+      .unwrap();
     });
   }
 

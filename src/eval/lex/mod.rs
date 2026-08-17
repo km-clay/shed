@@ -455,6 +455,7 @@ pub fn clean_input(input: &str) -> String {
       in_comment = false;
       output.push('\n');
       let delim = heredoc_queue.pop_front().unwrap();
+      let delim = delim.to_str_lossy();
       let tab_strip = delim.starts_with('-');
       let match_delim = delim.trim_start_matches('-');
       let start = i + 1;

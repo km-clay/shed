@@ -320,7 +320,7 @@ mod tests {
   fn alias_simple() {
     let _guard = TestGuard::new();
     let dummy_span = Span::default();
-    Shed::logic_mut(|l| l.insert_alias("ll", "ls -la", dummy_span.clone()));
+    Shed::logic_mut(|l| l.insert_alias("ll", &"ls -la".into(), dummy_span.clone()));
 
     let result = expand_aliases("ll");
     assert_eq!(result, "ls -la");
@@ -330,7 +330,7 @@ mod tests {
   fn alias_circular_prevention() {
     let _guard = TestGuard::new();
     let dummy_span = Span::default();
-    Shed::logic_mut(|l| l.insert_alias("foo", "foo --verbose", dummy_span.clone()));
+    Shed::logic_mut(|l| l.insert_alias("foo", &"foo --verbose".into(), dummy_span.clone()));
 
     let result = expand_aliases("foo");
     // After first expansion: "foo --verbose", then "foo" is in already_expanded
@@ -345,7 +345,7 @@ mod tests {
     // argument position (the trailing `g`).
     let _guard = TestGuard::new();
     let sp = Span::default();
-    Shed::logic_mut(|l| l.insert_alias("g", "git", sp.clone()));
+    Shed::logic_mut(|l| l.insert_alias("g", &"git".into(), sp.clone()));
 
     let result = expand_aliases("g status; g log && g diff | g show g");
     assert_eq!(result, "git status; git log && git diff | git show g");
@@ -358,8 +358,8 @@ mod tests {
     let _guard = TestGuard::new();
     let sp = Span::default();
     Shed::logic_mut(|l| {
-      l.insert_alias("a", "b", sp.clone());
-      l.insert_alias("b", "c", sp.clone());
+      l.insert_alias("a", &"b".into(), sp.clone());
+      l.insert_alias("b", &"c".into(), sp.clone());
     });
 
     assert_eq!(expand_aliases("a"), "c");
@@ -369,7 +369,7 @@ mod tests {
   fn alias_not_expanded_in_argument_position() {
     let _guard = TestGuard::new();
     let sp = Span::default();
-    Shed::logic_mut(|l| l.insert_alias("ls", "ls --color", sp.clone()));
+    Shed::logic_mut(|l| l.insert_alias("ls", &"ls --color".into(), sp.clone()));
 
     // `ls` as an argument to `echo` must stay literal.
     assert_eq!(expand_aliases("echo ls"), "echo ls");

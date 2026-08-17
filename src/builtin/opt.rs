@@ -51,11 +51,11 @@ impl Opt {
     self.span.clone()
   }
   pub fn key(&self) -> &str {
-    &self.key
+    self.key.to_str().unwrap_or_default()
   }
   pub fn value(&self) -> ShResult<&str> {
     if self.args.len() == 1 {
-      Ok(self.args[0].0.as_str())
+      Ok(self.args[0].0.to_str().unwrap_or_default())
     } else {
       Err(sherr!(ParseErr @ self.span(), "option '{self}' requires an argument"))
     }
@@ -131,7 +131,7 @@ impl OptSpec {
   pub fn is_long_match(&self, other: &str) -> bool {
     other
       .strip_prefix("--")
-      .is_some_and(|name| self.long.as_deref() == Some(name))
+      .is_some_and(|name| self.long.as_deref() == Some(name.as_bytes()))
   }
 
   pub fn is_short_match(&self, other: char) -> bool {
@@ -225,17 +225,25 @@ fn parse_opts_inner(
       break;
     }
 
-    if !word.starts_with('-') || word == "-" || word.starts_with("---") {
+    if !word.to_str_lossy().starts_with('-')
+      || word == "-"
+      || word.to_str_lossy().starts_with("---")
+    {
       // it's not an option
       words.push(Word::Arg(word, span));
       continue;
     }
 
-    if word.starts_with("--") {
+    if word.to_str_lossy().starts_with("--") {
       // long option
-      match specs.iter().find(|s| s.is_long_match(&word)) {
+      match specs.iter().find(|s| s.is_long_match(&word.to_str_lossy())) {
         Some(spec) => {
-          let args = take_args(&mut words_iter, spec.argc, span.clone(), &word)?;
+          let args = take_args(
+            &mut words_iter,
+            spec.argc,
+            span.clone(),
+            &word.to_str_lossy(),
+          )?;
           words.push(Word::Opt(Opt {
             key: spec.key.clone(),
             span,
@@ -245,14 +253,19 @@ fn parse_opts_inner(
         None if strict => return Err(sherr!(ParseErr @ span, "Unknown option '{word}'")),
         None => words.push(Word::Arg(word, span)),
       }
-    } else if let Some(cluster) = word.strip_prefix('-') {
+    } else if let Some(cluster) = word.to_str_lossy().strip_prefix('-') {
       if cluster
         .chars()
         .all(|ch| specs.iter().any(|s| s.is_short_match(ch)))
       {
         for ch in cluster.chars() {
           let spec = specs.iter().find(|s| s.is_short_match(ch)).unwrap();
-          let args = take_args(&mut words_iter, spec.argc, span.clone(), &varstr!("-{ch}"))?;
+          let args = take_args(
+            &mut words_iter,
+            spec.argc,
+            span.clone(),
+            &varstr!("-{ch}").to_str_lossy(),
+          )?;
           words.push(Word::Opt(Opt {
             key: spec.key.clone(),
             span: span.clone(),

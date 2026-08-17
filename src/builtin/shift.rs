@@ -11,7 +11,7 @@ impl super::Builtin for Shift {
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let count = args.arguments().next().map_or(Ok(1), |(st, sp)| {
-      st.parse::<usize>().map_err(|_| {
+      st.to_str_lossy().parse::<usize>().map_err(|_| {
         sherr!(
           ExecFail @ sp.clone(),
           "Expected a number in shift args",

@@ -315,9 +315,9 @@ impl CompStrat {
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct Candidate {
-  content: VarStr,
+  content: String,
   weight: i32,
-  desc: Option<VarStr>,
+  desc: Option<String>,
   id: Option<usize>, // for stuff like history that cares about the original index
 }
 
@@ -343,12 +343,12 @@ impl Ord for Candidate {
 
 impl From<PathBuf> for Candidate {
   fn from(value: PathBuf) -> Self {
-    let path_raw = value.to_string_lossy().into();
+    let path_raw = value.to_string_lossy().into_owned();
     let desc = file_desc(&value);
     Self {
       content: path_raw,
       weight: 0,
-      desc: Some(desc),
+      desc: Some(desc.to_str_lossy().into_owned()),
       id: None,
     }
   }
@@ -357,7 +357,7 @@ impl From<PathBuf> for Candidate {
 impl From<String> for Candidate {
   fn from(value: String) -> Self {
     Self {
-      content: value.into(),
+      content: value,
       weight: 0,
       desc: None,
       id: None,
@@ -368,7 +368,7 @@ impl From<String> for Candidate {
 impl From<VarStr> for Candidate {
   fn from(value: VarStr) -> Self {
     Self {
-      content: value,
+      content: value.to_str_lossy().into_owned(),
       weight: 0,
       desc: None,
       id: None,
@@ -379,7 +379,7 @@ impl From<VarStr> for Candidate {
 impl From<&VarStr> for Candidate {
   fn from(value: &VarStr) -> Self {
     Self {
-      content: value.clone(),
+      content: value.to_str_lossy().into_owned(),
       weight: 0,
       desc: None,
       id: None,
@@ -396,7 +396,7 @@ impl From<Rc<Utility>> for Candidate {
 impl From<&state::meta::Utility> for Candidate {
   fn from(value: &state::meta::Utility) -> Self {
     Self {
-      content: value.name(),
+      content: value.name().to_str_lossy().into_owned(),
       weight: 0,
       desc: None,
       id: None,
@@ -441,7 +441,7 @@ impl From<&&str> for Candidate {
 impl From<(usize, String)> for Candidate {
   fn from(value: (usize, String)) -> Self {
     Self {
-      content: value.1.into(),
+      content: value.1,
       weight: 0,
       desc: None,
       id: Some(value.0),
@@ -494,8 +494,8 @@ impl Candidate {
   pub fn as_str(&self) -> &str {
     &self.content
   }
-  pub fn with_desc(mut self, desc: VarStr) -> Self {
-    self.desc = Some(desc);
+  pub fn with_desc(mut self, desc: &VarStr) -> Self {
+    self.desc = Some(desc.to_str_lossy().into_owned());
     self
   }
   pub fn with_weight(mut self, weight: i32) -> Self {
@@ -555,7 +555,7 @@ pub(crate) fn complete_aliases(start: &str) -> Vec<Candidate> {
   Shed::logic(|l| {
     l.aliases()
       .iter()
-      .map(|(a, v)| Candidate::from(a.clone()).with_desc(v.body()))
+      .map(|(a, v)| Candidate::from(a.clone()).with_desc(&v.body()))
       .filter(|a| a.is_match(start))
       .collect()
   })
@@ -569,11 +569,9 @@ pub(crate) fn complete_jobs(start: &str) -> Vec<Candidate> {
         .filter_map(|j| j.as_ref())
         .filter_map(|j| {
           let name = j.name()?;
-          Some(Candidate::from(name.to_string()).with_desc(varstr!(
-            "{} ({})",
-            j.pgid(),
-            j.get_cmd_line()
-          )))
+          let pgid = j.pgid();
+          let cmd_line = j.get_cmd_line();
+          Some(Candidate::from(name.to_string()).with_desc(&varstr!("{pgid} ({cmd_line})")))
         })
         .filter(|name| name.is_match(prefix))
         .map(|name| format!("%{name}").into())
@@ -584,7 +582,7 @@ pub(crate) fn complete_jobs(start: &str) -> Vec<Candidate> {
       j.jobs()
         .iter()
         .filter_map(|j| j.as_ref())
-        .map(|j| Candidate::from(j.pgid().to_string()).with_desc(j.get_cmd_line()))
+        .map(|j| Candidate::from(j.pgid().to_string()).with_desc(&j.get_cmd_line()))
         .filter(|pgid| pgid.is_match(start))
         .collect()
     })
@@ -609,7 +607,13 @@ pub(crate) fn complete_vars(start: &str) -> Vec<Candidate> {
       .keys()
       .map(|s| {
         if let Some(val) = try_var!(s) {
-          Candidate::from(s).with_desc(val.escape_debug().collect())
+          let desc: VarStr = val
+            .to_str_lossy()
+            .escape_debug()
+            .collect::<String>()
+            .as_bytes()
+            .into();
+          Candidate::from(s).with_desc(&desc)
         } else {
           Candidate::from(s)
         }
@@ -625,7 +629,7 @@ pub(crate) fn complete_vars_raw(raw: &str) -> Vec<Candidate> {
       .keys()
       .map(|k| {
         if let Some(val) = try_var!(k) {
-          Candidate::from(k.clone()).with_desc(val)
+          Candidate::from(k.clone()).with_desc(&val)
         } else {
           Candidate::from(k.clone())
         }
@@ -772,7 +776,9 @@ where
   candidates
     .into_iter()
     .map(|mut c| {
-      c.content = splice_literal_prefix(literal, &expanded, &c.content);
+      c.content = splice_literal_prefix(literal, &expanded, &c.content)
+        .to_str_lossy()
+        .into_owned();
       c
     })
     .collect()
@@ -811,10 +817,10 @@ fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
 
       // glob strips a leading ./ even when the search pattern had it
       if path.starts_with("./") && !c.content.starts_with("./") && !c.content.starts_with('/') {
-        c.content = varstr!("./{}", c.content);
+        c.content = format!("./{}", c.content);
       }
       if is_dir {
-        c.content = varstr!("{}/", c.content);
+        c.content = format!("{}/", c.content);
       }
       c
     })
@@ -824,7 +830,7 @@ fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
 fn file_desc<P: AsRef<Path>>(path: P) -> VarStr {
   let path = path.as_ref();
   let Ok(meta) = path.metadata() else {
-    return VarStr::new();
+    return VarStr::default();
   };
   let kind = if meta.is_dir() {
     "dir"
@@ -948,7 +954,7 @@ impl BashCompSpec {
       wordlist,
       targets: flags,
       flags: opt_flags,
-      source: VarStr::new(),
+      source: VarStr::default(),
     }
   }
   pub fn exec_comp_func(&self, ctx: &CompContext) -> ShResult<Vec<Candidate>> {
@@ -972,19 +978,31 @@ impl BashCompSpec {
     } = ctx;
 
     let raw_words = words.clone();
-    Shed::vars_mut(|v| v.set_var("COMP_WORDS", VarKind::arr(raw_words), VarFlags::READONLY))?;
     Shed::vars_mut(|v| {
       v.set_var(
-        "COMP_CWORD",
-        VarKind::string(cword.to_string()),
+        "COMP_WORDS",
+        VarKind::arr(raw_words.into_iter().map(Into::into)),
         VarFlags::READONLY,
       )
     })?;
-    Shed::vars_mut(|v| v.set_var("COMP_LINE", VarKind::string(line), VarFlags::READONLY))?;
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "COMP_CWORD",
+        VarKind::string(cword.to_string().into()),
+        VarFlags::READONLY,
+      )
+    })?;
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "COMP_LINE",
+        VarKind::string(line.into()),
+        VarFlags::READONLY,
+      )
+    })?;
     Shed::vars_mut(|v| {
       v.set_var(
         "COMP_POINT",
-        VarKind::string(cursor_pos.to_string()),
+        VarKind::string(cursor_pos.to_string().into()),
         VarFlags::READONLY,
       )
     })?;
@@ -1108,7 +1126,7 @@ impl CompSpec for BashCompSpec {
             tail
           };
 
-          c.content = varstr!("{new_prefix}{tail}");
+          c.content = format!("{new_prefix}{tail}");
         }
         c
       })
@@ -1123,7 +1141,7 @@ impl CompSpec for BashCompSpec {
   }
 
   fn source(&self) -> &str {
-    &self.source
+    self.source.to_str().unwrap_or_default()
   }
 
   fn get_flags(&self) -> CompOptFlags {

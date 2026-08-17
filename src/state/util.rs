@@ -101,7 +101,7 @@ pub fn expand_arr_index(idx_raw: &str, allow_side_effects: bool) -> ShResult<Arr
     .next()
     .ok_or_else(|| sherr!(ParseErr, "Empty array index"))?;
 
-  ArrIndex::parse(&expanded, allow_side_effects)
+  ArrIndex::parse(&expanded.to_str_lossy(), allow_side_effects)
     .map_err(|_| sherr!(ParseErr, "Invalid array index: {}", expanded,))
 }
 
@@ -148,7 +148,7 @@ where
     .keys()
     .map(|k| {
       let prev = Shed::vars(|v| {
-        v.try_get_var_meta(k)
+        v.try_get_var_meta(&k.to_str_lossy())
           .map(|var| (var.kind().clone(), var.flags()))
       });
       (k.clone(), prev)
@@ -157,7 +157,10 @@ where
 
   for (name, val) in vars {
     let val = val.into();
-    Shed::vars_mut(|v| v.set_var(&name, val.kind().clone(), val.flags()).unwrap());
+    Shed::vars_mut(|v| {
+      v.set_var(&name.to_str_lossy(), val.kind().clone(), val.flags())
+        .unwrap()
+    });
   }
 
   let _guard = scopeguard::guard(restores, |restores| {
@@ -165,10 +168,10 @@ where
       for (name, prev) in restores {
         match prev {
           Some((kind, flags)) => {
-            v.set_var(&name, kind, flags).ok();
+            v.set_var(&name.to_str_lossy(), kind, flags).ok();
           }
           None => {
-            v.unset_var(&name).ok();
+            v.unset_var(&name.to_str_lossy()).ok();
           }
         }
       }
@@ -196,8 +199,8 @@ pub fn change_dir_with_pwd<P: AsRef<Path>>(dir: P, logical_pwd: Option<String>) 
 
   with_vars(
     [
-      ("NEW_DIR".into(), dir_raw.as_str()),
-      ("OLD_DIR".into(), current_dir.as_str()),
+      ("NEW_DIR".into(), dir_raw.clone().into()),
+      ("OLD_DIR".into(), current_dir.clone()),
     ],
     || autocmd!(PreChangeDir),
   );
@@ -233,7 +236,7 @@ pub fn change_dir_with_pwd<P: AsRef<Path>>(dir: P, logical_pwd: Option<String>) 
 
   Shed::vars_mut(|v| {
     v.set_var("OLDPWD", VarKind::Str(current_dir), VarFlags::EXPORT)?;
-    v.set_var("PWD", VarKind::string(new_pwd), VarFlags::EXPORT)
+    v.set_var("PWD", VarKind::string(new_pwd.into()), VarFlags::EXPORT)
   })?;
 
   Ok(())
@@ -273,7 +276,12 @@ pub fn get_comp_wordbreaks() -> VarStr {
 /// Used mainly for joining strings
 pub fn get_separator() -> VarStr {
   let separators = get_separators();
-  separators.graphemes(true).next().unwrap_or_default().into()
+  separators
+    .to_str_lossy()
+    .graphemes(true)
+    .next()
+    .unwrap_or_default()
+    .into()
 }
 
 /// Get the entire IFS variable
@@ -286,7 +294,7 @@ pub fn get_separators() -> VarStr {
 pub fn get_ps4() -> VarStr {
   try_var!("PS4")
     .and_then(|ps4| {
-      Expander::from_raw(ps4.as_str(), TkFlags::empty())
+      Expander::from_raw(&ps4.to_str_lossy(), TkFlags::empty())
         .expand_no_split()
         .ok()
     })
@@ -313,7 +321,7 @@ pub fn lookup_cmd(cmd: &str) -> Option<PathBuf> {
     return Some(p);
   }
   let path_env = var!("PATH");
-  let resolved = crate::util::resolve_in_path(&path_env, cmd)?;
+  let resolved = crate::util::resolve_in_path(&path_env.to_str_lossy(), cmd)?;
   Shed::meta_mut(|m| m.cache_cmd(cmd.to_string(), resolved.clone()));
   Some(resolved)
 }
@@ -477,7 +485,7 @@ pub fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
       lines.extend(header.iter().map(|h| VarStr::from(*h)));
     }
     lines.extend(content);
-    lines.push(VarStr::new());
+    lines.push(VarStr::default());
   };
 
   // Content for a user-defined section: live entries, or nothing for the
@@ -507,20 +515,20 @@ pub fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
     });
     lines.push("# Edit this file to customize, or use it as a reference.".into());
     lines.push("# Refer to the 'help' builtin for information on specific shed features.".into());
-    lines.push(VarStr::new());
+    lines.push(VarStr::default());
   }
 
   // Shell options
   if config.include_shopts {
     if comments {
       lines.push("# -- Shell Options --".into());
-      lines.push(VarStr::new());
+      lines.push(VarStr::default());
     }
     let mut current_group: Option<&'static str> = None;
     for (_key, group, entry, doc) in Shed::shopts(|o| o.rc_entries(config.source)) {
       if comments && Some(group) != current_group {
         if current_group.is_some() {
-          lines.push(VarStr::new());
+          lines.push(VarStr::default());
         }
         lines.push(varstr!("# - {group} -"));
         current_group = Some(group);
@@ -530,7 +538,7 @@ pub fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
         _ => entry,
       });
     }
-    lines.push(VarStr::new());
+    lines.push(VarStr::default());
   }
 
   // Remaining sections
@@ -611,7 +619,7 @@ pub fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
   );
 
   // Trim trailing blank lines so the file doesn't end with extra padding.
-  while lines.last().is_some_and(|s| s.as_str().is_empty()) {
+  while lines.last().is_some_and(|s| s.is_empty()) {
     lines.pop();
   }
   lines
@@ -710,7 +718,7 @@ pub fn display_path<P: AsRef<Path>>(path: P) -> String {
   let s = path.as_ref().to_string_lossy().into_owned();
   if let Some(home) = get_home_str()
     && !home.is_empty()
-    && let Some(rest) = s.strip_prefix(&*home)
+    && let Some(rest) = s.strip_prefix(&*home.to_str_lossy())
   {
     format!("~{rest}")
   } else {
@@ -758,12 +766,12 @@ pub fn set_sh_lvl() -> ShResult<()> {
   // Increment SHLVL, or set to 1 if not present or invalid.
   // This var represents how many nested shell instances we're in
   if let Some(var) = try_var!("SHLVL")
-    && let Ok(lvl) = var.parse::<u32>()
+    && let Ok(lvl) = var.to_str_lossy().parse::<u32>()
   {
     Shed::vars_mut(|v| {
       v.set_var(
         "SHLVL",
-        VarKind::string((lvl + 1).to_string()),
+        VarKind::string((lvl + 1).to_string().into()),
         VarFlags::EXPORT,
       )
     })?;
@@ -929,7 +937,7 @@ fn history_db_path() -> PathBuf {
       |p| p.to_string_lossy().into(),
     )
   };
-  PathBuf::from(db_path.as_str())
+  PathBuf::from(db_path)
 }
 
 /// Migrate history database file from the legacy path to the new one
@@ -1284,7 +1292,7 @@ mod generate_default_rc_tests {
     Shed::vars_mut(|v| {
       v.set_var(
         "SHED_RC",
-        VarKind::string(p.to_string_lossy()),
+        VarKind::string(p.to_string_lossy().into()),
         VarFlags::empty(),
       )
       .unwrap();

@@ -166,7 +166,7 @@ impl EditorCore {
     Shed::vars_mut(|v| {
       v.set_var(
         "SHED_EDIT_MODE",
-        VarKind::string(self.mode.report_mode().to_string()),
+        VarKind::string(self.mode.report_mode().to_string().into()),
         VarFlags::empty(),
       )
     })
@@ -306,7 +306,7 @@ impl EditorCore {
       Shed::vars_mut(|v| {
         v.set_var(
           "SHED_EDIT_MODE",
-          VarKind::string(self.mode.report_mode().to_string()),
+          VarKind::string(self.mode.report_mode().to_string().into()),
           VarFlags::empty(),
         )
       })?;
@@ -343,7 +343,7 @@ impl EditorCore {
     Shed::vars_mut(|v| {
       v.set_var(
         "SHED_EDIT_MODE",
-        VarKind::string(self.mode.report_mode().to_string()),
+        VarKind::string(self.mode.report_mode().to_string().into()),
         VarFlags::empty(),
       )
     })?;

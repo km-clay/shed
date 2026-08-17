@@ -122,7 +122,7 @@ fn process_ctx_tokens(mut out: Vec<CtxTk>) -> Vec<CtxTk> {
 fn is_exec_wrapper(tk: &CtxTk) -> bool {
   get_exec_wrappers()
     .into_iter()
-    .any(|wr| wr.as_str() == tk.span().as_str())
+    .any(|wr| wr.to_str_lossy() == tk.span().as_str())
     && is_valid_cmd(&tk.as_tk()).is_some()
 }
 
@@ -229,14 +229,17 @@ fn is_valid_cmd(command: &Tk) -> Option<CmdKind> {
   let name = expanded.get_first_word()?;
   let cmd_path = Path::new(&name);
 
-  if cmd_path.is_absolute() || name.starts_with("./") || name.starts_with("../") {
+  if cmd_path.is_absolute()
+    || name.to_str_lossy().starts_with('/')
+    || name.to_str_lossy().starts_with("../")
+  {
     let meta = cmd_path.metadata().ok()?;
 
     (!meta.is_dir() && meta.permissions().mode() & 0o111 != 0).then_some(CmdKind::External)
-  } else if BUILTIN_NAMES.contains(&name.as_str()) {
+  } else if BUILTIN_NAMES.contains(&name.to_str_lossy().as_ref()) {
     Some(CmdKind::Builtin)
   } else {
-    let util = state::util::which_util(&name)?;
+    let util = state::util::which_util(&name.to_str_lossy())?;
     match util.kind() {
       UtilKind::Alias => Some(CmdKind::Alias),
       UtilKind::Function => Some(CmdKind::Function),
@@ -838,7 +841,7 @@ fn subdivide_argument(mut tk: CtxTk) -> Vec<CtxTk> {
     let span_end = tk.span().range().end;
 
     let split_at = raw.char_indices().find_map(|(byte, ch)| {
-      if !wordbreaks.contains(ch) {
+      if !wordbreaks.to_str_lossy().contains(ch) {
         return None;
       }
       let after = span_start + byte + ch.len_utf8();
@@ -1873,11 +1876,14 @@ mod tests {
     let expanded = tk.expand_no_side_effects().expect("expand");
     let word = expanded.get_first_word().expect("word");
     assert!(
-      word.starts_with('/'),
+      word.to_str_lossy().starts_with('/'),
       "tilde-expanded path should be absolute, got {word:?}"
     );
     assert!(
-      !word.chars().any(|c| ('\u{fdd0}'..='\u{fdef}').contains(&c)),
+      !word
+        .to_str_lossy()
+        .chars()
+        .any(|c| ('\u{fdd0}'..='\u{fdef}').contains(&c)),
       "expanded path should not contain marker chars, got {word:?}"
     );
   }

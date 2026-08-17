@@ -178,6 +178,7 @@ impl Drop for DepthGuard {
 /// references are cut off by [`MAX_ARITH_DEPTH`].
 fn resolve_var_num(name: &str) -> ShResult<i64> {
   let val = try_var!(name).unwrap_or_default();
+  let val = val.to_str_lossy();
   let trimmed = val.trim();
   if trimmed.is_empty() {
     return Ok(0);
@@ -195,6 +196,7 @@ fn resolve_var_num(name: &str) -> ShResult<i64> {
   let _guard = DepthGuard;
   let result = expand_arithmetic(trimmed)?;
   result
+    .to_str_lossy()
     .parse::<i64>()
     .map_err(|_| sherr!(ParseErr, "Variable '{name}' does not contain an integer"))
 }
@@ -668,7 +670,7 @@ impl ArithTk {
           let op = tokens.next().unwrap();
           let val = read_var_as_i64(var)?;
           let delta: i64 = if matches!(op, ArithTk::Inc) { 1 } else { -1 };
-          Shed::vars_mut(|v| v.set_var(var, VarKind::string((val + delta).to_string()), VarFlags::empty())).unwrap();
+          Shed::vars_mut(|v| v.set_var(var, VarKind::string((val + delta).to_string().into()), VarFlags::empty())).unwrap();
           output.push(ArithTk::Num(val)); // push old value (postfix)
         } else {
           output.push(token); // keep as Var, may be assignment target
@@ -687,7 +689,7 @@ impl ArithTk {
         let val = read_var_as_i64(&var)?;
         let delta: i64 = if matches!(op, ArithTk::Inc) { 1 } else { -1 };
         let new_val = val + delta;
-        Shed::vars_mut(|v| v.set_var(&var, VarKind::string(new_val.to_string()), VarFlags::empty())).unwrap();
+        Shed::vars_mut(|v| v.set_var(&var, VarKind::string(new_val.to_string().into()), VarFlags::empty())).unwrap();
         output.push(ArithTk::Num(new_val)); // push new value (prefix)
       }
 
@@ -926,7 +928,11 @@ impl ArithTk {
               let rhs = pop_num!();
               let lhs = pop_var!();
               Shed::vars_mut(|v| {
-                v.set_var(&lhs, VarKind::string(rhs.to_string()), VarFlags::empty())
+                v.set_var(
+                  &lhs,
+                  VarKind::string(rhs.to_string().into()),
+                  VarFlags::empty(),
+                )
               })
               .unwrap();
               stack.push(StackVal::Num(rhs));
@@ -938,7 +944,7 @@ impl ArithTk {
               Shed::vars_mut(|v| {
                 v.set_var(
                   &lhs,
-                  VarKind::string(new_val.to_string()),
+                  VarKind::string(new_val.to_string().into()),
                   VarFlags::empty(),
                 )
               })
@@ -952,7 +958,7 @@ impl ArithTk {
               Shed::vars_mut(|v| {
                 v.set_var(
                   &lhs,
-                  VarKind::string(new_val.to_string()),
+                  VarKind::string(new_val.to_string().into()),
                   VarFlags::empty(),
                 )
               })
@@ -966,7 +972,7 @@ impl ArithTk {
               Shed::vars_mut(|v| {
                 v.set_var(
                   &lhs,
-                  VarKind::string(new_val.to_string()),
+                  VarKind::string(new_val.to_string().into()),
                   VarFlags::empty(),
                 )
               })
@@ -983,7 +989,7 @@ impl ArithTk {
               Shed::vars_mut(|v| {
                 v.set_var(
                   &lhs,
-                  VarKind::string(new_val.to_string()),
+                  VarKind::string(new_val.to_string().into()),
                   VarFlags::empty(),
                 )
               })
@@ -1000,7 +1006,7 @@ impl ArithTk {
               Shed::vars_mut(|v| {
                 v.set_var(
                   &lhs,
-                  VarKind::string(new_val.to_string()),
+                  VarKind::string(new_val.to_string().into()),
                   VarFlags::empty(),
                 )
               })
@@ -1125,7 +1131,7 @@ impl ArithTk {
               Shed::vars_mut(|v| {
                 v.set_var(
                   &lhs,
-                  VarKind::string(new_val.to_string()),
+                  VarKind::string(new_val.to_string().into()),
                   VarFlags::empty(),
                 )
               })
@@ -1139,7 +1145,7 @@ impl ArithTk {
               Shed::vars_mut(|v| {
                 v.set_var(
                   &lhs,
-                  VarKind::string(new_val.to_string()),
+                  VarKind::string(new_val.to_string().into()),
                   VarFlags::empty(),
                 )
               })
@@ -1153,7 +1159,7 @@ impl ArithTk {
               Shed::vars_mut(|v| {
                 v.set_var(
                   &lhs,
-                  VarKind::string(new_val.to_string()),
+                  VarKind::string(new_val.to_string().into()),
                   VarFlags::empty(),
                 )
               })
@@ -1247,7 +1253,11 @@ mod tests {
 
   fn arith(s: &str) -> f64 {
     // Tests pass raw expressions - no outer ((...)) wrapper stripping
-    expand_arithmetic(s).unwrap().parse::<f64>().unwrap()
+    expand_arithmetic(s)
+      .unwrap()
+      .to_str_lossy()
+      .parse::<f64>()
+      .unwrap()
   }
 
   // ===================== Wrapper stripping =====================
@@ -1271,6 +1281,7 @@ mod tests {
     let w = |s: &str| {
       expand_arithmetic_wrapped(s)
         .unwrap()
+        .to_str_lossy()
         .parse::<f64>()
         .unwrap()
     };
@@ -1346,14 +1357,14 @@ mod tests {
   fn arith_recursive_variable_resolution() {
     let _g = TestGuard::new();
     // A variable holding another name resolves transitively.
-    Shed::vars_mut(|v| v.set_var("x", VarKind::string("3"), VarFlags::empty())).unwrap();
-    Shed::vars_mut(|v| v.set_var("y", VarKind::string("x"), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| v.set_var("x", VarKind::string("3".into()), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| v.set_var("y", VarKind::string("x".into()), VarFlags::empty())).unwrap();
     assert_eq!(arith("y+1"), 4.0);
     // A variable holding a sub-expression is evaluated.
-    Shed::vars_mut(|v| v.set_var("b", VarKind::string("x+1"), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| v.set_var("b", VarKind::string("x+1".into()), VarFlags::empty())).unwrap();
     assert_eq!(arith("b*2"), 8.0);
     // A chain resolves to the end.
-    Shed::vars_mut(|v| v.set_var("a", VarKind::string("b"), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| v.set_var("a", VarKind::string("b".into()), VarFlags::empty())).unwrap();
     assert_eq!(arith("a"), 4.0);
   }
 
@@ -1361,11 +1372,11 @@ mod tests {
   fn arith_recursion_cycle_errors_not_crashes() {
     // Self-reference must error (via the depth cap), not overflow the stack.
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("z", VarKind::string("z"), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| v.set_var("z", VarKind::string("z".into()), VarFlags::empty())).unwrap();
     assert!(expand_arithmetic("z").is_err());
     // Mutual reference likewise.
-    Shed::vars_mut(|v| v.set_var("p", VarKind::string("q"), VarFlags::empty())).unwrap();
-    Shed::vars_mut(|v| v.set_var("q", VarKind::string("p"), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| v.set_var("p", VarKind::string("q".into()), VarFlags::empty())).unwrap();
+    Shed::vars_mut(|v| v.set_var("q", VarKind::string("p".into()), VarFlags::empty())).unwrap();
     assert!(expand_arithmetic("p").is_err());
   }
 
@@ -1863,7 +1874,7 @@ mod tests {
     // The pre-fix bug: foo would end up as "(1 k 2)".
     let foo = crate::var!("foo");
     assert!(
-      foo.is_empty() || !foo.contains('k'),
+      foo.is_empty() || !foo.to_str_lossy().contains('k'),
       "foo should not contain the raw arith body; got {foo:?}"
     );
   }
@@ -1879,7 +1890,7 @@ mod tests {
     test_input("foo=$(echo $((1 k 2)))").ok();
     let foo = crate::var!("foo");
     assert!(
-      foo.is_empty() || !foo.contains("(1 k 2)"),
+      foo.is_empty() || !foo.to_str_lossy().contains("(1 k 2)"),
       "raw arith body leaked into echo output: {foo:?}"
     );
   }

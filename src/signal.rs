@@ -446,7 +446,13 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
       .map(|s| s.to_string())
       .collect::<VecDeque<String>>();
 
-    Shed::vars_mut(|v| v.set_var("PIPESTATUS", VarKind::arr(pipe_status), VarFlags::empty()))?;
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "PIPESTATUS",
+        VarKind::arr(pipe_status.into_iter().map(Into::into)),
+        VarFlags::empty(),
+      )
+    })?;
   }
 
   let status_strs = stats.iter().map(|s| match s {
@@ -466,7 +472,10 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
     ),
     (
       "CHILD_COUNT".into(),
-      Var::new(VarKind::string(cmd_count.to_string()), VarFlags::empty()),
+      Var::new(
+        VarKind::string(cmd_count.to_string().into()),
+        VarFlags::empty(),
+      ),
     ),
     (
       "JOB_ID".into(),

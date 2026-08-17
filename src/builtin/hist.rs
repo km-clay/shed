@@ -88,7 +88,7 @@ impl HistQuery {
     let mut idx = 1;
 
     if let (Some(after), not) = &self.after {
-      let ts = parse_date_string(after, Utc::now(), Dialect::Us)
+      let ts = parse_date_string(&after.to_str_lossy(), Utc::now(), Dialect::Us)
         .map_err(|e| sherr!(ParseErr, "Failed to parse date for --after: {e}"))?;
       cond!(
         not,
@@ -100,7 +100,7 @@ impl HistQuery {
       );
     }
     if let (Some(before), not) = &self.before {
-      let ts = parse_date_string(before, Utc::now(), Dialect::Us)
+      let ts = parse_date_string(&before.to_str_lossy(), Utc::now(), Dialect::Us)
         .map_err(|e| sherr!(ParseErr, "Failed to parse date for --before: {e}"))?;
       cond!(
         not,
@@ -192,7 +192,7 @@ impl HistQuery {
       );
     }
     if let (Some(duration), not) = &self.duration_gt {
-      let secs = chrono_english::parse_duration(duration)
+      let secs = chrono_english::parse_duration(&duration.to_str_lossy())
         .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --longer-than: {e}"))?;
       cond!(
         not,
@@ -204,7 +204,7 @@ impl HistQuery {
       );
     }
     if let (Some(duration), not) = &self.duration_lt {
-      let secs = chrono_english::parse_duration(duration)
+      let secs = chrono_english::parse_duration(&duration.to_str_lossy())
         .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --shorter-than: {e}"))?;
       cond!(
         not,
@@ -252,7 +252,7 @@ impl HistQuery {
     let mut entries = hist.query(&query, &param_refs)?;
 
     if let (Some(pat), not) = &self.matches {
-      let re = match Shed::meta_mut(|m| m.get_regex(pat)) {
+      let re = match Shed::meta_mut(|m| m.get_regex(&pat.to_str_lossy())) {
         Ok(re) => re,
         Err(e) => return Err(sherr!(ParseErr, "{e}")),
       };
@@ -550,7 +550,7 @@ impl super::Builtin for Hist {
     };
 
     for (arg, span) in arg_vec {
-      let Ok(id) = arg.parse::<i64>() else {
+      let Ok(id) = arg.to_str_lossy().parse::<i64>() else {
         Shed::set_status(2);
         return Err(sherr!(ParseErr @ span.clone(), "Invalid command ID: {arg}"));
       };
@@ -572,7 +572,7 @@ impl super::Builtin for Hist {
     }
 
     if let Some(ref path) = query.import {
-      let entries: Vec<(i64, HistEntry)> = import_history(path.as_str())
+      let entries: Vec<(i64, HistEntry)> = import_history(path)
         .promote_err(span.clone())?
         .into_iter()
         .enumerate()
@@ -825,7 +825,7 @@ mod tests {
     let _g = TestGuard::new();
     set_shed_home("/tmp/some_home");
     let q = parse(&[Opt::for_test("import", &["bash"])]);
-    assert_eq!(q.import.as_deref(), Some("/tmp/some_home/.bash_history"));
+    assert_eq!(q.import, Some("/tmp/some_home/.bash_history".into()));
   }
 
   #[test]
@@ -833,14 +833,14 @@ mod tests {
     let _g = TestGuard::new();
     set_shed_home("/tmp/some_home");
     let q = parse(&[Opt::for_test("import", &["zsh"])]);
-    assert_eq!(q.import.as_deref(), Some("/tmp/some_home/.zsh_history"));
+    assert_eq!(q.import, Some("/tmp/some_home/.zsh_history".into()));
   }
 
   #[test]
   fn opts_import_arbitrary_path_passed_through() {
     let _g = TestGuard::new();
     let q = parse(&[Opt::for_test("import", &["/etc/some.history"])]);
-    assert_eq!(q.import.as_deref(), Some("/etc/some.history"));
+    assert_eq!(q.import, Some("/etc/some.history".into()));
   }
 
   // ─── Unknown / error handling ────────────────────────────────────────
@@ -1162,7 +1162,7 @@ mod tests {
     let results = q.execute(&h).unwrap();
     assert_eq!(results.len(), 2);
     for r in &results {
-      assert!(!r.1.command.contains("danger"));
+      assert!(!r.1.command.to_str_lossy().contains("danger"));
     }
   }
 

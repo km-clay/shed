@@ -37,7 +37,7 @@ impl super::Builtin for Seek {
     let Some((fd, fd_span)) = arg_iter.next() else {
       return Err(sherr!(ExecFail @ span, "lseek: Missing required argument 'fd'",));
     };
-    let Ok(fd) = fd.parse::<u32>() else {
+    let Ok(fd) = fd.to_str_lossy().parse::<u32>() else {
       return Err(
         sherr!(ExecFail @ fd_span, "Invalid file descriptor")
           .with_note("file descriptors are integers".into()),
@@ -50,7 +50,7 @@ impl super::Builtin for Seek {
         "lseek: Missing required argument 'offset'",
       ));
     };
-    let Ok(offset) = offset.parse::<i64>() else {
+    let Ok(offset) = offset.to_str_lossy().parse::<i64>() else {
       return Err(
         sherr!(ExecFail @ offset_span, "Invalid offset")
           .with_note("offset can be a positive or negative integer".into()),

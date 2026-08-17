@@ -343,7 +343,7 @@ impl CmdTimer {
       super::util::with_vars(vars, || autocmd!(OnTimeReport));
     } else {
       let fmt_str = super::util::get_time_fmt();
-      let report = self.format_report(&fmt_str)?;
+      let report = self.format_report(&fmt_str.to_str_lossy())?;
       system_msg!("{report}");
     }
     Ok(())
@@ -943,7 +943,7 @@ impl MetaTab {
   pub fn rehash_path_cache(&mut self) {
     let path = var!("PATH");
     self.old_path = Some(path.clone());
-    self.path_cache.hash_path_list(&path);
+    self.path_cache.hash_path_list(&path.to_str_lossy());
   }
 
   pub fn clear_path_cache(&mut self) {
@@ -955,7 +955,7 @@ impl MetaTab {
     let path = var!("PATH");
     if self.old_path.as_ref().is_none_or(|old| *old != path) {
       self.old_path = Some(path.clone());
-      self.path_cache.hash_path_list(&path);
+      self.path_cache.hash_path_list(&path.to_str_lossy());
     }
   }
   pub fn invalidate_path_cache_if_stale(&mut self) {
@@ -1011,6 +1011,7 @@ impl MetaTab {
   #[cfg(test)]
   pub fn get_cmds_in_path() -> Vec<Rc<Utility>> {
     let path = var!("PATH");
+    let path = path.to_str_lossy();
     let paths = util::path_list_entries(&path);
 
     let mut seen = crate::HashSet::default();

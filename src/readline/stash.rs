@@ -126,7 +126,7 @@ impl Stash {
     if cmd
       .name
       .as_ref()
-      .is_some_and(|n| n.parse::<usize>().is_ok())
+      .is_some_and(|n| n.to_str_lossy().parse::<usize>().is_ok())
     {
       return Err(sherr!(ParseErr, "stash name cannot be a number"));
     }
@@ -136,7 +136,7 @@ impl Stash {
     }
     conn.execute(
       "INSERT INTO stash (name, buffer, cursor, timestamp) VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
-      (&cmd.name, &cmd.buffer, cmd.cursor_pos.trim())
+      (&cmd.name, &cmd.buffer, cmd.cursor_pos.to_str_lossy().trim())
     )?;
     Ok(())
   }
@@ -181,7 +181,10 @@ impl Stash {
 
   pub fn push(&self, name: Option<&VarStr>, buffer: &str, cursor: (usize, usize)) -> ShResult<()> {
     let (row, col) = cursor;
-    if name.as_ref().is_some_and(|n| n.parse::<usize>().is_ok()) {
+    if name
+      .as_ref()
+      .is_some_and(|n| n.to_str_lossy().parse::<usize>().is_ok())
+    {
       return Err(sherr!(ParseErr, "stashed command name cannot be a number"));
     }
     let cursor = format!("{row}:{col}");

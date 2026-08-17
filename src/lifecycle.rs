@@ -125,7 +125,7 @@ where
   I: Iterator<Item = (VarStr, Span)>,
 {
   let (word, span) = words.next().unwrap();
-  match word.as_str() {
+  match word.to_str_lossy().as_ref() {
     "--version" => cfg.version = true,
     "--help" => {
       print_usage();
@@ -174,7 +174,7 @@ fn parse_args() -> ShResult<ShedArgs> {
     .peekable();
 
   while let Some((word, _)) = words.peek() {
-    let word = word.as_str();
+    let word = word.to_str_lossy();
     if word == "--" {
       words.next();
       break;
@@ -250,7 +250,7 @@ pub(super) fn setup() -> Option<ShedArgs> {
 
   if !args.no_rc {
     if let Some(ref path) = args.rc_path {
-      Shed::vars_mut(|v| v.set_var("SHED_RC", VarKind::string(path), VarFlags::EXPORT)).ok();
+      Shed::vars_mut(|v| v.set_var("SHED_RC", VarKind::string(path.into()), VarFlags::EXPORT)).ok();
     }
     if let Err(e) = source_env() {
       e.print_error();

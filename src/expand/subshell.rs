@@ -8,7 +8,7 @@ use crate::{
     parse::node::nodes_have_only_builtins,
   },
   lifecycle,
-  procio::{self, SinkScope, bytes_to_string},
+  procio::{self, SinkScope},
   readline::{NestedSub, nested_subs},
   state::{Shed, meta::MetaTab, vars::VarStr},
   util::isolation_guard,
@@ -26,6 +26,7 @@ use super::{
   sherr,
 };
 
+use bstr::ByteSlice;
 use nix::errno::Errno;
 use nix::sys::wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid};
 use nix::unistd::{ForkResult, fork};
@@ -116,7 +117,7 @@ pub fn is_internal(raw: &str) -> bool {
 
   let has_forking_sub = nested_subs(raw).into_iter().any(|sub| match sub {
     NestedSub::Proc => true,
-    NestedSub::Cmd(body) => !is_internal(&body),
+    NestedSub::Cmd(body) => !is_internal(&body.to_str_lossy()),
   });
   if has_forking_sub {
     return false;
@@ -144,11 +145,9 @@ pub fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
 
   Shed::meta_mut(|m| m.set_last_cmdsub_status(Shed::get_status()));
 
-  Ok(
-    bytes_to_string(scope.into_buf())
-      .trim_end_matches('\n')
-      .into(),
-  )
+  let output = VarStr::from(scope.into_buf().trim_end_with(|c| c == '\n'));
+
+  Ok(output)
 }
 
 /// Get the command output of a given command input as a String
@@ -204,7 +203,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
       }
       let truncated = sink.was_truncated();
       let size = sink.limit();
-      let output = bytes_to_string(sink.into_buf());
+      let output = VarStr::from(sink.into_buf().trim_end_with(|c| c == '\n'));
 
       // Wait for child with EINTR retry
       let status = loop {
@@ -225,7 +224,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
           }
 
           Shed::meta_mut(|m| m.set_last_cmdsub_status(Shed::get_status()));
-          Ok(output.trim_end_matches('\n').into())
+          Ok(output)
         }
         _ => Err(sherr!(InternalErr, "Command sub failed")),
       }
@@ -358,7 +357,7 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         "PWD",
-        VarKind::string(start.to_string_lossy()),
+        VarKind::string(start.to_string_lossy().into()),
         VarFlags::EXPORT,
       )
     })
@@ -426,7 +425,7 @@ mod tests {
     )
     .unwrap();
     assert_eq!(result.len(), 1 << 18);
-    assert!(result.chars().all(|c| c == 'x'));
+    assert!(result.to_str_lossy().chars().all(|c| c == 'x'));
   }
 
   // ===================== expand_proc_sub =====================

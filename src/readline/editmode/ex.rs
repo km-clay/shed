@@ -210,7 +210,7 @@ fn expand_ex_aliases(input: &str) -> String {
       break; // not an alias — leave it for the real command lookup
     };
     let range = cmd_tk.span.range();
-    input.replace_range(range, &alias.body());
+    input.replace_range(range, &alias.body().to_str_lossy());
     active.insert(name);
   }
 
@@ -1121,7 +1121,7 @@ impl ExParser {
       return ExR::success(ExNdRule::Stash(StashArgs::Push(None)));
     } else if !arg_names
       .iter()
-      .any(|name| name.starts_with(arg.as_ref().unwrap().as_str()))
+      .any(|name| name.starts_with(&*arg.as_ref().unwrap().to_str_lossy()))
     {
       return ExR::success(ExNdRule::Stash(StashArgs::Push(arg)));
     }
@@ -1132,21 +1132,27 @@ impl ExParser {
     // `<name>.starts_with(arg)` — so abbreviations like `:stash p` or
     // `:stash ap` resolve to `pop` / `apply` etc. The subcommand names
     // have no shared prefixes, so this is unambiguous.
-    match arg.as_str() {
-      _ if "pop".starts_with(arg.as_str()) => ExR::success(ExNdRule::Stash(StashArgs::Pop(name))),
-      _ if "drop".starts_with(arg.as_str()) => ExR::success(ExNdRule::Stash(StashArgs::Drop(name))),
-      _ if "apply".starts_with(arg.as_str()) => {
+    match arg.to_str_lossy().as_ref() {
+      _ if "pop".starts_with(&*arg.to_str_lossy()) => {
+        ExR::success(ExNdRule::Stash(StashArgs::Pop(name)))
+      }
+      _ if "drop".starts_with(&*arg.to_str_lossy()) => {
+        ExR::success(ExNdRule::Stash(StashArgs::Drop(name)))
+      }
+      _ if "apply".starts_with(&*arg.to_str_lossy()) => {
         ExR::success(ExNdRule::Stash(StashArgs::Apply(name)))
       }
-      _ if "insert".starts_with(arg.as_str()) => {
+      _ if "insert".starts_with(&*arg.to_str_lossy()) => {
         ExR::success(ExNdRule::Stash(StashArgs::Insert(name)))
       }
-      _ if "swap".starts_with(arg.as_str()) => ExR::success(ExNdRule::Stash(StashArgs::Swap(name))),
-      _ if "list".starts_with(arg.as_str()) => {
+      _ if "swap".starts_with(&*arg.to_str_lossy()) => {
+        ExR::success(ExNdRule::Stash(StashArgs::Swap(name)))
+      }
+      _ if "list".starts_with(&*arg.to_str_lossy()) => {
         let target = name
-          .map(|n| match n.as_str() {
-            _ if "stack".starts_with(n.trim()) => Ok(Some(StashListArg::Stack)),
-            _ if "named".starts_with(n.trim()) => Ok(Some(StashListArg::Named)),
+          .map(|n| match n.to_str_lossy().as_ref() {
+            _ if "stack".starts_with(n.to_str_lossy().trim()) => Ok(Some(StashListArg::Stack)),
+            _ if "named".starts_with(n.to_str_lossy().trim()) => Ok(Some(StashListArg::Named)),
             _ => Err(ExR::error(format!("invalid stash list argument: {n}"))),
           })
           .transpose();
@@ -1522,7 +1528,7 @@ mod parse_read_write_tests {
       ExNdRule::Read(ReadSrc::Cmd(s)) => {
         // Whatever the lexer gives us, the raw span should contain
         // 'ls' and '-la' joined as one string.
-        assert!(s.contains("ls"), "got: {s:?}");
+        assert!(s.to_str_lossy().contains("ls"), "got: {s:?}");
       }
       other => panic!("expected Read(Cmd), got {other:?}"),
     }
@@ -1563,7 +1569,7 @@ mod parse_read_write_tests {
   fn write_bang_treats_arg_as_shell_command() {
     let kind = parse_ok("write! cat");
     match kind {
-      ExNdRule::Write(WriteDest::Cmd(s)) => assert!(s.contains("cat"), "got: {s:?}"),
+      ExNdRule::Write(WriteDest::Cmd(s)) => assert!(s.to_str_lossy().contains("cat"), "got: {s:?}"),
       other => panic!("expected Write(Cmd), got {other:?}"),
     }
   }
@@ -1875,7 +1881,7 @@ mod ex_alias_tests {
   use crate::tests::testutil::TestGuard;
 
   fn set_alias(name: &str, body: &str) {
-    Shed::logic_mut(|l| l.insert_ex_alias(name, body, Span::default()));
+    Shed::logic_mut(|l| l.insert_ex_alias(name, &body.into(), Span::default()));
   }
 
   fn parse_ok(input: &str) -> ExNode {

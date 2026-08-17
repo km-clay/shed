@@ -39,7 +39,7 @@ impl super::Builtin for Hash {
           .collect()
       });
       for (name, path) in entries {
-        let path = shell_quote(path.to_string_lossy());
+        let path = shell_quote(&path.to_string_lossy());
         outln!("{name}={path}");
       }
     }
@@ -57,7 +57,7 @@ impl super::Builtin for Hash {
       Shed::meta_mut(MetaTab::rehash_path_cache);
       Shed::meta(|m| -> ShResult<()> {
         for (arg, span) in args.arguments() {
-          if m.lookup_cached_cmd(arg).is_none() {
+          if m.lookup_cached_cmd(&arg.to_str_lossy()).is_none() {
             return Err(sherr!(NotFound, "Command not found: {arg}").promote(span.clone()));
           }
         }

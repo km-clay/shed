@@ -101,7 +101,7 @@ pub fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResult<()> 
   };
 
   let tabid = match arg_vec.next() {
-    Some((arg, blame)) => parse_job_id(arg, blame.clone())?,
+    Some((arg, blame)) => parse_job_id(&arg.to_str_lossy(), blame.clone())?,
     None => curr_job_id,
   };
 
@@ -174,10 +174,15 @@ impl super::Builtin for Wait {
     let arg_vec = args
       .arguments()
       .map(|arg| {
-        if arg.0.as_str().chars().all(|ch| ch.is_ascii_digit()) {
-          Ok(JobID::Pid(Pid::from_raw(arg.0.parse::<i32>().unwrap())))
+        if arg.0.to_str_lossy().chars().all(|ch| ch.is_ascii_digit()) {
+          Ok(JobID::Pid(Pid::from_raw(
+            arg.0.to_str_lossy().parse::<i32>().unwrap(),
+          )))
         } else {
-          Ok(JobID::TableID(parse_job_id(arg.0, arg.1.clone())?))
+          Ok(JobID::TableID(parse_job_id(
+            &arg.0.to_str_lossy(),
+            arg.1.clone(),
+          )?))
         }
       })
       .collect::<ShResult<Vec<JobID>>>()
@@ -232,7 +237,7 @@ impl super::Builtin for Disown {
 
     let mut ids = vec![];
     for (arg, span) in args.arguments() {
-      let id = parse_job_id(arg, span.clone())?;
+      let id = parse_job_id(&arg.to_str_lossy(), span.clone())?;
       ids.push(id);
     }
 
@@ -343,7 +348,7 @@ pub(super) fn list_all_signals() {
       sig.strip_prefix("SIG").unwrap_or(&sig).to_string()
     })
     .collect::<Vec<_>>()
-    .join(&state::util::get_separator());
+    .join(&state::util::get_separator().to_str_lossy());
   outln!("{signals}");
 }
 
@@ -426,8 +431,8 @@ impl super::Builtin for Kill {
       // kill -l <arg> converts between names and numbers. A numeric argument
       // prints the signal name; a name prints its number. Signal 0 isn't named,
       // so we only accept real signals here.
-      let sig = parse_signal(arg).promote_err(span.clone())?;
-      if arg.trim().parse::<i32>().is_ok() {
+      let sig = parse_signal(&arg.to_str_lossy()).promote_err(span.clone())?;
+      if arg.to_str_lossy().trim().parse::<i32>().is_ok() {
         let name = sig.to_string();
         outln!("{}", name.strip_prefix("SIG").unwrap_or(&name));
       } else {
@@ -445,15 +450,16 @@ impl super::Builtin for Kill {
 
     for (arg, span) in args.arguments() {
       // Check if the arg looks like a signal (e.g. kill -TERM pid, kill -0 pid)
-      if arg.starts_with('-') && !arg.starts_with("--") {
-        let stripped = arg.trim_start_matches('-');
+      if arg.to_str_lossy().starts_with('-') && !arg.to_str_lossy().starts_with("--") {
+        let stripped = arg.to_str_lossy();
+        let stripped = stripped.trim_start_matches('-');
         if let Ok(sig_override) = parse_kill_sig(stripped).promote_err(span.clone()) {
           signal.replace(sig_override);
           continue;
         }
       }
 
-      let target = parse_kill_target(arg, span.clone())?;
+      let target = parse_kill_target(&arg.to_str_lossy(), span.clone())?;
       send_signal(&target, signal.unwrap_or(sig), verbose, span)?;
     }
 

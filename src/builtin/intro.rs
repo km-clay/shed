@@ -28,14 +28,14 @@ impl super::Builtin for Type {
 
     for (arg, span) in args.arguments() {
       if terse {
-        let word = if let Some(util) = state::util::which_util(arg) {
+        let word = if let Some(util) = state::util::which_util(&arg.to_str_lossy()) {
           match util.kind() {
             UtilKind::Alias => Some("alias"),
             UtilKind::Function => Some("function"),
             UtilKind::Builtin => Some("builtin"),
             UtilKind::Command(_) | UtilKind::File(_) => Some("file"),
           }
-        } else if KEYWORDS.contains(&arg.as_str()) {
+        } else if KEYWORDS.contains(&arg.to_str_lossy().as_ref()) {
           Some("keyword")
         } else {
           None
@@ -47,7 +47,7 @@ impl super::Builtin for Type {
         continue;
       }
 
-      if let Some(util) = state::util::which_util(arg) {
+      if let Some(util) = state::util::which_util(&arg.to_str_lossy()) {
         match util.kind() {
           UtilKind::Alias => {
             let alias = Shed::logic(|v| v.get_alias(&arg.to_str_lossy())).unwrap();
@@ -65,7 +65,7 @@ impl super::Builtin for Type {
             }
           }
           UtilKind::Function => {
-            let func = Shed::logic(|v| v.get_func(arg)).unwrap();
+            let func = Shed::logic(|v| v.get_func(&arg.to_str_lossy())).unwrap();
             match func {
               ShFunc::Autoload(src) => {
                 let (origin, location) = match &src {
@@ -111,13 +111,13 @@ impl super::Builtin for Type {
             }
           }
         }
-      } else if KEYWORDS.contains(&arg.as_str()) {
+      } else if KEYWORDS.contains(&arg.to_str_lossy().as_ref()) {
         if short {
           outln!("keyword");
         } else {
           outln!("{arg} is a shell keyword");
         }
-      } else if let Some(var) = Shed::vars(|v| v.try_get_var_meta(arg.as_str())) {
+      } else if let Some(var) = Shed::vars(|v| v.try_get_var_meta(&arg.to_str_lossy())) {
         if short {
           match var.kind() {
             VarKind::Str(_) => outln!("string"),

@@ -1,16 +1,13 @@
-use bstr::ByteSlice;
 use nix::sys::signal::Signal;
 
 use std::{
   fmt::{self, Display},
   path::PathBuf,
-  str::FromStr,
 };
 
 use crate::{HashMap, ShResult, eval::execute::exec_nonint, sherr, state::vars::VarStr, util};
 
 use super::{
-  ShErr,
   eval::{Node, lex::Span},
   expand::shell_quote,
   keys::{KeyEvent, KeyMap, KeyMapFlags, KeyMapMatch},
@@ -58,7 +55,7 @@ struct AutoloadComps;
 /// trigger from `OnCommand` to `OnCompletion`. On-disk entries shadow
 /// embedded ones with the same name; that's intentional so users can
 /// override bundled scripts.
-fn collect_autoload<I>(embedded: I, env_var: &VarStr) -> HashMap<String, AutoloadSrc>
+fn collect_autoload<I>(embedded: I, env_var: &str) -> HashMap<String, AutoloadSrc>
 where
   I: Iterator<Item = std::borrow::Cow<'static, str>>,
 {
@@ -91,13 +88,13 @@ where
 
 impl AutoloadFuncs {
   pub fn get_all() -> HashMap<String, AutoloadSrc> {
-    collect_autoload(Self::iter(), "SHED_FUNC_PATH".into())
+    collect_autoload(Self::iter(), "SHED_FUNC_PATH")
   }
 }
 
 impl AutoloadComps {
   pub fn get_all() -> HashMap<String, AutoloadSrc> {
-    collect_autoload(Self::iter(), "SHED_COMPLETE_PATH".into())
+    collect_autoload(Self::iter(), "SHED_COMPLETE_PATH")
   }
 }
 
@@ -294,7 +291,7 @@ impl AutoCmd {
 impl Display for AutoCmd {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let kind = self.kind.to_string();
-    let command = shell_quote(&self.command);
+    let command = shell_quote(&self.command.to_str_lossy());
     write!(f, "autocmd {kind} {command}")
   }
 }
@@ -308,7 +305,7 @@ pub(crate) enum TrapTarget {
 }
 
 impl TrapTarget {
-  fn parse(s: &VarStr) -> ShResult<Self> {
+  pub(crate) fn parse(s: &VarStr) -> ShResult<Self> {
     match s.as_bytes() {
       b"0" | b"EXIT" => Ok(TrapTarget::Exit),
       b"RETURN" => Ok(TrapTarget::Return),

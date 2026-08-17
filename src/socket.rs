@@ -214,6 +214,7 @@ impl FromStr for SocketRequest {
       }
     }
     let rest = rest_chars.collect::<VarStr>();
+    let rest = rest.to_str_lossy();
     let mut args = rest.split(&*sep);
 
     match request_kind.trim() {
@@ -428,6 +429,7 @@ impl ShedSocket {
   }
   pub fn mode() -> Mode {
     var!("SHED_SOCK_MODE")
+      .to_str_lossy()
       .parse::<stat::mode_t>()
       .ok()
       .and_then(Mode::from_bits)
@@ -471,7 +473,7 @@ impl ShedSocket {
     Shed::vars_mut(|v| {
       v.set_var(
         "SHED_SOCK",
-        VarKind::string(sock_path.to_string_lossy()),
+        VarKind::string(sock_path.to_string_lossy().into()),
         VarFlags::EXPORT,
       )
     })
@@ -631,7 +633,7 @@ pub(super) fn handle_socket_request(
         write(&conn, b"\n").ok();
       }
       QueryHeader::SetVar(var, val, flags) => {
-        Shed::vars_mut(|v| v.set_var(&var, VarKind::string(val), flags)).ok();
+        Shed::vars_mut(|v| v.set_var(&var, VarKind::string(val.into()), flags)).ok();
         write(&conn, b"ok\n").ok();
       }
       QueryHeader::Status(headers) => {
@@ -641,7 +643,7 @@ pub(super) fn handle_socket_request(
             StatusHeader::ExitCode => responses.push(varstr!("{}", Shed::get_status())),
             StatusHeader::CommandName => {
               let Some(name) = Shed::meta(|m| m.last_job().and_then(Job::name)) else {
-                responses.push(VarStr::new());
+                responses.push(VarStr::default());
                 continue;
               };
 
@@ -649,7 +651,7 @@ pub(super) fn handle_socket_request(
             }
             StatusHeader::Runtime => {
               let Some(dur) = Shed::meta_mut(|m| m.get_time()) else {
-                responses.push(VarStr::new());
+                responses.push(VarStr::default());
                 continue;
               };
               responses.push(varstr!("{}", dur.as_millis()));
@@ -664,7 +666,7 @@ pub(super) fn handle_socket_request(
                 })
               });
               let Some(job) = job else {
-                responses.push(VarStr::new());
+                responses.push(VarStr::default());
                 continue;
               };
               responses.push(job);
@@ -672,7 +674,7 @@ pub(super) fn handle_socket_request(
             StatusHeader::Pgid => {
               let Some(job) = Shed::meta_mut(|m| m.last_job().map(|j| varstr!("{}", j.pgid())))
               else {
-                responses.push(VarStr::new());
+                responses.push(VarStr::default());
                 continue;
               };
               responses.push(job);

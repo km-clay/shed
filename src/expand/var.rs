@@ -56,10 +56,10 @@ pub fn expand_raw_inner(
 
       if expanded {
         result.push(markers::DUB_QUOTE);
-        result.push_str(&home);
+        result.push_str(&home.to_str_lossy());
         result.push(markers::DUB_QUOTE);
       } else {
-        result.push_str(&home);
+        result.push_str(&home.to_str_lossy());
       }
     }
     markers::PROC_SUB_OUT if allow_side_effects => {
@@ -98,7 +98,7 @@ pub fn expand_raw_inner(
       if mark_split && qt_state.outside() {
         expanded = format_smolstr!("{}{expanded}{}", markers::EXPAND_START, markers::EXPAND_END).into();
       }
-      result.push_str(&expanded);
+      result.push_str(&expanded.to_str_lossy());
     }
     _ => result.push(ch),
   });
@@ -214,7 +214,7 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>, allow_side_effects: bool) -> 
     }
   });
   if var_name.is_empty() {
-    Ok(VarStr::new())
+    Ok(VarStr::default())
   } else {
     let val = try_var!(&var_name);
     if val.is_none() && shopt!(set.nounset) {

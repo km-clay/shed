@@ -28,7 +28,7 @@ impl super::Builtin for Pwd {
 
     let dir = if logical {
       try_var!("PWD")
-        .filter(|p| is_same_dir_as_cwd(p))
+        .filter(|p| is_same_dir_as_cwd(&p.to_str_lossy()))
         .or_else(|| physical_cwd().map(|p| p.to_string_lossy().into()))
     } else {
       physical_cwd().map(|p| p.to_string_lossy().into())

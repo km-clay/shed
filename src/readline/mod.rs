@@ -276,13 +276,14 @@ impl Prompt {
       return Self::default();
     };
     // PS1 expansion may involve running commands (e.g., for \h or \W), which can modify shell state
-    let Ok(ps1_expanded) = util::with_saved_status(|| expand_prompt(&ps1_raw)) else {
+    let Ok(ps1_expanded) = util::with_saved_status(|| expand_prompt(&ps1_raw.to_str_lossy()))
+    else {
       return Self::default();
     };
     let psr_raw = try_var!("PSR");
     let psr_expanded = psr_raw
       .clone()
-      .map(|r| util::with_saved_status(|| expand_prompt(&r)))
+      .map(|r| util::with_saved_status(|| expand_prompt(&r.to_str_lossy())))
       .transpose()
       .ok()
       .flatten();
@@ -551,7 +552,7 @@ impl ShedLine {
     Shed::vars_mut(|v| {
       v.set_var(
         "SHED_EDIT_MODE",
-        VarKind::string(new.core.mode.report_mode().to_string()),
+        VarKind::string(new.core.mode.report_mode().to_string().into()),
         VarFlags::empty(),
       )
     })?;
@@ -633,7 +634,7 @@ impl ShedLine {
       v.set_var("EDITOR_LINE", VarKind::Int(1), VarFlags::READONLY)?;
       v.set_var(
         "EDITOR_FILE",
-        VarKind::string(String::new()),
+        VarKind::string(VarStr::default()),
         VarFlags::READONLY,
       )
     })?;
@@ -764,7 +765,7 @@ impl ShedLine {
         Shed::vars_mut(|v| {
           v.set_var(
             "SHED_EDIT_MODE",
-            VarKind::string(self.core.mode.report_mode().to_string()),
+            VarKind::string(self.core.mode.report_mode().to_string().into()),
             VarFlags::empty(),
           )
         })
@@ -788,7 +789,7 @@ impl ShedLine {
         Shed::vars_mut(|v| {
           v.set_var(
             "SHED_EDIT_MODE",
-            VarKind::string(self.core.mode.report_mode().to_string()),
+            VarKind::string(self.core.mode.report_mode().to_string().into()),
             VarFlags::empty(),
           )
         })
@@ -822,7 +823,7 @@ impl ShedLine {
       Shed::vars_mut(|v| {
         v.set_var(
           "SHED_EDIT_MODE",
-          VarKind::string(this.core.mode.report_mode().to_string()),
+          VarKind::string(this.core.mode.report_mode().to_string().into()),
           VarFlags::empty(),
         )
       })
@@ -856,7 +857,7 @@ impl ShedLine {
         Shed::vars_mut(|v| {
           v.set_var(
             "SHED_EDIT_MODE",
-            VarKind::string(self.core.mode.report_mode().to_string()),
+            VarKind::string(self.core.mode.report_mode().to_string().into()),
             VarFlags::empty(),
           )
         })
@@ -989,7 +990,7 @@ impl ShedLine {
       Shed::vars_mut(|v| {
         v.set_var(
           "SHED_EDIT_MODE",
-          VarKind::string(self.core.mode.report_mode().to_string()),
+          VarKind::string(self.core.mode.report_mode().to_string().into()),
           VarFlags::empty(),
         )
       })
@@ -1163,8 +1164,14 @@ impl ShedLine {
           )
         })
         .unwrap();
-        Shed::vars_mut(|v| v.set_var("SEARCH_STR", VarKind::string(comp.token()), VarFlags::LOCAL))
-          .unwrap();
+        Shed::vars_mut(|v| {
+          v.set_var(
+            "SEARCH_STR",
+            VarKind::string(comp.token().into()),
+            VarFlags::LOCAL,
+          )
+        })
+        .unwrap();
 
         let cmds = Shed::logic(|l| l.get_autocmds(AutoCmdKind::OnCompletionStart));
         Shed::notify_autocmd(AutoCmdKind::OnCompletionStart);
@@ -1204,7 +1211,7 @@ impl ShedLine {
 
           let candidates: Vec<Candidate> =
             filtered.into_iter().fold(vec![], |mut acc, (name, desc)| {
-              let cand: Candidate = Candidate::from(name).with_desc(desc);
+              let cand: Candidate = Candidate::from(name).with_desc(&desc);
               acc.push(cand);
               acc
             });
@@ -1218,7 +1225,7 @@ impl ShedLine {
             Shed::vars_mut(|v| {
               v.set_var(
                 "SHED_EDIT_MODE",
-                VarKind::string("COMPLETE"),
+                VarKind::string("COMPLETE".into()),
                 VarFlags::empty(),
               )
             })
@@ -1255,7 +1262,7 @@ impl ShedLine {
     Shed::vars_mut(|v| {
       v.set_var(
         "SHED_EDIT_MODE",
-        VarKind::string(self.core.mode.report_mode().to_string()),
+        VarKind::string(self.core.mode.report_mode().to_string().into()),
         VarFlags::empty(),
       )
     })
@@ -1315,7 +1322,7 @@ impl ShedLine {
         Shed::vars_mut(|v| {
           v.set_var(
             "SHED_EDIT_MODE",
-            VarKind::string("SEARCH"),
+            VarKind::string("SEARCH".into()),
             VarFlags::empty(),
           )
         })
@@ -1997,7 +2004,7 @@ impl ShedLine {
 
     let seq_fits = pending_seq
       .as_ref()
-      .is_some_and(|seq| row0_used + 1 < t_cols.saturating_sub(seq.width()));
+      .is_some_and(|seq| row0_used + 1 < t_cols.saturating_sub(seq.to_str_lossy().width()));
     let psr_fits = prompt_string_right
       .as_ref()
       .is_some_and(|psr| new_layout.end.col + 1 < t_cols.saturating_sub(psr.width()));
@@ -2010,7 +2017,7 @@ impl ShedLine {
       && !self.core.mode.is_input_mode()
     {
       // write our pending sequence
-      let to_col = (t_cols - calc_str_width(&seq)) as u16;
+      let to_col = (t_cols - calc_str_width(&seq.to_str_lossy())) as u16;
       let up = new_layout.cursor.row as u16; // rows to move up from cursor to top line of prompt
 
       // Save cursor, move up to top row, move right to column, write sequence,
@@ -2079,7 +2086,7 @@ impl ShedLine {
         let mut highlighted = String::new();
         highlight::highlight_ex(
           &mut highlighted,
-          &pending_seq,
+          &pending_seq.to_str_lossy(),
           &highlight::Palette::new(),
           cursor_pos,
         )
@@ -2100,6 +2107,7 @@ impl ShedLine {
       new_layout.cursor.col = {
         let cursor_offset = self.core.mode.pending_cursor().unwrap_or(pending_seq.len());
         let before_cursor = pending_seq
+          .to_str_lossy()
           .graphemes(true)
           .take(cursor_offset)
           .collect::<String>();

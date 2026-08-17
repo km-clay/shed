@@ -315,9 +315,9 @@ impl super::Builtin for UMask {
         ));
       }
 
-      if raw.chars().any(|c| c.is_ascii_digit()) {
+      if raw.to_str_lossy().chars().any(|c| c.is_ascii_digit()) {
         // Numeric mode: umask 022
-        let mode_raw = stat::mode_t::from_str_radix(raw, 8)
+        let mode_raw = stat::mode_t::from_str_radix(&raw.to_str_lossy(), 8)
           .map_err(|_| sherr!(ParseErr @ span.clone(), "invalid numeric umask: {raw}"))?;
         // need to use the mode_t type alias
         // since the int size varies between Linux/MacOS
@@ -326,7 +326,7 @@ impl super::Builtin for UMask {
         change_umask(mode.bits());
       } else {
         // Symbolic mode: umask u=rwx,g=rx,o=
-        for part in raw.split(',') {
+        for part in raw.to_str_lossy().split(',') {
           let (who, op, bits) = if let Some((w, b)) = part.split_once('=') {
             (w, '=', b)
           } else if let Some((w, b)) = part.split_once('+') {
@@ -358,7 +358,7 @@ fn change_umask(mask: stat::mode_t) -> Mode {
   Shed::vars_mut(|v| {
     v.set_var(
       "UMASK",
-      VarKind::string(format!("{mask:04o}")),
+      VarKind::string(format!("{mask:04o}").into()),
       VarFlags::EXPORT | VarFlags::READONLY,
     )
   })

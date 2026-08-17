@@ -145,9 +145,9 @@ impl super::Builtin for Read {
 
     if let Some(arr) = array_name {
       if flags.contains(ReadFlags::QUOTED) {
-        field_split_arr_quoted(&input, &arr).promote_err(args.span())
+        field_split_arr_quoted(&input, &arr.to_str_lossy()).promote_err(args.span())
       } else {
-        field_split_arr(&input, &arr).promote_err(args.span())
+        field_split_arr(&input, &arr.to_str_lossy()).promote_err(args.span())
       }
     } else {
       if flags.contains(ReadFlags::QUOTED) {
@@ -492,16 +492,22 @@ fn glue_zero_width(fields: Vec<String>) -> Vec<String> {
 
 fn field_split_vars(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()> {
   if vars.is_empty() {
-    Shed::vars_mut(|v| v.set_var("REPLY", VarKind::string(input), VarFlags::empty()))?;
+    Shed::vars_mut(|v| v.set_var("REPLY", VarKind::string(input.into()), VarFlags::empty()))?;
     return Ok(());
   }
 
   let sep = state::util::get_separators();
-  let fields = ifs_split(input, &sep, Some(vars.len()));
+  let fields = ifs_split(input, &sep.to_str_lossy(), Some(vars.len()));
 
   for (i, (name, _)) in vars.iter().enumerate() {
     let value = fields.get(i).map_or("", String::as_str);
-    Shed::vars_mut(|v| v.set_var(name, VarKind::string(value), VarFlags::empty()))?;
+    Shed::vars_mut(|v| {
+      v.set_var(
+        &name.to_str_lossy(),
+        VarKind::string(value.into()),
+        VarFlags::empty(),
+      )
+    })?;
   }
 
   Ok(())
@@ -513,9 +519,15 @@ fn field_split_arr(input: &str, arr_name: &str) -> ShResult<()> {
   }
 
   let sep = state::util::get_separators();
-  let fields = glue_zero_width(ifs_split(input, &sep, None));
+  let fields = glue_zero_width(ifs_split(input, &sep.to_str_lossy(), None));
 
-  Shed::vars_mut(|v| v.set_var(arr_name, VarKind::arr(fields), VarFlags::empty()))
+  Shed::vars_mut(|v| {
+    v.set_var(
+      arr_name,
+      VarKind::arr(fields.into_iter().map(Into::into)),
+      VarFlags::empty(),
+    )
+  })
 }
 
 fn field_split_vars_quoted(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()> {
@@ -523,7 +535,7 @@ fn field_split_vars_quoted(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()>
 
   if vars.is_empty() {
     let joined = fields.join(" ");
-    Shed::vars_mut(|v| v.set_var("REPLY", VarKind::string(joined), VarFlags::empty()))?;
+    Shed::vars_mut(|v| v.set_var("REPLY", VarKind::string(joined.into()), VarFlags::empty()))?;
     return Ok(());
   }
 
@@ -536,7 +548,13 @@ fn field_split_vars_quoted(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()>
       fields[i].clone()
     };
 
-    Shed::vars_mut(|v| v.set_var(name, VarKind::string(value), VarFlags::empty()))?;
+    Shed::vars_mut(|v| {
+      v.set_var(
+        &name.to_str_lossy(),
+        VarKind::string(value.into()),
+        VarFlags::empty(),
+      )
+    })?;
   }
 
   Ok(())
@@ -549,7 +567,13 @@ fn field_split_arr_quoted(input: &str, arr_name: &str) -> ShResult<()> {
 
   let fields = glue_zero_width(quote::unquote_raw(input)?);
 
-  Shed::vars_mut(|v| v.set_var(arr_name, VarKind::arr(fields), VarFlags::empty()))
+  Shed::vars_mut(|v| {
+    v.set_var(
+      arr_name,
+      VarKind::arr(fields.into_iter().map(Into::into)),
+      VarFlags::empty(),
+    )
+  })
 }
 
 pub(super) struct ReadKey;

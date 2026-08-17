@@ -1,4 +1,5 @@
 use crate::{HashMap, eval::execute, opt, state::logic::TrapTarget, util};
+use bstr::ByteSlice;
 use std::fmt::Write;
 
 use yansi::Paint;
@@ -27,7 +28,7 @@ trait FlowCtl: super::Builtin {
       .arguments()
       .next()
       .map(|(st, sp)| {
-        st.parse::<i32>().map_err(|_| {
+        st.to_str_lossy().parse::<i32>().map_err(|_| {
           sherr!(
             SyntaxErr @ sp.clone(),
             "{}: Expected a number",

@@ -23,7 +23,7 @@ impl super::Builtin for Flog {
       return Err(sherr!(ExecFail, "Usage: flog <LEVEL> <MESSAGE>"));
     };
     let level = first.to_ascii_uppercase();
-    let Some(level) = log::Level::from_str(&level).ok() else {
+    let Some(level) = log::Level::from_str(&String::from_utf8_lossy(&level)).ok() else {
       return Err(sherr!(ExecFail @ span.clone(), "Invalid log level"));
     };
 
@@ -44,7 +44,7 @@ impl super::Builtin for Flog {
     }
 
     let (rest, _) = join_raw_args(arg_vec);
-    let formatted = Self::expand_prefix_fmt(&prefix_fmt, &level, source, line, col);
+    let formatted = Self::expand_prefix_fmt(&prefix_fmt.to_str_lossy(), &level, source, line, col);
 
     let out = format!("{formatted} {rest}");
 
@@ -97,7 +97,7 @@ impl Flog {
 
   fn get_log_level() -> Option<log::Level> {
     let level = var!("FLOG_LEVEL").to_ascii_uppercase();
-    level.parse::<log::Level>().ok()
+    String::from_utf8_lossy(&level).parse::<log::Level>().ok()
   }
 }
 

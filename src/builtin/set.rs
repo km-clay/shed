@@ -298,12 +298,13 @@ where
 
   let mut found = false;
   while let Some((word, _)) = words.peek() {
-    if word.as_str().starts_with('-') || word.as_str().starts_with('+') {
+    let word = word.to_str_lossy();
+    if word.starts_with('-') || word.starts_with('+') {
       break;
     }
     found = true;
     let (name, name_span) = words.next().unwrap();
-    let flag = SetFlags::from_str(&name).promote_err(name_span)?;
+    let flag = SetFlags::from_str(&name.to_str_lossy()).promote_err(name_span)?;
     apply_set_flags(on, flag, span)?;
   }
 
@@ -335,15 +336,16 @@ where
   I: Iterator<Item = (VarStr, Span)>,
 {
   while let Some((word, span)) = words.peek().cloned() {
-    match word.as_str().chars().next() {
+    let word = word.to_str_lossy();
+    match word.chars().next() {
       Some('-' | '+') => {}
       _ => break, // first operand — leave it in `words`
     }
-    if word.as_str() == "-" {
+    if word == "-" {
       break; // a lone `-` is an operand, not an option
     }
-    if word.as_str().starts_with("--") {
-      if word.as_str() == "--" {
+    if word.starts_with("--") {
+      if word == "--" {
         words.next();
         return Ok(SetOpts { terminated: true });
       }
@@ -351,12 +353,8 @@ where
     }
 
     words.next(); // commit: it's a short cluster or `-o`
-    let on = word.as_str().starts_with('-');
-    let mut cluster = word.as_str()[1..]
-      .chars()
-      .collect::<Vec<_>>()
-      .into_iter()
-      .peekable();
+    let on = word.starts_with('-');
+    let mut cluster = word[1..].chars().collect::<Vec<_>>().into_iter().peekable();
     let mut flags = SetFlags::empty();
 
     while let Some(ch) = cluster.next() {
@@ -409,12 +407,12 @@ impl super::Builtin for Set {
           let items = items
             .clone()
             .into_iter()
-            .map(|v| shell_quote(v.as_str()))
+            .map(|v| shell_quote(&v.to_str_lossy()))
             .collect::<Vec<_>>()
             .join(" ");
           outln!("{k}=( {items} )");
         } else {
-          let v = shell_quote(v.to_string());
+          let v = shell_quote(&v.to_string());
           outln!("{k}={v}");
         }
       }
@@ -424,7 +422,7 @@ impl super::Builtin for Set {
     let mut it = arg_vec.into_iter().peekable();
 
     // `set -` (a bare dash) resets every set-option to its default.
-    if matches!(it.peek(), Some((w, _)) if w.as_str() == "-") {
+    if matches!(it.peek(), Some((w, _)) if w == "-") {
       reset_set_opts();
       it.next();
     }
