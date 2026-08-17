@@ -11,8 +11,10 @@ use super::{meta::MetaTab, scopes::ScopeStack};
 use std::{
   borrow::Cow,
   collections::VecDeque,
+  ffi::OsStr,
   fmt::{self, Display},
   ops::Deref,
+  os::unix::ffi::OsStrExt,
   path::{Path, PathBuf},
   rc::Rc,
   str::FromStr,
@@ -20,6 +22,8 @@ use std::{
 };
 
 use bitflags::bitflags;
+use bstr::ByteSlice;
+use hipstr::HipByt;
 use nix::{
   sys::stat,
   unistd::{Pid, User, gethostname, getppid, isatty},
@@ -230,6 +234,7 @@ impl ArrIndex {
         VarKindTag::Arr | VarKindTag::Str | VarKindTag::Int | VarKindTag::Magic => {
           let evaluated = expand_arithmetic(&s)?;
           let n: usize = evaluated
+            .to_str_lossy()
             .parse()
             .map_err(|_| sherr!(ParseErr, "Invalid array index '{s}': not a number"))?;
           Ok(Self::Literal(n))
@@ -391,15 +396,13 @@ pub trait VarStrSliceExt {
 
 impl VarStrSliceExt for [VarStr] {
   fn join_with(&self, sep: &str) -> VarStr {
-    let total =
-      self.iter().map(|v| v.len()).sum::<usize>() + sep.len() * self.len().saturating_sub(1);
-    let mut out = String::with_capacity(total);
+    let mut out = vec![];
     let mut iter = self.iter();
     if let Some(first) = iter.next() {
-      out.push_str(first);
+      out.extend_from_slice(first.as_bytes());
       for v in iter {
-        out.push_str(sep);
-        out.push_str(v);
+        out.extend_from_slice(sep.as_bytes());
+        out.extend_from_slice(v.as_bytes());
       }
     }
     VarStr::from(out)
@@ -408,15 +411,13 @@ impl VarStrSliceExt for [VarStr] {
 
 impl VarStrSliceExt for [&VarStr] {
   fn join_with(&self, sep: &str) -> VarStr {
-    let total =
-      self.iter().map(|v| v.len()).sum::<usize>() + sep.len() * self.len().saturating_sub(1);
-    let mut out = String::with_capacity(total);
+    let mut out = vec![];
     let mut iter = self.iter();
     if let Some(first) = iter.next() {
-      out.push_str(first);
+      out.extend_from_slice(first.as_bytes());
       for v in iter {
-        out.push_str(sep);
-        out.push_str(v);
+        out.extend_from_slice(sep.as_bytes());
+        out.extend_from_slice(v.as_bytes());
       }
     }
     VarStr::from(out)
@@ -425,37 +426,49 @@ impl VarStrSliceExt for [&VarStr] {
 
 /// shed's internal string type for variable values.
 ///
-/// It is a wrapper around `SmolStr` that implements `Deref<Target=str>` and various conversions to/from `String`, `&str`, `Rc<str>`, and `PathBuf`.
+/// It is a wrapper around `HipByt`.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
-pub(crate) struct VarStr(SmolStr);
+pub(crate) struct VarStr(HipByt<'static>);
 
-impl Deref for VarStr {
-  type Target = str;
-  fn deref(&self) -> &Self::Target {
+impl VarStr {
+  pub fn as_bytes(&self) -> &[u8] {
     &self.0
+  }
+
+  /// Borrowed UTF-8 view, or `None` if the bytes aren't valid UTF-8. Cheap
+  /// (validation only, no allocation) — use for value paths that must be text.
+  pub fn to_str(&self) -> Option<&str> {
+    std::str::from_utf8(&self.0).ok()
+  }
+
+  /// Lossy UTF-8 view (invalid bytes → `U+FFFD`). For display and text-only
+  /// contexts like identifier lookups, where invalid bytes can't occur anyway.
+  pub fn to_str_lossy(&self) -> Cow<'_, str> {
+    String::from_utf8_lossy(&self.0)
   }
 }
 
-impl VarStr {
-  pub fn new() -> Self {
-    Self(SmolStr::default())
-  }
-
-  pub fn as_str(&self) -> &str {
+impl Deref for VarStr {
+  type Target = [u8];
+  fn deref(&self) -> &Self::Target {
     &self.0
   }
 }
 
 impl ToSql for VarStr {
   fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-    Ok(rusqlite::types::ToSqlOutput::from(self.as_str()))
+    Ok(rusqlite::types::ToSqlOutput::from(self.as_bytes()))
   }
 }
 
 impl FromSql for VarStr {
   fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
     match value {
-      rusqlite::types::ValueRef::Text(s) => Ok(Self(SmolStr::new(String::from_utf8_lossy(s)))),
+      // `ToSql` binds values as BLOBs (VarStr may hold non-UTF-8 bytes), but
+      // accept TEXT too so rows written by older, UTF-8-only builds still read.
+      rusqlite::types::ValueRef::Text(s) | rusqlite::types::ValueRef::Blob(s) => {
+        Ok(Self(HipByt::from(s)))
+      }
       _ => Err(rusqlite::types::FromSqlError::InvalidType),
     }
   }
@@ -463,13 +476,14 @@ impl FromSql for VarStr {
 
 impl From<VarStr> for PathBuf {
   fn from(value: VarStr) -> Self {
-    PathBuf::from(value.as_str())
+    PathBuf::from(OsStr::from_bytes(value.as_bytes()))
   }
 }
 
-impl From<VarStr> for Rc<str> {
-  fn from(value: VarStr) -> Self {
-    Rc::from(value.as_str())
+impl From<Vec<u8>> for VarStr {
+  fn from(value: Vec<u8>) -> Self {
+    // Owning conversion: reuses the allocation for large values, inlines small.
+    Self(HipByt::from(value))
   }
 }
 
@@ -479,13 +493,13 @@ impl FromIterator<char> for VarStr {
     for ch in iter {
       builder.push(ch);
     }
-    Self(builder.finish())
+    Self(HipByt::from(builder.finish().as_bytes()))
   }
 }
 
 impl From<compact_str::CompactString> for VarStr {
   fn from(value: compact_str::CompactString) -> Self {
-    Self(SmolStr::new(value.as_str()))
+    Self(HipByt::from(value.as_bytes()))
   }
 }
 
@@ -522,7 +536,7 @@ macro_rules! impl_varstr_from {
     $(impl From<$t> for VarStr {
       fn from(value: $t) -> VarStr {
         let mut buf = itoa::Buffer::new();
-        VarStr(SmolStr::new(buf.format(value)))
+        VarStr(HipByt::from(buf.format(value).as_bytes()))
       }
     })*
   };
@@ -532,75 +546,64 @@ impl_varstr_from!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 
 impl AsRef<std::ffi::OsStr> for VarStr {
   fn as_ref(&self) -> &std::ffi::OsStr {
-    std::ffi::OsStr::new(self.as_str())
-  }
-}
-
-impl AsRef<str> for VarStr {
-  fn as_ref(&self) -> &str {
-    &self.0
-  }
-}
-
-impl AsRef<Path> for VarStr {
-  fn as_ref(&self) -> &Path {
-    self.as_str().as_ref()
+    std::ffi::OsStr::from_bytes(self.as_bytes())
   }
 }
 
 impl PartialEq<str> for VarStr {
   fn eq(&self, other: &str) -> bool {
-    self.0 == other
+    self.0 == other.as_bytes()
   }
 }
 
 impl PartialEq<&str> for VarStr {
   fn eq(&self, other: &&str) -> bool {
-    self.0 == *other
+    self.0 == other.as_bytes()
   }
 }
 
 impl PartialEq<String> for VarStr {
   fn eq(&self, other: &String) -> bool {
-    self.0 == other.as_str()
+    self.0 == other.as_bytes()
   }
 }
 
 impl Display for VarStr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    self.0.fmt(f)
+    self.0.to_str_lossy().fmt(f)
   }
 }
 
 impl From<&mut str> for VarStr {
   fn from(s: &mut str) -> Self {
-    Self(SmolStr::new(s))
+    Self(HipByt::from(s.as_bytes()))
   }
 }
 
 impl From<&str> for VarStr {
   fn from(s: &str) -> Self {
-    Self(SmolStr::new(s))
+    Self(HipByt::from(s.as_bytes()))
   }
 }
 impl From<String> for VarStr {
   fn from(s: String) -> Self {
-    Self(SmolStr::new(s))
+    // Owning: reuse the String's allocation instead of copying.
+    Self(HipByt::from(s.into_bytes()))
   }
 }
 impl From<&String> for VarStr {
   fn from(s: &String) -> Self {
-    Self(SmolStr::new(s))
+    Self(HipByt::from(s.as_bytes()))
   }
 }
 impl From<SmolStr> for VarStr {
   fn from(s: SmolStr) -> Self {
-    Self(s)
+    Self(HipByt::from(s.as_bytes()))
   }
 }
 impl From<Cow<'_, str>> for VarStr {
   fn from(s: Cow<'_, str>) -> Self {
-    Self(SmolStr::new(s))
+    Self(HipByt::from(s.as_bytes()))
   }
 }
 
@@ -665,7 +668,7 @@ impl VarKind {
     }
     let raw = raw[1..raw.len() - 1].to_string();
 
-    let tokens: VecDeque<VarStr> = LexStream::new(raw.into(), LexFlags::empty())
+    let tokens = LexStream::new(raw.into(), LexFlags::empty())
       .filter(|tk| {
         !tk.as_ref().is_ok_and(|tk| {
           matches!(
@@ -675,42 +678,27 @@ impl VarKind {
         })
       })
       .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
-      .try_fold(String::new(), |mut acc, wrds| {
+      .try_fold(Vec::new(), |mut acc, wrds| {
         match wrds {
-          Ok(wrds) => {
-            for wrd in wrds.iter() {
-              if !acc.is_empty() {
-                acc.push(markers::ARG_SEP);
-              }
-              acc.push_str(wrd);
-            }
-          }
+          Ok(wrds) => acc.extend(wrds.iter().filter(|s| !s.is_empty()).cloned()),
           Err(e) => return Err(e),
         }
         Ok(acc)
-      })?
-      .split(markers::ARG_SEP)
-      .filter(|s| !s.is_empty())
-      .map(VarStr::from)
-      .collect();
+      })?;
 
-    Ok(Self::Arr(tokens))
+    Ok(Self::Arr(tokens.into()))
   }
 
   pub fn parse(raw: &str) -> Self {
     Self::arr_from_raw(raw).unwrap_or_else(|_| Self::Str(raw.into()))
   }
 
-  pub fn string<S: AsRef<str>>(raw: S) -> Self {
-    Self::Str(raw.as_ref().into())
+  pub fn string(raw: VarStr) -> Self {
+    Self::Str(raw)
   }
 
-  pub fn arr<S: AsRef<str>, I: IntoIterator<Item = S>>(iter: I) -> Self {
-    let vec: VecDeque<VarStr> = iter
-      .into_iter()
-      .map(SmolStr::new)
-      .map(VarStr::from)
-      .collect();
+  pub fn arr<I: IntoIterator<Item = VarStr>>(iter: I) -> Self {
+    let vec: VecDeque<VarStr> = iter.into_iter().collect();
     Self::Arr(vec)
   }
 
@@ -983,6 +971,9 @@ pub(crate) enum ScopeKind {
 
 #[derive(Default, Clone, Debug)]
 pub(crate) struct VarTab {
+  // Variable *names* are always valid identifiers (`[A-Za-z_]\w*`), never byte
+  // data — so they stay `String`, and `&str` lookups keep working without a
+  // `Borrow` shim. Only variable *values* (`Var`) carry arbitrary bytes.
   vars: HashMap<String, Var>,
   params: HashMap<ShellParam, VarStr>,
   sh_argv: VecDeque<VarStr>, /* Using a VecDeque makes the implementation of `shift` straightforward */
@@ -1407,8 +1398,8 @@ impl VarTab {
     }
     self.vars.contains_key(var_name)
   }
-  pub fn set_param(&mut self, param: ShellParam, val: &str) {
-    self.params.insert(param, val.into());
+  pub fn set_param(&mut self, param: ShellParam, val: &VarStr) {
+    self.params.insert(param, val.clone());
   }
   pub fn try_get_param(&self, param: ShellParam) -> Option<VarStr> {
     match param {

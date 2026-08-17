@@ -8,12 +8,12 @@ use crate::state::{
   Shed, scopes::ScopeStack, vars::ArrIndex, vars::ShellParam, vars::VarFlags, vars::VarKind,
   vars::VarName,
 };
-use crate::util::{ShResult, compile_glob_lenient, split_at_unescaped_markers};
-use crate::{match_loop, util};
+use crate::util::{ShResult, split_at_unescaped_markers};
+use crate::{match_loop, util, varstr};
 use crate::{sherr, shopt, var};
 
 #[derive(Debug)]
-pub enum ParamExp {
+pub(crate) enum ParamExp {
   ToUpperFirst,                      // ^var_name
   ToUpperAll,                        // ^^var_name
   ToLowerFirst,                      // ,var_name
@@ -196,11 +196,7 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
       // arguments.
       return Ok(Shed::vars(|v| v.get_param(ShellParam::ArgCount)));
     }
-    // A positional (`${#1}`) or other special param (`${#$}`, `${#0}`) is not a
-    // named variable, so `get_var_meta` below would miss it and report 0.
-    // Resolve it through the param path; `try_get_param` reports None for an
-    // unset positional (length 0) and Some("") for a set-but-empty one.
-    // `${#@}`/`${#*}`/`${#}` (argument count) are already handled above.
+
     if let Ok(param) = var_spec.parse::<ShellParam>() {
       let len = Shed::vars(|v| v.try_get_param(param)).map_or(0, |val| val.len());
       return Ok(len.to_string().into());
@@ -448,10 +444,10 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         let expanded = Expander::from_raw_no_brace_pattern(&prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = compile_glob_lenient(&expanded);
+        let pattern = glob_to_regex(&expanded, false);
         for i in (0..=value.len()).filter(|&i| value.is_char_boundary(i)) {
           let sliced = &value[..i];
-          if pattern.matches(sliced) {
+          if pattern.is_match(sliced) {
             return Ok(value[i..].into());
           }
         }
@@ -462,13 +458,13 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         let expanded = Expander::from_raw_no_brace_pattern(&prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = compile_glob_lenient(&expanded);
+        let pattern = glob_to_regex(&expanded, false);
         for i in (0..=value.len())
           .rev()
           .filter(|&i| value.is_char_boundary(i))
         {
           let sliced = &value[..i];
-          if pattern.matches(sliced) {
+          if pattern.is_match(sliced) {
             return Ok(value[i..].into());
           }
         }
@@ -479,13 +475,13 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         let expanded = Expander::from_raw_no_brace_pattern(&suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = compile_glob_lenient(&expanded);
+        let pattern = glob_to_regex(&expanded, false);
         for i in (0..=value.len())
           .rev()
           .filter(|&i| value.is_char_boundary(i))
         {
           let sliced = &value[i..];
-          if pattern.matches(sliced) {
+          if pattern.is_match(sliced) {
             return Ok(value[..i].into());
           }
         }
@@ -496,10 +492,10 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         let expanded_suffix = Expander::from_raw_no_brace_pattern(&suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = compile_glob_lenient(&expanded_suffix);
+        let pattern = glob_to_regex(&expanded_suffix, false);
         for i in (0..=value.len()).filter(|&i| value.is_char_boundary(i)) {
           let sliced = &value[i..];
-          if pattern.matches(sliced) {
+          if pattern.is_match(sliced) {
             return Ok(value[..i].into());
           }
         }
@@ -518,8 +514,8 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         if let Some(mat) = regex.find(&value) {
           let before = &value[..mat.start()];
           let after = &value[mat.end()..];
-          let result = format!("{before}{expanded_replace}{after}");
-          Ok(result.into())
+          let result = varstr!("{before}{expanded_replace}{after}");
+          Ok(result)
         } else {
           Ok(value)
         }
@@ -554,11 +550,11 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         let expanded_replace = Expander::from_raw_pattern(&replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let pattern = compile_glob_lenient(&expanded_search);
+        let pattern = glob_to_regex(&expanded_search, false);
         for i in (0..=value.len()).rev() {
           let sliced = &value[..i];
-          if pattern.matches(sliced) {
-            return Ok(format!("{}{}", expanded_replace, &value[i..]).into());
+          if pattern.is_match(sliced) {
+            return Ok(varstr!("{}{}", expanded_replace, &value[i..]));
           }
         }
         Ok(value)
@@ -571,11 +567,11 @@ pub fn perform_param_expansion(raw: &str, allow_side_effects: bool) -> ShResult<
         let expanded_replace = Expander::from_raw_pattern(&replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let pattern = compile_glob_lenient(&expanded_search);
+        let pattern = glob_to_regex(&expanded_search, false);
         for i in (0..=value.len()).rev() {
           let sliced = &value[i..];
-          if pattern.matches(sliced) {
-            return Ok(format!("{}{}", &value[..i], expanded_replace).into());
+          if pattern.is_match(sliced) {
+            return Ok(varstr!("{}{}", &value[..i], expanded_replace));
           }
         }
         Ok(value)

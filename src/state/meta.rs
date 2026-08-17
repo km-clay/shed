@@ -8,14 +8,7 @@ use std::{
   time::{Duration, Instant},
 };
 
-use crate::{
-  HashMap,
-  state::vars::VarStr,
-  util::{
-    compile_glob_lenient, count_unescaped, ends_with_unescaped, has_any_unescaped, has_unescaped,
-    split_at_unescaped, starts_with_unescaped,
-  },
-};
+use crate::{HashMap, expand::Pattern, state::vars::VarStr};
 
 use super::{
   ShResult, Shed, autocmd, crate_util as util,
@@ -30,7 +23,6 @@ use super::{
   var,
   vars::{VarFlags, VarKind},
 };
-use glob::Pattern as GlobPattern;
 use nix::{
   libc::time_t,
   poll::PollTimeout,
@@ -480,94 +472,6 @@ pub(crate) struct XtraceGuard;
 impl Drop for XtraceGuard {
   fn drop(&mut self) {
     Shed::meta_mut(MetaTab::xtrace_ascend);
-  }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum Pattern {
-  Any, // bare *, matches anything
-  Equal(Rc<str>),
-  Contains(Rc<str>),
-  StartsWith(Rc<str>),
-  EndsWith(Rc<str>),
-  DoubleSided(Rc<str>, Rc<str>), // something like a*b
-  Glob(GlobPattern),
-}
-
-impl Pattern {
-  pub fn compile(mut pattern: &str) -> Self {
-    if pattern.chars().all(|c| c == '*') {
-      return Self::Any;
-    }
-
-    // collapse leading and trailing stars
-    while starts_with_unescaped(pattern, "*") && pattern.starts_with("**") {
-      pattern = &pattern[1..];
-    }
-    while ends_with_unescaped(pattern, "*") && pattern.ends_with("**") {
-      pattern = &pattern[..pattern.len() - 1];
-    }
-
-    // something like *foo*b[aA]r*b?z or something
-    // let regex figure it out
-    if count_unescaped(pattern, "*") > 2 || has_any_unescaped(pattern, &["?", "[", "{"]) {
-      return Self::Glob(compile_glob_lenient(pattern));
-    }
-
-    let strip_glob_escapes = |s: &str| -> String {
-      let mut out = String::with_capacity(s.len());
-      let mut chars = s.chars();
-      match_loop!(chars.next() => ch, {
-        '\\' => {
-          if let Some(next) = chars.next() {
-            out.push(next);
-          }
-        }
-        _ => out.push(ch),
-      });
-      out
-    };
-
-    let left_star = starts_with_unescaped(pattern, "*");
-    let right_star = ends_with_unescaped(pattern, "*");
-
-    // The literal body sitting between the optional boundary stars.
-    let body = &pattern[usize::from(left_star)..pattern.len() - usize::from(right_star)];
-
-    if has_unescaped(body, "*") {
-      if !left_star && !right_star && count_unescaped(body, "*") == 1 {
-        let (star, star_len) = split_at_unescaped(body, "*").unwrap();
-        let lhs = strip_glob_escapes(&body[..star]).into();
-        let rhs = strip_glob_escapes(&body[star + star_len..]).into();
-        return Self::DoubleSided(lhs, rhs);
-      }
-      return Self::Glob(compile_glob_lenient(pattern));
-    }
-
-    let body: Rc<str> = strip_glob_escapes(body).into();
-    match (left_star, right_star) {
-      (false, false) => Self::Equal(body),
-      (true, false) => Self::EndsWith(body),
-      (false, true) => Self::StartsWith(body),
-      (true, true) => Self::Contains(body),
-    }
-  }
-  pub fn is_match(&self, text: &str) -> bool {
-    match self {
-      Pattern::Any => true,
-      Pattern::Equal(s) => text == &**s,
-      Pattern::Contains(s) => text.contains(&**s),
-      Pattern::StartsWith(s) => text.starts_with(&**s),
-      Pattern::EndsWith(s) => text.ends_with(&**s),
-      Pattern::Glob(g) => g.matches(text),
-      Pattern::DoubleSided(l, r) => {
-        // The prefix and suffix must not overlap: `ab*bc` requires at least
-        // `len("ab") + len("bc")` chars, so it can't match `abc`.
-        let len_match = text.len() >= l.len() + r.len();
-        let both_sides_match = text.starts_with(&**l) && text.ends_with(&**r);
-        len_match && both_sides_match
-      }
-    }
   }
 }
 

@@ -1,3 +1,5 @@
+use bstr::ByteSlice;
+
 use crate::opt;
 
 use super::{
@@ -29,8 +31,8 @@ impl super::Builtin for Alias {
       }
 
       if let Some(value) = value {
-        Shed::logic_mut(|l| l.insert_alias(name, value, span.clone()));
-      } else if let Some(alias) = Shed::logic(|l| l.get_alias(name)) {
+        Shed::logic_mut(|l| l.insert_alias(&name.to_str_lossy(), value, span.clone()));
+      } else if let Some(alias) = Shed::logic(|l| l.get_alias(&name.to_str_lossy())) {
         outln!("{}", display_as_var(name, alias.body()));
       } else {
         return Err(sherr!(
@@ -55,13 +57,13 @@ impl super::Builtin for Unalias {
     }
 
     for (arg, span) in args.arguments() {
-      if Shed::logic(|l| l.get_alias(arg)).is_none() {
+      if Shed::logic(|l| l.get_alias(&arg.to_str_lossy())).is_none() {
         return Err(sherr!(
           SyntaxErr @ span.clone(),
           "unalias: alias '{arg}' not found",
         ));
       }
-      Shed::logic_mut(|l| l.remove_alias(arg));
+      Shed::logic_mut(|l| l.remove_alias(&arg.to_str_lossy()));
     }
 
     with_status(0)
@@ -96,10 +98,10 @@ impl super::Builtin for ExCmd {
       let (name, value) = split_assignment_raw(arg);
 
       if !remove && let Some(value) = value {
-        Shed::logic_mut(|l| l.insert_ex_alias(name, value, span.clone()));
-      } else if let Some(alias) = Shed::logic(|l| l.get_ex_alias(name)) {
+        Shed::logic_mut(|l| l.insert_ex_alias(&name.to_str_lossy(), value, span.clone()));
+      } else if let Some(alias) = Shed::logic(|l| l.get_ex_alias(&name.to_str_lossy())) {
         if remove {
-          Shed::logic_mut(|l| l.remove_ex_alias(name));
+          Shed::logic_mut(|l| l.remove_ex_alias(&name.to_str_lossy()));
         } else {
           outln!("{}", display_as_var(name, alias.body()));
         }

@@ -1,3 +1,4 @@
+use bstr::ByteSlice;
 use nix::sys::signal::Signal;
 
 use std::{
@@ -57,7 +58,7 @@ struct AutoloadComps;
 /// trigger from `OnCommand` to `OnCompletion`. On-disk entries shadow
 /// embedded ones with the same name; that's intentional so users can
 /// override bundled scripts.
-fn collect_autoload<I>(embedded: I, env_var: &str) -> HashMap<String, AutoloadSrc>
+fn collect_autoload<I>(embedded: I, env_var: &VarStr) -> HashMap<String, AutoloadSrc>
 where
   I: Iterator<Item = std::borrow::Cow<'static, str>>,
 {
@@ -90,13 +91,13 @@ where
 
 impl AutoloadFuncs {
   pub fn get_all() -> HashMap<String, AutoloadSrc> {
-    collect_autoload(Self::iter(), "SHED_FUNC_PATH")
+    collect_autoload(Self::iter(), "SHED_FUNC_PATH".into())
   }
 }
 
 impl AutoloadComps {
   pub fn get_all() -> HashMap<String, AutoloadSrc> {
-    collect_autoload(Self::iter(), "SHED_COMPLETE_PATH")
+    collect_autoload(Self::iter(), "SHED_COMPLETE_PATH".into())
   }
 }
 
@@ -306,14 +307,13 @@ pub(crate) enum TrapTarget {
   Signal(Signal),
 }
 
-impl FromStr for TrapTarget {
-  type Err = ShErr;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s {
-      "0" | "EXIT" => Ok(TrapTarget::Exit),
-      "RETURN" => Ok(TrapTarget::Return),
-      "ERR" => Ok(TrapTarget::Error),
-      _ => Ok(TrapTarget::Signal(parse_signal(s)?)),
+impl TrapTarget {
+  fn parse(s: &VarStr) -> ShResult<Self> {
+    match s.as_bytes() {
+      b"0" | b"EXIT" => Ok(TrapTarget::Exit),
+      b"RETURN" => Ok(TrapTarget::Return),
+      b"ERR" => Ok(TrapTarget::Error),
+      _ => Ok(TrapTarget::Signal(parse_signal(&s.to_str_lossy())?)),
     }
   }
 }
@@ -428,7 +428,7 @@ impl LogTab {
     self.traps.remove(&target)
   }
   pub fn reset_caught_traps(&mut self) {
-    self.traps.retain(|_, command| command.as_str().is_empty());
+    self.traps.retain(|_, command| command.is_empty());
   }
   pub fn traps(&self) -> &HashMap<TrapTarget, VarStr> {
     &self.traps
@@ -459,10 +459,10 @@ impl LogTab {
   pub fn aliases(&self) -> &HashMap<String, ShAlias> {
     &self.aliases
   }
-  pub fn insert_alias(&mut self, name: &str, body: &str, source: Span) {
+  pub fn insert_alias(&mut self, name: &str, body: &VarStr, source: Span) {
     self
       .aliases
-      .insert(name.into(), ShAlias::new(body.into(), source));
+      .insert(name.into(), ShAlias::new(body.clone(), source));
   }
   pub fn get_alias(&self, name: &str) -> Option<ShAlias> {
     self.aliases.get(name).cloned()
@@ -471,10 +471,10 @@ impl LogTab {
     self.aliases.remove(name);
   }
 
-  pub fn insert_ex_alias(&mut self, name: &str, body: &str, source: Span) {
+  pub fn insert_ex_alias(&mut self, name: &str, body: &VarStr, source: Span) {
     self
       .ex_aliases
-      .insert(name.into(), ShAlias::new(body.into(), source));
+      .insert(name.into(), ShAlias::new(body.clone(), source));
   }
   pub fn remove_ex_alias(&mut self, name: &str) {
     self.ex_aliases.remove(name);

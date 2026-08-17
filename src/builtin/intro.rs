@@ -50,7 +50,7 @@ impl super::Builtin for Type {
       if let Some(util) = state::util::which_util(arg) {
         match util.kind() {
           UtilKind::Alias => {
-            let alias = Shed::logic(|v| v.get_alias(arg)).unwrap();
+            let alias = Shed::logic(|v| v.get_alias(&arg.to_str_lossy())).unwrap();
             let (line, col) = alias.source().line_and_col();
             let name = alias.source().source().name();
             if short {

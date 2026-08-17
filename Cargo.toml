@@ -52,6 +52,8 @@ rustc-hash = "2.1.2"
 smol_str = "0.3.6"
 itoa = "1.0.18"
 compact_str = "0.9.1"
+bstr = "1.13.1"
+hipstr = "0.8.0"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

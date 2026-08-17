@@ -117,7 +117,7 @@ pub fn split_assignment<'a>(arg: &'a VarStr, src: &str) -> (&'a str, Option<VarK
   (var, Some(assignment_value(val, src)))
 }
 
-pub fn split_assignment_raw(arg: &VarStr) -> (&str, Option<&str>) {
+pub fn split_assignment_raw(arg: &VarStr) -> (&VarStr, Option<&VarStr>) {
   let Some((e, l)) = split_at_unescaped(arg, "=") else {
     return (arg.as_str(), None);
   };
@@ -382,7 +382,7 @@ impl super::Builtin for Unset {
 
     for (arg, _) in arg_vec {
       if is_func {
-        Shed::logic_mut(|l| l.remove_func(&arg));
+        Shed::logic_mut(|l| l.remove_func(&arg.to_str_lossy()));
         continue;
       }
 

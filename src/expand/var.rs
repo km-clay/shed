@@ -11,7 +11,6 @@ use crate::{
 
 use super::{
   PARAMETERS, ShResult,
-  escape::escape_str,
   eval::lex::is_hard_sep,
   markers, match_loop,
   param::perform_param_expansion,
@@ -223,66 +222,6 @@ pub fn expand_var(chars: &mut Peekable<Chars<'_>>, allow_side_effects: bool) -> 
     }
     Ok(val.unwrap_or_default())
   }
-}
-
-pub fn restore_glob_prefix(pattern: &str, mut result: String) -> String {
-  if pattern.starts_with("./") && !result.starts_with("./") && !result.starts_with('/') {
-    result.insert_str(0, "./");
-  }
-  if pattern.ends_with('/') && !result.ends_with('/') {
-    result.push('/');
-  }
-  result
-}
-
-/// Quick structural check: only return true if the string could plausibly be a glob.
-/// A lone `[` or `]` (e.g. from `[ ... ]` test command) is not a valid pattern.
-pub(super) fn might_be_glob(s: &str) -> bool {
-  let mut open_bracket = false;
-  let mut close_bracket = false;
-  for b in s.bytes() {
-    match b {
-      b'*' | b'?' => return true,
-      b'[' => open_bracket = true,
-      b']' => close_bracket = true,
-      _ => {}
-    }
-  }
-  open_bracket && close_bracket
-}
-
-pub fn expand_glob(raw: &str) -> ShResult<Vec<String>> {
-  let mut words = vec![];
-
-  if !might_be_glob(raw) || shopt!(set.noglob) {
-    return Ok(vec![raw.to_string()]);
-  }
-  let escaped = super::escape_glob(raw, true);
-
-  let final_component = raw.rsplit('/').next().unwrap_or(raw);
-  let explicit_leading_dot = final_component.starts_with('.');
-  let opts = glob::MatchOptions {
-    require_literal_leading_dot: !(shopt!(core.dotglob) || explicit_leading_dot),
-    ..Default::default()
-  };
-  for entry in
-    glob::glob_with(&escaped, opts).map_err(|_| sherr!(SyntaxErr, "Invalid glob pattern"))?
-  {
-    let entry = entry.map_err(|_| sherr!(SyntaxErr, "Invalid filename found in glob"))?;
-    // Never let a pattern (e.g. `.*`) expand to the `.` or `..` directory
-    // entries. `Path::file_name` returns `None` for a path whose final
-    // component is `.`/`..`, which is exactly what we want to drop.
-    if entry.file_name().is_none() {
-      continue;
-    }
-    let entry_raw = entry
-      .to_str()
-      .ok_or_else(|| sherr!(SyntaxErr, "Non-UTF8 filename found in glob"))?;
-    let escaped = escape_str(entry_raw, true);
-
-    words.push(escaped);
-  }
-  Ok(words)
 }
 
 #[cfg(test)]

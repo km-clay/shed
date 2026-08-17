@@ -2,6 +2,7 @@ mod alias;
 mod arithmetic;
 mod brace;
 mod escape;
+mod glob;
 pub(super) mod markers;
 mod param;
 mod prompt;
@@ -17,9 +18,10 @@ pub(super) use escape::{
   escape_glob, escape_str, expand_ansi_c, shell_quote, shell_quote_fmt, unescape_heredoc,
   unescape_prompt, unescape_str, xtrace_quote,
 };
+pub(super) use glob::{Pattern, expand_glob, replace_posix_classes};
 pub(super) use prompt::expand_prompt;
 pub(super) use util::{expand_case_pattern, glob_to_regex};
-pub(super) use var::{expand_glob, expand_raw, expand_raw_inner};
+pub(super) use var::{expand_raw, expand_raw_inner};
 
 use crate::{
   state::vars::{VarStr, VarStrSliceExt},
@@ -216,7 +218,7 @@ impl Expander {
     let mut glob_words: Vec<VarStr> = Vec::with_capacity(words.len());
 
     for mut word in words {
-      if !var::might_be_glob(&word) {
+      if !glob::might_be_glob(&word) {
         escape::strip_escape_markers(&mut word);
         glob_words.push(word);
         continue;
@@ -233,7 +235,7 @@ impl Expander {
       }
 
       for exp in expansions {
-        let mut exp = var::restore_glob_prefix(&word, exp).into();
+        let mut exp = glob::restore_glob_prefix(&word, exp).into();
         escape::strip_escape_markers(&mut exp);
         glob_words.push(exp);
       }

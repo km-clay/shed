@@ -1,8 +1,8 @@
 use regex::Regex;
 
-use crate::util::replace_posix_classes;
-
-use super::{ShResult, escape::unescape_str, markers, match_loop, var::expand_raw};
+use super::{
+  ShResult, escape::unescape_str, markers, match_loop, replace_posix_classes, var::expand_raw,
+};
 
 /// Expand a case pattern: performs variable/command expansion while preserving
 /// glob metacharacters that were inside quotes as literals (by backslash-escaping them).

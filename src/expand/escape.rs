@@ -4,6 +4,7 @@ use std::ops::Range;
 use std::str::Chars;
 
 use bitflags::bitflags;
+use bstr::ByteSlice;
 
 use crate::{eval::lex, state::vars::VarStr, util};
 
@@ -39,11 +40,12 @@ impl ExpandFlags {
 
 /// Strip ESCAPE markers from a string, leaving the characters they protect intact.
 pub(super) fn strip_escape_markers(s: &mut VarStr) {
-  if !s.contains(markers::ESCAPE) {
+  let s_str = s.to_str_lossy();
+  if !s_str.contains(markers::ESCAPE) {
     return;
   }
 
-  *s = s.replace(markers::ESCAPE, "").into();
+  *s = s_str.replace(markers::ESCAPE, "").into();
 }
 
 /// Strip ESCAPE markers from a string, leaving the characters they protect intact.
@@ -866,12 +868,12 @@ pub fn shell_quote_fmt<W: std::fmt::Write>(s: &str, f: &mut W) -> std::fmt::Resu
 }
 
 /// Quotes a string such that it can be round-tripped as shell syntax
-pub fn shell_quote<S: AsRef<str>>(s: S) -> String {
+pub fn shell_quote(s: &str) -> String {
   quote(s, shell_quote_fmt)
 }
 
 /// Quotes an xtrace argument
-pub fn xtrace_quote<S: AsRef<str>>(s: S) -> String {
+pub fn xtrace_quote(s: &str) -> String {
   quote(s, xtrace_quote_fmt)
 }
 

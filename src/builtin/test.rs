@@ -1,10 +1,7 @@
 use std::{collections::VecDeque, fs::metadata, os::fd::BorrowedFd, path::PathBuf, str::FromStr};
 
 use crate::{
-  eval::lex::Tk,
-  procio,
-  state::vars::VarStr,
-  util::{ShResultExt, replace_posix_classes},
+  eval::lex::Tk, expand::replace_posix_classes, procio, state::vars::VarStr, util::ShResultExt,
 };
 
 use super::{
