@@ -1,3 +1,4 @@
+use bstr::ByteSlice;
 use smallvec::SmallVec;
 
 use crate::{state::vars::VarStr, util::QuoteState};
@@ -15,28 +16,30 @@ impl SegStream {
   /// bytes never contain these sequences, so this is a no-op for them.
   fn from_value_bytes(bytes: &[u8]) -> Self {
     let mut out = SegStream::new();
-    let mut i = 0;
-    let mut start = 0;
+    let mut rest = bytes;
 
-    while i < bytes.len() {
-      // the markers are \xEF\xB7\x96 (ARG_SEP) and \xEF\xB7\x95 (NULL_EXPAND)
-      if i + 3 <= bytes.len() && bytes[i] == 0xEF && bytes[i + 1] == 0xB7 {
-        let marker = match bytes[i + 2] {
+    // The markers are \xEF\xB7\x96 (ARG_SEP) and \xEF\xB7\x95 (NULL_EXPAND), so
+    // \xEF is the only lead byte worth looking at.
+    while let Some(ef) = rest.find_byte(0xEF) {
+      let marker = (ef + 3 <= rest.len() && rest[ef + 1] == 0xB7)
+        .then(|| match rest[ef + 2] {
           0x96 => Some(Marker::ArgSep),
           0x95 => Some(Marker::NullExpand),
           _ => None,
-        };
-        if let Some(marker) = marker {
-          out.push_bytes(&bytes[start..i]);
-          out.push_marker(marker);
-          i += 3;
-          start = i;
-          continue;
-        }
+        })
+        .flatten();
+
+      if let Some(marker) = marker {
+        out.push_bytes(&rest[..ef]);
+        out.push_marker(marker);
+        rest = &rest[ef + 3..];
+      } else {
+        // A \xEF that isn't a marker: emit up to and including it, keep scanning.
+        out.push_bytes(&rest[..=ef]);
+        rest = &rest[ef + 1..];
       }
-      i += 1;
     }
-    out.push_bytes(&bytes[start..]);
+    out.push_bytes(rest);
     out
   }
 }

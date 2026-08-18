@@ -77,7 +77,20 @@ pub struct SpanSource {
   content: Rc<str>,
 }
 
+thread_local! {
+  /// Cached default source name, so `Span::new`
+  /// doesn't re-allocate `"<stdin>"` on every call.
+  static STDIN_NAME: Rc<str> = Rc::from("<stdin>");
+}
+
+fn stdin_name() -> Rc<str> {
+  STDIN_NAME.with(Rc::clone)
+}
+
 impl SpanSource {
+  pub fn new(name: Rc<str>, content: Rc<str>) -> Self {
+    Self { name, content }
+  }
   pub fn name(&self) -> &str {
     &self.name
   }
@@ -93,23 +106,31 @@ impl Display for SpanSource {
   }
 }
 
-#[derive(Clone, PartialEq, Default, Debug)]
 /// A slice of some source text. Ultimately wraps an `Rc<str>`, which means these are cheap to clone.
 ///
 /// Load-bearing struct. Used extensively throughout the codebase for slicing shell input for various reasons (error reporting, tab completion, etc)
+#[derive(Clone, PartialEq, Default, Debug)]
 pub(crate) struct Span {
   range: Range<usize>,
   pos: Pos,
-  source: SpanSource,
+  source: Rc<SpanSource>,
 }
 
 impl Span {
   /// New `Span`. Wraps a range and a string that it refers to.
-  pub fn new(range: Range<usize>, source: Rc<str>) -> Self {
-    let source = SpanSource {
-      name: "<stdin>".into(),
-      content: source,
-    };
+  pub fn new(range: Range<usize>, content: Rc<str>) -> Self {
+    Span {
+      range,
+      pos: Pos::MIN,
+      source: Rc::new(SpanSource {
+        name: stdin_name(),
+        content,
+      }),
+    }
+  }
+  /// Like `new`, but reuses an already-built, shared `Rc<SpanSource>` — no
+  /// allocation and no per-token rename.
+  pub fn with_source(range: Range<usize>, source: Rc<SpanSource>) -> Self {
     Span {
       range,
       pos: Pos::MIN,
@@ -146,7 +167,10 @@ impl Span {
     self
   }
   pub fn rename(&mut self, name: Rc<str>) {
-    self.source.name = name;
+    // Fork this span's shared source (copy-on-write) so renaming it — e.g. to
+    // attribute a function body to its name for error blame — doesn't rename
+    // every other span sharing the source.
+    Rc::make_mut(&mut self.source).name = name;
   }
   pub fn line_and_col(&self) -> (usize, usize) {
     (self.pos.row, self.pos.col)
@@ -159,7 +183,7 @@ impl Span {
     self.source.content.clone()
   }
   pub fn span_source(&self) -> &SpanSource {
-    &self.source
+    self.source.as_ref()
   }
   pub fn range(&self) -> Range<usize> {
     self.range.clone()
@@ -544,6 +568,7 @@ pub fn clean_input(input: &str) -> String {
 /// The first and last lexed token will be an empty token with class `TkRule::Soi` and `TkRule::Eoi` respectively. These tokens must be handled specially if you are using the lexer for internal stuff like the cases mentioned above.
 pub(crate) struct LexStream {
   source: Rc<str>,
+  span_source: Rc<SpanSource>,
   pub cursor: usize,
   pos_offset: usize,
   pos: Pos,
@@ -561,10 +586,13 @@ pub(crate) struct LexStream {
 impl LexStream {
   pub fn new(source: Rc<str>, flags: LexFlags) -> Self {
     let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
+    let name: Rc<str> = "<stdin>".into();
+    let span_source = Rc::new(SpanSource::new(name.clone(), source.clone()));
     Self {
       flags,
       source,
-      name: "<stdin>".into(),
+      span_source,
+      name,
       cursor: 0,
       pos_offset: 0,
       pos: Pos::new(0, 0),
@@ -600,6 +628,7 @@ impl LexStream {
     self.source.get(start..end)
   }
   pub fn with_name(mut self, name: Rc<str>) -> Self {
+    self.span_source = Rc::new(SpanSource::new(name.clone(), self.source.clone()));
     self.name = name;
     self
   }
@@ -1414,11 +1443,10 @@ impl LexStream {
   }
   pub fn get_span(&mut self, range: Range<usize>) -> Span {
     self.update_pos();
-    Span::new(range, self.source.clone()).at(self.pos)
+    Span::with_source(range, self.span_source.clone()).at(self.pos)
   }
   pub fn get_token(&mut self, range: Range<usize>, class: TkRule) -> Tk {
-    let mut span = self.get_span(range);
-    span.rename(self.name.clone());
+    let span = self.get_span(range);
     Tk::new(class, span)
   }
 }

@@ -185,6 +185,27 @@ fn bare_dollar_before_space() {
   assert_eq!(out, "$ foo\n");
 }
 
+// ===================== Parameter-expansion globs cross newlines =====================
+//
+// A shell `*`/`?` matches any character *including* newlines, so patterns must
+// span multiple lines (`${status%%$'\n'*}` extracting the first line, etc.).
+// Regression: the glob->regex conversion left `.` excluding `\n`.
+
+#[test]
+fn param_glob_star_crosses_newlines() {
+  let guard = TestGuard::new();
+  // `${x#*Y}` must strip through the Y even though a newline sits before it.
+  test_input("x=$(printf 'a\\nY\\nb'); printf '[%s]' \"${x#*Y}\"").unwrap();
+  assert_eq!(guard.read_output(), "[\nb]");
+}
+
+#[test]
+fn param_first_line_extraction() {
+  let guard = TestGuard::new();
+  test_input("x=$(printf 'one\\ntwo\\nthree'); printf '%s' \"${x%%$'\\n'*}\"").unwrap();
+  assert_eq!(guard.read_output(), "one");
+}
+
 // ===================== Byte transparency =====================
 //
 // The expansion pipeline is byte-native: arbitrary non-UTF-8 bytes must pass
