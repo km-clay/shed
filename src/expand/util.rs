@@ -79,8 +79,12 @@ pub fn glob_to_regex_pattern(glob: &str, anchored: bool) -> String {
 }
 
 pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
+  use regex::RegexBuilder;
   let pattern = glob_to_regex_pattern(glob, anchored);
-  Regex::new(&pattern).unwrap_or_else(|_| Regex::new(&regex::escape(glob)).unwrap())
+  RegexBuilder::new(&pattern)
+    .dot_matches_new_line(true)
+    .build()
+    .unwrap_or_else(|_| Regex::new(&regex::escape(glob)).unwrap())
 }
 
 /// Like `glob_to_regex` but allows non-utf8 patterns
@@ -89,10 +93,12 @@ pub fn glob_to_regex_bytes(glob: &str, anchored: bool) -> regex::bytes::Regex {
   let pattern = glob_to_regex_pattern(glob, anchored);
   RegexBuilder::new(&pattern)
     .unicode(false)
+    .dot_matches_new_line(true)
     .build()
     .unwrap_or_else(|_| {
       RegexBuilder::new(&regex::escape(glob))
         .unicode(false)
+        .dot_matches_new_line(true)
         .build()
         .unwrap()
     })
