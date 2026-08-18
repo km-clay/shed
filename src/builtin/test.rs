@@ -261,8 +261,8 @@ impl<'a> ArgvParser<'a> {
     }
   }
 
-  fn peek(&self) -> Option<&str> {
-    self.argv.get(self.pos).and_then(|s| s.0.to_str())
+  fn peek(&self) -> Option<std::borrow::Cow<'_, str>> {
+    self.argv.get(self.pos).map(|s| s.0.to_str_lossy())
   }
 
   fn advance(&mut self) {
@@ -271,7 +271,7 @@ impl<'a> ArgvParser<'a> {
 
   fn parse_or(&mut self, eval: bool) -> ShResult<bool> {
     let mut left = self.parse_and(eval)?;
-    while matches!(self.peek(), Some("-o" | "||")) {
+    while matches!(self.peek().as_deref(), Some("-o" | "||")) {
       self.advance();
       let right = self.parse_and(eval && !left)?;
       left = left || right;
@@ -281,7 +281,7 @@ impl<'a> ArgvParser<'a> {
 
   fn parse_and(&mut self, eval: bool) -> ShResult<bool> {
     let mut left = self.parse_not(eval)?;
-    while matches!(self.peek(), Some("-a" | "&&")) {
+    while matches!(self.peek().as_deref(), Some("-a" | "&&")) {
       self.advance();
       let right = self.parse_not(eval && left)?;
       left = left && right;
@@ -290,7 +290,7 @@ impl<'a> ArgvParser<'a> {
   }
 
   fn parse_not(&mut self, eval: bool) -> ShResult<bool> {
-    if self.peek() == Some("!") {
+    if self.peek().as_deref() == Some("!") {
       self.advance();
       Ok(!self.parse_not(eval)?)
     } else {
@@ -299,10 +299,10 @@ impl<'a> ArgvParser<'a> {
   }
 
   fn parse_primary(&mut self, eval: bool) -> ShResult<bool> {
-    if self.peek() == Some("(") {
+    if self.peek().as_deref() == Some("(") {
       self.advance();
       let inner = self.parse_or(eval)?;
-      if self.peek() != Some(")") {
+      if self.peek().as_deref() != Some(")") {
         return Err(sherr!(SyntaxErr, "test: expected ')' to close group"));
       }
       self.advance();
@@ -311,7 +311,7 @@ impl<'a> ArgvParser<'a> {
 
     let start = self.pos;
     while let Some(tok) = self.peek() {
-      if STOP_TOKENS.contains(&tok) {
+      if STOP_TOKENS.contains(&tok.as_ref()) {
         // if this is true, this token refers to the right hand side of a test
         // and is therefore literal.
         let is_rhs = self.pos - start == 2
