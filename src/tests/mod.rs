@@ -289,6 +289,38 @@ fn arrops_pop_emits_raw_bytes() {
 }
 
 #[test]
+fn param_prefix_removal_preserves_non_utf8() {
+  // Regression (ultrareview bug_005): `${x#pat}` sliced a lossy view, so a raw
+  // byte became U+FFFD. It must trim on the byte value.
+  let guard = TestGuard::new();
+  test_input("x=$(printf 'a\\377b'); printf '%s' \"${x#a}\"").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"\xffb");
+}
+
+#[test]
+fn param_suffix_removal_preserves_non_utf8() {
+  let guard = TestGuard::new();
+  test_input("x=$(printf 'a\\377b'); printf '%s' \"${x%b}\"").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"a\xff");
+}
+
+#[test]
+fn param_replace_preserves_non_utf8() {
+  let guard = TestGuard::new();
+  test_input("x=$(printf 'a\\377b'); printf '%s' \"${x/a/Z}\"").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"Z\xffb");
+}
+
+#[test]
+fn test_command_non_utf8_operand_is_nonempty() {
+  // Regression (ultrareview bug_003): a non-UTF-8 operand made the argv parser
+  // treat it as end-of-input, truncating the leaf and mis-evaluating.
+  let guard = TestGuard::new();
+  test_input("x=$(printf 'a\\377b'); [ \"$x\" ]; printf '%d' \"$?\"").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"0");
+}
+
+#[test]
 fn unquote_dollar_quote_preserves_non_utf8() {
   // Regression: `unquote` used to `from_utf8_lossy` the `$'...'` expansion,
   // mangling raw bytes. It must now emit them verbatim.

@@ -746,14 +746,19 @@ fn strip_trailing_zeros(s: &[u8]) -> Vec<u8> {
     let (mantissa, exp) = s.split_at(epos);
 
     let trimmed = if mantissa.contains(&b'.') {
-      mantissa.trim_end_with(|c| c == '0' || c == '.')
+      // strip fractional zeros first (stops at the dot), then the dangling dot.
+      mantissa
+        .trim_end_with(|c| c == '0')
+        .trim_end_with(|c| c == '.')
     } else {
       mantissa
     };
 
     [trimmed, exp].concat()
   } else if s.contains(&b'.') {
-    s.trim_end_with(|c| c == '0' || c == '.').to_vec()
+    s.trim_end_with(|c| c == '0')
+      .trim_end_with(|c| c == '.')
+      .to_vec()
   } else {
     s.to_vec()
   }
@@ -1003,6 +1008,22 @@ mod tests {
     let guard = TestGuard::new();
     test_input(r"printf '%f' 3.14").unwrap();
     assert_eq!(guard.read_output(), "3.140000");
+  }
+
+  #[test]
+  fn printf_g_keeps_integer_zeros() {
+    // Regression (ultrareview bug_002): strip_trailing_zeros walked past the
+    // decimal point and ate integer-part zeros (`100.0` -> `1`).
+    let guard = TestGuard::new();
+    test_input(r"printf '%g %g %.4g %.5g' 100.0 10.0 10.0 200.0").unwrap();
+    assert_eq!(guard.read_output(), "100 10 10 200");
+  }
+
+  #[test]
+  fn printf_g_still_strips_fractional_zeros() {
+    let guard = TestGuard::new();
+    test_input(r"printf '%g' 1.5000").unwrap();
+    assert_eq!(guard.read_output(), "1.5");
   }
 
   #[test]
