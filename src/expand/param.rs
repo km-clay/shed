@@ -1,7 +1,7 @@
 use crate::eval::lex::TkFlags;
 use crate::expand::Expander;
 use crate::expand::stream::{Marker, SegStream, Unit};
-use crate::expand::util::glob_to_regex;
+use crate::expand::util::glob_to_regex_bytes;
 use crate::expand::var::expand_raw_inner;
 use crate::state::vars::VarStr;
 use crate::state::{
@@ -9,7 +9,7 @@ use crate::state::{
   vars::VarName,
 };
 use crate::util::ShResult;
-use crate::{match_loop, util, varstr};
+use crate::{match_loop, util};
 use crate::{sherr, shopt, var};
 
 #[derive(Debug)]
@@ -517,148 +517,141 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
       }
       ParamExp::RemShortestPrefix(prefix) => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
+        let value = value.as_bytes();
         let expanded = Expander::from_raw_no_brace_pattern(prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex(&expanded.to_str_lossy(), true);
-        for i in (0..=value.len()).filter(|&i| value.is_char_boundary(i)) {
-          let sliced = &value[..i];
-          if pattern.is_match(sliced) {
-            return Ok(value[i..].into());
+        let pattern = glob_to_regex_bytes(&expanded.to_str_lossy(), true);
+        for i in 0..=value.len() {
+          if pattern.is_match(&value[..i]) {
+            return Ok(VarStr::from(&value[i..]).into());
           }
         }
-        Ok(value.into())
+        Ok(VarStr::from(value).into())
       }
       ParamExp::RemLongestPrefix(prefix) => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
+        let value = value.as_bytes();
         let expanded = Expander::from_raw_no_brace_pattern(prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex(&expanded.to_str_lossy(), true);
-        for i in (0..=value.len())
-          .rev()
-          .filter(|&i| value.is_char_boundary(i))
-        {
-          let sliced = &value[..i];
-          if pattern.is_match(sliced) {
-            return Ok(value[i..].into());
+        let pattern = glob_to_regex_bytes(&expanded.to_str_lossy(), true);
+        for i in (0..=value.len()).rev() {
+          if pattern.is_match(&value[..i]) {
+            return Ok(VarStr::from(&value[i..]).into());
           }
         }
-        Ok(value.into()) // no match
+        Ok(VarStr::from(value).into()) // no match
       }
       ParamExp::RemShortestSuffix(suffix) => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
+        let value = value.as_bytes();
         let expanded = Expander::from_raw_no_brace_pattern(suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex(&expanded.to_str_lossy(), true);
-        for i in (0..=value.len())
-          .rev()
-          .filter(|&i| value.is_char_boundary(i))
-        {
-          let sliced = &value[i..];
-          if pattern.is_match(sliced) {
-            return Ok(value[..i].into());
+        let pattern = glob_to_regex_bytes(&expanded.to_str_lossy(), true);
+        for i in (0..=value.len()).rev() {
+          if pattern.is_match(&value[i..]) {
+            return Ok(VarStr::from(&value[..i]).into());
           }
         }
-        Ok(value.into())
+        Ok(VarStr::from(value).into())
       }
       ParamExp::RemLongestSuffix(suffix) => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
+        let value = value.as_bytes();
         let expanded_suffix = Expander::from_raw_no_brace_pattern(suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex(&expanded_suffix.to_str_lossy(), true);
-        for i in (0..=value.len()).filter(|&i| value.is_char_boundary(i)) {
-          let sliced = &value[i..];
-          if pattern.is_match(sliced) {
-            return Ok(value[..i].into());
+        let pattern = glob_to_regex_bytes(&expanded_suffix.to_str_lossy(), true);
+        for i in 0..=value.len() {
+          if pattern.is_match(&value[i..]) {
+            return Ok(VarStr::from(&value[..i]).into());
           }
         }
-        Ok(value.into())
+        Ok(VarStr::from(value).into())
       }
       ParamExp::ReplaceFirstMatch(search, replace) => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
+        let value = value.as_bytes();
         let expanded_search = Expander::from_raw_pattern(search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let regex = glob_to_regex(&expanded_search.to_str_lossy(), false); // unanchored pattern
+        let regex = glob_to_regex_bytes(&expanded_search.to_str_lossy(), false); // unanchored
 
-        if let Some(mat) = regex.find(&value) {
-          let before = &value[..mat.start()];
-          let after = &value[mat.end()..];
-          let result = varstr!("{before}{expanded_replace}{after}");
-          Ok(result.into())
+        if let Some(mat) = regex.find(value) {
+          let mut result = Vec::with_capacity(value.len());
+          result.extend_from_slice(&value[..mat.start()]);
+          result.extend_from_slice(expanded_replace.as_bytes());
+          result.extend_from_slice(&value[mat.end()..]);
+          Ok(VarStr::from(result).into())
         } else {
-          Ok(value.into())
+          Ok(VarStr::from(value).into())
         }
       }
       ParamExp::ReplaceAllMatches(search, replace) => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
+        let value = value.as_bytes();
         let expanded_search = Expander::from_raw_pattern(search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let regex = glob_to_regex(&expanded_search.to_str_lossy(), false);
-        let mut result = String::new();
+        let regex = glob_to_regex_bytes(&expanded_search.to_str_lossy(), false);
+        let mut result: Vec<u8> = Vec::new();
         let mut last_match_end = 0;
 
-        for mat in regex.find_iter(&value) {
-          result.push_str(&value[last_match_end..mat.start()]);
-          result.push_str(&expanded_replace.to_str_lossy());
+        for mat in regex.find_iter(value) {
+          result.extend_from_slice(&value[last_match_end..mat.start()]);
+          result.extend_from_slice(expanded_replace.as_bytes());
           last_match_end = mat.end();
         }
 
         // Append the rest of the string
-        result.push_str(&value[last_match_end..]);
-        Ok(result.into())
+        result.extend_from_slice(&value[last_match_end..]);
+        Ok(VarStr::from(result).into())
       }
       ParamExp::ReplacePrefix(search, replace) => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
+        let value = value.as_bytes();
         let expanded_search = Expander::from_raw_pattern(search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let pattern = glob_to_regex(&expanded_search.to_str_lossy(), true);
+        let pattern = glob_to_regex_bytes(&expanded_search.to_str_lossy(), true);
         for i in (0..=value.len()).rev() {
-          let sliced = &value[..i];
-          if pattern.is_match(sliced) {
-            return Ok(varstr!("{}{}", expanded_replace, &value[i..]).into());
+          if pattern.is_match(&value[..i]) {
+            let mut result = expanded_replace.as_bytes().to_vec();
+            result.extend_from_slice(&value[i..]);
+            return Ok(VarStr::from(result).into());
           }
         }
-        Ok(value.into())
+        Ok(VarStr::from(value).into())
       }
       ParamExp::ReplaceSuffix(search, replace) => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
+        let value = value.as_bytes();
         let expanded_search = Expander::from_raw_pattern(search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let pattern = glob_to_regex(&expanded_search.to_str_lossy(), true);
+        let pattern = glob_to_regex_bytes(&expanded_search.to_str_lossy(), true);
         for i in (0..=value.len()).rev() {
-          let sliced = &value[i..];
-          if pattern.is_match(sliced) {
-            return Ok(varstr!("{}{}", &value[..i], expanded_replace).into());
+          if pattern.is_match(&value[i..]) {
+            let mut result = value[..i].to_vec();
+            result.extend_from_slice(expanded_replace.as_bytes());
+            return Ok(VarStr::from(result).into());
           }
         }
-        Ok(value.into())
+        Ok(VarStr::from(value).into())
       }
       ParamExp::VarNamesWithPrefix(prefix) => {
         let flat = Shed::vars(ScopeStack::flatten_vars);

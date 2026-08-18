@@ -60,11 +60,13 @@ pub fn is_var_name_ch(ch: char) -> bool {
   )
 }
 
-pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
+/// Build the regex pattern string for a glob (shared by the `str` and byte
+/// matchers). `anchored` keeps fnmatch's `^...$`; otherwise they're stripped.
+fn glob_to_regex_pattern(glob: &str, anchored: bool) -> String {
   let glob = &replace_posix_classes(glob);
   // fnmatch_regex always produces ^...$, so get the pattern string and strip if unanchored
   let pattern = fnmatch_regex::glob_to_regex_pattern(glob).unwrap_or_else(|_| regex::escape(glob));
-  let pattern = if anchored {
+  if anchored {
     pattern
   } else {
     pattern
@@ -73,8 +75,27 @@ pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
       .strip_suffix('$')
       .unwrap_or(&pattern)
       .to_string()
-  };
+  }
+}
+
+pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
+  let pattern = glob_to_regex_pattern(glob, anchored);
   Regex::new(&pattern).unwrap_or_else(|_| Regex::new(&regex::escape(glob)).unwrap())
+}
+
+/// Like `glob_to_regex` but allows non-utf8 patterns
+pub fn glob_to_regex_bytes(glob: &str, anchored: bool) -> regex::bytes::Regex {
+  use regex::bytes::RegexBuilder;
+  let pattern = glob_to_regex_pattern(glob, anchored);
+  RegexBuilder::new(&pattern)
+    .unicode(false)
+    .build()
+    .unwrap_or_else(|_| {
+      RegexBuilder::new(&regex::escape(glob))
+        .unicode(false)
+        .build()
+        .unwrap()
+    })
 }
 
 #[cfg(test)]
