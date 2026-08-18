@@ -1,7 +1,6 @@
 use crate::eval::lex::TkFlags;
 use crate::expand::Expander;
 use crate::expand::stream::{Marker, SegStream, Unit};
-use crate::expand::util::glob_to_regex_bytes;
 use crate::expand::var::expand_raw_inner;
 use crate::state::vars::VarStr;
 use crate::state::{
@@ -521,7 +520,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded = Expander::from_raw_no_brace_pattern(prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex_bytes(&expanded.to_str_lossy(), true);
+        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded.to_str_lossy(), true));
         for i in 0..=value.len() {
           if pattern.is_match(&value[..i]) {
             return Ok(VarStr::from(&value[i..]).into());
@@ -535,7 +534,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded = Expander::from_raw_no_brace_pattern(prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex_bytes(&expanded.to_str_lossy(), true);
+        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded.to_str_lossy(), true));
         for i in (0..=value.len()).rev() {
           if pattern.is_match(&value[..i]) {
             return Ok(VarStr::from(&value[i..]).into());
@@ -549,7 +548,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded = Expander::from_raw_no_brace_pattern(suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex_bytes(&expanded.to_str_lossy(), true);
+        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded.to_str_lossy(), true));
         for i in (0..=value.len()).rev() {
           if pattern.is_match(&value[i..]) {
             return Ok(VarStr::from(&value[..i]).into());
@@ -563,7 +562,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_suffix = Expander::from_raw_no_brace_pattern(suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = glob_to_regex_bytes(&expanded_suffix.to_str_lossy(), true);
+        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded_suffix.to_str_lossy(), true));
         for i in 0..=value.len() {
           if pattern.is_match(&value[i..]) {
             return Ok(VarStr::from(&value[..i]).into());
@@ -580,7 +579,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let regex = glob_to_regex_bytes(&expanded_search.to_str_lossy(), false); // unanchored
+        let regex = Shed::meta_mut(|m| m.get_byte_regex(&expanded_search.to_str_lossy(), false)); // unanchored
 
         if let Some(mat) = regex.find(value) {
           let mut result = Vec::with_capacity(value.len());
@@ -601,7 +600,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let regex = glob_to_regex_bytes(&expanded_search.to_str_lossy(), false);
+        let regex = Shed::meta_mut(|m| m.get_byte_regex(&expanded_search.to_str_lossy(), false));
         let mut result: Vec<u8> = Vec::new();
         let mut last_match_end = 0;
 
@@ -624,7 +623,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let pattern = glob_to_regex_bytes(&expanded_search.to_str_lossy(), true);
+        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded_search.to_str_lossy(), true));
         for i in (0..=value.len()).rev() {
           if pattern.is_match(&value[..i]) {
             let mut result = expanded_replace.as_bytes().to_vec();
@@ -643,7 +642,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let pattern = glob_to_regex_bytes(&expanded_search.to_str_lossy(), true);
+        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded_search.to_str_lossy(), true));
         for i in (0..=value.len()).rev() {
           if pattern.is_match(&value[i..]) {
             let mut result = value[..i].to_vec();

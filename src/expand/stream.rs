@@ -16,25 +16,27 @@ impl SegStream {
   fn from_value_bytes(bytes: &[u8]) -> Self {
     let mut out = SegStream::new();
     let mut i = 0;
+    let mut start = 0;
+
     while i < bytes.len() {
+      // the markers are \xEF\xB7\x96 (ARG_SEP) and \xEF\xB7\x95 (NULL_EXPAND)
       if i + 3 <= bytes.len() && bytes[i] == 0xEF && bytes[i + 1] == 0xB7 {
-        match bytes[i + 2] {
-          0x96 => {
-            out.push_marker(Marker::ArgSep);
-            i += 3;
-            continue;
-          }
-          0x95 => {
-            out.push_marker(Marker::NullExpand);
-            i += 3;
-            continue;
-          }
-          _ => {}
+        let marker = match bytes[i + 2] {
+          0x96 => Some(Marker::ArgSep),
+          0x95 => Some(Marker::NullExpand),
+          _ => None,
+        };
+        if let Some(marker) = marker {
+          out.push_bytes(&bytes[start..i]);
+          out.push_marker(marker);
+          i += 3;
+          start = i;
+          continue;
         }
       }
-      out.push_byte(bytes[i]);
       i += 1;
     }
+    out.push_bytes(&bytes[start..]);
     out
   }
 }
@@ -105,7 +107,7 @@ impl SegStream {
     }
     match self.0.last_mut() {
       Some(StreamSeg::Bytes(last)) => last.extend_from_slice(bytes),
-      _ => self.0.push(StreamSeg::Bytes(bytes.into())),
+      _ => self.0.push(StreamSeg::Bytes(SmallVec::from_slice(bytes))),
     }
   }
   pub fn push_marker(&mut self, marker: Marker) {

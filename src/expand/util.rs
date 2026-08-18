@@ -62,7 +62,7 @@ pub fn is_var_name_ch(ch: char) -> bool {
 
 /// Build the regex pattern string for a glob (shared by the `str` and byte
 /// matchers). `anchored` keeps fnmatch's `^...$`; otherwise they're stripped.
-fn glob_to_regex_pattern(glob: &str, anchored: bool) -> String {
+pub fn glob_to_regex_pattern(glob: &str, anchored: bool) -> String {
   let glob = &replace_posix_classes(glob);
   // fnmatch_regex always produces ^...$, so get the pattern string and strip if unanchored
   let pattern = fnmatch_regex::glob_to_regex_pattern(glob).unwrap_or_else(|_| regex::escape(glob));

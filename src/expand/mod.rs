@@ -21,7 +21,7 @@ pub(super) use escape::{
 };
 pub(super) use glob::{Pattern, expand_glob, replace_posix_classes};
 pub(super) use prompt::expand_prompt;
-pub(super) use util::{expand_case_pattern, glob_to_regex};
+pub(super) use util::{expand_case_pattern, glob_to_regex, glob_to_regex_bytes};
 pub(super) use var::{expand_raw, expand_raw_inner};
 
 use crate::state::vars::{VarStr, VarStrSliceExt};

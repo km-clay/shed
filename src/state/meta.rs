@@ -8,7 +8,11 @@ use std::{
   time::{Duration, Instant},
 };
 
-use crate::{HashMap, expand::Pattern, state::vars::VarStr};
+use crate::{
+  HashMap,
+  expand::{Pattern, glob_to_regex_bytes},
+  state::vars::VarStr,
+};
 
 use super::{
   ShResult, Shed, autocmd, crate_util as util,
@@ -31,7 +35,7 @@ use nix::{
     time::TimeVal,
   },
 };
-use regex::Regex;
+use regex::{Regex, bytes};
 
 #[derive(Debug)]
 pub(crate) struct CmdTimer {
@@ -475,6 +479,53 @@ impl Drop for XtraceGuard {
   }
 }
 
+#[derive(Debug, Clone, Default)]
+struct RegexCache {
+  regexes: HashMap<String, Rc<Regex>>,
+  bytes_anchored: HashMap<String, Rc<bytes::Regex>>,
+  bytes_unanchored: HashMap<String, Rc<bytes::Regex>>,
+  // Compiled glob patterns (for `case`/`[[` matching). A `Pattern`, not a
+  // regex, but cached alongside its cousins.
+  globs: HashMap<String, Pattern>,
+}
+
+impl RegexCache {
+  pub fn new() -> Self {
+    Self::default()
+  }
+  pub fn get_regex(&mut self, pat: &str) -> Result<Rc<Regex>, String> {
+    if let Some(rx) = self.regexes.get(pat) {
+      return Ok(Rc::clone(rx));
+    }
+    let rx = Rc::new(Regex::new(pat).map_err(|e| e.to_string())?);
+    self.regexes.insert(pat.to_string(), Rc::clone(&rx));
+    Ok(rx)
+  }
+  pub fn get_byte_regex(&mut self, pat: &str, anchored: bool) -> Rc<bytes::Regex> {
+    let bytes_map = if anchored {
+      &mut self.bytes_anchored
+    } else {
+      &mut self.bytes_unanchored
+    };
+    if let Some(p) = bytes_map.get(pat) {
+      return Rc::clone(p);
+    }
+    // `glob_to_regex_bytes` is infallible (it falls back to an escaped literal),
+    // so no Result here — unlike `get_regex`, which compiles a raw user regex.
+    let p = Rc::new(glob_to_regex_bytes(pat, anchored));
+    bytes_map.insert(pat.to_string(), Rc::clone(&p));
+    p
+  }
+  pub fn get_glob(&mut self, pat: &str) -> Pattern {
+    if let Some(p) = self.globs.get(pat) {
+      return p.clone();
+    }
+    let p = Pattern::compile(pat);
+    self.globs.insert(pat.to_string(), p.clone());
+    p
+  }
+}
+
 /// Miscellaneous global data storage
 #[derive(Debug)]
 #[expect(clippy::struct_excessive_bools)]
@@ -499,8 +550,11 @@ pub(crate) struct MetaTab {
   old_path: Option<VarStr>,
   // utility cache - commands, functions, aliases, etc
   path_cache: PathTable,
-  regexes: HashMap<String, Rc<Regex>>,
-  globs: HashMap<String, Pattern>,
+
+  // Regex cache
+  // Vanilla regexes
+  regexes: RegexCache,
+
   // envp cache - environment variables for execve
   envp_cache: Option<Rc<[CString]>>,
   // programmable completion specs
@@ -551,7 +605,6 @@ impl Clone for MetaTab {
       envp_cache: self.envp_cache.clone(),
       comp_add_candidates: self.comp_add_candidates.clone(),
       regexes: self.regexes.clone(),
-      globs: self.globs.clone(),
       path_cache: self.path_cache.clone(),
       comp_specs: self.comp_specs.clone(),
       pending_widget_keys: self.pending_widget_keys.clone(),
@@ -584,8 +637,7 @@ impl Default for MetaTab {
       envp_cache: None,
       procsub_stack: vec![],
       comp_add_candidates: vec![],
-      regexes: HashMap::default(),
-      globs: HashMap::default(),
+      regexes: RegexCache::new(),
       path_cache: PathTable::new(),
       comp_specs: HashMap::default(),
       pending_widget_keys: vec![],
@@ -815,20 +867,13 @@ impl MetaTab {
     self.pending_widget_keys = exp;
   }
   pub fn get_regex(&mut self, pat: &str) -> Result<Rc<Regex>, String> {
-    if let Some(rx) = self.regexes.get(pat) {
-      return Ok(Rc::clone(rx));
-    }
-    let rx = Rc::new(Regex::new(pat).map_err(|e| e.to_string())?);
-    self.regexes.insert(pat.to_string(), Rc::clone(&rx));
-    Ok(rx)
+    self.regexes.get_regex(pat)
+  }
+  pub fn get_byte_regex(&mut self, pat: &str, anchored: bool) -> Rc<bytes::Regex> {
+    self.regexes.get_byte_regex(pat, anchored)
   }
   pub fn get_glob(&mut self, pat: &str) -> Pattern {
-    if let Some(p) = self.globs.get(pat) {
-      return p.clone();
-    }
-    let p = Pattern::compile(pat);
-    self.globs.insert(pat.to_string(), p.clone());
-    p
+    self.regexes.get_glob(pat)
   }
   pub fn take_pending_widget_keys(&mut self) -> Option<Vec<KeyEvent>> {
     if self.pending_widget_keys.is_empty() {
@@ -1284,7 +1329,7 @@ mod cmd_timer_tests {
 
 #[cfg(test)]
 mod pattern_tests {
-  use super::Pattern;
+  use crate::expand::Pattern;
 
   fn matches(pat: &str, text: &str) -> bool {
     Pattern::compile(pat).is_match(text)
