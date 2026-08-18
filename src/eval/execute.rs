@@ -1,9 +1,9 @@
 use crate::{
-  autocmd,
+  autocmd, builtin,
   eval::parse::node::{LabelCtx, node_has_only_builtins},
   expand, lifecycle,
   procio::{OutputSink, SinkScope, StdinScope},
-  shopt_mut, socket,
+  shopt_mut, signal, socket,
   state::{
     Shed,
     logic::AutoloadKind,
@@ -14,7 +14,7 @@ use crate::{
 };
 use bstr::ByteSlice;
 use std::{
-  collections::VecDeque,
+  collections::{HashSet, VecDeque},
   ffi::CString,
   os::{fd::RawFd, unix::fs::PermissionsExt},
   path::Path,
@@ -1575,7 +1575,7 @@ impl Dispatcher {
     // input. It stays fatal only for a special built-in in a non-interactive
     // shell.
     let fatal = !Shed::term(Terminal::interactive)
-      && lookup_builtin(cmd_name).is_some_and(crate::builtin::Builtin::is_special);
+      && lookup_builtin(cmd_name).is_some_and(builtin::Builtin::is_special);
     let _guard = match RedirSet::from(&cmd.redirs).try_apply(fatal) {
       RedirResult::Applied(guard) => Some(guard),
       RedirResult::NoRedirs => None,
@@ -1593,6 +1593,38 @@ impl Dispatcher {
       return Ok(());
     }
 
+    let mut resolved_env = vec![];
+
+    // Resolve prefix assignments in the parent. We set them in the child later.
+    if !assignments.is_empty() {
+      let _guard = util::prefix_assign_guard(assignments);
+      if let Err(e) = Self::set_assignments(assignments, assign_behavior) {
+        Shed::set_status(1);
+        e.print_error();
+        return Ok(());
+      }
+      let mut names: HashSet<Rc<str>> = HashSet::new();
+      for a in assignments {
+        if let NdRule::Assignment { var, .. } = &a.class {
+          let raw = var.span.as_str();
+          let name: Rc<str> = state::util::parse_arr_bracket(raw)
+            .map_or_else(
+              || raw.to_string(),
+              |(base, _)| base.to_str_lossy().into_owned(),
+            )
+            .as_str()
+            .into();
+
+          if names.insert(Rc::clone(&name)) {
+            let Some(var) = Shed::vars(|v| v.try_get_var_meta(&name)) else {
+              continue;
+            };
+            resolved_env.push((name, var));
+          }
+        }
+      }
+    }
+
     if !cmd.flags.contains(NdFlags::NO_TRACE) {
       xtrace_print(&expanded);
     }
@@ -1603,15 +1635,15 @@ impl Dispatcher {
       if let Some(pgid) = pgid {
         let _ = setpgid(Pid::from_raw(0), pgid);
       }
-      if let AssignBehavior::Export = assign_behavior
-        && !assignments.is_empty()
-      {
-        Self::set_assignments(assignments, assign_behavior).ok();
+      // Apply the values resolved in the parent above (already `EXPORT`-flagged),
+      // so `get_envp` picks them up for `execve`. No expansion happens here.
+      for (name, var) in &resolved_env {
+        let _ = Shed::vars_mut(|v| v.set_var(name, var.kind().clone(), var.flags()));
       }
       let exec_args = ExecArgs::from_expanded(expanded.clone());
 
       if interactive || !no_fork {
-        crate::signal::reset_signals(fg_job);
+        signal::reset_signals(fg_job);
       }
 
       let cmd = &exec_args.cmd.0;
@@ -1719,7 +1751,7 @@ impl Dispatcher {
         } else if interactive {
           let _ = setpgid(Pid::from_raw(0), Pid::from_raw(0));
         }
-        crate::signal::reset_signals(self.fg_job);
+        signal::reset_signals(self.fg_job);
 
         if let Some(fd) = self.fork_close_fd {
           let _ = nix::unistd::close(fd);
@@ -3562,5 +3594,35 @@ mod tests {
     let guard = TestGuard::new();
     test_input("x=$(exit 7)\necho \"after=$?\"").unwrap();
     assert!(guard.read_output().contains("after=7"));
+  }
+
+  // Prefix assignments on an *external* command are resolved in the parent
+  // (not the forked exec child), so their RHS command subs run with full shell
+  // state, intra-list references work, and nothing leaks to the parent.
+
+  #[test]
+  fn prefix_assign_cmdsub_resolves_for_external() {
+    // The RHS command sub must resolve in the parent so the external command's
+    // environment gets the right value. (Pipe through `grep` so the harness
+    // captures the external `env`'s output.)
+    let g = TestGuard::new();
+    test_input("FOO=$(echo resolved) env | grep ^FOO=").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("FOO=resolved"), "got: {out:?}");
+  }
+
+  #[test]
+  fn prefix_assign_intra_reference_for_external() {
+    let g = TestGuard::new();
+    test_input("A=1 B=$A env | grep ^B=").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("B=1"), "got: {out:?}");
+  }
+
+  #[test]
+  fn prefix_assign_does_not_leak_to_parent_for_external() {
+    let guard = TestGuard::new();
+    test_input("PFXLEAK=x sh -c ':'; printf '[%s]' \"${PFXLEAK-unset}\"").unwrap();
+    assert_eq!(guard.read_output(), "[unset]");
   }
 }
