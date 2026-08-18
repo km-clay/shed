@@ -329,6 +329,10 @@ fn unquote_dollar_quote_preserves_non_utf8() {
   assert_eq!(guard.read_output_bytes(), b"a\xffb\n");
 }
 
+#[cfg_attr(
+  not(target_os = "linux"),
+  ignore = "non-UTF-8 filenames are rejected by the OS on non-Linux targets"
+)]
 #[test]
 fn cd_and_pwd_preserve_non_utf8_dir() {
   use std::os::unix::ffi::OsStrExt;

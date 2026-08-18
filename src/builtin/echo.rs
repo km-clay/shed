@@ -1,9 +1,9 @@
 use crate::{
+  procio::out_bytes,
   state::vars::{VarStr, VarStrSliceExt},
-  varstr,
 };
 
-use super::{Builtin, ShResult, expand, opt::OptSpec, out, shopt, util::ShResultExt, with_status};
+use super::{Builtin, ShResult, expand, opt::OptSpec, shopt, util::ShResultExt, with_status};
 use bitflags::bitflags;
 
 bitflags! {
@@ -66,12 +66,12 @@ impl Builtin for Echo {
       })
       .collect();
 
-    let mut joined = prepared?.join_with(" ");
+    let joined = prepared?.join_with(" ");
+    let mut bytes = joined.as_bytes().to_vec();
     if !flags.contains(EchoFlags::NO_NEWLINE) {
-      joined = varstr!("{joined}\n");
+      bytes.push(b'\n');
     }
-
-    out!("{joined}");
+    out_bytes(&bytes);
 
     with_status(0)
   }
@@ -88,6 +88,13 @@ mod tests {
     test_input("echo hello").unwrap();
     let out = guard.read_output();
     assert_eq!(out, "hello\n");
+  }
+
+  #[test]
+  fn echo_preserves_non_utf8_bytes() {
+    let guard = TestGuard::new();
+    test_input("x=$(printf 'a\\377b'); echo \"$x\"").unwrap();
+    assert_eq!(guard.read_output_bytes(), b"a\xffb\n");
   }
 
   #[test]
