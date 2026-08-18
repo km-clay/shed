@@ -1,11 +1,12 @@
 use std::collections::VecDeque;
 
+use crate::procio::outln_bytes;
 use crate::state::vars::VarStr;
 
 use super::{
   BuiltinArgs, ShResult, Shed,
   opt::OptSpec,
-  outln, sherr,
+  sherr,
   state::vars::{VarFlags, VarKind},
   util::ShResultExt,
   with_status,
@@ -108,7 +109,7 @@ trait ArrOp {
       }
     } else {
       for val in popped {
-        outln!("{val}");
+        outln_bytes(val.as_bytes());
       }
     }
 

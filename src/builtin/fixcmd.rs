@@ -1,7 +1,4 @@
-use std::{
-  fmt::Write,
-  io::{Read, Seek, Write as IoWrite},
-};
+use std::io::{Read, Seek, Write as IoWrite};
 
 use bstr::ByteSlice;
 use tempfile::NamedTempFile;
@@ -16,7 +13,7 @@ use super::{
     execute::{Dispatcher, exec_input},
     lex::{Span, Tk},
   },
-  match_loop, out,
+  match_loop,
   readline::{HistEntry, History},
   sherr,
   state::{self},
@@ -294,17 +291,17 @@ fn fc_list(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
     Shed::meta(MetaTab::current_cmd_recorded),
   )?;
 
-  let mut buf = String::new();
+  let mut buf: Vec<u8> = Vec::new();
   for (id, entry) in entries {
     let cmd = entry.command;
     if !opts.no_numbers {
       write!(buf, "{id}\t").unwrap();
     }
-    buf.push_str(&cmd.to_str_lossy());
-    buf.push('\n');
+    buf.extend_from_slice(cmd.as_bytes());
+    buf.push(b'\n');
   }
 
-  out!("{}", buf);
+  crate::procio::out_bytes(&buf);
 
   Ok(())
 }

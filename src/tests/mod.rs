@@ -184,3 +184,135 @@ fn bare_dollar_before_space() {
   let out = guard.read_output();
   assert_eq!(out, "$ foo\n");
 }
+
+// ===================== Byte transparency =====================
+//
+// The expansion pipeline is byte-native: arbitrary non-UTF-8 bytes must pass
+// through printf, command substitution, and variables without being laundered
+// into the U+FFFD replacement character, matching how bash preserves raw bytes.
+
+#[test]
+fn printf_octal_escape_emits_raw_bytes() {
+  let guard = TestGuard::new();
+  test_input("printf '\\377\\376'").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"\xff\xfe");
+}
+
+#[test]
+fn printf_backslash_b_hex_emits_raw_byte() {
+  let guard = TestGuard::new();
+  test_input("printf '%b' 'x\\xffy'").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"x\xffy");
+}
+
+#[test]
+fn printf_backslash_b_octal_emits_raw_byte() {
+  let guard = TestGuard::new();
+  test_input("printf '%b' '\\0377'").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"\xff");
+}
+
+#[test]
+fn printf_non_utf8_in_format_string() {
+  let guard = TestGuard::new();
+  test_input("printf '\\377%s\\376' hi").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"\xffhi\xfe");
+}
+
+#[test]
+fn cmd_sub_captures_raw_bytes() {
+  let guard = TestGuard::new();
+  test_input("x=$(printf '\\377'); printf '%s' \"$x\"").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"\xff");
+}
+
+#[test]
+fn cmd_sub_raw_bytes_survive_concatenation() {
+  let guard = TestGuard::new();
+  test_input("x=$(printf 'a\\377b'); printf 'pre%spost' \"$x\"").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"prea\xffbpost");
+}
+
+#[test]
+fn printf_percent_c_of_raw_byte() {
+  let guard = TestGuard::new();
+  test_input("x=$(printf '\\377'); printf '%c' \"$x\"").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"\xff");
+}
+
+// `declare -p`/`export -p`/`set` must round-trip a variable holding non-UTF-8
+// bytes as a reusable `$'...'` ANSI-C assignment, not launder it into U+FFFD.
+
+#[test]
+fn declare_p_emits_ansi_c_for_non_utf8_value() {
+  let guard = TestGuard::new();
+  test_input("x=$(printf 'a\\377b'); declare -p x").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"x=$'a\\xffb'\n");
+}
+
+#[test]
+fn export_p_emits_ansi_c_for_non_utf8_value() {
+  let guard = TestGuard::new();
+  test_input("x=$(printf 'a\\377b'); export x; export -p").unwrap();
+  let out = guard.read_output_bytes();
+  let needle = b"export x=$'a\\xffb'";
+  assert!(
+    out.windows(needle.len()).any(|w| w == needle),
+    "missing byte-native export line in: {out:?}"
+  );
+}
+
+#[test]
+fn set_dump_emits_ansi_c_for_non_utf8_value() {
+  let guard = TestGuard::new();
+  test_input("x=$(printf 'a\\377b'); set").unwrap();
+  let out = guard.read_output_bytes();
+  let needle = b"x=$'a\\xffb'";
+  assert!(
+    out.windows(needle.len()).any(|w| w == needle),
+    "missing byte-native set line in: {out:?}"
+  );
+}
+
+#[test]
+fn quote_emits_ansi_c_for_non_utf8_arg() {
+  let guard = TestGuard::new();
+  test_input("x=$(printf 'a\\377b'); quote \"$x\"").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"$'a\\xffb'\n");
+}
+
+#[test]
+fn arrops_pop_emits_raw_bytes() {
+  let guard = TestGuard::new();
+  test_input("push arr \"$(printf 'x\\377y')\"; pop arr").unwrap();
+  assert_eq!(guard.read_output_bytes(), b"x\xffy\n");
+}
+
+#[test]
+fn unquote_dollar_quote_preserves_non_utf8() {
+  // Regression: `unquote` used to `from_utf8_lossy` the `$'...'` expansion,
+  // mangling raw bytes. It must now emit them verbatim.
+  let guard = TestGuard::new();
+  test_input(r#"unquote "\$'a\377b'""#).unwrap();
+  assert_eq!(guard.read_output_bytes(), b"a\xffb\n");
+}
+
+#[test]
+fn cd_and_pwd_preserve_non_utf8_dir() {
+  use std::os::unix::ffi::OsStrExt;
+  let guard = TestGuard::new();
+  let tmp = tempfile::TempDir::new().unwrap();
+  let subdir = tmp.path().join(std::ffi::OsStr::from_bytes(b"ba\xffd"));
+  std::fs::create_dir(&subdir).unwrap();
+
+  // The tempdir prefix is UTF-8; the non-UTF-8 leaf arrives at runtime via
+  // command substitution, so the source stays valid UTF-8.
+  let base = tmp.path().display().to_string();
+  test_input(format!("cd '{base}'; cd \"$(printf 'ba\\377d')\"; pwd -P")).unwrap();
+
+  let out = guard.read_output_bytes();
+  assert!(
+    out.ends_with(b"ba\xffd\n"),
+    "pwd -P did not preserve non-UTF-8 dir bytes: {out:?}"
+  );
+}

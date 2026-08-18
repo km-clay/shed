@@ -10,7 +10,7 @@ use chrono::Utc;
 use chrono_english::{Dialect, Interval, parse_date_string};
 
 use crate::{
-  HashSet, builtin::opt::Opt, expand::shell_quote_fmt, opt, state::vars::VarStr, status_msg,
+  HashSet, builtin::opt::Opt, expand::shell_quote_bytes, opt, state::vars::VarStr, status_msg,
 };
 
 use super::{
@@ -389,8 +389,8 @@ impl HistQuery {
   pub fn format_entries(
     &self,
     entries: &[(i64, HistEntry)],
-    f: &mut impl std::fmt::Write,
-  ) -> std::fmt::Result {
+    f: &mut impl std::io::Write,
+  ) -> std::io::Result<()> {
     // Filters that don't depend on the output format run once, up front, so
     // every renderer below inherits them.
     let entries = self.dedupe(entries);
@@ -404,8 +404,8 @@ impl HistQuery {
         if !self.no_numbers {
           write!(f, "{id} ")?;
         }
-        shell_quote_fmt(entry.command(), f)?;
-        writeln!(f)?;
+        f.write_all(&shell_quote_bytes(entry.command_bytes()))?;
+        f.write_all(b"\n")?;
       }
 
       Ok(())
@@ -414,7 +414,8 @@ impl HistQuery {
         if !self.no_numbers {
           write!(f, "{id}\t")?;
         }
-        writeln!(f, "{}", entry.command())?;
+        f.write_all(entry.command_bytes())?;
+        f.write_all(b"\n")?;
       }
       Ok(())
     }
@@ -428,11 +429,11 @@ impl HistQuery {
     }
     // Walk newest-first so the kept copy of each command is the latest, then
     // restore chronological order.
-    let mut seen: HashSet<&str> = HashSet::default();
+    let mut seen: HashSet<&[u8]> = HashSet::default();
     let mut kept: Vec<_> = entries
       .iter()
       .rev()
-      .filter(|(_, e)| seen.insert(e.command()))
+      .filter(|(_, e)| seen.insert(e.command_bytes()))
       .collect();
     kept.reverse();
     kept
@@ -443,8 +444,8 @@ impl HistQuery {
   fn format_json(
     &self,
     entries: &[&(i64, HistEntry)],
-    f: &mut impl std::fmt::Write,
-  ) -> std::fmt::Result {
+    f: &mut impl std::io::Write,
+  ) -> std::io::Result<()> {
     use serde_json::Value;
     let entry_obj = |e: &HistEntry| {
       let HistEntry {

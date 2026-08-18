@@ -145,17 +145,19 @@ fn getopts_inner(
     state::Shed::set_status(1);
     return Ok(());
   };
-  let arg = arg.to_str_lossy();
+  // Option syntax (`-`, `--`, the flag chars) is ASCII, so parse over a lossy
+  // view; the *argument value* (OPTARG) is pulled from the raw `arg` bytes below.
+  let arg_str = arg.to_str_lossy();
 
   // "--" stops option processing
-  if arg == "--" {
+  if arg_str == "--" {
     advance_optind(opt_index, 1)?;
     Shed::meta_mut(MetaTab::reset_getopts_char_offset);
     return with_status(1);
   }
 
   // Not an option - done
-  let Some(opt_str) = arg.strip_prefix('-') else {
+  let Some(opt_str) = arg_str.strip_prefix('-') else {
     return with_status(1);
   };
 
@@ -226,9 +228,11 @@ fn getopts_inner(
       Shed::meta_mut(MetaTab::reset_getopts_char_offset);
 
       if !last_char_in_arg {
-        // Remaining chars in this arg are the argument: -bVALUE
-        let optarg: String = opt_str.chars().skip(char_idx + 1).collect();
-        Shed::vars_mut(|v| v.set_var("OPTARG", VarKind::string(optarg.into()), VarFlags::empty()))?;
+        // Remaining bytes in this arg are the argument: -bVALUE. The option
+        // syntax up to here (`-` + flag chars) is single-byte ASCII, so the
+        // value begins at byte offset `char_idx + 2` (past `-` and the flag).
+        let optarg = VarStr::from(&arg.as_bytes()[char_idx + 2..]);
+        Shed::vars_mut(|v| v.set_var("OPTARG", VarKind::string(optarg), VarFlags::empty()))?;
         advance_optind(opt_index, 1)?;
       } else if let Some(next_arg) = argv.get(arr_idx + 1) {
         // Next arg is the argument
@@ -355,6 +359,18 @@ mod tests {
     test_input("getopts a: opt -avalue").unwrap();
     assert_eq!(var!("opt"), "a");
     assert_eq!(var!("OPTARG"), "value");
+  }
+
+  #[test]
+  fn getopts_optarg_preserves_non_utf8_bytes() {
+    // OPTARG must hold raw bytes, both for an attached (`-aVAL`) and a
+    // separate (`-a VAL`) argument.
+    let _g = TestGuard::new();
+    test_input(r#"set -- "-a$(printf 'v\377w')"; getopts a: o"#).unwrap();
+    assert_eq!(super::var!("OPTARG").as_bytes(), &b"v\xffw"[..]);
+
+    test_input(r#"OPTIND=1; set -- -a "$(printf 'v\377w')"; getopts a: o"#).unwrap();
+    assert_eq!(super::var!("OPTARG").as_bytes(), &b"v\xffw"[..]);
   }
 
   // ===================== Bundled options =====================

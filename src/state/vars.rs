@@ -1,7 +1,7 @@
 use crate::{
   HashMap,
   eval::lex::TkFlags,
-  expand::Expander,
+  expand::{Expander, expand_raw_inner, stream::SegStream},
   match_loop,
   util::{self, QuoteState},
 };
@@ -14,7 +14,7 @@ use std::{
   ffi::OsStr,
   fmt::{self, Display},
   ops::Deref,
-  os::unix::ffi::OsStrExt,
+  os::unix::ffi::{OsStrExt, OsStringExt},
   path::{Path, PathBuf},
   rc::Rc,
   str::FromStr,
@@ -37,7 +37,7 @@ use super::{
     lex::{LexFlags, LexStream, Tk, TkRule},
     parse::node::Node,
   },
-  expand::{expand_arithmetic, expand_raw, markers, shell_quote},
+  expand::{expand_arithmetic, expand_raw, markers, shell_quote_bytes},
   procio::stdin_fileno,
   readline::Candidate,
   sherr,
@@ -45,25 +45,100 @@ use super::{
   util::get_separator,
 };
 
-/// Display key/value pairs as '{key}={value}\n'
+/// A variable/alias value that can be rendered as raw bytes for reuse as a
+/// shell assignment. Unlike `Display`, this preserves arbitrary non-UTF-8
+/// bytes instead of laundering them into `U+FFFD`.
+pub(crate) trait ValueBytes {
+  fn value_bytes(&self) -> Vec<u8>;
+}
+
+impl<T: ValueBytes + ?Sized> ValueBytes for &T {
+  fn value_bytes(&self) -> Vec<u8> {
+    (**self).value_bytes()
+  }
+}
+
+impl ValueBytes for VarStr {
+  fn value_bytes(&self) -> Vec<u8> {
+    self.as_bytes().to_vec()
+  }
+}
+
+impl ValueBytes for Var {
+  fn value_bytes(&self) -> Vec<u8> {
+    self.kind.value_bytes()
+  }
+}
+
+impl ValueBytes for VarKind {
+  fn value_bytes(&self) -> Vec<u8> {
+    match self {
+      VarKind::Str(s) => s.as_bytes().to_vec(),
+      VarKind::Int(i) => i.to_string().into_bytes(),
+      VarKind::Arr(items) => {
+        let mut out = Vec::new();
+        let mut item_iter = items.iter().peekable();
+        while let Some(item) = item_iter.next() {
+          out.extend_from_slice(item.as_bytes());
+          if item_iter.peek().is_some() {
+            out.push(b' ');
+          }
+        }
+        out
+      }
+      VarKind::AssocArr(items) => {
+        let mut out = Vec::new();
+        let mut item_iter = items.iter().peekable();
+        while let Some((k, v)) = item_iter.next() {
+          out.extend_from_slice(&shell_quote_bytes(k.as_bytes()));
+          out.push(b'=');
+          out.extend_from_slice(&shell_quote_bytes(v.as_bytes()));
+          if item_iter.peek().is_some() {
+            out.push(b' ');
+          }
+        }
+        out
+      }
+      VarKind::Magic(func) => func().unwrap_or_default().as_bytes().to_vec(),
+      VarKind::Unset => Vec::new(),
+    }
+  }
+}
+
+/// Join lines with `\n` (no trailing newline), byte-native.
+fn join_lines(mut lines: Vec<Vec<u8>>) -> Vec<u8> {
+  lines.sort();
+  let mut out = Vec::new();
+  let mut iter = lines.into_iter().peekable();
+  while let Some(line) = iter.next() {
+    out.extend_from_slice(&line);
+    if iter.peek().is_some() {
+      out.push(b'\n');
+    }
+  }
+  out
+}
+
+/// Display key/value pairs as '{key}={value}', one per line, sorted.
 ///
 /// The 'value' is escaped in such a way that the whole line can be reused as a shell assignment
 pub(crate) fn display_as_vars(
-  vars: impl Iterator<Item = (impl ToString, impl ToString)>,
-) -> String {
-  let mut vars = vars
-    .map(|(k, v)| display_as_var(k, v))
-    .collect::<Vec<String>>();
-  vars.sort();
-  vars.join("\n")
+  vars: impl Iterator<Item = (impl AsRef<[u8]>, impl ValueBytes)>,
+) -> Vec<u8> {
+  join_lines(vars.map(|(k, v)| display_as_var(k, v)).collect())
 }
 
-#[expect(clippy::needless_pass_by_value)]
-pub(crate) fn display_as_var(name: impl ToString, value: impl ToString) -> String {
-  format!("{}={}", name.to_string(), shell_quote(&value.to_string()))
+pub(crate) fn display_as_var(name: impl AsRef<[u8]>, value: impl ValueBytes) -> Vec<u8> {
+  let name = name.as_ref();
+  let value = shell_quote_bytes(&value.value_bytes());
+  let mut out = Vec::with_capacity(name.len() + value.len() + 1);
+  out.extend_from_slice(name);
+  out.push(b'=');
+  out.extend_from_slice(&value);
+  out
 }
 
-fn display_vars_internal(vars: &ScopeStack, filter: Option<VarFlags>) -> String {
+fn display_vars_internal(vars: &ScopeStack, filter: Option<VarFlags>) -> Vec<u8> {
   let vars = vars.flatten_vars().into_iter();
 
   if let Some(flags) = filter {
@@ -75,33 +150,39 @@ fn display_vars_internal(vars: &ScopeStack, filter: Option<VarFlags>) -> String 
 
 /// The readonly variables (`readonly` / `readonly -p`), each as a reusable
 /// `readonly NAME=value` line.
-pub(crate) fn display_readonly(vars: &ScopeStack) -> String {
-  let mut lines = vars
+pub(crate) fn display_readonly(vars: &ScopeStack) -> Vec<u8> {
+  let lines = vars
     .flatten_vars()
     .into_iter()
     .filter(|(_, v)| v.flags().contains(VarFlags::READONLY))
-    .map(|(k, v)| format!("readonly {}", display_as_var(k, v)))
-    .collect::<Vec<String>>();
-  lines.sort();
-  lines.join("\n")
+    .map(|(k, v)| {
+      let mut line = b"readonly ".to_vec();
+      line.extend_from_slice(&display_as_var(k, v));
+      line
+    })
+    .collect();
+  join_lines(lines)
 }
 
 /// The exported variables (`export` / `export -p`), each as a reusable
 /// `export NAME=value` line. Reads the variable table (filtered by the export
 /// attribute) rather than the live process environment, so variables exported
 /// during this session are included, not just inherited ones.
-pub(crate) fn display_exported(vars: &ScopeStack) -> String {
-  let mut lines = vars
+pub(crate) fn display_exported(vars: &ScopeStack) -> Vec<u8> {
+  let lines = vars
     .flatten_vars()
     .into_iter()
     .filter(|(_, v)| v.flags().contains(VarFlags::EXPORT))
-    .map(|(k, v)| format!("export {}", display_as_var(k, v)))
-    .collect::<Vec<String>>();
-  lines.sort();
-  lines.join("\n")
+    .map(|(k, v)| {
+      let mut line = b"export ".to_vec();
+      line.extend_from_slice(&display_as_var(k, v));
+      line
+    })
+    .collect();
+  join_lines(lines)
 }
 
-pub(crate) fn display_local(vars: &ScopeStack) -> String {
+pub(crate) fn display_local(vars: &ScopeStack) -> Vec<u8> {
   display_vars_internal(vars, None)
 }
 
@@ -197,7 +278,9 @@ impl ArrIndex {
   /// the `allow_side_effects` parameter controls whether or not mutating parameter
   /// expansions and command substitutions will be evaluated.
   pub fn parse(s: &str, allow_side_effects: bool) -> ShResult<Self> {
-    let s = crate::expand::expand_raw_inner(&mut s.chars().peekable(), allow_side_effects, false)?;
+    let input = SegStream::from_bytes(s.as_bytes());
+    let expanded = expand_raw_inner(&mut input.cursor(), allow_side_effects, false)?;
+    let s = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
     match s.as_str() {
       "@" => Ok(Self::AllSplit),
       "*" => Ok(Self::AllJoined),
@@ -325,12 +408,23 @@ impl VarName {
         if let Some(split_pos) = top_level_colon(rest) {
           let s = &rest[..split_pos];
           let l = &rest[split_pos + 1..];
-          let s_exp = expand_raw(&mut s.chars().peekable()).unwrap_or_else(|_| s.to_string());
-          let l_exp = expand_raw(&mut l.chars().peekable()).unwrap_or_else(|_| l.to_string());
+          let s_input = SegStream::from_bytes(s.as_bytes());
+          let l_input = SegStream::from_bytes(l.as_bytes());
+          let s_exp = expand_raw(&mut s_input.cursor()).map_or_else(
+            |_| s.to_string(),
+            |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
+          );
+          let l_exp = expand_raw(&mut l_input.cursor()).map_or_else(
+            |_| l.to_string(),
+            |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
+          );
           (s_exp.parse::<usize>().ok(), l_exp.parse::<usize>().ok())
         } else {
-          let expanded =
-            expand_raw(&mut rest.chars().peekable()).unwrap_or_else(|_| rest.to_string());
+          let rest_input = SegStream::from_bytes(rest.as_bytes());
+          let expanded = expand_raw(&mut rest_input.cursor()).map_or_else(
+            |_| rest.to_string(),
+            |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
+          );
           (expanded.parse::<usize>().ok(), None)
         }
       } else {
@@ -1083,70 +1177,87 @@ impl VarTab {
 
     // Inherit OS env. Subsequent steps either insert-if-missing (user-set
     // vars like HOME/USER) or unconditionally override (shed-controlled
-    // vars like UID/PPID/PWD).
-    let mut env: HashMap<String, String> = std::env::vars().collect();
+    // vars like UID/PPID/PWD). Values are read byte-native (`vars_os`): env
+    // values (e.g. an inherited `PWD` for a non-UTF-8 cwd) can hold arbitrary
+    // bytes, so `env::vars()` — which panics on non-UTF-8 — is unusable here.
+    // Variable *names* must be valid identifiers, so a non-UTF-8 key is
+    // skipped.
+    let mut env: HashMap<String, VarStr> = std::env::vars_os()
+      .filter_map(|(k, v)| Some((k.into_string().ok()?, VarStr::from(v.into_vec()))))
+      .collect();
 
     // Insert-if-missing: prefer the inherited value, fall back otherwise.
     env
       .entry("HOME".into())
-      .or_insert_with(|| home_fallback.clone());
+      .or_insert_with(|| home_fallback.clone().into());
     env
       .entry("USER".into())
-      .or_insert_with(|| username_fallback.clone());
-    let resolved_home = env["HOME"].clone();
+      .or_insert_with(|| username_fallback.clone().into());
+    let resolved_home = env["HOME"].to_str_lossy().into_owned();
     let resolved_user = env["USER"].clone();
 
     let mut state_dir = env.get("XDG_STATE_HOME").map_or_else(
       || PathBuf::from(format!("{resolved_home}/.local/state")),
-      PathBuf::from,
+      |x| PathBuf::from(x.clone()),
     );
     state_dir.push("shed");
     let shed_db = state_dir.join("shed_hist.db");
 
     env.entry("TMPDIR".into()).or_insert_with(|| "/tmp".into());
-    env.entry("TERM".into()).or_insert_with(|| term);
+    env.entry("TERM".into()).or_insert_with(|| term.into());
     env
       .entry("LANG".into())
       .or_insert_with(|| "en_US.UTF-8".into());
     env.entry("LOGNAME".into()).or_insert(resolved_user);
     env
       .entry("SHELL".into())
-      .or_insert_with(|| pathbuf_to_string(std::env::current_exe()));
+      .or_insert_with(|| pathbuf_to_string(std::env::current_exe()).into());
     env
       .entry("SHED_HISTDB".into())
-      .or_insert_with(|| shed_db.display().to_string());
+      .or_insert_with(|| shed_db.display().to_string().into());
 
     // SHED_HPATH: prepend install_dir if it isn't already present.
     if let Some(install_dir) = super::builtin::HELP_PAGE_INSTALL_DIR {
       let new_hpath = match env.get("SHED_HPATH") {
-        Some(hpath) if !util::split_path_list(hpath).any(|p| p.as_os_str() == install_dir) => {
-          Some(format!("{install_dir}:{hpath}"))
+        Some(hpath)
+          if !util::split_path_list(&hpath.to_str_lossy())
+            .any(|p| p.as_os_str() == install_dir) =>
+        {
+          Some(format!("{install_dir}:{}", hpath.to_str_lossy()))
         }
         None => Some(install_dir.to_string()),
         _ => None,
       };
       if let Some(hpath) = new_hpath {
-        env.insert("SHED_HPATH".into(), hpath);
+        env.insert("SHED_HPATH".into(), hpath.into());
       }
     }
 
     // Unconditional overrides: shed-controlled values that should not
     // honor an inherited (potentially spoofed) env entry.
-    env.insert("PWD".into(), pathbuf_to_string(std::env::current_dir()));
+    env.insert(
+      "PWD".into(),
+      super::util::path_to_varstr(&std::env::current_dir().unwrap_or_default()),
+    );
     env.insert("IFS".into(), " \t\n".into());
-    env.insert("UID".into(), uid.to_string());
-    env.insert("PPID".into(), getppid().to_string());
-    env.insert("HOST".into(), hostname);
+    env.insert("UID".into(), uid.to_string().into());
+    env.insert("PPID".into(), getppid().to_string().into());
+    env.insert("HOST".into(), hostname.into());
 
     let mut vars: Vec<(String, Var)> = env
       .into_iter()
-      .map(|(k, v)| (k, Var::env_var(&v)))
+      .map(|(k, v)| (k, Var::new(VarKind::Str(v), VarFlags::EXPORT)))
       .collect();
 
     let orig = stat::umask(stat::Mode::empty());
     let umask = stat::umask(orig);
     let mut umask_var = Var::env_var(&format!("{umask:04o}"));
-    let underline = Var::env_var(&std::env::args().next().unwrap_or_default());
+    let underline = Var::new(
+      VarKind::Str(VarStr::from(
+        std::env::args_os().next().unwrap_or_default().into_vec(),
+      )),
+      VarFlags::EXPORT,
+    );
     umask_var.flags |= VarFlags::READONLY;
     vars.push(("UMASK".to_string(), umask_var));
     vars.push(("_".to_string(), underline));
@@ -1172,8 +1283,8 @@ impl VarTab {
     }
   }
   pub fn init_sh_argv(&mut self) {
-    for arg in std::env::args() {
-      self.bpush_arg(arg.into());
+    for arg in std::env::args_os() {
+      self.bpush_arg(VarStr::from(arg.into_vec()));
     }
   }
   pub fn defer_cmd(&mut self, cmd: Node) {

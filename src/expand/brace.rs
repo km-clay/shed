@@ -10,7 +10,11 @@ fn has_braces(s: &str) -> bool {
   if !s.contains('{') {
     return false;
   }
-  let s = expand_raw(&mut s.chars().peekable()).unwrap_or(s.to_string());
+  let s = expand_raw(&mut crate::expand::stream::SegStream::from_bytes(s.as_bytes()).cursor())
+    .map_or_else(
+      |_| s.to_string(),
+      |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
+    );
   let mut chars = s.chars().peekable();
   let mut depth = 0;
   let mut found_open = false;

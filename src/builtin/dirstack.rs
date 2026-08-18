@@ -1,8 +1,15 @@
 use std::{env, path::PathBuf};
 
+use crate::procio::{out_bytes, outln_bytes};
+
 use super::{
-  super::state::meta::MetaTab, ShResult, Shed, Span, opt::OptSpec, out, outln, sherr,
-  state::util::change_dir, try_var, util::ShResultExt, with_status,
+  super::state::meta::MetaTab,
+  ShResult, Shed, Span,
+  opt::OptSpec,
+  sherr,
+  state::util::{change_dir, display_path_bytes},
+  util::ShResultExt,
+  with_status,
 };
 
 fn is_index_arg(arg: &str) -> bool {
@@ -249,17 +256,14 @@ impl super::Builtin for Dirs {
       return Ok(());
     }
 
-    let mut dirs: Vec<String> = Shed::meta(|m| {
+    let mut dirs: Vec<Vec<u8>> = Shed::meta(|m| {
       let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
-      let stack = [current_dir]
-        .into_iter()
-        .chain(m.dirs().clone())
-        .map(|d| d.to_string_lossy().to_string());
+      let stack = [current_dir].into_iter().chain(m.dirs().clone());
 
       if abbreviate_home {
-        stack.map(truncate_home_path).collect()
+        stack.map(|d| display_path_bytes(&d)).collect()
       } else {
-        stack.collect()
+        stack.map(|d| path_bytes(&d)).collect()
       }
     });
 
@@ -284,39 +288,49 @@ impl super::Builtin for Dirs {
       }
     }
 
-    let mut output = String::new();
-
     if one_per_line {
-      output = dirs.join("\n");
+      out_bytes(&join_bytes(&dirs, b"\n"));
     } else if one_per_line_indexed {
-      for (i, dir) in dirs.iter_mut().enumerate() {
-        *dir = format!("{i}\t{dir}");
-      }
-      output = dirs.join("\n");
-      output.push('\n');
+      let indexed_lines: Vec<Vec<u8>> = dirs
+        .iter()
+        .enumerate()
+        .map(|(i, dir)| {
+          let mut line = format!("{i}\t").into_bytes();
+          line.extend_from_slice(dir);
+          line
+        })
+        .collect();
+      out_bytes(&join_bytes(&indexed_lines, b"\n"));
+      out_bytes(b"\n");
     } else if indexed {
       // An index was supplied: print just the selected entry (`dirs` was
       // narrowed above), not the whole stack.
-      output = dirs.join(" ");
-      output.push('\n');
+      out_bytes(&join_bytes(&dirs, b" "));
+      out_bytes(b"\n");
     } else {
       print_dirs()?;
     }
-
-    out!("{output}");
 
     with_status(0)
   }
 }
 
-pub fn truncate_home_path(path: String) -> String {
-  if let Some(home) = try_var!("HOME")
-    && path.starts_with(&*home.to_str_lossy())
-  {
-    let new = path.strip_prefix(&*home.to_str_lossy()).unwrap();
-    return format!("~{new}");
+/// A path's raw bytes (Unix: exact, no lossy step).
+fn path_bytes(path: &std::path::Path) -> Vec<u8> {
+  use std::os::unix::ffi::OsStrExt;
+  path.as_os_str().as_bytes().to_vec()
+}
+
+/// Join byte slices with `sep` (no trailing separator).
+fn join_bytes(parts: &[Vec<u8>], sep: &[u8]) -> Vec<u8> {
+  let mut out = Vec::new();
+  for (i, part) in parts.iter().enumerate() {
+    if i > 0 {
+      out.extend_from_slice(sep);
+    }
+    out.extend_from_slice(part);
   }
-  path
+  out
 }
 
 enum StackIdx {
@@ -327,17 +341,22 @@ enum StackIdx {
 fn print_dirs() -> ShResult<()> {
   let current_dir = env::current_dir()?;
   let dirs_iter = Shed::meta(|m| m.dirs().clone().into_iter());
-  let all_dirs = [current_dir]
+  let all_dirs: Vec<Vec<u8>> = [current_dir]
     .into_iter()
     .chain(dirs_iter)
-    .map(|d| d.to_string_lossy().to_string())
-    .map(truncate_home_path)
-    .collect::<Vec<_>>()
-    .join(" ");
+    .map(|d| display_path_bytes(&d))
+    .collect();
 
-  outln!("{all_dirs}");
+  outln_bytes(&join_bytes(&all_dirs, b" "));
 
   Ok(())
+}
+
+/// Collapse a leading `$HOME` in a path to `~` (test helper mirroring the
+/// byte-native [`display_path_bytes`]).
+#[cfg(test)]
+pub fn truncate_home_path(path: &str) -> String {
+  String::from_utf8_lossy(&display_path_bytes(std::path::Path::new(path))).into_owned()
 }
 
 fn parse_stack_idx(arg: &str, blame: Span, cmd: &str) -> ShResult<StackIdx> {
@@ -409,7 +428,7 @@ pub mod tests {
     assert_eq!(dir_stack[0], current_dir);
 
     let out = g.read_output();
-    let path = super::truncate_home_path(current_dir.to_string_lossy().to_string());
+    let path = super::truncate_home_path(&current_dir.to_string_lossy());
     let tmp_canon = canon(PathBuf::from("/tmp")).to_string_lossy().to_string();
     assert_eq!(out, format!("{tmp_canon} {path}\n"));
   }
@@ -434,7 +453,7 @@ pub mod tests {
 
     assert_eq!(env::current_dir().unwrap(), current_dir);
     let out = g.read_output();
-    let path = super::truncate_home_path(current_dir.to_string_lossy().to_string());
+    let path = super::truncate_home_path(&current_dir.to_string_lossy());
     assert_eq!(out, format!("{path}\n"));
   }
 
@@ -569,13 +588,10 @@ pub mod tests {
     let out = g.read_output();
     let lines: Vec<&str> = out.split('\n').filter(|l| !l.is_empty()).collect();
     assert_eq!(lines.len(), 2);
-    assert_eq!(
-      lines[0],
-      super::truncate_home_path(path.to_string_lossy().to_string())
-    );
+    assert_eq!(lines[0], super::truncate_home_path(&path.to_string_lossy()));
     assert_eq!(
       lines[1],
-      super::truncate_home_path(original.to_string_lossy().to_string())
+      super::truncate_home_path(&original.to_string_lossy())
     );
   }
 

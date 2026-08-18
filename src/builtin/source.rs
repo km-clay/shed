@@ -100,6 +100,21 @@ pub mod tests {
   }
 
   #[test]
+  fn source_tolerates_non_utf8_bytes() {
+    // Regression: `read_to_string` rejected the whole file on a single
+    // non-UTF-8 byte. A stray byte in a comment must not abort sourcing.
+    let _g = TestGuard::new();
+    let mut file = NamedTempFile::new().unwrap();
+    let path = file.path().display().to_string();
+    file
+      .write_all(b"# comment with \xff byte\nsrc_ok_var=yes")
+      .unwrap();
+
+    test_input(format!("source {path}")).unwrap();
+    assert_eq!(var!("src_ok_var"), "yes");
+  }
+
+  #[test]
   fn source_multiple_commands() {
     let _g = TestGuard::new();
     let mut file = NamedTempFile::new().unwrap();

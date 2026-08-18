@@ -1,7 +1,7 @@
 use std::{iter::Peekable, str::Chars};
 
 use bitflags::bitflags;
-use bstr::{ByteSlice, ByteVec};
+use bstr::ByteSlice;
 
 use crate::{
   ShResult, expand, match_loop,
@@ -62,7 +62,7 @@ impl PrintFormatter {
       '%' => {
         if !literal.is_empty() {
           let lit: String = std::mem::take(&mut literal).into();
-          let expanded = expand::expand_ansi_c(&lit);
+          let expanded = expand::expand_ansi_c(lit.as_bytes());
           segments.push(Segment::Literal(expanded));
         }
 
@@ -74,7 +74,7 @@ impl PrintFormatter {
 
     if !literal.is_empty() {
       let lit: String = std::mem::take(&mut literal).into();
-      let expanded = expand::expand_ansi_c(&lit);
+      let expanded = expand::expand_ansi_c(lit.as_bytes());
       segments.push(Segment::Literal(expanded));
     }
 
@@ -88,10 +88,10 @@ impl PrintFormatter {
     let mut out = Rendered::default();
     for seg in &self.0 {
       match seg {
-        Segment::Literal(s) => out.text.push_str(s),
+        Segment::Literal(s) => out.text.extend_from_slice(s),
         Segment::Spec(spec) => {
           let rendered = spec.apply(args)?;
-          out.text.push_str(&rendered.text);
+          out.text.extend_from_slice(&rendered.text);
           out.merge_errors(rendered);
         }
       }
@@ -105,7 +105,7 @@ impl PrintFormatter {
 }
 
 enum Segment {
-  Literal(String),
+  Literal(Vec<u8>),
   Spec(FmtSpec),
 }
 
@@ -431,7 +431,7 @@ impl FmtSpec {
     let sign = pick_sign(f.is_sign_negative() && f != 0.0, flags);
 
     Ok(Rendered {
-      text: pad_to_width(&abs_body, sign, flags, width, true),
+      text: pad_to_width(abs_body, sign, flags, width, true),
       errors: err.into_iter().collect(),
     })
   }
@@ -443,7 +443,7 @@ impl FmtSpec {
   ) -> ShResult<Vec<u8>> {
     let arg = args.next().unwrap_or_default();
     // POSIX %c: take first character of the argument.
-    let c = arg.get(1..).unwrap_or_default();
+    let c = arg.get(..1).unwrap_or_default();
     Ok(pad_to_width(c, b"", flags, width, false))
   }
 
@@ -480,10 +480,10 @@ impl FmtSpec {
     let s = args.next().unwrap_or_default();
     let expanded = expand::expand_ansi_c(&s);
     let truncated = match prec {
-      Some(p) => expanded.chars().take(p).collect::<String>(),
+      Some(p) => expanded.into_iter().take(p).collect::<Vec<u8>>(),
       None => expanded,
     };
-    Ok(pad_to_width(&truncated, "", flags, width, false))
+    Ok(pad_to_width(&truncated, b"", flags, width, false))
   }
 
   fn apply_shell_quote<I: Iterator<Item = Vec<u8>>>(
@@ -492,8 +492,8 @@ impl FmtSpec {
     width: Option<usize>,
   ) -> ShResult<Vec<u8>> {
     let s = args.next().unwrap_or_default();
-    let quoted = crate::expand::shell_quote(&s);
-    Ok(pad_to_width(&quoted, "", flags, width, false))
+    let quoted = crate::expand::shell_quote(&String::from_utf8_lossy(&s));
+    Ok(pad_to_width(quoted.as_bytes(), b"", flags, width, false))
   }
 
   fn apply_strftime<I: Iterator<Item = Vec<u8>>>(
@@ -504,8 +504,8 @@ impl FmtSpec {
   ) -> ShResult<Vec<u8>> {
     use crate::state::{Shed, meta::MetaTab};
     use chrono::{Local, TimeZone};
-    let arg = args.next().unwrap_or_else(|| "-1".to_string());
-    let secs: i64 = arg.parse().unwrap_or(-1);
+    let arg = args.next().unwrap_or_else(|| b"-1".to_vec());
+    let secs: i64 = String::from_utf8_lossy(&arg).parse().unwrap_or(-1);
 
     let dt = if secs == -1 {
       // Current time
@@ -531,7 +531,7 @@ impl FmtSpec {
     };
 
     let formatted = dt.format(format).to_string();
-    Ok(pad_to_width(&formatted, b"", flags, width, false))
+    Ok(pad_to_width(formatted.as_bytes(), b"", flags, width, false))
   }
 
   fn parse_int_arg<I: Iterator<Item = Vec<u8>>>(args: &mut Peekable<I>) -> ShResult<i32> {
@@ -539,7 +539,7 @@ impl FmtSpec {
     let Some(arg) = args.next() else {
       return Ok(0);
     };
-    Ok(arg.parse::<i32>().unwrap_or(0))
+    Ok(String::from_utf8_lossy(&arg).parse::<i32>().unwrap_or(0))
   }
 
   fn parse_flags(chars: &mut Peekable<Chars>) -> ShResult<PrintFlags> {
@@ -713,7 +713,7 @@ fn pad_to_width(
 /// (`1e+02`, `1.5e-03`): sign always present, exponent zero-padded to at
 /// least two digits.
 fn normalize_exponent(s: &[u8]) -> Vec<u8> {
-  let Some(epos) = s.find([b'e', b'E']) else {
+  let Some(epos) = s.find_byteset(b"eE") else {
     return s.to_vec();
   };
   let (mantissa, exp_part) = s.split_at(epos);
@@ -742,7 +742,7 @@ fn normalize_exponent(s: &[u8]) -> Vec<u8> {
 }
 
 fn strip_trailing_zeros(s: &[u8]) -> Vec<u8> {
-  if let Some(epos) = s.find([b'e', b'E']) {
+  if let Some(epos) = s.find_byteset(b"eE") {
     let (mantissa, exp) = s.split_at(epos);
 
     let trimmed = if mantissa.contains(&b'.') {
@@ -809,7 +809,7 @@ impl super::Builtin for Printf {
     let (format_str, _) = first;
 
     let formatter = PrintFormatter::parse(&format_str.to_str_lossy())?;
-    let remaining: Vec<Vec<u8>> = arg_iter.map(|(s, _)| s.to_string()).collect();
+    let remaining: Vec<Vec<u8>> = arg_iter.map(|(s, _)| s.as_bytes().to_vec()).collect();
 
     let mut values = remaining.into_iter().peekable();
 

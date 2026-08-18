@@ -2,6 +2,7 @@ use std::{fmt::Write, iter::Peekable, str::FromStr};
 
 use unicode_width::UnicodeWidthStr;
 
+use crate::procio::outln_bytes;
 use crate::state::{
   shopt::ShOptSet,
   vars::{VarStr, VarStrSliceExt},
@@ -13,10 +14,13 @@ use super::{
     execute::prepare_argv_with,
     lex::{Span, Tk},
   },
-  expand::shell_quote,
+  expand::shell_quote_bytes,
   opt::Parsed,
   outln, sherr,
-  state::{Shed, vars::VarKind},
+  state::{
+    Shed,
+    vars::{ValueBytes, VarKind},
+  },
   util::{ShErr, ShResult, ShResultExt, with_status},
 };
 use bitflags::bitflags;
@@ -403,18 +407,22 @@ impl super::Builtin for Set {
       // print values of all variables
       let all_vars = Shed::vars(ScopeStack::all_vars);
       for (k, v) in all_vars {
+        let mut line = k.into_bytes();
         if let VarKind::Arr(items) = v.kind() {
-          let items = items
-            .clone()
-            .into_iter()
-            .map(|v| shell_quote(&v.to_str_lossy()))
-            .collect::<Vec<_>>()
-            .join(" ");
-          outln!("{k}=( {items} )");
+          line.extend_from_slice(b"=( ");
+          let mut item_iter = items.iter().peekable();
+          while let Some(item) = item_iter.next() {
+            line.extend_from_slice(&shell_quote_bytes(item.as_bytes()));
+            if item_iter.peek().is_some() {
+              line.push(b' ');
+            }
+          }
+          line.extend_from_slice(b" )");
         } else {
-          let v = shell_quote(&v.to_string());
-          outln!("{k}={v}");
+          line.push(b'=');
+          line.extend_from_slice(&shell_quote_bytes(&v.value_bytes()));
         }
+        outln_bytes(&line);
       }
     }
 

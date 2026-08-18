@@ -622,21 +622,21 @@ fn cycle_wraps_backward() {
 #[test]
 fn escape_str_special_chars() {
   use crate::expand::escape_str;
-  let escaped = escape_str("hello world", false);
+  let escaped = escape_str("hello world");
   assert_eq!(escaped, "hello\\ world");
 }
 
 #[test]
 fn escape_str_multiple_specials() {
   use crate::expand::escape_str;
-  let escaped = escape_str("a&b|c", false);
+  let escaped = escape_str("a&b|c");
   assert_eq!(escaped, "a\\&b\\|c");
 }
 
 #[test]
 fn escape_str_no_specials() {
   use crate::expand::escape_str;
-  let escaped = escape_str("hello", false);
+  let escaped = escape_str("hello");
   assert_eq!(escaped, "hello");
 }
 
@@ -648,7 +648,7 @@ fn escape_str_all_shell_metacharacters() {
     ' ', '\t', '\n',
   ] {
     let input = format!("a{ch}b");
-    let escaped = escape_str(&input, false);
+    let escaped = escape_str(&input);
     let expected = format!("a\\{ch}b");
     assert_eq!(escaped, expected, "failed to escape {ch:?}");
   }
@@ -658,7 +658,7 @@ fn escape_str_all_shell_metacharacters() {
 fn escape_str_kitchen_sink() {
   use crate::expand::escape_str;
   let input = "f$le (with) 'spaces' & {braces} | pipes; #hash ~tilde `backtick` !bang";
-  let escaped = escape_str(input, false);
+  let escaped = escape_str(input);
   assert_eq!(
     escaped,
     "f\\$le\\ \\(with\\)\\ \\'spaces\\'\\ \\&\\ \\{braces}\\ \\|\\ pipes\\;\\ \\#hash\\ ~tilde\\ \\`backtick\\`\\ \\!bang"

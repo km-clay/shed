@@ -1,8 +1,10 @@
+use crate::procio::outln_bytes;
+
 use super::{
   Shed, errln,
-  expand::shell_quote,
+  expand::shell_quote_bytes,
   opt::OptSpec,
-  outln, sherr,
+  sherr,
   state::logic::TrapTarget,
   util::{ShResult, ShResultExt, with_status},
 };
@@ -58,8 +60,11 @@ impl super::Builtin for Trap {
         for entry in l.traps() {
           let target = entry.0;
           if filter.is_empty() || filter.contains(target) {
-            let command = shell_quote(&entry.1.to_str_lossy());
-            outln!("trap -- {command} {target}");
+            let mut line = b"trap -- ".to_vec();
+            line.extend_from_slice(&shell_quote_bytes(entry.1.as_bytes()));
+            line.push(b' ');
+            line.extend_from_slice(target.to_string().as_bytes());
+            outln_bytes(&line);
           }
         }
         Ok(())

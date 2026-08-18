@@ -8,7 +8,7 @@ use super::{
   BuiltinArgs,
   eval::lex::Span,
   opt::OptSpec,
-  out, outln, sherr,
+  outln, sherr,
   signal::parse_signal,
   state::{
     self, Shed,
@@ -121,7 +121,7 @@ pub fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResult<()> 
     }
     JobBehavior::Background => {
       let job_order = Shed::jobs(|j| j.order().to_vec());
-      out!("{}", job.display(&job_order, JobCmdFlags::PIDS));
+      crate::procio::out_bytes(&job.display_bytes(&job_order, JobCmdFlags::PIDS));
       Shed::jobs_mut(|j| j.insert_job(job, true));
     }
   }

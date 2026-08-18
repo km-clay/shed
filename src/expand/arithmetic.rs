@@ -1217,8 +1217,8 @@ impl ArithTk {
 /// The caller is responsible for stripping any `((...))` or `(...)` wrappers.
 pub fn expand_arithmetic(expr: &str) -> ShResult<VarStr> {
   let unescaped = unescape_math(expr)?;
-  let expanded = expand_raw(&mut unescaped.chars().peekable())?;
-  let tokens = ArithTk::tokenize(&expanded)?;
+  let expanded = expand_raw(&mut unescaped.cursor())?.into_bytes();
+  let tokens = ArithTk::tokenize(&String::from_utf8_lossy(&expanded))?;
   let rpn = ArithTk::to_rpn(tokens)?;
   let result = ArithTk::eval_rpn(&rpn)?;
   Ok(result.into())

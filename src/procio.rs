@@ -1113,11 +1113,9 @@ pub(super) fn out_bytes(buf: &[u8]) {
   let _ = Shed::sinks(|s| s.write_all(buf));
 }
 
+/// Write raw bytes followed by a newline, byte-native counterpart to `outln!`.
 pub(super) fn outln_bytes(buf: &[u8]) {
-  let _ = Shed::sinks(|s| {
-    s.write_all(buf)?;
-    s.write_all(b"\n")
-  });
+  let _ = Shed::sinks(|s| s.write_all(buf).and_then(|()| s.write_all(b"\n")));
 }
 
 /// A pipe created before a fork to deliver stdin bytes to the child on fd 0.

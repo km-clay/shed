@@ -164,7 +164,7 @@ fn do_read(
   escape_aware: bool,
   timeout: Option<i32>,
   max_bytes: Option<usize>,
-) -> ShResult<String> {
+) -> ShResult<Vec<u8>> {
   let fd = stdin_fileno();
 
   if !procio::has_in_sink()
@@ -183,7 +183,7 @@ fn walking_read(
   escape_aware: bool,
   timeout: Option<i32>,
   max_bytes: Option<usize>,
-) -> ShResult<String> {
+) -> ShResult<Vec<u8>> {
   let use_sink = procio::has_in_sink();
   let mut buf = vec![];
   let mut escaped = false;
@@ -200,12 +200,11 @@ fn walking_read(
         Err(Errno::EINTR) => {
           if signal::sigint_pending() {
             state::Shed::set_status(130);
-            return Ok(String::new());
+            return Ok(Vec::new());
           }
           if signal::has_actionable_pending() {
             state::Shed::set_status(1);
-            return String::from_utf8(buf)
-              .map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}"));
+            return Ok(buf);
           }
           continue; // untrapped SIGCHLD/SIGWINCH etc., retry the poll
         }
@@ -213,7 +212,7 @@ fn walking_read(
       };
       if ready == 0 {
         state::Shed::set_status(1);
-        return String::from_utf8(buf).map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}")); // timeout
+        return Ok(buf); // timeout
       }
     }
 
@@ -229,12 +228,11 @@ fn walking_read(
         Err(Errno::EINTR) => {
           if signal::sigint_pending() {
             state::Shed::set_status(130);
-            return Ok(String::new());
+            return Ok(Vec::new());
           }
           if signal::has_actionable_pending() {
             state::Shed::set_status(1);
-            return String::from_utf8(buf)
-              .map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}"));
+            return Ok(buf);
           }
           continue;
         }
@@ -244,7 +242,7 @@ fn walking_read(
 
     if n == 0 {
       state::Shed::set_status(1);
-      return String::from_utf8(buf).map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}")); // EOF
+      return Ok(buf); // EOF
     }
 
     if escape_aware && escaped {
@@ -272,7 +270,7 @@ fn walking_read(
   }
 
   state::Shed::set_status(0);
-  String::from_utf8(buf).map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}"))
+  Ok(buf)
 }
 
 fn delim_scan(delim: u8, slice: &[u8], escape_aware: bool) -> Option<usize> {
@@ -296,7 +294,7 @@ fn seeking_read(
   delim: u8,
   escape_aware: bool,
   max_bytes: Option<usize>,
-) -> ShResult<String> {
+) -> ShResult<Vec<u8>> {
   let mut buf = [0u8; CHUNK_SIZE];
   let mut line = Vec::new();
   let mut last_was_escaped = false;
@@ -308,7 +306,7 @@ fn seeking_read(
       Ok(0) => {
         if line.is_empty() {
           state::Shed::set_status(1);
-          return Ok(String::new());
+          return Ok(Vec::new());
         }
         return finalize(line, escape_aware);
       }
@@ -318,7 +316,7 @@ fn seeking_read(
         if signal::sigint_pending() {
           // we got ctrl+c
           state::Shed::set_status(130);
-          return Ok(String::new());
+          return Ok(Vec::new());
         }
         if signal::has_actionable_pending() {
           state::Shed::set_status(1);
@@ -377,12 +375,12 @@ fn seeking_read(
   }
 }
 
-fn finalize(mut line: Vec<u8>, escape_aware: bool) -> ShResult<String> {
+fn finalize(mut line: Vec<u8>, escape_aware: bool) -> ShResult<Vec<u8>> {
   state::Shed::set_status(0);
   if escape_aware {
     line = unescape(&line);
   }
-  String::from_utf8(line).map_err(|e| sherr!(ExecFail, "read: invalid UTF-8: {e}"))
+  Ok(line)
 }
 
 fn unescape(line: &[u8]) -> Vec<u8> {
@@ -408,45 +406,48 @@ fn unescape(line: &[u8]) -> Vec<u8> {
 /// splitting stops after `max - 1` fields and the untouched remainder (with
 /// trailing IFS-whitespace trimmed) becomes the final field, mirroring
 /// `read var1 var2 ...` where the last variable absorbs the rest of the line.
-fn ifs_split(input: &str, ifs: &str, max: Option<usize>) -> Vec<String> {
-  let is_ws = |c: char| c.is_whitespace() && ifs.contains(c);
-  let is_hard = |c: char| !c.is_whitespace() && ifs.contains(c);
+fn ifs_split(input: &[u8], ifs: &[u8], max: Option<usize>) -> Vec<Vec<u8>> {
+  let is_ws = |b: u8| b.is_ascii_whitespace() && ifs.contains(&b);
+  let is_hard = |b: u8| !b.is_ascii_whitespace() && ifs.contains(&b);
 
-  let mut fields: Vec<String> = Vec::new();
-  let mut cur = String::new();
-  let mut chars = input.char_indices().peekable();
+  let mut fields: Vec<Vec<u8>> = Vec::new();
+  let mut cur: Vec<u8> = Vec::new();
+  let mut bytes = input.iter().copied().enumerate().peekable();
 
-  while chars.peek().is_some_and(|&(_, c)| is_ws(c)) {
-    chars.next();
+  while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
+    bytes.next();
   }
 
-  while let Some(&(i, c)) = chars.peek() {
+  while let Some(&(i, c)) = bytes.peek() {
     if max.is_some_and(|max| fields.len() == max - 1) {
-      let rest = input[i..].trim_end_matches(|c: char| is_ws(c));
-      fields.push(rest.to_string());
+      let mut rest = input[i..].to_vec();
+      while rest.last().is_some_and(|&b| is_ws(b)) {
+        rest.pop();
+      }
+      fields.push(rest);
       return fields;
     }
 
-    chars.next();
+    bytes.next();
 
     if is_ws(c) {
-      while chars.peek().is_some_and(|&(_, c)| is_ws(c)) {
-        chars.next();
+      while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
+        bytes.next();
       }
-      if chars.peek().is_some_and(|&(_, c)| is_hard(c)) {
-        chars.next();
-        while chars.peek().is_some_and(|&(_, c)| is_ws(c)) {
-          chars.next();
+      if bytes.peek().is_some_and(|&(_, c)| is_hard(c)) {
+        bytes.next();
+        while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
+          bytes.next();
         }
       }
       // trailing whitespace must not produce an empty field
-      if chars.peek().is_some() {
+      if bytes.peek().is_some() {
         fields.push(std::mem::take(&mut cur));
       }
     } else if is_hard(c) {
       fields.push(std::mem::take(&mut cur));
-      while chars.peek().is_some_and(|&(_, c)| is_ws(c)) {
-        chars.next();
+      while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
+        bytes.next();
       }
     } else {
       cur.push(c);
@@ -467,17 +468,17 @@ fn ifs_split(input: &str, ifs: &str, max: Option<usize>) -> Vec<String> {
 /// deliberately diverges from bash, which would leave the escape orphaned;
 /// the divergence makes splitting colored, column-aligned command output
 /// (`eza`, `ls`, `ps`) survive positional indexing.
-fn glue_zero_width(fields: Vec<String>) -> Vec<String> {
-  let mut out: Vec<String> = Vec::with_capacity(fields.len());
-  let mut pending = String::new();
+fn glue_zero_width(fields: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+  let mut out: Vec<Vec<u8>> = Vec::with_capacity(fields.len());
+  let mut pending: Vec<u8> = Vec::new();
 
   for field in fields {
-    if !field.is_empty() && state::terminal::calc_str_width(&field) == 0 {
-      pending.push_str(&field);
+    if !field.is_empty() && state::terminal::calc_str_width(&String::from_utf8_lossy(&field)) == 0 {
+      pending.extend_from_slice(&field);
     } else if pending.is_empty() {
       out.push(field);
     } else {
-      pending.push_str(&field);
+      pending.extend_from_slice(&field);
       out.push(std::mem::take(&mut pending));
     }
   }
@@ -490,21 +491,27 @@ fn glue_zero_width(fields: Vec<String>) -> Vec<String> {
   out
 }
 
-fn field_split_vars(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()> {
+fn field_split_vars(input: &[u8], vars: &[(VarStr, Span)]) -> ShResult<()> {
   if vars.is_empty() {
-    Shed::vars_mut(|v| v.set_var("REPLY", VarKind::string(input.into()), VarFlags::empty()))?;
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "REPLY",
+        VarKind::string(VarStr::from(input)),
+        VarFlags::empty(),
+      )
+    })?;
     return Ok(());
   }
 
   let sep = state::util::get_separators();
-  let fields = ifs_split(input, &sep.to_str_lossy(), Some(vars.len()));
+  let fields = ifs_split(input, sep.as_bytes(), Some(vars.len()));
 
   for (i, (name, _)) in vars.iter().enumerate() {
-    let value = fields.get(i).map_or("", String::as_str);
+    let value: &[u8] = fields.get(i).map_or(&[][..], Vec::as_slice);
     Shed::vars_mut(|v| {
       v.set_var(
         &name.to_str_lossy(),
-        VarKind::string(value.into()),
+        VarKind::string(VarStr::from(value)),
         VarFlags::empty(),
       )
     })?;
@@ -513,37 +520,55 @@ fn field_split_vars(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()> {
   Ok(())
 }
 
-fn field_split_arr(input: &str, arr_name: &str) -> ShResult<()> {
+fn field_split_arr(input: &[u8], arr_name: &str) -> ShResult<()> {
   if arr_name.is_empty() {
     return Err(sherr!(ExecFail, "read: Array name cannot be empty"));
   }
 
   let sep = state::util::get_separators();
-  let fields = glue_zero_width(ifs_split(input, &sep.to_str_lossy(), None));
+  let fields = glue_zero_width(ifs_split(input, sep.as_bytes(), None));
 
   Shed::vars_mut(|v| {
     v.set_var(
       arr_name,
-      VarKind::arr(fields.into_iter().map(Into::into)),
+      VarKind::arr(fields.into_iter().map(VarStr::from)),
       VarFlags::empty(),
     )
   })
 }
 
-fn field_split_vars_quoted(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()> {
+/// Join byte-slice fields with `sep` (no trailing separator).
+fn join_fields(fields: &[Vec<u8>], sep: &[u8]) -> Vec<u8> {
+  let mut out = Vec::new();
+  for (i, f) in fields.iter().enumerate() {
+    if i > 0 {
+      out.extend_from_slice(sep);
+    }
+    out.extend_from_slice(f);
+  }
+  out
+}
+
+fn field_split_vars_quoted(input: &[u8], vars: &[(VarStr, Span)]) -> ShResult<()> {
   let fields = glue_zero_width(quote::unquote_raw(input)?);
 
   if vars.is_empty() {
-    let joined = fields.join(" ");
-    Shed::vars_mut(|v| v.set_var("REPLY", VarKind::string(joined.into()), VarFlags::empty()))?;
+    let joined = join_fields(&fields, b" ");
+    Shed::vars_mut(|v| {
+      v.set_var(
+        "REPLY",
+        VarKind::string(VarStr::from(joined)),
+        VarFlags::empty(),
+      )
+    })?;
     return Ok(());
   }
 
   for (i, (name, _)) in vars.iter().enumerate() {
-    let value = if i >= fields.len() {
-      String::new()
+    let value: Vec<u8> = if i >= fields.len() {
+      Vec::new()
     } else if i + 1 == vars.len() {
-      fields[i..].join(" ")
+      join_fields(&fields[i..], b" ")
     } else {
       fields[i].clone()
     };
@@ -551,7 +576,7 @@ fn field_split_vars_quoted(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()>
     Shed::vars_mut(|v| {
       v.set_var(
         &name.to_str_lossy(),
-        VarKind::string(value.into()),
+        VarKind::string(VarStr::from(value)),
         VarFlags::empty(),
       )
     })?;
@@ -560,7 +585,7 @@ fn field_split_vars_quoted(input: &str, vars: &[(VarStr, Span)]) -> ShResult<()>
   Ok(())
 }
 
-fn field_split_arr_quoted(input: &str, arr_name: &str) -> ShResult<()> {
+fn field_split_arr_quoted(input: &[u8], arr_name: &str) -> ShResult<()> {
   if arr_name.is_empty() {
     return Err(sherr!(ExecFail, "read: Array name cannot be empty"));
   }
@@ -570,7 +595,7 @@ fn field_split_arr_quoted(input: &str, arr_name: &str) -> ShResult<()> {
   Shed::vars_mut(|v| {
     v.set_var(
       arr_name,
-      VarKind::arr(fields.into_iter().map(Into::into)),
+      VarKind::arr(fields.into_iter().map(VarStr::from)),
       VarFlags::empty(),
     )
   })
@@ -681,6 +706,23 @@ mod tests {
     test_input("read myvar < <(echo world)").unwrap();
     let val = var!("myvar");
     assert_eq!(val, "world");
+  }
+
+  #[test]
+  fn read_preserves_non_utf8_bytes() {
+    // Regression: `read` used to reject non-UTF-8 input ("read: invalid UTF-8").
+    // It must now store the raw bytes verbatim, like bash.
+    let _g = TestGuard::new();
+    test_input("read x < <(printf 'a\\377b')").unwrap();
+    assert_eq!(var!("x").as_bytes(), &b"a\xffb"[..]);
+  }
+
+  #[test]
+  fn read_field_split_preserves_non_utf8_bytes() {
+    let _g = TestGuard::new();
+    test_input("read a b < <(printf 'x\\377y z')").unwrap();
+    assert_eq!(var!("a").as_bytes(), &b"x\xffy"[..]);
+    assert_eq!(var!("b").as_bytes(), &b"z"[..]);
   }
 
   // ===================== Field splitting =====================

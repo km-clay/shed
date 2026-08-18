@@ -125,7 +125,7 @@ pub fn expand_glob(raw: &str) -> ShResult<Vec<String>> {
   if !might_be_glob(raw) || shopt!(set.noglob) {
     return Ok(vec![raw.to_string()]);
   }
-  let escaped = super::escape_glob(raw, true);
+  let escaped = super::escape_glob(raw);
 
   let final_component = raw.rsplit('/').next().unwrap_or(raw);
   let explicit_leading_dot = final_component.starts_with('.');
@@ -147,9 +147,9 @@ pub fn expand_glob(raw: &str) -> ShResult<Vec<String>> {
     let entry_raw = entry
       .to_str()
       .ok_or_else(|| sherr!(SyntaxErr, "Non-UTF8 filename found in glob"))?;
-    let escaped = super::escape_str(entry_raw, true);
-
-    words.push(escaped);
+    // The match is a real filename and becomes a final word verbatim; escaping
+    // it (previously stripped again downstream) would leak backslashes.
+    words.push(entry_raw.to_string());
   }
   Ok(words)
 }

@@ -1,59 +1,26 @@
 pub(crate) type Marker = char;
 
-/*
- * These are invisible Unicode noncharacters used to annotate
- * strings with various contextual metadata.
- *
- * Noncharacters (U+FDD0..=U+FDEF) are codepoints that Unicode
- * guarantees will never be assigned to any character and are
- * explicitly designated for application-internal use. Unlike the
- * Private Use Area (U+E000..=U+F8FF), which is widely used by
- * powerline glyphs, Nerd Fonts, and other icon sets, noncharacters
- * are safe to use as sentinels without colliding with real user text.
- */
-
-/* Highlight Markers */
-
-// token-level (derived from token class)
-pub(crate) const SUBSH: Marker = '\u{fdd7}';
-
-// sub-token (needs scanning)
-pub(crate) const VAR_SUB: Marker = '\u{fdd8}';
-pub(crate) const ESCAPE: Marker = '\u{fdd9}';
-
-pub(crate) const RESET: Marker = '\u{fdda}';
-
-/* Expansion Markers */
-/// Double quote '"' marker
-pub(crate) const DUB_QUOTE: Marker = '\u{fdd0}';
-/// Single quote '\'' marker
-pub(crate) const SNG_QUOTE: Marker = '\u{fdd1}';
-/// Tilde sub marker
-pub(crate) const TILDE_SUB: Marker = '\u{fdd2}';
-/// Input process sub marker
-pub(crate) const PROC_SUB_IN: Marker = '\u{fdd3}';
-/// Output process sub marker
-pub(crate) const PROC_SUB_OUT: Marker = '\u{fdd4}';
-
-/// Marker for null expansion
-/// This is used for when "$@" or "$*" are used in quotes and there are no
-/// arguments Without this marker, it would be handled like an empty string,
-/// which breaks some commands
-pub(crate) const NULL_EXPAND: Marker = '\u{fdd5}';
-
-/// Explicit marker for argument separation
-/// This is used to join the arguments given by "$@", and preserves exact
-/// formatting of the original arguments, including quoting
-pub(crate) const ARG_SEP: Marker = '\u{fdd6}';
-
-/// The start of an unquoted expansion
-pub(crate) const EXPAND_START: Marker = '\u{fde1}';
-/// The end of an unquoted expansion
-pub(crate) const EXPAND_END: Marker = '\u{fde2}';
-
+#[cfg(test)]
 pub(crate) fn is_marker(c: Marker) -> bool {
   ('\u{fdd0}'..='\u{fdef}').contains(&c)
 }
+
+/// Value-layer separator joining `$@`/`${arr[@]}` elements so each becomes its
+/// own field after word splitting. Arrays and positional params store their
+/// joined value as a `VarStr`, so the separator lives as this byte sequence and
+/// is translated to `Marker::ArgSep` when the value enters a `SegStream`.
+pub(crate) const ARG_SEP: Marker = '\u{fdd6}';
+/// Value-layer null-field marker for empty `"$@"`/`"${arr[@]}"` (zero fields).
+/// Translated to `Marker::NullExpand` at the `SegStream` boundary.
+pub(crate) const NULL_EXPAND: Marker = '\u{fdd5}';
+
+// Display markers (help/syntax highlighting and format placeholders). These
+// live in `String`s on the display path, not in the byte-native expansion
+// pipeline (which uses `stream::Marker`).
+/// Escape/placeholder sentinel used by display formatters (e.g. flog's `%`).
+pub(crate) const ESCAPE: Marker = '\u{fdd9}';
+/// Reset to default styling for help/syntax highlighting.
+pub(crate) const RESET: Marker = '\u{fdda}';
 
 // Help command formatting markers
 pub(crate) const TAG: Marker = '\u{fddb}';
@@ -65,6 +32,7 @@ pub(crate) const KEYWORD_1: Marker = '\u{fddf}';
 /// square brackets
 pub(crate) const KEYWORD_2: Marker = '\u{fde0}';
 
+#[cfg(test)]
 pub(crate) fn strip_markers(str: &str) -> String {
   let mut out = str.to_string();
   out.retain(|c| !is_marker(c));
@@ -102,19 +70,5 @@ mod tests {
     let apple_logo = "\u{f8ff}";
     let stripped = strip_markers(apple_logo);
     assert_eq!(stripped, apple_logo);
-  }
-
-  #[test]
-  fn actual_markers_still_stripped() {
-    let input = format!("hello{NULL_EXPAND}world{ARG_SEP}");
-    let stripped = strip_markers(&input);
-    assert_eq!(stripped, "helloworld");
-  }
-
-  #[test]
-  fn mixed_markers_and_pua_preserves_pua() {
-    let input = format!("a{NULL_EXPAND}b{}c{ARG_SEP}d", '\u{e0b0}');
-    let stripped = strip_markers(&input);
-    assert_eq!(stripped, "ab\u{e0b0}cd");
   }
 }

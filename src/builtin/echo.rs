@@ -53,7 +53,7 @@ impl Builtin for Echo {
       .arguments()
       .map(|(st, sp)| -> ShResult<VarStr> {
         if use_escape {
-          Ok(expand::expand_ansi_c(&st.to_str_lossy()).into())
+          Ok(expand::expand_ansi_c(st.as_bytes()).into())
         } else if use_prompt {
           Ok(
             expand::expand_prompt(&st.to_str_lossy())

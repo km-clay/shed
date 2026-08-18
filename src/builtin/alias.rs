@@ -3,18 +3,19 @@ use crate::opt;
 use super::{
   ShResult, Shed,
   opt::OptSpec,
-  outln, sherr,
+  sherr,
   state::vars::{display_as_var, display_as_vars},
   varcmds::split_assignment_raw,
   with_status,
 };
+use crate::procio::outln_bytes;
 
 pub(super) struct Alias;
 impl super::Builtin for Alias {
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if args.argv.is_empty() {
       let output = Shed::logic(|l| display_as_vars(l.aliases().iter()));
-      outln!("{output}");
+      outln_bytes(&output);
 
       return with_status(0);
     }
@@ -31,7 +32,7 @@ impl super::Builtin for Alias {
       if let Some(value) = value {
         Shed::logic_mut(|l| l.insert_alias(name, &value.into(), span.clone()));
       } else if let Some(alias) = Shed::logic(|l| l.get_alias(name)) {
-        outln!("{}", display_as_var(name, alias.body()));
+        outln_bytes(&display_as_var(name, alias.body()));
       } else {
         return Err(sherr!(
           SyntaxErr @ span.clone(),
@@ -49,7 +50,7 @@ impl super::Builtin for Unalias {
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if args.argv.is_empty() {
       let output = Shed::logic(|l| display_as_vars(l.aliases().iter()));
-      outln!("{output}");
+      outln_bytes(&output);
 
       return with_status(0);
     }
@@ -79,7 +80,7 @@ impl super::Builtin for ExCmd {
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if args.argv.is_empty() {
       let output = Shed::logic(|l| display_as_vars(l.ex_aliases().iter()));
-      outln!("{output}");
+      outln_bytes(&output);
 
       return with_status(0);
     }
@@ -101,7 +102,7 @@ impl super::Builtin for ExCmd {
         if remove {
           Shed::logic_mut(|l| l.remove_ex_alias(name));
         } else {
-          outln!("{}", display_as_var(name, alias.body()));
+          outln_bytes(&display_as_var(name, alias.body()));
         }
       } else {
         return Err(sherr!(

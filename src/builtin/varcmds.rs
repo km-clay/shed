@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+use crate::procio::outln_bytes;
 use crate::state::{
   logic::{AutoloadKind, ShFunc},
   vars::VarStr,
@@ -232,7 +233,7 @@ impl super::Builtin for Declare {
     if arg_vec.is_empty() {
       // Bare `declare` prints all variables in declare-style format.
       let output = Shed::vars(display_local);
-      outln!("{output}");
+      outln_bytes(&output);
       return with_status(0);
     }
 
@@ -245,12 +246,12 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
     IntrospectMode::Vars => {
       if argv.is_empty() {
         let output = Shed::vars(display_local);
-        outln!("{output}");
+        outln_bytes(&output);
       } else {
         for (name, span) in argv {
           let val = try_var!(&name.to_str_lossy());
           match val {
-            Some(v) => outln!("{}", display_as_var(name, v)),
+            Some(v) => outln_bytes(&display_as_var(name.as_bytes(), v)),
             None if Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy())).is_some() => {
               // Declared but unset: it exists, so show it value-less rather than
               // erroring (cf. bash's `declare -- name`).
@@ -358,17 +359,18 @@ impl super::Builtin for Readonly {
     if list || arg_vec.is_empty() {
       // List the readonly variables (bare `readonly` and `readonly -p`).
       let vars = Shed::vars(display_readonly);
-      outln!("{vars}");
+      outln_bytes(&vars);
 
       return with_status(0);
     }
 
     for (arg, span) in arg_vec {
       let (var, val) = split_assignment(&arg, span.as_str());
-      Shed::vars_mut(|v| {
-        v.set_var(var, val.unwrap_or_default(), VarFlags::READONLY)
-          .promote_err(span)
-      })?;
+      Shed::vars_mut(|v| match val {
+        Some(val) => v.set_var(var, val, VarFlags::READONLY),
+        None => v.declare_var_novalue(var, VarFlags::READONLY),
+      })
+      .promote_err(span)?;
     }
 
     with_status(0)
@@ -447,7 +449,7 @@ impl super::Builtin for Export {
     if list || (arg_vec.is_empty() && !unexport) {
       // List the exported variables (bare `export` and `export -p` are the same).
       let vars = Shed::vars(display_exported);
-      outln!("{vars}");
+      outln_bytes(&vars);
       return with_status(0);
     }
 
@@ -496,7 +498,7 @@ impl super::Builtin for Local {
 
     if arg_vec.is_empty() {
       let vars = Shed::vars(display_local);
-      outln!("{vars}");
+      outln_bytes(&vars);
       return with_status(0);
     }
 
@@ -535,6 +537,18 @@ mod tests {
     test_input("readonly myvar=hello").unwrap();
     test_input("myvar=world").ok();
     assert_eq!(var!("myvar"), "hello");
+  }
+
+  #[test]
+  fn readonly_bare_name_preserves_existing_value() {
+    // `readonly NAME` (no `=`) only adds the attribute; it must not wipe the
+    // existing value to empty.
+    let _g = TestGuard::new();
+    test_input("myvar=hello").unwrap();
+    test_input("readonly myvar").unwrap();
+    assert_eq!(var!("myvar"), "hello");
+    let flags = Shed::vars(|v| v.get_var_flags("myvar"));
+    assert!(flags.unwrap().contains(VarFlags::READONLY));
   }
 
   #[test]

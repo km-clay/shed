@@ -1,15 +1,18 @@
-use std::fmt::Write;
-use std::iter::Peekable;
 use std::ops::Range;
-use std::str::Chars;
 
 use bitflags::bitflags;
-use bstr::{ByteSlice, Bytes};
-use smallvec::SmallVec;
 
-use crate::{eval::lex, procio::RedirType, state::vars::VarStr, util};
+use crate::{
+  eval::lex,
+  expand::stream::{ProcSubKind, SegCursor, StreamSeg},
+};
 
-use super::{QuoteState, ShResult, markers, match_loop, sherr, try_var, util::is_var_name_ch};
+use super::{
+  QuoteState, ShResult, match_loop, sherr,
+  stream::{Marker, Quote, SegStream, Unit},
+  try_var,
+  util::is_var_name_ch,
+};
 
 bitflags! {
   #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,63 +42,49 @@ impl ExpandFlags {
   const PATTERN: Self = Self::WORD.difference(Self::SUBSHELL);
 }
 
-/// Strip ESCAPE markers from a string, leaving the characters they protect intact.
-pub(super) fn strip_escape_markers(s: &mut VarStr) {
-  let s_str = s.to_str_lossy();
-  if !s_str.contains(markers::ESCAPE) {
-    return;
-  }
-
-  *s = s_str.replace(markers::ESCAPE, "").into();
-}
-
-/// Strip ESCAPE markers from a string, leaving the characters they protect intact.
-pub(super) fn strip_escape_markers_str(s: &mut String) {
-  if !s.contains(markers::ESCAPE) {
-    return;
-  }
-
-  *s = s.replace(markers::ESCAPE, "");
-}
-
 /// Convert internal quote/escape markers into glob-syntax for `glob::Pattern`.
-pub(super) fn markers_to_glob_escapes(s: &str) -> String {
-  let mut out = String::with_capacity(s.len());
-  let mut chars = s.chars();
-  while let Some(c) = chars.next() {
-    match c {
-      markers::ESCAPE => {
-        if let Some(next) = chars.next() {
-          push_glob_literal(&mut out, next);
-        }
-      }
-      markers::DUB_QUOTE | markers::SNG_QUOTE => {
-        let closer = c;
-        while let Some(inner) = chars.next() {
-          if inner == closer {
-            break;
+pub(super) fn markers_to_glob_escapes(s: &SegStream) -> Vec<u8> {
+  let mut out = vec![];
+  let mut cursor = s.cursor();
+  while let Some(unit) = cursor.next() {
+    match unit {
+      Unit::Byte(b) => out.push(b),
+      Unit::Mark(m) => match m {
+        Marker::Escape => {
+          if let Some(next) = cursor.next_byte() {
+            push_glob_literal(&mut out, next);
           }
-          if inner == markers::ESCAPE {
-            if let Some(next) = chars.next() {
-              push_glob_literal(&mut out, next);
+        }
+        Marker::Quote(q) => {
+          while let Some(inner) = cursor.next() {
+            match inner {
+              Unit::Mark(m) => match m {
+                Marker::Quote(inner_q) if inner_q == q => break,
+                Marker::Escape => {
+                  if let Some(next) = cursor.next_byte() {
+                    push_glob_literal(&mut out, next);
+                  }
+                }
+                _ => {}
+              },
+              Unit::Byte(b) => {
+                push_glob_literal(&mut out, b);
+              }
             }
-            continue;
           }
-          push_glob_literal(&mut out, inner);
         }
-      }
-      _ => out.push(c),
+        _ => {}
+      },
     }
   }
   out
 }
 
-pub fn escape_glob(raw: &str, use_markers: bool) -> String {
-  let esc_ch = if use_markers { markers::ESCAPE } else { '\\' };
+pub fn escape_glob(raw: &str) -> String {
   let mut out = String::new();
   let mut chars = raw.chars();
   match_loop!(chars.next() => ch, {
-    _ if ch == esc_ch => {
+    '\\' => {
       if let Some(nch) = chars.next() {
         out.push_str(&glob::Pattern::escape(&nch.to_string()));
       }
@@ -108,611 +97,572 @@ pub fn escape_glob(raw: &str, use_markers: bool) -> String {
 
 /// Push `c` to `out` as a literal glob character, using a bracket expression
 /// to escape glob metas since `glob::Pattern` doesn't recognize `\x` escapes.
-fn push_glob_literal(out: &mut String, c: char) {
-  if matches!(c, '*' | '?' | '[') {
-    out.push('[');
+fn push_glob_literal(out: &mut Vec<u8>, c: u8) {
+  if matches!(c, b'*' | b'?' | b'[') {
+    out.push(b'[');
     out.push(c);
-    out.push(']');
+    out.push(b']');
   } else {
     out.push(c);
   }
 }
 
 /// Install internal marker characters for substitution, quoting, escape, etc.,
-fn unescape_with(raw: &str, flags: ExpandFlags) -> String {
-  if !raw.bytes().any(|b| {
-    matches!(
-      b,
-      b'~' | b'\\' | b'(' | b'"' | b'\'' | b'`' | b'<' | b'>' | b'$'
-    )
-  }) {
-    return raw.to_string();
+fn unescape_with(stream: SegStream, flags: ExpandFlags) -> SegStream {
+  let has_meta = stream.stream().iter().any(|seg| match seg {
+    StreamSeg::Bytes(b) => b.iter().any(|&c| {
+      matches!(
+        c,
+        b'~' | b'\\' | b'(' | b'"' | b'\'' | b'`' | b'<' | b'>' | b'$'
+      )
+    }),
+    StreamSeg::Mark(_) => false,
+  });
+  if !has_meta {
+    return stream;
   }
 
-  let mut chars = raw.chars().peekable();
-  let mut result = String::new();
+  let mut cursor = stream.cursor();
+  let mut out = SegStream::new();
 
   let (word_breaks, mut last_was_word_break, mut first_char) = if flags.contains(ExpandFlags::TILDE)
   {
     let wb = try_var!("COMP_WORDBREAKS").unwrap_or("\"'><=;|&(: ".into());
     let ifs = try_var!("IFS").unwrap_or(" \t\n".into());
-    (format!("{wb}{ifs}"), false, true)
+    (Some([wb.as_bytes(), ifs.as_bytes()].concat()), false, true)
   } else {
-    (String::new(), false, false)
+    (None, false, false)
   };
 
-  // Depth inside a `${...}` parameter expansion. A bare `(` inside the body is
-  // part of a pattern/operand (e.g. `${v%(x)}`, `${v/x/(y)}`), not a
-  // subshell — keep it literal so it reaches the glob matcher. `$(...)`
-  // cmdsubs still work (handled by the CMDSUB arm, which consumes its own
-  // parens), and nested `${...}` increments this counter.
+  // Depth inside a `${...}` parameter expansion.
   let mut param_depth: u32 = 0;
 
-  while let Some(ch) = chars.next() {
-    match ch {
-      // An existing ESCAPE marker (from a prior unescape pass,
-      // e.g. the marker-encoded operand of a parameter expansion)
-      // means the next char is literal
-      markers::ESCAPE => {
-        result.push(markers::ESCAPE);
-        if let Some(next_ch) = chars.next() {
-          result.push(next_ch);
-        }
-      }
-      // An existing quote-region marker from a prior unescape pass.
-      // Its contents were already processed, so copy the whole region
-      // verbatim rather than re-scanning it
-      markers::DUB_QUOTE | markers::SNG_QUOTE => {
-        let closer = ch;
-        result.push(ch);
-        for inner in chars.by_ref() {
-          result.push(inner);
-          if inner == closer {
-            break;
+  while let Some(unit) = cursor.next() {
+    match unit {
+      Unit::Mark(mark) => match mark {
+        Marker::Escape => {
+          out.push(unit);
+          if let Some(n_unit) = cursor.next() {
+            out.push(n_unit);
           }
         }
-      }
-      '~' if flags.contains(ExpandFlags::TILDE) && (last_was_word_break || first_char) => {
-        result.push(markers::TILDE_SUB);
-      }
-      '\\' => {
-        if let Some(next_ch) = chars.next() {
-          result.push(markers::ESCAPE);
-          result.push(next_ch);
+        Marker::Quote(quote) => {
+          out.push(unit);
+          while let Some(inner_unit) = cursor.next() {
+            out.push(inner_unit);
+            if let Unit::Mark(Marker::Quote(end)) = inner_unit
+              && end == quote
+            {
+              break;
+            }
+          }
         }
-      }
-      '"' if flags.contains(ExpandFlags::QUOTE) || param_depth > 0 => {
-        read_dub_quote(&mut chars, &mut result);
-      }
-      '\'' if flags.contains(ExpandFlags::QUOTE) || param_depth > 0 => {
-        read_sng_quote(&mut chars, &mut result);
-      }
-      '`' if flags.contains(ExpandFlags::CMDSUB) => read_backtick(&mut chars, &mut result, false),
-      '<' if flags.contains(ExpandFlags::PROCSUB) && chars.peek() == Some(&'(') => {
-        read_proc_sub_in(&mut chars, &mut result);
-      }
-      '>' if flags.contains(ExpandFlags::PROCSUB) && chars.peek() == Some(&'(') => {
-        read_proc_sub_out(&mut chars, &mut result);
-      }
-      '$' if flags.contains(ExpandFlags::CMDSUB) && chars.peek() == Some(&'(') => {
-        result.push(markers::VAR_SUB);
-        chars.next();
-        read_subsh(&mut chars, &mut result);
-      }
-      '$' if flags.contains(ExpandFlags::VAR) && chars.peek() == Some(&'\'') => {
-        chars.next();
-        result.push(markers::SNG_QUOTE);
-        expand_dollar_quote(&mut chars, &mut result);
-        result.push(markers::SNG_QUOTE);
-      }
-      '$' if flags.intersects(ExpandFlags::VAR.union(ExpandFlags::CMDSUB)) => {
-        read_varsub(&mut chars, &mut result);
-        // `${` opens a parameter expansion; track depth so bare `(` inside the
-        // body stays literal.
-        if chars.peek() == Some(&'{') {
-          chars.next();
-          result.push('{');
-          param_depth = param_depth.saturating_add(1);
+        _ => { /* not handled */ }
+      },
+      Unit::Byte(byte) => match byte {
+        b'~' if flags.contains(ExpandFlags::TILDE) && (last_was_word_break || first_char) => {
+          out.push_marker(Marker::TildeSub);
         }
-      }
-      // `}` closes the innermost `${...}` body.
-      '}' if param_depth > 0 => {
-        result.push('}');
-        param_depth = param_depth.saturating_sub(1);
-      }
-      // Bare `(...)` as a substitution — only in word context, and only when
-      // not inside a `${...}` (where a bare `(` is a literal pattern char).
-      '(' if flags.contains(ExpandFlags::SUBSHELL) && param_depth == 0 => {
-        read_subsh(&mut chars, &mut result);
-      }
-      _ => result.push(ch),
+        b'\\' => {
+          if let Some(esc_byte) = cursor.next_byte() {
+            out.push_marker(Marker::Escape);
+            out.push_byte(esc_byte);
+          } else {
+            out.push_byte(byte);
+          }
+        }
+        b'"' if flags.contains(ExpandFlags::QUOTE) || param_depth > 0 => {
+          read_dub_quote(&mut cursor, &mut out);
+        }
+        b'\'' if flags.contains(ExpandFlags::QUOTE) || param_depth > 0 => {
+          read_sng_quote(&mut cursor, &mut out);
+        }
+        b'`' if flags.contains(ExpandFlags::CMDSUB) => {
+          read_backtick(&mut cursor, &mut out, false);
+        }
+        dir @ (b'>' | b'<')
+          if flags.contains(ExpandFlags::PROCSUB) && cursor.peek_byte() == Some(b'(') =>
+        {
+          let input = matches!(dir, b'<');
+          read_proc_sub(&mut cursor, &mut out, input);
+        }
+        b'$' if flags.contains(ExpandFlags::CMDSUB) && cursor.peek_byte() == Some(b'(') => {
+          out.push_marker(Marker::VarSub);
+          cursor.next();
+          read_subsh(&mut cursor, &mut out);
+        }
+        b'$' if flags.contains(ExpandFlags::VAR) && cursor.peek_byte() == Some(b'\'') => {
+          cursor.next();
+          out.push_marker(Marker::Quote(Quote::Single));
+          expand_dollar_quote(&mut cursor, &mut out);
+          out.push_marker(Marker::Quote(Quote::Single));
+        }
+        b'$' if flags.intersects(ExpandFlags::VAR.union(ExpandFlags::CMDSUB)) => {
+          read_varsub(&mut cursor, &mut out);
+          if cursor.peek_byte() == Some(b'{') {
+            cursor.next();
+            out.push_byte(b'{');
+            param_depth = param_depth.saturating_add(1);
+          }
+        }
+        b'}' if param_depth > 0 => {
+          out.push_byte(b'}');
+          param_depth = param_depth.saturating_sub(1);
+        }
+        b'(' if flags.contains(ExpandFlags::SUBSHELL) && param_depth == 0 => {
+          read_subsh(&mut cursor, &mut out);
+        }
+        _ => out.push_byte(byte),
+      },
     }
-    if flags.contains(ExpandFlags::TILDE) {
-      last_was_word_break = word_breaks.contains(ch);
+    if let Some(breaks) = &word_breaks
+      && let Unit::Byte(b) = unit
+      && flags.contains(ExpandFlags::TILDE)
+    {
+      last_was_word_break = breaks.contains(&b);
       first_char = false;
     }
   }
 
-  result
+  out
 }
 
 /// Full word-context unescape: all substitutions, quote sub-machines, tildes,
 /// process subs, escapes. Used by the main expansion pipeline.
-pub fn unescape_str(raw: &str) -> String {
-  unescape_with(raw, ExpandFlags::WORD)
+pub fn unescape_str(raw: &str) -> SegStream {
+  unescape_with(SegStream::from_bytes(raw.as_bytes()), ExpandFlags::WORD)
 }
 
 /// Like `unescape_str` but for the pattern/replacement operand of a parameter
 /// expansion (`${var#pat}`, `${var%pat}`, `${var/pat/rep}`, ...): a bare `(` is
 /// a literal character, not a subshell. `$(...)`, `$var`, quotes, etc. still
 /// expand as in word context.
-pub(crate) fn unescape_pattern(raw: &str) -> String {
+pub(crate) fn unescape_pattern(raw: SegStream) -> SegStream {
   unescape_with(raw, ExpandFlags::PATTERN)
 }
 
 /// Prompt-context unescape: $var, ${var}, $(cmd), backticks. No quote handling,
 /// no tildes, no procsubs, no bare subshells. Used by `prompt.substitute`.
-pub fn unescape_prompt(raw: &str) -> String {
-  unescape_with(raw, ExpandFlags::PROMPT)
+pub fn unescape_prompt(raw: &str) -> SegStream {
+  unescape_with(SegStream::from_bytes(raw.as_bytes()), ExpandFlags::PROMPT)
 }
 
-fn read_varsub(chars: &mut Peekable<Chars>, result: &mut String) -> bool {
-  if chars
-    .peek()
-    .is_none_or(|ch| *ch != '$' && *ch != '(' && *ch != '{' && !is_var_name_ch(*ch))
+fn read_varsub(stream: &mut SegCursor, out: &mut SegStream) -> bool {
+  if stream
+    .peek_byte()
+    .is_none_or(|b| b != b'$' && b != b'(' && b != b'{' && !is_var_name_ch(b as char))
   {
-    result.push('$');
+    out.push_byte(b'$');
   } else {
-    result.push(markers::VAR_SUB);
-    if chars.peek().is_some_and(|ch| *ch == '$') {
-      chars.next();
-      result.push('$');
+    out.push_marker(Marker::VarSub);
+    if stream.eat_byte(b'$') {
+      out.push_byte(b'$');
       return false;
     }
   }
   true
 }
 
-fn read_subsh(chars: &mut Peekable<Chars>, result: &mut String) {
-  result.push(markers::SUBSH);
-  // `chars` sits just after `$(`. Delimit the body with the lexer's
-  // case-aware subshell scanner
-  let rest: String = chars.clone().collect();
-  if let Some(close) = lex::scan_cmd_sub_body(&rest) {
-    result.push_str(&rest[..close]);
-    result.push(markers::SUBSH);
-    for _ in 0..rest[..=close].chars().count() {
-      chars.next();
+fn read_subsh(stream: &mut SegCursor, out: &mut SegStream) {
+  out.push_marker(Marker::Subshell);
+
+  let mut peeker = *stream;
+  let mut rest: Vec<u8> = vec![];
+  while let Some(b) = peeker.next_byte() {
+    rest.push(b);
+  }
+
+  if let Ok(rest_str) = std::str::from_utf8(&rest)
+    && let Some(close) = lex::scan_cmd_sub_body(rest_str)
+  {
+    out.push_bytes(&rest[..close]);
+    out.push_marker(Marker::Subshell);
+    for _ in 0..=close {
+      stream.next();
     }
     return;
   }
 
   let mut paren_count = 1;
   let mut qt = QuoteState::default();
-  match_loop!(chars.next() => ch, {
-    '\\' => {
-      result.push(ch);
-      if let Some(next_ch) = chars.next() {
-        result.push(next_ch);
+  match_loop!(stream.next() => unit, {
+    Unit::Byte(b) => match b {
+      b'\\' => {
+        out.push_byte(b'\\');
+        if let Some(next) = stream.next_byte() {
+          out.push_byte(next);
+        }
       }
-    }
-    '\'' => {
-      qt.toggle_single();
-      result.push(ch);
-    }
-    '"' if !qt.in_single() => {
-      qt.toggle_double();
-      result.push(ch);
-    }
-    _ if qt.in_quote() => result.push(ch),
-    '(' => {
-      paren_count += 1;
-      result.push(ch);
-    }
-    ')' => {
-      paren_count -= 1;
-      if paren_count == 0 {
-        result.push(markers::SUBSH);
-        break;
+      b'\'' if !qt.in_double() => {
+        qt.toggle_single();
+        out.push_byte(b'\'');
       }
-      result.push(ch);
+      b'"' if !qt.in_single() => {
+        qt.toggle_double();
+        out.push_byte(b'"');
+      }
+      b if qt.in_quote() => out.push_byte(b),
+      b'(' => {
+        paren_count += 1;
+        out.push_byte(b'(');
+      }
+      b')' => {
+        paren_count -= 1;
+        if paren_count == 0 {
+          out.push_marker(Marker::Subshell);
+          break;
+        }
+        out.push_byte(b')');
+      }
+      b => out.push_byte(b),
     }
-    _ => result.push(ch),
+    Unit::Mark(m) => out.push_marker(m),
   });
 }
 
-fn read_sng_quote(chars: &mut Peekable<Chars>, result: &mut String) {
-  result.push(markers::SNG_QUOTE);
-  match_loop!(chars.next() => q_ch, {
-    '\'' => {
-      result.push(markers::SNG_QUOTE);
+fn read_sng_quote(stream: &mut SegCursor, out: &mut SegStream) {
+  out.push_marker(Marker::Quote(Quote::Single));
+  match_loop!(stream.next_byte() => q_ch, {
+    b'\'' => {
+      out.push_marker(Marker::Quote(Quote::Single));
       break;
     }
-    _ => result.push(q_ch),
+    _ => out.push_byte(q_ch),
   });
 }
 
-fn read_dub_quote(chars: &mut Peekable<Chars>, result: &mut String) {
-  result.push(markers::DUB_QUOTE);
+fn read_dub_quote(stream: &mut SegCursor, out: &mut SegStream) {
+  out.push_marker(Marker::Quote(Quote::Double));
 
   // the current depth of '${...}' expansions
   let mut param_depth: u32 = 0;
 
-  match_loop!(chars.next() => q_ch, {
-    '\\' => {
-      if let Some(next_ch) = chars.next() {
-        match next_ch {
-          '"' | '\\' | '`' | '$' | '!' => {
-            // discard the backslash
+  match_loop!(stream.next() => q_unit, {
+    Unit::Byte(byte) => match byte {
+      b'\\' => {
+        if let Some(next) = stream.next_byte() {
+          match next {
+            b'"' | b'\\' | b'`' | b'$' | b'!' => {
+              // discard the backslash
+            }
+            b'}' | b'/' if param_depth > 0 => {
+              // `}` (the `${...}` closer) and `/` (the `${v/pat/rep}` separator)
+              // are detected by char-driven scans downstream, so a backslash
+              // escape on one inside a parameter expansion must be kept as an
+              // ESCAPE marker rather than neutralized by de-marking.
+              out.push_marker(Marker::Escape);
+            }
+            _ => {
+              out.push_byte(b'\\');
+            }
           }
-          '}' | '/' if param_depth > 0 => {
-            // `}` (the `${...}` closer) and `/` (the `${v/pat/rep}` separator)
-            // are detected by char-driven scans downstream, so a backslash
-            // escape on one inside a parameter expansion must be kept as an
-            // ESCAPE marker rather than neutralized by de-marking.
-            result.push(markers::ESCAPE);
-          }
-          _ => {
-            result.push(q_ch);
-          }
-        }
-        result.push(next_ch);
-      }
-    }
-    '$' if chars.peek() == Some(&'\'') => {
-      if param_depth > 0 {
-        // Inside a `${...}`, `$'...'` ANSI-C quoting is active even within the
-        // outer double quotes (matching bash). Consume the whole region so its
-        // closing `'` isn't mistaken for a bare single-quote opener by the
-        // `'` arm below.
-        chars.next();
-        result.push(markers::SNG_QUOTE);
-        expand_dollar_quote(chars, result);
-        result.push(markers::SNG_QUOTE);
-      } else {
-        result.push(q_ch);
-        let sng_quote = chars.next().unwrap();
-        result.push(sng_quote);
-      }
-    }
-    '$' => {
-      if read_varsub(chars, result) {
-        if chars.peek() == Some(&'{') {
-          chars.next();
-          result.push('{');
-          param_depth = param_depth.saturating_add(1);
-        } else if chars.peek() == Some(&'(') {
-          chars.next();
-          read_subsh(chars, result);
+          out.push_byte(next);
         }
       }
+      b'$' if stream.peek_byte() == Some(b'\'') => {
+        if param_depth > 0 {
+          stream.next();
+          out.push_marker(Marker::Quote(Quote::Single));
+          expand_dollar_quote(stream, out);
+          out.push_marker(Marker::Quote(Quote::Single));
+        } else {
+          out.push_byte(b'$');
+          stream.next();
+          out.push_byte(b'\'');
+        }
+      }
+      b'$' => {
+        if read_varsub(stream, out) {
+          if stream.eat_byte(b'{') {
+            out.push_byte(b'{');
+            param_depth = param_depth.saturating_add(1);
+          } else if stream.eat_byte(b'(') {
+            read_subsh(stream, out);
+          }
+        }
+      }
+      b'}' if param_depth > 0 => {
+        out.push_byte(b'}');
+        param_depth = param_depth.saturating_sub(1);
+      }
+      b'\'' if param_depth > 0 => {
+        read_sng_quote(stream, out);
+      }
+      b'`' => {
+        read_backtick(stream, out, true);
+      }
+      b'"' if param_depth > 0 => {
+        read_dub_quote(stream, out);
+      }
+      b'"' => {
+        out.push(Unit::Mark(Marker::Quote(Quote::Double)));
+        break;
+      }
+      _ => out.push_byte(byte),
     }
-    '}' if param_depth > 0 => {
-      result.push('}');
-      param_depth = param_depth.saturating_sub(1);
-    }
-    '\'' if param_depth > 0 => read_sng_quote(chars, result),
-    '`' => read_backtick(chars, result, true),
-    '"' if param_depth > 0 => read_dub_quote(chars, result),
-    '"' => {
-      result.push(markers::DUB_QUOTE);
-      break;
-    }
-    _ => result.push(q_ch),
+    Unit::Mark(m) => out.push_marker(m),
   });
-}
-
-enum Quote {
-  Single,
-  Double,
-}
-
-enum ProcSubKind {
-  In,
-  Out,
-}
-
-enum StreamSeg {
-  Bytes(SmallVec<[u8; 32]>),
-  Subsh,
-  VarSub,
-  Escape,
-  Reset,
-  TildeSub,
-  Quote(Quote),
-  ProcSub(ProcSubKind),
-  NullExpand,
-  ArgSep,
-  ExpandStart,
-  ExpandEnd,
 }
 
 pub fn expand_ansi_c(s: &[u8]) -> Vec<u8> {
-  let mut out = Vec::new();
-  expand_ansi_c_stream(&mut s.bytes().peekable(), &mut out, None);
-  out
+  let input = SegStream::from_bytes(s);
+  let mut out = SegStream::new();
+  expand_ansi_c_stream(&mut input.cursor(), &mut out, None);
+  out.into_bytes()
 }
 
-pub fn expand_dollar_quote(chars: &mut Peekable<Bytes>, out: &mut Vec<u8>) {
+pub fn expand_dollar_quote(chars: &mut SegCursor, out: &mut SegStream) {
   expand_ansi_c_stream(chars, out, Some(b'\''));
 }
 
-pub fn expand_ansi_c_stream(
-  chars: &mut Peekable<Bytes>,
-  out: &mut Vec<u8>,
-  terminator: Option<u8>,
-) {
-  let mut pending: Vec<u8> = Vec::new();
-  macro_rules! flush {
-    () => {
-      if !pending.is_empty() {
-        out.append(&mut pending);
-      }
-    };
-  }
-
-  match_loop!(chars.next() => q_ch, {
-    c if Some(c) == terminator => break,
-    b'\\' if let Some(esc) = chars.next() => {
-      match esc {
-        // byte-producing escapes: keep buffering so adjacent ones combine.
-        b'x' => read_hex(chars, &mut pending),
-        b'o' => read_octal(chars, &mut pending, None),
-        _ if esc.is_ascii_digit() => read_octal(chars, &mut pending, Some(esc)),
-        // everything else emits text. flush any pending byte run first.
+pub fn expand_ansi_c_stream(stream: &mut SegCursor, out: &mut SegStream, terminator: Option<u8>) {
+  match_loop!(stream.next() => unit, {
+    Unit::Byte(c) if Some(c) == terminator => break,
+    Unit::Byte(b'\\') => match stream.next_byte() {
+      Some(b'x') => read_hex(stream, out),
+      Some(b'o') => read_octal(stream, out, None),
+      Some(esc) if esc.is_ascii_digit() => read_octal(stream, out, Some(esc)),
+      Some(esc) => match esc {
+        b'n' => out.push_byte(b'\n'),
+        b't' => out.push_byte(b'\t'),
+        b'r' => out.push_byte(b'\r'),
+        b'"' => out.push_byte(b'"'),
+        b'\'' => out.push_byte(b'\''),
+        b'\\' => out.push_byte(b'\\'),
+        b'a' => out.push_byte(b'\x07'),
+        b'b' => out.push_byte(b'\x08'),
+        b'c' => read_stty_escape(stream, out),
+        b'e' | b'E' => out.push_byte(b'\x1b'),
+        b'f' => out.push_byte(b'\x0c'),
+        b'v' => out.push_byte(b'\x0b'),
+        b'u' | b'U' => read_unicode(stream, out, esc),
         _ => {
-          flush!();
-          match esc {
-            b'n' => out.push(b'\n'),
-            b't' => out.push(b'\t'),
-            b'r' => out.push(b'\r'),
-            b'"' => out.push(b'"'),
-            b'\'' => out.push(b'\''),
-            b'\\' => out.push(b'\\'),
-            b'a' => out.push(b'\x07'),
-            b'b' => out.push(b'\x08'),
-            b'c' => read_stty_escape(chars, out),
-            b'e' | b'E' => out.push(b'\x1b'),
-            b'f' => out.push(b'\x0c'),
-            b'v' => out.push(b'\x0b'),
-            b'u' | b'U' => read_unicode(chars, out, esc),
-            _ => {
-              out.push(b'\\');
-              out.push(esc);
-            }
-          }
+          out.push_byte(b'\\');
+          out.push_byte(esc);
         }
-      }
+      },
+      None => out.push_byte(b'\\'),
     }
-    _ => {
-      flush!();
-      out.push(q_ch);
-    }
+    Unit::Byte(b) => out.push_byte(b),
+    Unit::Mark(m) => out.push_marker(m),
   });
-  flush!();
 }
 
-pub fn read_unicode(chars: &mut Peekable<Bytes>, result: &mut Vec<u8>, marker: u8) {
-  let mut hex = vec![];
+pub fn read_unicode(stream: &mut SegCursor, out: &mut SegStream, marker: u8) {
+  let mut hex: Vec<u8> = vec![];
   let max = match marker {
     b'u' => 4,
     b'U' => 8,
     _ => unreachable!("read_unicode called with non-unicode marker"),
   };
 
-  while hex.len() < max
-    && chars
-      .peek()
-      .is_some_and(|c| (*c as char).is_ascii_hexdigit())
-  {
-    hex.push(chars.next().unwrap());
+  while hex.len() < max {
+    match stream.peek_byte() {
+      Some(h) if h.is_ascii_hexdigit() => {
+        hex.push(h);
+        stream.next();
+      }
+      _ => break,
+    }
   }
 
-  if let Some(ch) = u32::from_str_radix(&hex.to_str_lossy(), 16)
+  if let Some(ch) = std::str::from_utf8(&hex)
     .ok()
+    .and_then(|s| u32::from_str_radix(s, 16).ok())
     .and_then(char::from_u32)
   {
     let mut buf = [0u8; 4];
-    result.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+    out.push_bytes(ch.encode_utf8(&mut buf).as_bytes());
   } else {
     // empty or invalid, just push it literally
-    result.push(b'\\');
-    result.push(marker);
+    out.push_byte(b'\\');
+    out.push_byte(marker);
+    out.push_bytes(&hex);
   }
 }
 
-pub fn read_stty_escape(chars: &mut Peekable<Bytes>, result: &mut Vec<u8>) {
-  let mut peeker = chars.clone();
+pub fn read_stty_escape(stream: &mut SegCursor, out: &mut SegStream) {
+  let mut peeker = *stream;
 
-  let Some(first) = peeker.next() else {
-    result.push(b'\\');
-    result.push(b'c');
+  let Some(first) = peeker.next_byte() else {
+    out.push_bytes(b"\\c");
     return;
   };
 
   let (target, consume_count) = if first == b'\\' {
-    let Some(second) = peeker.next() else {
-      result.push(b'\\');
-      result.push(b'c');
-      return;
-    };
-    if second != b'\\' {
-      result.push(b'\\');
-      result.push(b'c');
+    if let Some(b'\\') = peeker.next_byte() {
+      (b'\\', 2)
+    } else {
+      out.push_bytes(b"\\c");
       return;
     }
-    (b'\\', 2)
   } else {
     (first, 1)
   };
 
   let upper = target.to_ascii_uppercase();
   if !matches!(upper, b'@'..=b'_' | b'?') {
-    result.push(b'\\');
-    result.push(b'c');
+    out.push_bytes(b"\\c");
     return;
   }
 
   for _ in 0..consume_count {
-    chars.next();
+    stream.next();
   }
 
   // fun fact: all of the ascii control chars are exactly
   // the printable ascii chars with the high bit cleared.
   // so if we xor this char by 0x40, we automagically get our
   // control character
-  let code = (upper as u8) ^ 0x40;
-  result.push(code);
+  out.push_byte(upper ^ 0x40);
 }
 
-pub fn read_octal(chars: &mut Peekable<Bytes>, result: &mut Vec<u8>, first: Option<u8>) {
-  let mut oct = vec![];
+pub fn read_octal(stream: &mut SegCursor, out: &mut SegStream, first: Option<u8>) {
+  let mut oct: Vec<u8> = vec![];
   if let Some(first) = first {
     oct.push(first);
   }
   for _ in 0..3 {
-    if let Some(o) = chars.peek() {
-      if (*o as char).is_digit(8) {
-        oct.push(*o);
-        chars.next();
-      } else {
-        break;
+    match stream.peek_byte() {
+      Some(o @ b'0'..=b'7') => {
+        oct.push(o);
+        stream.next();
       }
-    } else {
-      break;
+      _ => break,
     }
   }
-  if let Ok(byte) = u8::from_str_radix(&oct.to_str_lossy(), 8) {
-    result.push(byte);
+  if let Some(byte) = std::str::from_utf8(&oct)
+    .ok()
+    .and_then(|s| u8::from_str_radix(s, 8).ok())
+  {
+    out.push_byte(byte);
   } else {
-    result.extend_from_slice(b"\\o");
-    result.extend_from_slice(oct.as_bytes());
+    out.push_bytes(b"\\o");
+    out.push_bytes(&oct);
   }
 }
 
-pub fn read_hex(chars: &mut Peekable<Bytes>, result: &mut Vec<u8>) {
-  let mut hex = vec![];
-  if let Some(h1) = chars.next() {
-    hex.push(h1);
-  } else {
-    result.extend_from_slice(b"\\x");
+pub fn read_hex(stream: &mut SegCursor, out: &mut SegStream) {
+  let Some(h1) = stream.next_byte() else {
+    out.push_bytes(b"\\x");
     return;
-  }
-  if let Some(h2) = chars.next() {
-    hex.push(h2);
-  } else {
-    result.extend_from_slice(b"\\x");
-    result.extend_from_slice(hex.as_bytes());
-    return;
-  }
-  if let Ok(byte) = u8::from_str_radix(&hex.to_str_lossy(), 16) {
-    result.push(byte);
-  } else {
-    result.extend_from_slice(b"\\x");
-    result.extend_from_slice(hex.as_bytes());
-  }
-}
-
-fn read_proc_sub_in(chars: &mut Peekable<Chars>, result: &mut String) {
-  read_proc_sub(chars, result, false);
-}
-
-fn read_proc_sub_out(chars: &mut Peekable<Chars>, result: &mut String) {
-  read_proc_sub(chars, result, true);
-}
-
-fn read_proc_sub(chars: &mut Peekable<Chars>, result: &mut String, input: bool) {
-  let marker = if input {
-    markers::PROC_SUB_IN
-  } else {
-    markers::PROC_SUB_OUT
   };
-  chars.next();
+  let Some(h2) = stream.next_byte() else {
+    out.push_bytes(b"\\x");
+    out.push_byte(h1);
+    return;
+  };
+  let digits = [h1, h2];
+  if let Some(byte) = std::str::from_utf8(&digits)
+    .ok()
+    .and_then(|s| u8::from_str_radix(s, 16).ok())
+  {
+    out.push_byte(byte);
+  } else {
+    out.push_bytes(b"\\x");
+    out.push_bytes(&digits);
+  }
+}
+
+fn read_proc_sub(stream: &mut SegCursor, out: &mut SegStream, input: bool) {
+  let kind = ProcSubKind::from(input);
+  stream.next();
   let mut paren_count = 1;
-  result.push(marker);
-  match_loop!(chars.next() => subsh_ch, {
-    '\\' => {
-      result.push(subsh_ch);
-      if let Some(next_ch) = chars.next() {
-        result.push(next_ch);
+  out.push_marker(Marker::ProcSub(kind));
+  let mut qt = QuoteState::default();
+
+  match_loop!(stream.next_byte() => subsh_ch, {
+    b'\\' => {
+      out.push_byte(subsh_ch);
+      if let Some(next_ch) = stream.next_byte() {
+        out.push_byte(next_ch);
       }
     }
-    '$' if chars.peek() == Some(&'\'') => {
-      result.push(subsh_ch);
+
+    b'\'' if !qt.in_double() => {
+      qt.toggle_single();
+      out.push_byte(subsh_ch);
     }
-    '(' => {
-      result.push(subsh_ch);
+    b'"' if !qt.in_single() => {
+      qt.toggle_double();
+      out.push_byte(subsh_ch);
+    }
+    byte if qt.in_quote() => out.push_byte(byte),
+
+    b'$' if stream.peek_byte() == Some(b'\'') => {
+      out.push_byte(subsh_ch);
+    }
+    b'(' => {
+      out.push_byte(subsh_ch);
       paren_count += 1;
     }
-    ')' => {
+    b')' => {
       paren_count -= 1;
       if paren_count <= 0 {
-        result.push(marker);
+        out.push_marker(Marker::ProcSub(kind));
         break;
       }
-      result.push(subsh_ch);
+      out.push_byte(subsh_ch);
     }
-    _ => result.push(subsh_ch),
+    _ => out.push_byte(subsh_ch),
   });
 }
 
-fn read_backtick(chars: &mut Peekable<Chars>, result: &mut String, in_dquote: bool) {
-  result.push(markers::VAR_SUB);
-  result.push(markers::SUBSH);
-  match_loop!(chars.next() => bt_ch, {
-    '\\' => {
+fn read_backtick(stream: &mut SegCursor, out: &mut SegStream, in_dquote: bool) {
+  out.push_marker(Marker::VarSub);
+  out.push_marker(Marker::Subshell);
+  match_loop!(stream.next_byte() => bt_ch, {
+    b'\\' => {
       // only push backslash for double quotes if we are already in double quotes
       // this is some weird posix corner case
-      match chars.peek() {
-        Some('`' | '$' | '\\') => result.push(chars.next().unwrap()),
-        Some('"') if in_dquote => result.push(chars.next().unwrap()),
-        _ => result.push(bt_ch),
+      match stream.peek_byte() {
+        Some(b'`' | b'$' | b'\\') => out.push_byte(stream.next_byte().unwrap()),
+        Some(b'"') if in_dquote => out.push_byte(stream.next_byte().unwrap()),
+        _ => out.push_byte(bt_ch),
       }
     }
     // fun fact: this one match arm allows us to parse backtick statements nested in regular command subs inside of other backtick statements.
     // Not even zsh's parser handles this case
-    '$' if chars.peek() == Some(&'(') => {
-      chars.next();
-      result.push_str("$(");
+    b'$' if stream.eat_byte(b'(') => {
+      out.push_bytes(b"$(");
       let mut paren_count = 1;
-      match_loop!(chars.next() => subsh_ch, {
-        '\\' => {
-          result.push(subsh_ch);
-          if let Some(next_ch) = chars.next() {
-            result.push(next_ch);
+      match_loop!(stream.next_byte() => subsh_ch, {
+        b'\\' => {
+          out.push_byte(subsh_ch);
+          if let Some(next_ch) = stream.next_byte() {
+            out.push_byte(next_ch);
           }
         }
-        '(' => {
+        b'(' => {
           paren_count += 1;
-          result.push(subsh_ch);
+          out.push_byte(b'(');
         }
-        ')' => {
+        b')' => {
           paren_count -= 1;
-          result.push(subsh_ch);
+          out.push_byte(b')');
           if paren_count == 0 {
             break;
           }
         }
-        _ => result.push(subsh_ch),
+        _ => out.push_byte(subsh_ch),
       });
     }
-    '`' => {
-      result.push(markers::SUBSH);
-      log::debug!("Finished reading backtick: {result}");
+    b'`' => {
+      out.push_marker(Marker::Subshell);
       break;
     }
-    _ => result.push(bt_ch),
+    _ => out.push_byte(bt_ch),
   });
 }
 
 /// Heredoc body: $var / ${var} / $(cmd) / backticks only. Quotes, tildes,
 /// globs, process subs, and bare subshells all pass through as literal text.
-pub fn unescape_heredoc(raw: &str) -> String {
-  unescape_with(raw, ExpandFlags::HEREDOC)
+pub fn unescape_heredoc(raw: &str) -> SegStream {
+  unescape_with(SegStream::from_bytes(raw.as_bytes()), ExpandFlags::HEREDOC)
 }
 
-pub fn escape_str(raw: &str, use_marker: bool) -> String {
-  escape_str_bounded(raw, use_marker, None)
+pub fn escape_str(raw: &str) -> String {
+  escape_str_bounded(raw, None)
 }
 
 /// Opposite of `unescape_str`, escapes a string to be executed as literal text
@@ -721,10 +671,9 @@ pub fn escape_str(raw: &str, use_marker: bool) -> String {
 /// if `use_marker` is true, it will check for `markers::ESCAPE` instead of a literal backslash.
 /// if a bound (something like 0..5) is provided, the escaping logic will be limited to those bytes
 /// this is mainly used for escaping the region of text that is changed during completion
-pub fn escape_str_bounded(raw: &str, use_marker: bool, bound: Option<&Range<usize>>) -> String {
+pub fn escape_str_bounded(raw: &str, bound: Option<&Range<usize>>) -> String {
   let mut result = String::new();
   let mut chars = raw.char_indices();
-  let esc_ch = if use_marker { markers::ESCAPE } else { '\\' };
 
   while let Some((i, ch)) = chars.next() {
     if let Some(bound) = &bound
@@ -737,11 +686,11 @@ pub fn escape_str_bounded(raw: &str, use_marker: bool, bound: Option<&Range<usiz
     match ch {
       '\'' | '"' | '\\' | '|' | '&' | ';' | '(' | ')' | '<' | '>' | '$' | '*' | '!' | '`' | '{'
       | '?' | '[' | '#' | ' ' | '\t' | '\n' => {
-        result.push(esc_ch);
+        result.push('\\');
         result.push(ch);
       }
       '~' if result.is_empty() => {
-        result.push(esc_ch);
+        result.push('\\');
         result.push(ch);
       }
       _ => {
@@ -753,60 +702,59 @@ pub fn escape_str_bounded(raw: &str, use_marker: bool, bound: Option<&Range<usiz
   result
 }
 
-pub fn unescape_math(raw: &str) -> ShResult<String> {
-  let mut chars = raw.chars().peekable();
-  let mut result = String::new();
+pub fn unescape_math(raw: &str) -> ShResult<SegStream> {
+  let mut chars = raw.bytes().peekable();
+  let mut out = SegStream::new();
   let mut qt_state = QuoteState::default();
 
   match_loop!(chars.next() => ch, {
-    '\\' => {
-      if (!qt_state.in_single() || chars.peek().is_some_and(|&c| c == '\''))
+    b'\\' => {
+      if (!qt_state.in_single() || chars.peek() == Some(&b'\''))
       && let Some(next_ch) = chars.next() {
-        result.push(next_ch);
+        out.push_byte(next_ch);
       }
     }
-    '"' => qt_state.toggle_double(),
-    '\'' => qt_state.toggle_single(),
-    _ if qt_state.in_single() => result.push(ch),
-    '$' => {
-      result.push(markers::VAR_SUB);
-      if chars.peek() == Some(&'(') {
-        result.push(markers::SUBSH);
+    b'"' => qt_state.toggle_double(),
+    b'\'' => qt_state.toggle_single(),
+    _ if qt_state.in_single() => out.push_byte(ch),
+    b'$' => {
+      out.push_marker(Marker::VarSub);
+      if chars.peek() == Some(&b'(') {
+        out.push_marker(Marker::Subshell);
         chars.next();
         let mut paren_count = 1;
         match_loop!(chars.next() => subsh_ch, {
-          '\\' => {
-            result.push(subsh_ch);
+          b'\\' => {
+            out.push_byte(subsh_ch);
             if let Some(next_ch) = chars.next() {
-              result.push(next_ch);
+              out.push_byte(next_ch);
             }
           }
-          '$' if chars.peek() != Some(&'(') => result.push(markers::VAR_SUB),
-          '(' => {
+          b'(' => {
             paren_count += 1;
-            result.push(subsh_ch);
+            out.push_byte(subsh_ch);
           }
-          ')' => {
+          b')' => {
             paren_count -= 1;
             if paren_count == 0 {
-              result.push(markers::SUBSH);
+              out.push_marker(Marker::Subshell);
               break;
             }
-            result.push(subsh_ch);
+            out.push_byte(subsh_ch);
           }
-          _ => result.push(subsh_ch),
+          _ => out.push_byte(subsh_ch),
         });
       }
     }
-    _ if qt_state.in_double() => { result.push(ch); }
-    _ => result.push(ch),
+    _ if qt_state.in_double() => { out.push_byte(ch); }
+    _ => out.push_byte(ch),
   });
 
   if !qt_state.outside() {
     return Err(sherr!(ParseErr, "Unmatched quote in arithmetic expression",));
   }
 
-  Ok(result)
+  Ok(out)
 }
 
 fn quote_fmt(
@@ -876,6 +824,50 @@ pub fn shell_quote(s: &str) -> String {
   quote(s, shell_quote_fmt)
 }
 
+/// Byte-native shell quoting: like [`shell_quote`], but preserves arbitrary
+/// non-UTF-8 bytes by rendering the value in `$'...'` ANSI-C form, so
+/// `declare`/`set`/`alias` output round-trips raw bytes instead of laundering
+/// them into `U+FFFD`. Valid UTF-8 values take the ordinary `shell_quote` path.
+pub fn shell_quote_bytes(bytes: &[u8]) -> Vec<u8> {
+  if let Ok(s) = std::str::from_utf8(bytes) {
+    shell_quote(s).into_bytes()
+  } else {
+    let mut out = Vec::with_capacity(bytes.len() + 4);
+    out.extend_from_slice(b"$'");
+    for chunk in bytes.utf8_chunks() {
+      for ch in chunk.valid().chars() {
+        push_ansi_c_escaped(&mut out, ch);
+      }
+      for &b in chunk.invalid() {
+        out.extend_from_slice(format!("\\x{b:02x}").as_bytes());
+      }
+    }
+    out.push(b'\'');
+    out
+  }
+}
+
+/// Append `ch` to `out` in the `$'...'` ANSI-C escaping convention (matching the
+/// `$'...'` branch of [`quote_fmt`]).
+fn push_ansi_c_escaped(out: &mut Vec<u8>, ch: char) {
+  match ch {
+    '\\' => out.extend_from_slice(b"\\\\"),
+    '\'' => out.extend_from_slice(b"\\'"),
+    '\n' => out.extend_from_slice(b"\\n"),
+    '\r' => out.extend_from_slice(b"\\r"),
+    '\t' => out.extend_from_slice(b"\\t"),
+    '\x07' => out.extend_from_slice(b"\\a"),
+    '\x08' => out.extend_from_slice(b"\\b"),
+    '\x0B' => out.extend_from_slice(b"\\v"),
+    '\x0C' => out.extend_from_slice(b"\\f"),
+    c if c.is_ascii_control() => out.extend_from_slice(format!("\\x{:02x}", c as u8).as_bytes()),
+    c => {
+      let mut buf = [0u8; 4];
+      out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+    }
+  }
+}
+
 /// Quotes an xtrace argument
 pub fn xtrace_quote(s: &str) -> String {
   quote(s, xtrace_quote_fmt)
@@ -892,6 +884,46 @@ fn quote<S: AsRef<str>, F: Fn(&str, &mut String) -> std::fmt::Result>(s: S, f: F
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  // `unescape_str` is SegStream-native now; these tests assert marker
+  // placement, so render the stream back to a marker-char string (markers as
+  // their sentinel chars) for the string-shaped assertions below.
+  fn unescape_str(s: &str) -> String {
+    use crate::expand::stream::StreamSeg;
+    let mut out = String::new();
+    for seg in super::unescape_str(s).stream() {
+      match seg {
+        StreamSeg::Bytes(b) => out.push_str(&String::from_utf8_lossy(b)),
+        StreamSeg::Mark(m) => out.push(marker_char(*m)),
+      }
+    }
+    out
+  }
+  fn marker_char(m: crate::expand::stream::Marker) -> char {
+    use crate::expand::stream::{Marker, ProcSubKind, Quote};
+    match m {
+      Marker::Quote(Quote::Double) => '\u{fdd0}',
+      Marker::Quote(Quote::Single) => '\u{fdd1}',
+      Marker::TildeSub => '\u{fdd2}',
+      Marker::ProcSub(ProcSubKind::In) => '\u{fdd3}',
+      Marker::ProcSub(ProcSubKind::Out) => '\u{fdd4}',
+      Marker::NullExpand => '\u{fdd5}',
+      Marker::ArgSep => '\u{fdd6}',
+      Marker::Subshell => '\u{fdd7}',
+      Marker::VarSub => '\u{fdd8}',
+      Marker::Escape => '\u{fdd9}',
+      Marker::ExpandStart => '\u{fde1}',
+      Marker::ExpandEnd => '\u{fde2}',
+    }
+  }
+  #[allow(dead_code)]
+  mod markers {
+    pub const ESCAPE: char = '\u{fdd9}';
+    pub const SNG_QUOTE: char = '\u{fdd1}';
+    pub const DUB_QUOTE: char = '\u{fdd0}';
+    pub const VAR_SUB: char = '\u{fdd8}';
+    pub const TILDE_SUB: char = '\u{fdd2}';
+  }
 
   // ===================== unescape_str =====================
 
@@ -1033,7 +1065,11 @@ mod tests {
 #[cfg(test)]
 #[expect(non_snake_case)] // names preserve uppercase vs lowercase E
 mod expand_ansi_c_tests {
-  use super::expand_ansi_c;
+  // `expand_ansi_c` is byte-native now; wrap it as str→str for these ASCII
+  // assertions (byte-specific cases call `super::expand_ansi_c` directly).
+  fn expand_ansi_c(s: &str) -> String {
+    String::from_utf8_lossy(&super::expand_ansi_c(s.as_bytes())).into_owned()
+  }
   // ─── identity passthrough ─────────────────────────────────────────
 
   #[test]
@@ -1114,7 +1150,8 @@ mod expand_ansi_c_tests {
 
   #[test]
   fn hex_uppercase_digits() {
-    assert_eq!(expand_ansi_c("\\xFF"), "\u{ff}");
+    // `\xFF` is the raw byte 0xFF (byte-native), not the widened `U+00FF`.
+    assert_eq!(super::expand_ansi_c(b"\\xFF"), [0xFF]);
   }
 
   #[test]

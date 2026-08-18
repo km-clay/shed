@@ -26,6 +26,17 @@ macro_rules! assert_output {
   }};
 }
 
+/// Like `assert_output!`, but compares raw bytes against a `&[u8]` expression
+/// so non-UTF-8 output survives the check unmangled.
+#[macro_export]
+macro_rules! assert_output_bytes {
+  ($guard:expr, $expected:expr) => {{
+    let output = $guard.read_output_bytes();
+    let expected: &[u8] = $expected;
+    assert_eq!(output, expected);
+  }};
+}
+
 #[macro_export]
 macro_rules! assert_file {
   ($path:expr, $($arg:tt)*) => {{
@@ -302,6 +313,13 @@ impl TestGuard {
   }
 
   pub fn read_output(&self) -> String {
+    String::from_utf8_lossy(&self.read_output_bytes()).to_string()
+  }
+
+  /// Like `read_output`, but returns the raw bytes without a lossy UTF-8
+  /// conversion. Use this to assert byte-transparent output (e.g. `printf`
+  /// emitting non-UTF-8 bytes), which `read_output` would mangle.
+  pub fn read_output_bytes(&self) -> Vec<u8> {
     // if we are here, then that means we have probably finished executing
     // our test. we now write this to the pty
     let _ = nix::unistd::write(self.pty_slave.as_fd(), TEST_OUTPUT_SENTINEL);
@@ -328,7 +346,7 @@ impl TestGuard {
       Some(pos) => (pos, pos + TEST_OUTPUT_SENTINEL.len()),
       None => (buf.len(), buf.len()),
     };
-    let res = String::from_utf8_lossy(&buf[..end]).to_string();
+    let res = buf[..end].to_vec();
     buf.drain(..drain_to);
 
     res // done

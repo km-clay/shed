@@ -1,7 +1,13 @@
 //! This module contains functions for managing the lifecycle of the program.
 //! These functions do stuff like setting up the logger, parsing the command line arguments, hanging up child processes on exit, etc.
 
-use std::{io::Write, path::PathBuf, process::ExitCode, sync::atomic::Ordering};
+use std::{
+  io::Write,
+  os::unix::ffi::{OsStrExt, OsStringExt},
+  path::PathBuf,
+  process::ExitCode,
+  sync::atomic::Ordering,
+};
 
 use crate::eval::execute;
 
@@ -160,17 +166,11 @@ where
 }
 
 /// Parse `shed`'s command-line arguments.
-///
-/// Invocation-only flags (`-c`/`-s`/`-i`/`-l`/`-w` and their `--long` forms)
-/// fill the returned [`ShedArgs`]; `set`-family options (`-e`, `-ex`, `+e`,
-/// `-o NAME`, ...) are applied to the shell's set-opts immediately via the same
-/// scanner the `set` builtin uses. Everything after the options — or after a
-/// `--` — becomes `script_args`.
 fn parse_args() -> ShResult<ShedArgs> {
   let mut cfg = ShedArgs::default();
-  let mut words = std::env::args()
+  let mut words = std::env::args_os()
     .skip(1)
-    .map(|a| (VarStr::from(a), Span::default()))
+    .map(|a| (VarStr::from(a.into_vec()), Span::default()))
     .peekable();
 
   while let Some((word, _)) = words.peek() {
@@ -233,7 +233,10 @@ pub(super) fn setup() -> Option<ShedArgs> {
       std::process::exit(2);
     }
   };
-  if std::env::args().next().is_some_and(|a| a.starts_with('-')) {
+  if std::env::args_os()
+    .next()
+    .is_some_and(|a| a.as_bytes().first() == Some(&b'-'))
+  {
     // first arg is '-shed'
     // meaning we are in a login shell
     args.login_shell = true;

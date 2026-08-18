@@ -1,6 +1,10 @@
 use std::{env, fs};
 
-use super::{ShResult, opt::OptSpec, outln, sherr, try_var, with_status};
+use crate::procio::outln_bytes;
+use crate::state::util;
+use crate::state::vars::VarStr;
+
+use super::{ShResult, opt::OptSpec, sherr, try_var, with_status};
 
 pub(super) struct Pwd;
 impl super::Builtin for Pwd {
@@ -26,12 +30,12 @@ impl super::Builtin for Pwd {
       return Err(sherr!(ParseErr @ args.span, "pwd: too many arguments"));
     }
 
-    let dir = if logical {
+    let dir: Option<VarStr> = if logical {
       try_var!("PWD")
-        .filter(|p| is_same_dir_as_cwd(&p.to_str_lossy()))
-        .or_else(|| physical_cwd().map(|p| p.to_string_lossy().into()))
+        .filter(|p| is_same_dir_as_cwd(p.as_bytes()))
+        .or_else(|| physical_cwd().map(|p| util::path_to_varstr(&p)))
     } else {
-      physical_cwd().map(|p| p.to_string_lossy().into())
+      physical_cwd().map(|p| util::path_to_varstr(&p))
     };
 
     let Some(dir) = dir else {
@@ -41,13 +45,15 @@ impl super::Builtin for Pwd {
       ));
     };
 
-    outln!("{dir}");
+    outln_bytes(dir.as_bytes());
     with_status(0)
   }
 }
 
-fn is_same_dir_as_cwd(path: &str) -> bool {
+fn is_same_dir_as_cwd(path: &[u8]) -> bool {
+  use std::os::unix::ffi::OsStrExt;
   use std::os::unix::fs::MetadataExt;
+  let path = std::path::Path::new(std::ffi::OsStr::from_bytes(path));
   let Ok(p_meta) = fs::metadata(path) else {
     return false;
   };

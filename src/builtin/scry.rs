@@ -79,9 +79,11 @@ impl super::Builtin for Scry {
 impl Scry {
   fn split_input_quoted(input: &str) -> ShResult<Vec<(String, i32)>> {
     Ok(
-      super::quote::unquote_records(input)?
+      super::quote::unquote_records(input.as_bytes())?
         .into_iter()
-        .map(|r| (r.join(" "), 0))
+        // scry's fuzzy picker is String-based, so the (byte-native) records are
+        // lossy-decoded here at the UI boundary.
+        .map(|r| (String::from_utf8_lossy(&r.join(&b' ')).into_owned(), 0))
         .collect(),
     )
   }

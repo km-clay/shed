@@ -1,4 +1,5 @@
 use std::collections::{VecDeque, hash_map::Entry};
+use std::os::unix::ffi::OsStringExt;
 
 use bstr::ByteSlice;
 
@@ -31,12 +32,10 @@ impl ScopeStack {
   pub fn new() -> Self {
     let mut new = Self::default();
     new.scopes.push(VarTab::new());
-    let shell_name = std::env::args()
+    let shell_name = std::env::args_os()
       .next()
-      .unwrap_or_else(|| "shed".to_string());
-    new
-      .global_params
-      .insert(ShellParam::ShellName, shell_name.into());
+      .map_or_else(|| VarStr::from("shed"), |a| VarStr::from(a.into_vec()));
+    new.global_params.insert(ShellParam::ShellName, shell_name);
     new
   }
   pub fn descend(&mut self, argv: Option<Vec<VarStr>>) {
@@ -153,9 +152,13 @@ impl ScopeStack {
         flat_vars.insert(var_name.clone(), var.clone());
       }
     }
-    for var in std::env::vars() {
-      if let Entry::Vacant(e) = flat_vars.entry(var.0) {
-        e.insert(Var::new(VarKind::string(var.1.into()), VarFlags::EXPORT));
+    for (k, v) in std::env::vars_os() {
+      let Ok(k) = k.into_string() else { continue };
+      if let Entry::Vacant(e) = flat_vars.entry(k) {
+        e.insert(Var::new(
+          VarKind::Str(VarStr::from(v.into_vec())),
+          VarFlags::EXPORT,
+        ));
       }
     }
 
@@ -210,12 +213,7 @@ impl ScopeStack {
   }
 
   /// Mutate the value of an existing variable in place, finding it in the
-  /// nearest scope that owns it and preserving its existing flags. Falls
-  /// back to creating a new global if the name is unbound. Use this for
-  /// compound-assignment paths (`arr+=`, `n+=1`, etc.) where the var is
-  /// being updated rather than declared — naive `set_var` with a recovered
-  /// LOCAL flag would shadow the original in whatever scope happens to be
-  /// current (e.g. a `for`-loop body).
+  /// nearest scope that owns it and preserving its existing flags.
   pub fn update_var(&mut self, var_name: &str, val: VarKind) -> ShResult<()> {
     for scope in self.bounded_scopes_rev_mut() {
       if scope.var_exists(var_name) {

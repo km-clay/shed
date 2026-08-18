@@ -64,6 +64,10 @@ impl HistEntry {
   pub fn command(&self) -> &str {
     self.command.to_str().unwrap_or_default()
   }
+  /// The raw command bytes (byte-native; preserves non-UTF-8).
+  pub fn command_bytes(&self) -> &[u8] {
+    self.command.as_bytes()
+  }
 }
 
 fn query_since(since_ts: i64, conn: &Connection, table: &str) -> Vec<HistEntry> {

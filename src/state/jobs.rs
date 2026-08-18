@@ -1,4 +1,4 @@
-use std::fmt::{self, Write};
+use std::fmt;
 
 use ariadne::Fmt;
 use bitflags::bitflags;
@@ -447,7 +447,17 @@ impl Job {
   pub fn name(&self) -> Option<VarStr> {
     self.children().first().and_then(ChildProc::cmd)
   }
+  /// Lossy `String` rendering for UI/notification paths (system messages, the
+  /// stored `JobData.display` field). For the `jobs` builtin's actual stdout,
+  /// use [`Job::display_bytes`], which preserves non-UTF-8 command bytes.
   pub fn display(&self, job_order: &[usize], flags: JobCmdFlags) -> String {
+    String::from_utf8_lossy(&self.display_bytes(job_order, flags)).into_owned()
+  }
+
+  /// Byte-native counterpart to [`Job::display`]: a job's command line may hold
+  /// arbitrary bytes, so this returns raw bytes (with the color escapes) rather
+  /// than laundering the command through `String`.
+  pub fn display_bytes(&self, job_order: &[usize], flags: JobCmdFlags) -> Vec<u8> {
     let long = flags.contains(JobCmdFlags::LONG);
     let init = flags.contains(JobCmdFlags::INIT);
     let pids = flags.contains(JobCmdFlags::PIDS);
@@ -475,39 +485,60 @@ impl Job {
     let id_width = id_box.len();
     let last_cmd = self.get_cmds().len().saturating_sub(1);
 
-    let mut output = format!("{id_box}\t");
+    let mut output: Vec<u8> = Vec::new();
+    output.extend_from_slice(id_box.as_bytes());
+    output.push(b'\t');
 
     for (i, pid, job_stat, cmd) in zipped {
       let fmt_stat = DisplayWaitStatus(*job_stat).to_string();
-      let pipe = if i == last_cmd { "" } else { " |" };
+      let pipe: &[u8] = if i == last_cmd { b"" } else { b" |" };
 
-      let stat_line = if pids || init {
-        format!("{pid} {fmt_stat}  {cmd}{pipe}")
-      } else {
-        format!("{fmt_stat}  {cmd}{pipe}")
-      };
-
-      let stat_line = match job_stat {
-        WtStat::Stopped(..) | WtStat::Signaled(..) => stat_line.fg(Color::Magenta),
-        WtStat::Exited(_, 0) => stat_line.fg(Color::Green),
-        WtStat::Exited(..) => stat_line.fg(Color::Red),
-        _ => stat_line.fg(Color::Cyan),
+      // Build the (uncolored) content as bytes, keeping the command raw.
+      let mut inner: Vec<u8> = Vec::new();
+      if pids || init {
+        inner.extend_from_slice(format!("{pid} ").as_bytes());
       }
-      .to_string();
+      inner.extend_from_slice(format!("{fmt_stat}  ").as_bytes());
+      inner.extend_from_slice(cmd.as_bytes());
+      inner.extend_from_slice(pipe);
+
+      // Wrap in the status color (escape codes are ASCII, content stays raw).
+      let color = match job_stat {
+        WtStat::Stopped(..) | WtStat::Signaled(..) => Color::Magenta,
+        WtStat::Exited(_, 0) => Color::Green,
+        WtStat::Exited(..) => Color::Red,
+        _ => Color::Cyan,
+      };
+      let (pre, suf) = fg_color_codes(color);
+      let mut stat_line = pre;
+      stat_line.extend_from_slice(&inner);
+      stat_line.extend_from_slice(&suf);
 
       if i == 0 {
         if long {
-          writeln!(output, "{pid} {stat_line}").ok();
-        } else {
-          writeln!(output, "{stat_line}").ok();
+          output.extend_from_slice(format!("{pid} ").as_bytes());
         }
-      } else if long {
-        writeln!(output, "{:>id_width$}\t{pid} {stat_line}", "").ok();
       } else {
-        writeln!(output, "{:>id_width$}\t{stat_line}", "").ok();
+        output.extend_from_slice(format!("{:>id_width$}\t", "").as_bytes());
+        if long {
+          output.extend_from_slice(format!("{pid} ").as_bytes());
+        }
       }
+      output.extend_from_slice(&stat_line);
+      output.push(b'\n');
     }
     output
+  }
+}
+
+/// The SGR prefix/suffix a foreground `color` wraps text with, as raw bytes
+/// (empty when styling is disabled). Lets us color a byte buffer without
+/// routing its content through `String`.
+fn fg_color_codes(color: Color) -> (Vec<u8>, Vec<u8>) {
+  let rendered = "\u{1}".fg(color).to_string();
+  match rendered.split_once('\u{1}') {
+    Some((pre, suf)) => (pre.as_bytes().to_vec(), suf.as_bytes().to_vec()),
+    None => (Vec::new(), Vec::new()),
   }
 }
 
@@ -882,10 +913,9 @@ impl JobTab {
       {
         continue;
       }
-      write(
-        stdout_fileno(),
-        format!("{}\n", job.display(&marker_order, flags)).as_bytes(),
-      )?;
+      let mut line = job.display_bytes(&marker_order, flags);
+      line.push(b'\n');
+      write(stdout_fileno(), &line)?;
       if job
         .get_stats()
         .iter()

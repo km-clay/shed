@@ -30,9 +30,7 @@ use super::{
   context::{CtxTk, CtxTkRule, get_context_tokens},
   editmode,
   eval::{execute::exec_nonint, lex::Span},
-  expand::{
-    escape_glob, escape_str, expand_raw_inner, markers::strip_markers, shell_quote, unescape_str,
-  },
+  expand::{escape_glob, escape_str, expand_raw_inner, shell_quote, unescape_str},
   key,
   keys::{self, KeyEvent as K},
   linebuf, shopt,
@@ -716,8 +714,10 @@ fn complete_dirs(start: &str, cursor_pos: usize) -> Vec<Candidate> {
 
 fn unescape_for_completion(raw: &str) -> String {
   let unescaped = unescape_str(raw);
-  expand_raw_inner(&mut unescaped.chars().peekable(), false, false)
-    .map_or_else(|_| raw.to_string(), |s| strip_markers(&s))
+  expand_raw_inner(&mut unescaped.cursor(), false, false).map_or_else(
+    |_| raw.to_string(),
+    |s| String::from_utf8_lossy(&s.into_bytes()).into_owned(),
+  )
 }
 
 /// Length of the longest byte-aligned common suffix between `a` and `b`.
@@ -748,7 +748,7 @@ fn is_char_boundary(bytes: &[u8], i: usize) -> bool {
 /// splice for `~`/`$VAR` structural prefixes and case-insensitive matches.
 fn splice_literal_prefix(literal: &str, expanded: &str, candidate: &str) -> VarStr {
   if let Some(rest) = candidate.strip_prefix(expanded) {
-    let rest_escaped = escape_str(rest, false);
+    let rest_escaped = escape_str(rest);
     return varstr!("{literal}{rest_escaped}");
   }
 
@@ -758,10 +758,10 @@ fn splice_literal_prefix(literal: &str, expanded: &str, candidate: &str) -> VarS
 
   match candidate.strip_prefix(expanded_structural) {
     Some(rest) => {
-      let rest_escaped = escape_str(rest, false);
+      let rest_escaped = escape_str(rest);
       varstr!("{literal_structural}{rest_escaped}")
     }
-    None => escape_str(candidate, false).into(),
+    None => escape_str(candidate).into(),
   }
 }
 
@@ -796,8 +796,8 @@ fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
     prefix
   };
 
-  let escaped_pre = escape_glob(prefix, false);
-  let escaped_post = escape_glob(postfix, false);
+  let escaped_pre = escape_glob(prefix);
+  let escaped_post = escape_glob(postfix);
 
   let ignore_case = shopt!(prompt.completion_ignore_case);
   let pat = format!("{escaped_pre}*{escaped_post}");
@@ -1049,8 +1049,8 @@ impl CompSpec for BashCompSpec {
     let prefix = &ctx.words[ctx.cword];
 
     let unescaped = unescape_str(prefix.as_str());
-    let expanded = expand_raw_inner(&mut unescaped.chars().peekable(), false, false)?;
-    let stripped = strip_markers(&expanded);
+    let expanded = expand_raw_inner(&mut unescaped.cursor(), false, false)?;
+    let stripped = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
 
     // path-shaped: wrapper handles expansion and escaping, candidates are
     // already display-ready and skip the reformat below
@@ -1118,9 +1118,9 @@ impl CompSpec for BashCompSpec {
             // TODO: make sure this stat call doesn't destroy performance
             // for long candidate lists
             if std::fs::metadata(&tail).is_ok_and(|m| m.is_dir()) {
-              escape_str(&format!("{tail}/"), false)
+              escape_str(&format!("{tail}/"))
             } else {
-              escape_str(&tail, false)
+              escape_str(&tail)
             }
           } else {
             tail

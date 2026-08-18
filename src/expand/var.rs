@@ -1,18 +1,16 @@
-use std::iter::Peekable;
-use std::str::Chars;
-
 use nix::unistd::{Uid, User};
 use smol_str::format_smolstr;
 
 use crate::{
+  expand::stream::{Marker, ProcSubKind, Quote, SegCursor, SegStream, Unit},
   state::vars::VarStr,
-  util::{self, QuoteState},
+  util::QuoteState,
 };
 
 use super::{
   PARAMETERS, ShResult,
   eval::lex::is_hard_sep,
-  markers, match_loop,
+  match_loop,
   param::perform_param_expansion,
   sherr, shopt,
   subshell::{expand_cmd_sub, expand_proc_sub},
@@ -20,208 +18,228 @@ use super::{
 };
 
 pub fn expand_raw_inner(
-  chars: &mut Peekable<Chars<'_>>,
+  chars: &mut SegCursor,
   allow_side_effects: bool,
   mark_split: bool,
-) -> ShResult<String> {
-  let mut result = String::new();
+) -> ShResult<SegStream> {
+  let mut result = SegStream::new();
   let mut qt_state = QuoteState::default();
 
-  match_loop!(chars.next() => ch, {
-    markers::TILDE_SUB => {
-      let mut username = util::scratch_buf();
-      while chars.peek().is_some_and(|ch| *ch != '/') {
-        let ch = chars.next().unwrap();
-        username.push(ch);
+  match_loop!(chars.next() => unit, {
+    Unit::Mark(Marker::TildeSub) => {
+      let mut username = String::new();
+      let mut quoted = false;
+      loop {
+        match chars.peek() {
+          Some(Unit::Byte(b'/')) | None => break,
+          Some(Unit::Byte(b)) => {
+            username.push(b as char);
+            chars.next();
+          }
+          // A quote or expansion anywhere in the tilde-prefix suppresses tilde
+          // expansion (bash): emit `~` + prefix literally and let the marker
+          // be processed normally.
+          Some(Unit::Mark(_)) => {
+            quoted = true;
+            break;
+          }
+        }
+      }
+      if quoted {
+        result.push_byte(b'~');
+        result.push_bytes(username.as_bytes());
+        continue;
       }
 
-      let (home, expanded) = if username.is_empty() {
+      let (home, expanded): (VarStr, bool) = if username.is_empty() {
         // standard '~' expansion
         (var!("HOME"), true)
-      } else if let Ok(result) = User::from_name(&username)
-        && let Some(user) = result
-      {
+      } else if let Ok(Some(user)) = User::from_name(&username) {
         // username expansion like '~user'
-        (user.dir.to_string_lossy().into(), true)
+        (user.dir.to_string_lossy().as_ref().into(), true)
       } else if let Ok(id) = username.parse::<u32>()
-        && let Ok(result) = User::from_uid(Uid::from_raw(id))
-          && let Some(user) = result
+        && let Ok(Some(user)) = User::from_uid(Uid::from_raw(id))
       {
         // uid expansion like '~1000'
         // shed only feature btw B)
-        (user.dir.to_string_lossy().into(), true)
+        (user.dir.to_string_lossy().as_ref().into(), true)
       } else {
-        (format_smolstr!("~{username}").into(), false)
+        (format_smolstr!("~{username}").as_str().into(), false)
       };
 
       if expanded {
-        result.push(markers::DUB_QUOTE);
-        result.push_str(&home.to_str_lossy());
-        result.push(markers::DUB_QUOTE);
+        result.push_marker(Marker::Quote(Quote::Double));
+        result.push_bytes(home.as_bytes());
+        result.push_marker(Marker::Quote(Quote::Double));
       } else {
-        result.push_str(&home.to_str_lossy());
+        result.push_bytes(home.as_bytes());
       }
     }
-    markers::PROC_SUB_OUT if allow_side_effects => {
-      let mut inner = util::scratch_buf();
-      match_loop!(chars.next() => ch, {
-        markers::PROC_SUB_OUT => break,
-        _ => inner.push(ch),
+    Unit::Mark(Marker::ProcSub(kind)) if allow_side_effects => {
+      let mut inner: Vec<u8> = Vec::new();
+      match_loop!(chars.next() => n, {
+        Unit::Mark(Marker::ProcSub(_)) => break,
+        Unit::Byte(b) => inner.push(b),
+        _ => {}
       });
-      let fd_path = expand_proc_sub(&inner, false)?;
-      result.push_str(&fd_path);
+      // `expand_proc_sub`'s flag means "the substituted path is writable", i.e.
+      // an *output* proc sub `>(...)`; `<(...)` (In) redirects the child's
+      // stdout into the pipe and is the `false` case.
+      let fd_path = expand_proc_sub(
+        &String::from_utf8_lossy(&inner),
+        matches!(kind, ProcSubKind::Out),
+      )?;
+      result.push_bytes(fd_path.as_bytes());
     }
-    markers::PROC_SUB_IN if allow_side_effects => {
-      let mut inner = util::scratch_buf();
-      match_loop!(chars.next() => ch, {
-        markers::PROC_SUB_IN => break,
-        _ => inner.push(ch),
-      });
-      let fd_path = expand_proc_sub(&inner, true)?;
-      result.push_str(&fd_path);
-    }
-    markers::DUB_QUOTE => {
-      if !qt_state.in_single() {
-        qt_state.toggle_double();
+    Unit::Mark(Marker::Quote(q)) => {
+      match q {
+        Quote::Double if !qt_state.in_single() => qt_state.toggle_double(),
+        Quote::Single if !qt_state.in_double() => qt_state.toggle_single(),
+        _ => {}
       }
-      result.push(ch);
+      result.push_marker(Marker::Quote(q));
     }
-    markers::SNG_QUOTE => {
-      if !qt_state.in_double() {
-        qt_state.toggle_single();
-      }
-      result.push(ch);
-    }
-    markers::VAR_SUB => {
-      let mut expanded = expand_var(chars, allow_side_effects)?;
+    Unit::Mark(Marker::VarSub) => {
+      let expanded = expand_var(chars, allow_side_effects)?;
 
       if mark_split && qt_state.outside() {
-        expanded = format_smolstr!("{}{expanded}{}", markers::EXPAND_START, markers::EXPAND_END).into();
+        result.push_marker(Marker::ExpandStart);
+        result.append(expanded);
+        result.push_marker(Marker::ExpandEnd);
+      } else {
+        result.append(expanded);
       }
-      result.push_str(&expanded.to_str_lossy());
     }
-    _ => result.push(ch),
+    Unit::Byte(b) => result.push_byte(b),
+    Unit::Mark(m) => result.push_marker(m),
   });
 
   Ok(result)
 }
 
-pub fn expand_raw(chars: &mut Peekable<Chars<'_>>) -> ShResult<String> {
-  expand_raw_inner(chars, true, false)
+pub fn expand_raw(stream: &mut SegCursor) -> ShResult<SegStream> {
+  expand_raw_inner(stream, true, false)
 }
 
-pub fn expand_var(chars: &mut Peekable<Chars<'_>>, allow_side_effects: bool) -> ShResult<VarStr> {
-  let mut var_name = util::scratch_buf();
+pub fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> ShResult<SegStream> {
+  let mut var_name = SegStream::new();
   let mut brace_depth: i32 = 0;
   let mut inner_brace_depth: i32 = 0;
   let mut prev_was_dollar = false;
   let mut in_subsh = false;
-  match_loop!(chars.peek() => &ch => ch, {
-    markers::SUBSH if var_name.is_empty() => {
-      chars.next(); // now safe to consume
-      let mut subsh_body = util::scratch_buf();
+
+  match_loop!(stream.peek() => unit, {
+    Unit::Mark(Marker::Subshell) if var_name.is_empty() => {
+      stream.bump();
+      let mut subsh_body: Vec<u8> = Vec::new();
       let mut found_end = false;
-      match_loop!(chars.next() => c, {
-        markers::SUBSH => {
+      match_loop!(stream.next() => n_unit, {
+        Unit::Mark(Marker::Subshell) => {
           found_end = true;
           break;
         }
-        _ => subsh_body.push(c),
+        Unit::Byte(b) => subsh_body.push(b),
+        _ => {}
       });
+
       if !found_end {
         // if there isnt a closing SUBSH, we are probably in some tab completion context
         // and we got passed some unfinished input. Just treat it as literal text
-        return Ok(format_smolstr!("$({subsh_body}").into());
+        let mut out = SegStream::from_bytes(b"$(");
+        out.push_bytes(&subsh_body);
+        return Ok(out);
       }
       if allow_side_effects {
-        let expanded = expand_cmd_sub(&subsh_body)?;
-        return Ok(expanded);
+        let expanded = expand_cmd_sub(&String::from_utf8_lossy(&subsh_body))?;
+        return Ok(SegStream::from_bytes(expanded.as_bytes()));
       }
-      return Ok(subsh_body.into());
+      return Ok(SegStream::from_bytes(&subsh_body));
     }
-    '{' if var_name.is_empty() && brace_depth == 0 => {
-      chars.next(); // consume the brace
+    Unit::Byte(b'{') if var_name.is_empty() && brace_depth == 0 => {
+      stream.bump();
       brace_depth += 1;
       prev_was_dollar = false;
     }
-    '}' if brace_depth > 0 && inner_brace_depth == 0 && !in_subsh => {
-      chars.next(); // consume the brace
-      let val = perform_param_expansion(&var_name, allow_side_effects)?;
-      return Ok(val);
+    Unit::Byte(b'}') if brace_depth > 0 && inner_brace_depth == 0 && !in_subsh => {
+      stream.bump();
+      return perform_param_expansion(&var_name, allow_side_effects);
     }
-    markers::ESCAPE if brace_depth > 0 => {
-      chars.next();
-      var_name.push(markers::ESCAPE);
-      if let Some(next_ch) = chars.next() {
-        var_name.push(next_ch);
+    Unit::Mark(Marker::Escape) if brace_depth > 0 => {
+      stream.bump();
+      var_name.push_marker(Marker::Escape);
+      if let Some(next_unit) = stream.next() {
+        var_name.push(next_unit);
       }
       prev_was_dollar = false;
     }
-    markers::DUB_QUOTE | markers::SNG_QUOTE if brace_depth > 0 => {
-      let opener = ch;
-      chars.next();
-      var_name.push(opener);
-      while let Some(&next_ch) = chars.peek() {
-        chars.next();
-        var_name.push(next_ch);
-        if next_ch == opener {
+    Unit::Mark(Marker::Quote(q)) if brace_depth > 0 => {
+      stream.bump();
+      var_name.push_marker(Marker::Quote(q));
+      while let Some(next_unit) = stream.next() {
+        var_name.push(next_unit);
+        if next_unit == Unit::Mark(Marker::Quote(q)) {
           break;
         }
-        if next_ch == markers::ESCAPE
-        && let Some(esc_ch) = chars.next() {
-          var_name.push(esc_ch);
+        if next_unit == Unit::Mark(Marker::Escape)
+          && let Some(escaped) = stream.next()
+        {
+          var_name.push(escaped);
         }
       }
       prev_was_dollar = false;
     }
-    ch if brace_depth > 0 => {
-      chars.next(); // safe to consume
-      if ch == markers::SUBSH {
-        in_subsh = !in_subsh;
-      } else if !in_subsh {
-        if ch == '{' && prev_was_dollar {
-          inner_brace_depth += 1;
-        } else if ch == '}' && inner_brace_depth > 0 {
-          inner_brace_depth -= 1;
-        }
+    _ if brace_depth > 0 => {
+      stream.bump();
+      match unit {
+        Unit::Mark(Marker::Subshell) => in_subsh = !in_subsh,
+        Unit::Byte(b'{') if !in_subsh && prev_was_dollar => inner_brace_depth += 1,
+        Unit::Byte(b'}') if !in_subsh && inner_brace_depth > 0 => inner_brace_depth -= 1,
+        _ => {}
       }
-      prev_was_dollar = !in_subsh && ch == markers::VAR_SUB;
-      var_name.push(ch);
+      prev_was_dollar = !in_subsh && unit == Unit::Mark(Marker::VarSub);
+      var_name.push(unit);
     }
-    ch if var_name.is_empty() && (PARAMETERS.contains(&ch) || ch.is_ascii_digit()) => {
-      chars.next();
+    Unit::Byte(b) if var_name.is_empty() && (PARAMETERS.contains(&(b as char)) || b.is_ascii_digit()) => {
+      stream.bump();
       let mut buf = [0u8; 4];
-      let parameter = ch.encode_utf8(&mut buf);
+      let parameter = (b as char).encode_utf8(&mut buf);
       let val = var!(parameter);
 
-      if ch == '@' && val.is_empty() {
-        let mut buf = [0u8; 4];
-        return Ok(VarStr::from(markers::NULL_EXPAND.encode_utf8(&mut buf)));
+      if b == b'@' && val.is_empty() {
+        let mut out = SegStream::new();
+        out.push_marker(Marker::NullExpand);
+        return Ok(out);
       }
 
-      return Ok(val);
+      return Ok(val.into());
     }
-    ch if is_hard_sep(ch) || !(ch.is_alphanumeric() || ch == '_') => {
-      let val = try_var!(&var_name);
-      if val.is_none() && shopt!(set.nounset) {
-        return Err(sherr!(NotFound, "Variable '{var_name}' is not set"));
-      }
-      return Ok(val.unwrap_or_default());
+    Unit::Byte(b) if is_hard_sep(b as char) || !((b as char).is_alphanumeric() || b == b'_') => {
+      return lookup_var(&var_name);
     }
-    _ => {
-      chars.next();
-      var_name.push(ch);
+    Unit::Mark(_) => {
+      return lookup_var(&var_name);
+    }
+    Unit::Byte(b) => {
+      stream.bump();
+      var_name.push_byte(b);
     }
   });
   if var_name.is_empty() {
-    Ok(VarStr::default())
+    Ok(SegStream::new())
   } else {
-    let val = try_var!(&var_name);
-    if val.is_none() && shopt!(set.nounset) {
-      return Err(sherr!(NotFound, "Variable '{var_name}' is not set"));
-    }
-    Ok(val.unwrap_or_default())
+    lookup_var(&var_name)
   }
+}
+
+/// Look up a bare `$name` and return its value, honoring `set -u` (nounset).
+fn lookup_var(var_name: &SegStream) -> ShResult<SegStream> {
+  let name_bytes = var_name.to_bytes();
+  let name = String::from_utf8_lossy(&name_bytes);
+  let val = try_var!(name.as_ref());
+  if val.is_none() && shopt!(set.nounset) {
+    return Err(sherr!(NotFound, "Variable '{name}' is not set"));
+  }
+  Ok(val.unwrap_or_default().into())
 }
 
 #[cfg(test)]
@@ -229,7 +247,45 @@ mod tests {
   use super::super::escape_glob;
   use super::var;
   use crate::expand::escape::unescape_str;
-  use crate::expand::{expand_glob, expand_raw, markers};
+  use crate::expand::expand_glob;
+
+  // expand_raw is SegStream-native; render it back to a marker-char string for
+  // these assertions (markers as sentinel chars). Plain-text results compare
+  // unchanged; the tilde tests check the quote-marker wrapping.
+  fn expand_raw(cur: &mut crate::expand::stream::SegCursor) -> super::ShResult<String> {
+    super::expand_raw(cur).map(|seg| {
+      use crate::expand::stream::StreamSeg;
+      let mut out = String::new();
+      for s in seg.stream() {
+        match s {
+          StreamSeg::Bytes(b) => out.push_str(&String::from_utf8_lossy(b)),
+          StreamSeg::Mark(m) => out.push(marker_char(*m)),
+        }
+      }
+      out
+    })
+  }
+  fn marker_char(m: crate::expand::stream::Marker) -> char {
+    use crate::expand::stream::{Marker, ProcSubKind, Quote};
+    match m {
+      Marker::Quote(Quote::Double) => '\u{fdd0}',
+      Marker::Quote(Quote::Single) => '\u{fdd1}',
+      Marker::TildeSub => '\u{fdd2}',
+      Marker::ProcSub(ProcSubKind::In) => '\u{fdd3}',
+      Marker::ProcSub(ProcSubKind::Out) => '\u{fdd4}',
+      Marker::NullExpand => '\u{fdd5}',
+      Marker::ArgSep => '\u{fdd6}',
+      Marker::Subshell => '\u{fdd7}',
+      Marker::VarSub => '\u{fdd8}',
+      Marker::Escape => '\u{fdd9}',
+      Marker::ExpandStart => '\u{fde1}',
+      Marker::ExpandEnd => '\u{fde2}',
+    }
+  }
+  #[allow(dead_code)]
+  mod markers {
+    pub const DUB_QUOTE: char = '\u{fdd0}';
+  }
   use crate::state::vars::VarStr;
   use crate::state::{Shed, vars::VarFlags, vars::VarKind};
   use crate::tests::testutil::TestGuard;
@@ -243,7 +299,7 @@ mod tests {
       .unwrap();
 
     let raw = unescape_str("$MYVAR");
-    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "hello");
   }
 
@@ -253,7 +309,7 @@ mod tests {
     Shed::vars_mut(|v| v.set_var("FOO", VarKind::Str("bar".into()), VarFlags::empty())).unwrap();
 
     let raw = unescape_str("${FOO}");
-    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "bar");
   }
 
@@ -262,7 +318,7 @@ mod tests {
     let _guard = TestGuard::new();
 
     let raw = unescape_str("$NONEXISTENT");
-    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "");
   }
 
@@ -273,7 +329,7 @@ mod tests {
     Shed::vars_mut(|v| v.set_var("B", VarKind::Str("world".into()), VarFlags::empty())).unwrap();
 
     let raw = unescape_str("${A}_${B}");
-    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "hello_world");
   }
 
@@ -285,7 +341,7 @@ mod tests {
     let home = var!("HOME");
 
     let raw = unescape_str("~/foo");
-    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(
       result,
       format!("{}{}{}/foo", markers::DUB_QUOTE, home, markers::DUB_QUOTE)
@@ -298,7 +354,7 @@ mod tests {
     let home = var!("HOME");
 
     let raw = unescape_str("~");
-    let result = expand_raw(&mut raw.chars().peekable()).unwrap();
+    let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(
       result,
       format!("{}{}{}", markers::DUB_QUOTE, home, markers::DUB_QUOTE)
@@ -310,45 +366,52 @@ mod tests {
   #[test]
   fn escape_glob_passthrough_when_no_escapes() {
     // No `\` chars → output equals input.
-    assert_eq!(escape_glob("foo*bar", false), "foo*bar");
-    assert_eq!(escape_glob("plain", false), "plain");
+    assert_eq!(escape_glob("foo*bar"), "foo*bar");
+    assert_eq!(escape_glob("plain"), "plain");
   }
 
   #[test]
   fn escape_glob_wraps_escaped_star() {
     // `\*` → `[*]` (glob-literal star)
-    assert_eq!(escape_glob("foo\\*", false), "foo[*]");
+    assert_eq!(escape_glob("foo\\*"), "foo[*]");
   }
 
   #[test]
   fn escape_glob_wraps_escaped_question_mark() {
-    assert_eq!(escape_glob("foo\\?", false), "foo[?]");
+    assert_eq!(escape_glob("foo\\?"), "foo[?]");
   }
 
   #[test]
   fn escape_glob_wraps_escaped_bracket() {
-    assert_eq!(escape_glob("foo\\[bar", false), "foo[[]bar");
+    assert_eq!(escape_glob("foo\\[bar"), "foo[[]bar");
   }
 
   #[test]
   fn escape_glob_strips_non_meta_escapes() {
     // `\ ` (escaped space) becomes literal space — not a glob meta, so
     // bracket-wrap is unnecessary.
-    assert_eq!(escape_glob("my\\ file", false), "my file");
+    assert_eq!(escape_glob("my\\ file"), "my file");
   }
 
   #[test]
   fn escape_glob_drops_trailing_escape() {
     // Lone trailing `\` with nothing to escape — silently dropped.
-    assert_eq!(escape_glob("foo\\", false), "foo");
+    assert_eq!(escape_glob("foo\\"), "foo");
   }
 
   #[test]
   fn escape_glob_with_marker_form() {
-    // use_markers=true reads the ESCAPE marker char, not literal `\`.
-    use crate::expand::markers;
-    let input = format!("foo{}*", markers::ESCAPE);
-    assert_eq!(escape_glob(&input, true), "foo[*]");
+    // The ESCAPE-marker → glob-literal conversion lives in
+    // `markers_to_glob_escapes` now (escape_glob is plain-backslash only).
+    use crate::expand::stream::{Marker, SegStream};
+    let mut seg = SegStream::new();
+    seg.push_bytes(b"foo");
+    seg.push_marker(Marker::Escape);
+    seg.push_bytes(b"*");
+    assert_eq!(
+      crate::expand::escape::markers_to_glob_escapes(&seg),
+      b"foo[*]".to_vec()
+    );
   }
 
   // ===================== expand_glob with escapes =====================
@@ -366,9 +429,11 @@ mod tests {
     let saved_dir = std::env::current_dir().ok();
     std::env::set_current_dir(&tmp).unwrap();
 
-    // After unescape_str, `my\ *` becomes `my{ESCAPE} *`.
+    // After unescape_str, `my\ *` becomes `my{ESCAPE} *`; convert to a glob
+    // pattern the way `expand()` does before matching.
     let unescaped = unescape_str("my\\ *");
-    let result = expand_glob(&unescaped);
+    let pattern = crate::expand::escape::markers_to_glob_escapes(&unescaped);
+    let result = expand_glob(&String::from_utf8_lossy(&pattern));
 
     if let Some(prev) = saved_dir {
       let _ = std::env::set_current_dir(prev);

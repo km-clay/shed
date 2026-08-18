@@ -1,9 +1,11 @@
+use crate::procio::outln_bytes;
+
 use super::{
   Shed,
-  expand::shell_quote,
+  expand::shell_quote_bytes,
   opt::OptSpec,
-  outln, sherr,
-  state::meta::MetaTab,
+  sherr,
+  state::{meta::MetaTab, util::path_to_varstr},
   util::{ShResult, with_status},
 };
 
@@ -39,8 +41,10 @@ impl super::Builtin for Hash {
           .collect()
       });
       for (name, path) in entries {
-        let path = shell_quote(&path.to_string_lossy());
-        outln!("{name}={path}");
+        let mut line = name.into_bytes();
+        line.push(b'=');
+        line.extend_from_slice(&shell_quote_bytes(path_to_varstr(&path).as_bytes()));
+        outln_bytes(&line);
       }
     }
 

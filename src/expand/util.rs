@@ -1,7 +1,11 @@
 use regex::Regex;
 
 use super::{
-  ShResult, escape::unescape_str, markers, match_loop, replace_posix_classes, var::expand_raw,
+  ShResult,
+  escape::unescape_str,
+  match_loop, replace_posix_classes,
+  stream::{Marker, Unit},
+  var::expand_raw,
 };
 
 /// Expand a case pattern: performs variable/command expansion while preserving
@@ -9,34 +13,35 @@ use super::{
 /// Unquoted glob chars (*, ?, [) pass through for `glob_to_regex` to interpret.
 pub fn expand_case_pattern(raw: &str) -> ShResult<String> {
   let unescaped = unescape_str(raw);
-  let expanded = expand_raw(&mut unescaped.chars().peekable())?;
+  let expanded = expand_raw(&mut unescaped.cursor())?;
 
-  let mut result = String::new();
+  let mut result: Vec<u8> = Vec::new();
   let mut in_quote = false;
-  let mut chars = expanded.chars();
+  let mut cursor = expanded.cursor();
 
-  match_loop!(chars.next() => ch, {
-    markers::DUB_QUOTE | markers::SNG_QUOTE => {
+  match_loop!(cursor.next() => unit, {
+    Unit::Mark(Marker::Quote(_)) => {
       in_quote = !in_quote;
     }
-    markers::ESCAPE => {
-      if let Some(next_ch) = chars.next() {
+    Unit::Mark(Marker::Escape) => {
+      if let Some(next) = cursor.next_byte() {
         // Backslash-escaped glob meta-chars must remain literal in the resulting
         // pattern, otherwise glob_to_regex would treat them as wildcards.
-        if matches!(next_ch, '*' | '?' | '[' | ']') {
-          result.push('\\');
+        if matches!(next, b'*' | b'?' | b'[' | b']') {
+          result.push(b'\\');
         }
-        result.push(next_ch);
+        result.push(next);
       }
     }
-    '*' | '?' | '[' | ']' if in_quote => {
-      result.push('\\');
-      result.push(ch);
+    Unit::Byte(b @ (b'*' | b'?' | b'[' | b']')) if in_quote => {
+      result.push(b'\\');
+      result.push(b);
     }
-    _ => result.push(ch),
+    Unit::Byte(b) => result.push(b),
+    Unit::Mark(_) => {}
   });
 
-  Ok(result)
+  Ok(String::from_utf8_lossy(&result).into_owned())
 }
 
 pub fn is_var_name_ch(ch: char) -> bool {

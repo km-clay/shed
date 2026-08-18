@@ -217,9 +217,8 @@ pub fn expand_prompt(raw: &str) -> ShResult<String> {
 
   if shopt!(prompt.substitute) {
     let marked = super::unescape_prompt(&result);
-    let mut expanded = super::expand_raw_inner(&mut marked.chars().peekable(), true, false)?;
-    super::escape::strip_escape_markers_str(&mut expanded);
-    result = expanded;
+    let expanded = super::expand_raw_inner(&mut marked.cursor(), true, false)?;
+    result = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
   }
 
   Ok(result)

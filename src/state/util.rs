@@ -159,7 +159,7 @@ where
     let val = val.into();
     Shed::vars_mut(|v| {
       v.set_var(&name.to_str_lossy(), val.kind().clone(), val.flags())
-        .unwrap()
+        .unwrap();
     });
   }
 
@@ -184,22 +184,18 @@ pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
   change_dir_with_pwd(dir, None)
 }
 
-pub fn change_dir_with_pwd<P: AsRef<Path>>(dir: P, logical_pwd: Option<String>) -> ShResult<()> {
+pub fn change_dir_with_pwd<P: AsRef<Path>>(dir: P, logical_pwd: Option<PathBuf>) -> ShResult<()> {
   let dir = dir.as_ref();
-  let dir_raw = &dir.display().to_string();
+  let dir_raw = path_to_varstr(dir);
   defer!(super::autocmd!(PostChangeDir));
 
   let current_dir = try_var!("PWD")
-    .or_else(|| {
-      std::env::current_dir()
-        .ok()
-        .map(|p| p.to_string_lossy().into())
-    })
+    .or_else(|| std::env::current_dir().ok().map(|p| path_to_varstr(&p)))
     .unwrap_or_default();
 
   with_vars(
     [
-      ("NEW_DIR".into(), dir_raw.clone().into()),
+      ("NEW_DIR".into(), dir_raw.clone()),
       ("OLD_DIR".into(), current_dir.clone()),
     ],
     || autocmd!(PreChangeDir),
@@ -207,11 +203,14 @@ pub fn change_dir_with_pwd<P: AsRef<Path>>(dir: P, logical_pwd: Option<String>) 
 
   std::env::set_current_dir(dir)?;
 
-  let new_pwd = logical_pwd.unwrap_or_else(|| {
-    std::env::current_dir()
-      .ok()
-      .map_or_else(|| dir_raw.clone(), |p| p.display().to_string())
-  });
+  let new_pwd = logical_pwd.map_or_else(
+    || {
+      std::env::current_dir()
+        .ok()
+        .map_or_else(|| dir_raw.clone(), |p| path_to_varstr(&p))
+    },
+    |p| path_to_varstr(&p),
+  );
 
   if Shed::meta(MetaTab::interactive_shell)
     && Shed::term(Terminal::interactive)
@@ -236,7 +235,7 @@ pub fn change_dir_with_pwd<P: AsRef<Path>>(dir: P, logical_pwd: Option<String>) 
 
   Shed::vars_mut(|v| {
     v.set_var("OLDPWD", VarKind::Str(current_dir), VarFlags::EXPORT)?;
-    v.set_var("PWD", VarKind::string(new_pwd.into()), VarFlags::EXPORT)
+    v.set_var("PWD", VarKind::string(new_pwd), VarFlags::EXPORT)
   })?;
 
   Ok(())
@@ -426,7 +425,11 @@ fn live_aliases() -> Vec<VarStr> {
   aliases.sort_by(|a, b| a.0.cmp(&b.0));
   aliases
     .into_iter()
-    .map(|(name, body)| varstr!("alias {}", super::vars::display_as_var(name, body)))
+    .map(|(name, body)| {
+      let mut line = b"alias ".to_vec();
+      line.extend_from_slice(&super::vars::display_as_var(name.as_bytes(), body));
+      VarStr::from(line)
+    })
     .collect()
 }
 
@@ -695,8 +698,13 @@ pub fn source_file(path: PathBuf) -> ShResult<()> {
   let source_display = display_path_normalized(source_name);
   let mut file = OpenOptions::new().read(true).open(path)?;
 
-  let mut buf = String::new();
-  file.read_to_string(&mut buf)?;
+  // Read raw bytes and lossily decode, rather than `read_to_string` which
+  // hard-rejects the whole file on a single non-UTF-8 byte. The lexer is
+  // `&str`-based (so bytes in string literals still degrade to U+FFFD), but a
+  // stray byte in a comment or heredoc no longer aborts sourcing.
+  let mut raw = Vec::new();
+  file.read_to_end(&mut raw)?;
+  let buf = String::from_utf8_lossy(&raw).into_owned();
 
   // sourced files behave like functions
   // 'return' is valid inside of them, and we also track recursion depth
@@ -728,6 +736,31 @@ pub fn display_path<P: AsRef<Path>>(path: P) -> String {
 
 pub fn display_path_normalized<P: AsRef<Path>>(path: P) -> String {
   display_path(lex_normalize_path(path.as_ref()))
+}
+
+/// A filesystem path's exact bytes as a `VarStr`. Unix paths are arbitrary
+/// bytes, so this avoids the lossy UTF-8 step of `display()`/`to_string_lossy`.
+pub fn path_to_varstr(path: &Path) -> VarStr {
+  use std::os::unix::ffi::OsStrExt;
+  VarStr::from(path.as_os_str().as_bytes())
+}
+
+/// Byte-native counterpart to [`display_path`]: collapse a leading `$HOME` to
+/// `~`, preserving arbitrary path bytes rather than laundering them.
+pub fn display_path_bytes(path: &Path) -> Vec<u8> {
+  use std::os::unix::ffi::OsStrExt;
+  let bytes = path.as_os_str().as_bytes();
+  if let Some(home) = get_home()
+    && !home.as_os_str().is_empty()
+    && let Some(rest) = bytes.strip_prefix(home.as_os_str().as_bytes())
+  {
+    let mut out = Vec::with_capacity(rest.len() + 1);
+    out.push(b'~');
+    out.extend_from_slice(rest);
+    out
+  } else {
+    bytes.to_vec()
+  }
 }
 
 pub fn set_ver_info() -> ShResult<()> {

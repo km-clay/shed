@@ -13,7 +13,7 @@ use super::{
     execute::{in_cd_path, is_in_path},
     lex::{LexFlags, LexStream, Span, Tk, TkFlags, TkRule},
   },
-  expand::{expand_raw_inner, markers::strip_markers, unescape_str},
+  expand::{expand_raw_inner, unescape_str},
   match_loop, shopt,
   state::{self, meta::UtilKind, util::get_exec_wrappers, vars::ShellParam},
   util::{QuoteState, has_unescaped, split_at_unescaped},
@@ -808,10 +808,10 @@ fn check_path_exists(path: &str) -> bool {
   }
 
   let unescaped = unescape_str(path);
-  let Ok(expanded) = expand_raw_inner(&mut unescaped.chars().peekable(), false, false) else {
+  let Ok(expanded) = expand_raw_inner(&mut unescaped.cursor(), false, false) else {
     return false;
   };
-  let stripped = strip_markers(&expanded);
+  let stripped = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
   if stripped.is_empty() {
     return false;
   }

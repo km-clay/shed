@@ -10,7 +10,7 @@ mod ui;
 
 use std::os::fd::BorrowedFd;
 
-use super::{Shed, eval, expand, match_loop, procio, sherr, state, system_msg, var};
+use super::{Shed, eval, match_loop, procio, sherr, state, system_msg, var};
 
 use compact_str::CompactString;
 pub(super) use guards::{
@@ -37,7 +37,7 @@ pub(super) use error::{ShErr, ShErrKind, ShResult, ShResultExt, get_context};
 pub(super) use strops::{
   QuoteState, VarStrDisplay, count_unescaped, ends_with_unescaped, format_mode, format_size,
   format_time, has_any_unescaped, has_unescaped, parse_size, scan_param_exp, scan_parens,
-  split_at_unescaped, split_at_unescaped_markers, split_tk, starts_with_unescaped,
+  split_at_unescaped, split_tk, starts_with_unescaped,
 };
 
 pub(super) struct FdWriter<'a>(pub BorrowedFd<'a>);

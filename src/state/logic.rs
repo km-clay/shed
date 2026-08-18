@@ -38,6 +38,12 @@ impl Display for ShAlias {
   }
 }
 
+impl super::vars::ValueBytes for ShAlias {
+  fn value_bytes(&self) -> Vec<u8> {
+    self.body.as_bytes().to_vec()
+  }
+}
+
 #[derive(rust_embed::RustEmbed)]
 #[folder = "include"]
 #[include = "functions/*"]

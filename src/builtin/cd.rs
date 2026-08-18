@@ -8,6 +8,8 @@ use crate::{
   readline::{FuzzyBuilder, fuzzy_best_match, fuzzy_match_score, match_positions},
 };
 
+use crate::procio::outln_bytes;
+
 use super::{
   ShResult, Shed,
   opt::OptSpec,
@@ -71,11 +73,7 @@ impl super::Builtin for Cd {
           .or_else(|| std::env::current_dir().ok())
           .unwrap_or_else(|| PathBuf::from("/"))
       };
-      Some(
-        util::lex_normalize_path(&base.join(&new_dir))
-          .display()
-          .to_string(),
-      )
+      Some(util::lex_normalize_path(&base.join(&new_dir)))
     };
 
     let target = if resolve_syms {
@@ -101,14 +99,8 @@ impl super::Builtin for Cd {
     }
 
     if print_dir {
-      let mut dir = util::display_path(var!("PWD"));
-      if let Some(home) = util::get_home_str()
-        && let Some(home_dir) = dir.strip_prefix(&*home.to_str_lossy())
-      {
-        dir = format!("~{home_dir}");
-      }
-
-      outln!("{dir}");
+      let pwd = PathBuf::from(var!("PWD"));
+      outln_bytes(&util::display_path_bytes(&pwd));
     }
 
     with_status(0)
