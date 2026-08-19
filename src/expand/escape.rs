@@ -341,15 +341,11 @@ fn read_dub_quote(stream: &mut SegCursor, out: &mut SegStream) {
       b'\\' => {
         if let Some(next) = stream.next_byte() {
           match next {
+            b'}' | b'/' | b'$' | b'`' if param_depth > 0 => {
+              out.push_marker(Marker::Escape);
+            }
             b'"' | b'\\' | b'`' | b'$' | b'!' => {
               // discard the backslash
-            }
-            b'}' | b'/' if param_depth > 0 => {
-              // `}` (the `${...}` closer) and `/` (the `${v/pat/rep}` separator)
-              // are detected by char-driven scans downstream, so a backslash
-              // escape on one inside a parameter expansion must be kept as an
-              // ESCAPE marker rather than neutralized by de-marking.
-              out.push_marker(Marker::Escape);
             }
             _ => {
               out.push_byte(b'\\');

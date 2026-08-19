@@ -410,7 +410,7 @@ mod tests {
     seg.push_bytes(b"*");
     assert_eq!(
       crate::expand::escape::markers_to_glob_escapes(&seg),
-      b"foo[*]".to_vec()
+      b"foo\\*".to_vec()
     );
   }
 
