@@ -965,9 +965,29 @@ impl Dispatcher {
       let _guard = util::shared_scope_guard();
       let mut last_body_status = 0;
       'outer: loop {
-        if let Err(e) = s.dispatch_node(tree, *cond) {
-          Shed::set_status(1);
-          return Err(e);
+        if let Err(mut e) = s.dispatch_node(tree, *cond) {
+          match e.kind_mut() {
+            ShErrKind::LoopBreak(count) => {
+              if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
+                Shed::set_status(0);
+                break 'outer;
+              }
+              *count -= 1;
+              return Err(e);
+            }
+            ShErrKind::LoopContinue(count) => {
+              if *count > 1 && Shed::meta(MetaTab::loop_depth) > 1 {
+                *count -= 1;
+                return Err(e);
+              }
+              Shed::set_status(0);
+              continue 'outer;
+            }
+            _ => {
+              Shed::set_status(1);
+              return Err(e);
+            }
+          }
         }
 
         let status = Shed::get_status();
