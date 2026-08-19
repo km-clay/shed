@@ -66,6 +66,7 @@ pub fn glob_to_regex_pattern(glob: &str, anchored: bool) -> String {
   let glob = &replace_posix_classes(glob);
   // fnmatch_regex always produces ^...$, so get the pattern string and strip if unanchored
   let pattern = fnmatch_regex::glob_to_regex_pattern(glob).unwrap_or_else(|_| regex::escape(glob));
+  let pattern = escape_class_brackets(&pattern);
   if anchored {
     pattern
   } else {
@@ -76,6 +77,36 @@ pub fn glob_to_regex_pattern(glob: &str, anchored: bool) -> String {
       .unwrap_or(&pattern)
       .to_string()
   }
+}
+
+/// Escape a literal `[` appearing *inside* a regex character class.
+///
+fn escape_class_brackets(pattern: &str) -> String {
+  let mut out = String::with_capacity(pattern.len());
+  let mut chars = pattern.chars();
+  let mut in_class = false;
+  while let Some(ch) = chars.next() {
+    match ch {
+      '\\' => {
+        // copy the escape pair through untouched
+        out.push('\\');
+        if let Some(next) = chars.next() {
+          out.push(next);
+        }
+      }
+      '[' if in_class => out.push_str("\\["),
+      '[' => {
+        in_class = true;
+        out.push('[');
+      }
+      ']' if in_class => {
+        in_class = false;
+        out.push(']');
+      }
+      _ => out.push(ch),
+    }
+  }
+  out
 }
 
 pub fn glob_to_regex(glob: &str, anchored: bool) -> Regex {
