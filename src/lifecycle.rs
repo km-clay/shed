@@ -335,8 +335,8 @@ pub(super) fn tear_down() -> ExitCode {
   let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
 
   while let Some(cmd) = deferred.pop() {
-    let mut dispatcher = Dispatcher::new(vec![cmd], "defer".into());
-    if let Err(e) = dispatcher.begin_dispatch() {
+    let mut dispatcher = Dispatcher::new("defer".into());
+    if let Err(e) = dispatcher.begin_dispatch(&cmd) {
       e.print_error();
     }
   }
@@ -366,8 +366,8 @@ pub(super) fn exit_shed(run_trap: bool, code: i32) -> ! {
   let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
 
   while let Some(cmd) = deferred.pop() {
-    let mut dispatcher = Dispatcher::new(vec![cmd], "defer".into());
-    if let Err(e) = dispatcher.begin_dispatch() {
+    let mut dispatcher = Dispatcher::new("defer".into());
+    if let Err(e) = dispatcher.begin_dispatch(&cmd) {
       e.print_error();
     }
   }

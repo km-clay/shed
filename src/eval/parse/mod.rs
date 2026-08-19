@@ -34,6 +34,10 @@ use super::{
   util::{self as crate_util, ShErr, ShResult},
 };
 
+/// Used to identify instances of `Ast`.
+///
+/// `Ast` is indexed by `NodeId`, which also carries this identifier.
+/// `Ast` being indexed by a mismatched `NodeId` is a panic.
 static AST_GENERATION: AtomicU32 = AtomicU32::new(0);
 
 /// The parsed AST along with the source input it parsed
@@ -133,7 +137,7 @@ impl ParsedSrc {
 pub(crate) struct Ast {
   arena: Vec<Node>,
   roots: Vec<NodeId>,
-  ast_id: u32,
+  id: u32,
 }
 
 impl Ast {
@@ -141,17 +145,12 @@ impl Ast {
     Self {
       arena: vec![],
       roots: vec![],
-      ast_id: AST_GENERATION.fetch_add(1, Ordering::SeqCst),
+      id: AST_GENERATION.fetch_add(1, Ordering::SeqCst),
     }
   }
   pub fn insert_node(&mut self, node: Node) -> NodeId {
-    let id = NodeId::new(self.arena.len() as u32, self.ast_id);
+    let id = NodeId::new(self.arena.len() as u32, self.id);
     self.arena.push(node);
-    id
-  }
-  pub fn insert_root(&mut self, node: Node) -> NodeId {
-    let id = self.insert_node(node);
-    self.roots.push(id);
     id
   }
   pub fn mark_root(&mut self, id: NodeId) {

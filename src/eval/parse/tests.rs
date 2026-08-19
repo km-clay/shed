@@ -14,8 +14,7 @@ fn parse_hello_world() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -39,8 +38,7 @@ fn parse_if_statement() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -58,8 +56,7 @@ fn parse_pipeline() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -77,8 +74,7 @@ fn parse_conjunction_and() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -102,8 +98,7 @@ fn parse_while_loop() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -123,8 +118,7 @@ fn parse_for_loop() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -148,8 +142,7 @@ fn parse_case_statement() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -170,8 +163,7 @@ fn parse_func_def() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -188,8 +180,7 @@ fn parse_assignment() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -206,8 +197,7 @@ fn parse_assignment_with_command() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -243,8 +233,7 @@ fn parse_if_elif_else() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -267,8 +256,7 @@ fn parse_brace_group() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -300,8 +288,7 @@ fn parse_nested_if_in_while() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -317,8 +304,7 @@ fn parse_test_bracket() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -357,8 +343,7 @@ fn parse_nested_func_with_if_and_loop() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -389,8 +374,7 @@ fn parse_pipeline_with_brace_groups() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -436,8 +420,7 @@ fn parse_deeply_nested_if() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -483,8 +466,7 @@ fn parse_case_with_multiple_commands() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -526,8 +508,7 @@ fn parse_func_with_case_and_conjunction() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -556,8 +537,7 @@ fn parse_while_with_pipeline_and_assignment() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -595,8 +575,7 @@ fn parse_nested_loops() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -620,8 +599,7 @@ fn parse_complex_conjunction_chain() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -655,8 +633,7 @@ fn parse_func_defining_inner_func() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -701,8 +678,7 @@ fn parse_multiline_if_elif_with_pipelines() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -733,8 +709,7 @@ fn parse_basic_heredoc() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -750,8 +725,7 @@ fn parse_heredoc_with_tab_strip() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -767,8 +741,7 @@ fn parse_literal_heredoc() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -784,8 +757,7 @@ fn parse_herestring() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -802,8 +774,7 @@ fn parse_heredoc_in_pipeline() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -821,8 +792,7 @@ fn parse_heredoc_in_conjunction() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -838,8 +808,7 @@ fn parse_heredoc_double_quoted_delimiter() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -855,8 +824,7 @@ fn parse_heredoc_empty_body() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -873,8 +841,7 @@ fn parse_heredoc_multiword_delimiter() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -883,11 +850,12 @@ fn parse_heredoc_multiword_delimiter() {
 fn parse_two_heredocs_on_one_line() {
   let input = "cat <<A; cat <<B\nfoo\nA\nbar\nB";
   let ast = get_ast(input).unwrap();
-  assert_eq!(ast.len(), 1);
-  let NdRule::List { ref commands } = ast[0].class else {
+  assert_eq!(ast.roots().len(), 1);
+  let root = ast.get_root().unwrap();
+  let NdRule::List { commands } = &ast[root].class else {
     panic!(
       "expected top-level List, got {:?}",
-      ast[0].class.as_nd_kind()
+      ast[root].class.as_nd_kind()
     );
   };
   assert_eq!(commands.len(), 2);
@@ -1107,8 +1075,7 @@ fn parse_try_basic() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -1131,8 +1098,7 @@ fn parse_try_multiple_body_commands() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -1152,8 +1118,7 @@ fn parse_try_multi_line() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -1452,8 +1417,7 @@ fn parse_not_basic() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -1465,13 +1429,11 @@ fn parse_not_matches_bang_structure() {
   let not_ast = get_ast("not false").unwrap();
 
   let mut bang_kinds = vec![];
-  bang_ast[0]
-    .clone()
-    .walk_tree(&mut |n| bang_kinds.push(n.class.as_nd_kind()));
+  let bang_root = bang_ast.get_root().unwrap();
+  bang_ast.walk_tree(bang_root, &mut |n| bang_kinds.push(n.class.as_nd_kind()));
   let mut not_kinds = vec![];
-  not_ast[0]
-    .clone()
-    .walk_tree(&mut |n| not_kinds.push(n.class.as_nd_kind()));
+  let not_root = not_ast.get_root().unwrap();
+  not_ast.walk_tree(not_root, &mut |n| not_kinds.push(n.class.as_nd_kind()));
 
   assert_eq!(bang_kinds, not_kinds);
 }
@@ -1666,8 +1628,7 @@ fn parse_defer_basic() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -1692,8 +1653,7 @@ fn parse_defer_brace_group_body() {
   ]
   .into_iter();
   let ast = get_ast(input).unwrap();
-  let mut node = ast[0].clone();
-  if let Err(e) = node.assert_structure(expected) {
+  if let Err(e) = ast.assert_structure(expected) {
     panic!("{}", e);
   }
 }
@@ -1706,13 +1666,11 @@ fn parse_defer_matches_time_structure() {
   let defer_ast = get_ast("defer echo x").unwrap();
 
   let mut time_kinds = vec![];
-  time_ast[0]
-    .clone()
-    .walk_tree(&mut |n| time_kinds.push(n.class.as_nd_kind()));
+  let time_root = time_ast.get_root().unwrap();
+  time_ast.walk_tree(time_root, &mut |n| time_kinds.push(n.class.as_nd_kind()));
   let mut defer_kinds = vec![];
-  defer_ast[0]
-    .clone()
-    .walk_tree(&mut |n| defer_kinds.push(n.class.as_nd_kind()));
+  let defer_root = defer_ast.get_root().unwrap();
+  defer_ast.walk_tree(defer_root, &mut |n| defer_kinds.push(n.class.as_nd_kind()));
 
   // Replace Timed with DeferNode for the comparison.
   let normalized: Vec<NdKind> = time_kinds

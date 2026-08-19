@@ -210,6 +210,18 @@ impl ExecArgs {
 /// directly without forking. This avoids process group issues where grandchild
 /// processes (e.g. nvim spawning opencode) lose their controlling terminal.
 pub fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
+  fn single_command_id(ast: &Ast, root: NodeId) -> Option<NodeId> {
+    let mut id = root;
+    loop {
+      match &ast[id].class {
+        NdRule::Command { .. } => return Some(id),
+        NdRule::Pipeline { cmds } if cmds.len() == 1 => id = cmds[0],
+        NdRule::Conjunction { elements } if elements.len() == 1 => id = elements[0].cmd,
+        _ => return None,
+      }
+    }
+  }
+
   let stdin = procio::stdin_fileno();
   let is_tty = isatty(stdin).unwrap_or(false);
   let _guard = Shed::term_mut(|t| t.interactive_guard(is_tty));
@@ -258,18 +270,6 @@ pub fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
   // The parser wraps single commands as Conjunction -> Pipeline -> Command.
   // Walk down to the inner Command, mark it NO_FORK, and dispatch it directly
   // (bypassing pipeline setup).
-  fn single_command_id(ast: &Ast, root: NodeId) -> Option<NodeId> {
-    let mut id = root;
-    loop {
-      match &ast[id].class {
-        NdRule::Command { .. } => return Some(id),
-        NdRule::Pipeline { cmds } if cmds.len() == 1 => id = cmds[0],
-        NdRule::Conjunction { elements } if elements.len() == 1 => id = elements[0].cmd,
-        _ => return None,
-      }
-    }
-  }
-
   let single_root = match ast.roots() {
     [only] => Some(*only),
     _ => None,
@@ -338,6 +338,7 @@ pub struct Dispatcher {
   /// downstream read end it inherited but doesn't exec away). Set per-segment in
   /// `exec_pipeline`, consumed in `run_fork`.
   fork_close_fd: Option<RawFd>,
+  fork_builtins: bool,
 }
 
 impl Dispatcher {
@@ -348,6 +349,7 @@ impl Dispatcher {
       timer_stack: vec![],
       fg_job: true,
       fork_close_fd: None,
+      fork_builtins: false,
     }
   }
   pub fn begin_dispatch(&mut self, tree: &Ast) -> ShResult<()> {
@@ -434,7 +436,7 @@ impl Dispatcher {
     // We need to expand this token
     // so that a command smuggled inside of a variable is routed correctly,
     // instead of only hitting the exec_cmd path
-    let words = cmd.clone().expand_to_words()?;
+    let words = (*cmd).clone().expand_to_words()?;
     let Some(cmd_word) = words.iter().next().cloned() else {
       if let NdRule::Command {
         assignments,
@@ -642,8 +644,8 @@ impl Dispatcher {
   }
   fn exec_func(&mut self, tree: &Ast, func_id: NodeId) -> ShResult<()> {
     let func = &tree[func_id];
-    if func.flags.contains(NdFlags::FORK_BUILTINS) {
-      let mut func_body = tree.break_off(func_id);
+    if std::mem::take(&mut self.fork_builtins) {
+      let func_body = tree.break_off(func_id);
 
       let Some(root) = func_body.get_root() else {
         return Err(sherr!(
@@ -656,8 +658,6 @@ impl Dispatcher {
         .get_command()
         .map(ToString::to_string)
         .unwrap_or_default();
-
-      func_body[root].flags.remove(NdFlags::FORK_BUILTINS);
 
       return self.run_fork(&name, |s| {
         catch_exit(|| s.exec_func(&func_body, root), exit_with);
@@ -781,7 +781,7 @@ impl Dispatcher {
     func_body[root].flags = func.flags;
 
     let _timer = self.take_timer();
-    match self.dispatch_node(&func_body, root) {
+    match self.dispatch_node(func_body, root) {
       Ok(()) => Ok(()),
       Err(e) => match e.kind() {
         ShErrKind::FuncReturn(code) => {
@@ -814,7 +814,7 @@ impl Dispatcher {
     &mut self,
     name: &str,
     redirs: &[RedirSpec],
-    flags: NdFlags,
+    _flags: NdFlags,
     blame: Span,
     tree: &Ast,
     mut logic: F,
@@ -822,7 +822,7 @@ impl Dispatcher {
   where
     F: FnMut(&mut Self, &Ast) -> ShResult<()>,
   {
-    let fork_builtins = flags.contains(NdFlags::FORK_BUILTINS);
+    let fork_builtins = std::mem::take(&mut self.fork_builtins);
 
     let redirs = RedirSet::from(redirs);
     let guard = match redirs.try_apply(false) {
@@ -1329,7 +1329,7 @@ impl Dispatcher {
     };
 
     let pipes = PipeGenerator::new((tail_start + 1).min(num_cmds));
-    let cmds_and_pipes = cmds.iter_mut().enumerate().zip(pipes);
+    let cmds_and_pipes = cmds.iter().enumerate().zip(pipes);
 
     // Per-stage statuses of the in-process tail, captured for the PIPESTATUS
     // splice and pipefail blame after the forked prefix is waited on.
@@ -1338,10 +1338,8 @@ impl Dispatcher {
     for ((i, cmd), (r, w, downstream_read)) in cmds_and_pipes {
       let has_redirs = has_redirs || (r.is_some() || w.is_some());
 
-      if num_cmds > 1 && i != tail_start {
-        // builtins must fork in the middle of multi-command pipelines
-        cmd.flags |= NdFlags::FORK_BUILTINS;
-      }
+      // builtins must fork in the middle of multi-command pipelines
+      self.fork_builtins = num_cmds > 1 && i != tail_start;
 
       let _guard = (has_redirs).then(RedirGuard::stdio);
 
@@ -1534,7 +1532,7 @@ impl Dispatcher {
 
   fn exec_builtin(&mut self, tree: &Ast, cmd_id: NodeId, cmd_name: &str) -> ShResult<()> {
     let cmd = &tree[cmd_id];
-    let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
+    let fork_builtins = std::mem::take(&mut self.fork_builtins);
 
     let Some(builtin) = lookup_builtin(cmd_name) else {
       sherr!(NotFound @ cmd.get_span(), "builtin not found: {cmd_name}").print_error();
@@ -1544,10 +1542,10 @@ impl Dispatcher {
     if fork_builtins {
       log::trace!("Forking builtin: {cmd_name}");
       self.run_fork(cmd_name, |s| {
-        catch_exit(|| builtin.setup_builtin(cmd, s), exit_with);
+        catch_exit(|| builtin.setup_builtin(tree, cmd_id, s), exit_with);
       })?;
       Ok(())
-    } else if let Err(e) = builtin.setup_builtin(cmd, self) {
+    } else if let Err(e) = builtin.setup_builtin(tree, cmd_id, self) {
       let is_flow_ctl = matches!(
         e.kind(),
         ShErrKind::CleanExit(_)
@@ -1580,12 +1578,11 @@ impl Dispatcher {
     };
 
     if let AssignBehavior::Set = assign_behavior {
-      if cmd.flags.contains(NdFlags::FORK_BUILTINS) {
-        let mut child = tree.break_off(cmd_id);
+      if std::mem::take(&mut self.fork_builtins) {
+        let child = tree.break_off(cmd_id);
         let Some(root) = child.get_root() else {
           unreachable!()
         };
-        child[root].flags.remove(NdFlags::FORK_BUILTINS);
         return self.run_fork("", move |s| {
           catch_exit(|| s.exec_cmd(&child, root), exit_with);
         });

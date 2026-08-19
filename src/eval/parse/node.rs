@@ -65,6 +65,13 @@ impl From<VecDeque<LabelBuilder>> for LabelCtx {
   }
 }
 
+/// An index into an instance of `Ast`.
+///
+/// Contains the actual id of the `Node` itself, and the id of the `Ast` that it refers to.
+/// Attempting to index any instance of `Ast` with a `NodeId` that does not match its own id will panic.
+///
+/// `NodeId` cannot be constructed outside of this module, and cannot be mutated once created. Because `Ast` is also immutable, this means that using a `NodeId` to index an `Ast` is guaranteed to be safe, as long as the `NodeId` was
+/// created by the same `Ast` instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct NodeId {
   node_id: u32,
@@ -80,14 +87,14 @@ impl NodeId {
 impl Index<NodeId> for super::Ast {
   type Output = Node;
   fn index(&self, index: NodeId) -> &Self::Output {
-    assert_eq!(index.ast_id, self.ast_id, "NodeId does not match Ast");
+    assert_eq!(index.ast_id, self.id, "NodeId does not match Ast");
     &self.arena[index.node_id as usize]
   }
 }
 
 impl IndexMut<NodeId> for super::Ast {
   fn index_mut(&mut self, index: NodeId) -> &mut Self::Output {
-    assert_eq!(index.ast_id, self.ast_id, "NodeId does not match Ast");
+    assert_eq!(index.ast_id, self.id, "NodeId does not match Ast");
     &mut self.arena[index.node_id as usize]
   }
 }
@@ -622,10 +629,7 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
   res.unwrap_or(false)
 }
 
-pub(crate) fn nodes_have_only_builtins<'a>(
-  tree: &Ast,
-  nodes: impl Iterator<Item = NodeId>,
-) -> bool {
+pub(crate) fn nodes_have_only_builtins(tree: &Ast, nodes: impl Iterator<Item = NodeId>) -> bool {
   for node in nodes {
     if !node_has_only_builtins(tree, node) {
       return false;

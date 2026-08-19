@@ -1,9 +1,12 @@
 use itertools::{EitherOrBoth, Itertools};
 
-use crate::state::vars::{VarStr, VarStrSliceExt};
+use crate::{
+  eval::parse::{Ast, node::NodeId},
+  state::vars::{VarStr, VarStrSliceExt},
+};
 
 use super::{
-  BuiltinArgs, Dispatcher, NdRule, Node, ShResult,
+  BuiltinArgs, Dispatcher, NdRule, ShResult,
   opt::{Opt, OptSpec, Word, parse_opts},
   out, outln,
   readline::{BashCompSpec, Candidate, CompContext, CompFlags, CompOptFlags, CompOpts, CompSpec},
@@ -109,7 +112,8 @@ impl super::Builtin for CompGen {
   fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
     unreachable!("CompGen uses run_builtin directly")
   }
-  fn run_builtin(&self, node: &Node, _dispatcher: &mut Dispatcher) -> ShResult<()> {
+  fn run_builtin(&self, tree: &Ast, node_id: NodeId, _dispatcher: &mut Dispatcher) -> ShResult<()> {
+    let node = &tree[node_id];
     let NdRule::Command {
       assignments: _,
       argv,

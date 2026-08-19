@@ -121,7 +121,6 @@ impl ParseStream {
   }
 }
 
-#[expect(clippy::type_complexity)]
 pub(super) fn split_for_arith_tk(
   tree: &mut Ast,
   tk: &Tk,

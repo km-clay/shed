@@ -109,9 +109,10 @@ pub fn is_internal(raw: &str) -> bool {
     return false;
   }
 
-  let mut ast = parser.extract_nodes();
+  let ast = parser.into_ast();
+  let roots = ast.roots();
 
-  if !nodes_have_only_builtins(ast.iter_mut()) {
+  if !nodes_have_only_builtins(&ast, roots.iter().copied()) {
     return false;
   }
 

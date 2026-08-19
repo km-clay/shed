@@ -26,7 +26,7 @@ use crate::{
 use super::{
   errln,
   eval::{
-    self, NdFlags, NdRule, Node,
+    self, NdFlags, NdRule,
     execute::{AssignBehavior, Dispatcher, exec_nonint},
     lex::{KEYWORDS, Span, Tk, TkRule},
   },
@@ -737,7 +737,7 @@ impl Builtin for BuiltinBuiltin {
   ) -> ShResult<()> {
     let node = &tree[node_id];
     let span = node.get_span();
-    let NdRule::Command { assignments, argv } = &node.class else {
+    let NdRule::Command { argv, .. } = &node.class else {
       unreachable!()
     };
     let mut inner_argv = expand_argv(argv)?;
@@ -756,27 +756,24 @@ impl Builtin for BuiltinBuiltin {
       return with_status(127);
     };
 
-    let mut forwarded = node.clone();
-    forwarded.class = NdRule::Command {
-      assignments: assignments.clone(),
+    // copy the wrapped invocation into its own ast, then dispatch
+    let mut sub_ast = tree.break_off(node_id);
+    let fwd_id = sub_ast.get_root().expect("forwarded command has no root");
+    let NdRule::Command { assignments, .. } = &sub_ast[fwd_id].class else {
+      unreachable!()
+    };
+    let assignments = assignments.clone();
+    sub_ast[fwd_id].class = NdRule::Command {
+      assignments,
       argv: inner_argv,
     };
-    forwarded.flags |= NdFlags::NO_TRACE;
+    sub_ast[fwd_id].flags |= NdFlags::NO_TRACE;
 
-    let mut sub_ast = Ast::new();
-    let fwd_id = sub_ast.insert_root(forwarded);
-
-    builtin.setup_builtin(tree, fwd_id, dispatcher)
+    builtin.setup_builtin(&sub_ast, fwd_id, dispatcher)
   }
 }
 
 /// Expand and flatten an argv into single-word `Expanded` tokens.
-///
-/// `command`/`builtin` strip `argv[0]` themselves to peel off their own name, so
-/// they must expand first — otherwise a command smuggled through a variable
-/// (`C="command echo hi"`) is a single token and the strip eats the whole line.
-/// `Expanded` tokens are idempotent under further expansion, so the result is
-/// handed straight back to the dispatcher without re-running command subs.
 fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
   let mut out = Vec::with_capacity(argv.len());
   for tk in argv {
@@ -804,7 +801,7 @@ impl Builtin for CommandBuiltin {
   }
   fn run_builtin(&self, tree: &Ast, node_id: NodeId, dispatcher: &mut Dispatcher) -> ShResult<()> {
     let node = &tree[node_id];
-    let NdRule::Command { assignments, argv } = &node.class else {
+    let NdRule::Command { argv, .. } = &node.class else {
       unreachable!()
     };
     // Expand first so a smuggled `command` (`C="command echo hi"`) is split
@@ -860,22 +857,26 @@ impl Builtin for CommandBuiltin {
 
     argv = rest;
 
-    let mut node = Node {
-      class: NdRule::Command {
-        assignments: assignments.clone(),
-        argv,
-      },
-      ..node.clone()
+    let mut sub_ast = tree.break_off(node_id);
+    let root = sub_ast
+      .get_root()
+      .expect("command: forwarded node has no root");
+    let NdRule::Command { assignments, .. } = &sub_ast[root].class else {
+      unreachable!()
     };
-    node.flags |= NdFlags::NO_TRACE;
+    let assignments = assignments.clone();
+    sub_ast[root].class = NdRule::Command { assignments, argv };
+    sub_ast[root].flags |= NdFlags::NO_TRACE;
 
     if use_default_path {
       let Some(default_path) = state::util::get_default_path() else {
         #[cfg(target_os = "android")]
-        return Err(sherr!(ExecFail @ node.get_span(), "the -p flag is not supported on Android"));
+        return Err(
+          sherr!(ExecFail @ sub_ast[root].get_span(), "the -p flag is not supported on Android"),
+        );
 
         #[cfg(not(target_os = "android"))]
-        return Err(sherr!(ExecFail @ node.get_span(), "unable to get default path"));
+        return Err(sherr!(ExecFail @ sub_ast[root].get_span(), "unable to get default path"));
       };
       // TODO: Find a way to do this that doesn't involve forcing a full PATH rehash twice
       defer! {
@@ -883,10 +884,10 @@ impl Builtin for CommandBuiltin {
       }
       state::util::with_vars([("PATH".into(), default_path)], || {
         Shed::meta_mut(MetaTab::rehash_path_cache);
-        Self::execute_inner(print_path, print_type, tree, node_id, dispatcher)
+        Self::execute_inner(print_path, print_type, &sub_ast, root, dispatcher)
       })
     } else {
-      Self::execute_inner(print_path, print_type, tree, node_id, dispatcher)
+      Self::execute_inner(print_path, print_type, &sub_ast, root, dispatcher)
     }
   }
 }

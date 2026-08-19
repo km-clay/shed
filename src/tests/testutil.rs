@@ -381,7 +381,7 @@ impl Drop for TestGuard {
   }
 }
 
-pub(crate) fn get_ast(input: &str) -> ShResult<Vec<crate::eval::Node>> {
+pub(crate) fn get_ast(input: &str) -> ShResult<crate::eval::parse::Ast> {
   let input = expand_aliases(input);
 
   let mut parser = ParsedSrc::new(input.into())
@@ -392,20 +392,21 @@ pub(crate) fn get_ast(input: &str) -> ShResult<Vec<crate::eval::Node>> {
     .parse_src()
     .map_err(|e| e.into_iter().next().unwrap())?;
 
-  Ok(parser.extract_nodes())
+  Ok(parser.into_ast())
 }
 
-impl crate::eval::Node {
+impl crate::eval::parse::Ast {
   pub fn assert_structure(
-    &mut self,
+    &self,
     expected: &mut impl Iterator<Item = NdKind>,
   ) -> Result<(), String> {
+    let root = self.get_root().expect("assert_structure: AST has no root");
     let mut full_structure = vec![];
     let mut before = vec![];
     let mut after = vec![];
     let mut offender = None;
 
-    self.walk_tree(&mut |s| {
+    self.walk_tree(root, &mut |s| {
       let expected_rule = expected.next();
       full_structure.push(s.class.as_nd_kind());
 

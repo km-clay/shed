@@ -3,13 +3,17 @@ use std::io::{Read, Seek, Write as IoWrite};
 use bstr::ByteSlice;
 use tempfile::NamedTempFile;
 
-use crate::{state::vars::VarStr, varstr};
+use crate::{
+  eval::parse::{Ast, node::NodeId},
+  state::vars::VarStr,
+  varstr,
+};
 
 use super::{
   super::state::meta::MetaTab,
   Shed,
   eval::{
-    NdRule, Node,
+    NdRule,
     execute::{Dispatcher, exec_input},
     lex::{Span, Tk},
   },
@@ -156,7 +160,8 @@ impl super::Builtin for FixCmd {
   fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
     unreachable!("fixcmd is a special snowflake command that needs really special handling");
   }
-  fn run_builtin(&self, node: &Node, _dispatcher: &mut Dispatcher) -> ShResult<()> {
+  fn run_builtin(&self, tree: &Ast, node_id: NodeId, _dispatcher: &mut Dispatcher) -> ShResult<()> {
+    let node = &tree[node_id];
     let span = node.get_span();
     let NdRule::Command {
       assignments: _,
