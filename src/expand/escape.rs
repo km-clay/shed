@@ -540,25 +540,18 @@ pub fn read_octal(stream: &mut SegCursor, out: &mut SegStream, first: Option<u8>
 }
 
 pub fn read_hex(stream: &mut SegCursor, out: &mut SegStream) {
-  let Some(h1) = stream.next_byte() else {
+  let hex_val = |b: u8| (b as char).to_digit(16);
+  let Some(d1) = stream.peek_byte().and_then(hex_val) else {
     out.push_bytes(b"\\x");
     return;
   };
-  let Some(h2) = stream.next_byte() else {
-    out.push_bytes(b"\\x");
-    out.push_byte(h1);
-    return;
-  };
-  let digits = [h1, h2];
-  if let Some(byte) = std::str::from_utf8(&digits)
-    .ok()
-    .and_then(|s| u8::from_str_radix(s, 16).ok())
-  {
-    out.push_byte(byte);
-  } else {
-    out.push_bytes(b"\\x");
-    out.push_bytes(&digits);
+  stream.next_byte();
+  let mut value = d1 as u8;
+  if let Some(d2) = stream.peek_byte().and_then(hex_val) {
+    stream.next_byte();
+    value = value * 16 + d2 as u8;
   }
+  out.push_byte(value);
 }
 
 fn read_proc_sub(stream: &mut SegCursor, out: &mut SegStream, input: bool) {
