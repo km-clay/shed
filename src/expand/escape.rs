@@ -98,10 +98,9 @@ pub fn escape_glob(raw: &str) -> String {
 /// Push `c` to `out` as a literal glob character, using a bracket expression
 /// to escape glob metas since `glob::Pattern` doesn't recognize `\x` escapes.
 fn push_glob_literal(out: &mut Vec<u8>, c: u8) {
-  if matches!(c, b'*' | b'?' | b'[') {
-    out.push(b'[');
+  if matches!(c, b'*' | b'?' | b'[' | b']') {
+    out.push(b'\\');
     out.push(c);
-    out.push(b']');
   } else {
     out.push(c);
   }
