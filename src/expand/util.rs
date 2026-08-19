@@ -27,13 +27,13 @@ pub fn expand_case_pattern(raw: &str) -> ShResult<String> {
       if let Some(next) = cursor.next_byte() {
         // Backslash-escaped glob meta-chars must remain literal in the resulting
         // pattern, otherwise glob_to_regex would treat them as wildcards.
-        if matches!(next, b'*' | b'?' | b'[' | b']') {
+        if matches!(next, b'*' | b'?' | b'[' | b']' | b'\\') {
           result.push(b'\\');
         }
         result.push(next);
       }
     }
-    Unit::Byte(b @ (b'*' | b'?' | b'[' | b']')) if in_quote => {
+    Unit::Byte(b @ (b'*' | b'?' | b'[' | b']' | b'\\')) if in_quote => {
       result.push(b'\\');
       result.push(b);
     }
