@@ -1220,6 +1220,29 @@ mod tests {
   }
 
   #[test]
+  fn array_literal_keeps_quoted_empty_elements() {
+    // A quoted "" is a legitimate (empty) element and must occupy a slot; only
+    // unquoted empty expansions are dropped. Regression: a blanket empty-filter
+    // used to discard these, shearing parallel arrays (e.g. completion
+    // candidate/description pairs).
+    let guard = TestGuard::new();
+    test_input(r#"arr=("" x "" y); echo "len=${#arr[@]}"; printf '[%s]' "${arr[@]}"; echo"#)
+      .unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("len=4"), "length wrong: {out:?}");
+    assert!(out.contains("[][x][][y]"), "empties not preserved: {out:?}");
+  }
+
+  #[test]
+  fn array_literal_drops_unquoted_empty_expansion() {
+    // The complement: an *unquoted* empty expansion produces no field at all.
+    let guard = TestGuard::new();
+    test_input(r#"arr=($unset a b); echo "len=${#arr[@]}""#).unwrap();
+    let out = guard.read_output();
+    assert!(out.contains("len=2"), "got {out:?}");
+  }
+
+  #[test]
   fn declare_p_prints_named_var() {
     let guard = TestGuard::new();
     test_input("declare myvar=visible").unwrap();

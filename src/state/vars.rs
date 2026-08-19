@@ -793,7 +793,7 @@ impl VarKind {
       .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
       .try_fold(Vec::new(), |mut acc, wrds| {
         match wrds {
-          Ok(wrds) => acc.extend(wrds.iter().filter(|s| !s.is_empty()).cloned()),
+          Ok(wrds) => acc.extend(wrds.iter().cloned()),
           Err(e) => return Err(e),
         }
         Ok(acc)
