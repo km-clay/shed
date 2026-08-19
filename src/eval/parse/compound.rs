@@ -208,7 +208,7 @@ impl ParseStream {
       return Err(pat_err);
     };
 
-    if pat_tk.span.as_str() == "in" {
+    if matches!(pat_tk.class, TkRule::Sep) || pat_tk.span.as_str() == "in" {
       return Err(pat_err);
     }
 
