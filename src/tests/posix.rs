@@ -1123,6 +1123,20 @@ mod word_expansions_2_6 {
       param_exp_example_13: r"echo ${x#*.}" => "txt\n";
       param_exp_example_14: r#"echo ${x#"*".}"# => "file.txt\n";
     }
+
+    test_input! {
+      // make sure we are treating an unclosed '[' as literal
+      setup: {
+        crate::__test_setup_vars!([
+          "v"    => "[",
+          "line" => "ok=[ok_a1 ok_a2] fail=[] unfin=[]",
+          "path" => "foo[bar",
+        ]);
+      },
+      strip_unterminated_bracket_only : r"echo [${v#*[}]"    => "[]\n";
+      strip_unterminated_bracket_mid  : r"echo ${path#*[}"   => "bar\n";
+      strip_unterminated_bracket_first: r"echo ${line#*ok=[}" => "ok_a1 ok_a2] fail=[] unfin=[]\n";
+    }
   }
 
   mod _3_command_sub {

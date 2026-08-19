@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use regex::Regex;
 
 use super::{
@@ -64,6 +66,7 @@ pub fn is_var_name_ch(ch: char) -> bool {
 /// matchers). `anchored` keeps fnmatch's `^...$`; otherwise they're stripped.
 pub fn glob_to_regex_pattern(glob: &str, anchored: bool) -> String {
   let glob = &replace_posix_classes(glob);
+  let glob = &escape_unterminated_brackets(glob);
   // fnmatch_regex always produces ^...$, so get the pattern string and strip if unanchored
   let pattern = fnmatch_regex::glob_to_regex_pattern(glob).unwrap_or_else(|_| regex::escape(glob));
   let pattern = escape_class_brackets(&pattern);
@@ -77,6 +80,70 @@ pub fn glob_to_regex_pattern(glob: &str, anchored: bool) -> String {
       .unwrap_or(&pattern)
       .to_string()
   }
+}
+
+/// Backslash-escape any `[` that does not open a valid, terminated bracket
+/// expression, so fnmatch treats it as a literal instead of erroring out with
+/// `UnclosedClass`.
+///
+/// Zero-allocation operation in the best case scenario (no unmatched braces)
+fn escape_unterminated_brackets(glob: &str) -> Cow<'_, str> {
+  let bytes = glob.as_bytes();
+  let n = bytes.len();
+
+  let class_close = |open: usize| -> Option<usize> {
+    let mut j = open + 1;
+
+    // leading '!' negates, leading ']' is literal
+    if j < n && bytes[j] == b'!' {
+      j += 1;
+    }
+    if j < n && bytes[j] == b']' {
+      j += 1;
+    }
+
+    while j < n {
+      match bytes[j] {
+        b'\\' => j += 2,
+        b']' => return Some(j),
+        _ => j += 1,
+      }
+    }
+    None
+  };
+
+  let mut bad = vec![]; // zero allocation until we push
+  let mut i = 0;
+  while i < n {
+    match bytes[i] {
+      b'\\' => i += 2, // skip an already-escaped char
+      b'[' => {
+        if let Some(close) = class_close(i) {
+          i = close + 1;
+        } else {
+          bad.push(i);
+          i += 1;
+        }
+      }
+      _ => i += 1,
+    }
+  }
+
+  if bad.is_empty() {
+    return Cow::Borrowed(glob);
+  }
+  // at this point we've already pushed an index to 'bad', so allocations can't be avoided
+  // let's write the new String now.
+
+  let mut out = String::with_capacity(glob.len() + bad.len());
+  let mut last = 0;
+  for &pos in &bad {
+    out.push_str(&glob[last..pos]);
+    out.push('\\');
+    last = pos;
+  }
+  out.push_str(&glob[last..]);
+  Cow::Owned(out)
 }
 
 /// Escape a literal `[` appearing *inside* a regex character class.
@@ -170,6 +237,25 @@ mod tests {
     assert!(re.is_match("a"));
     assert!(re.is_match("b"));
     assert!(!re.is_match("d"));
+  }
+
+  #[test]
+  fn glob_unterminated_bracket_is_literal() {
+    // `*[` — the trailing `[` never opens a class, so it is a literal `[`
+    // while the `*` keeps its wildcard meaning (issue #149).
+    let re = glob_to_regex("*[", true);
+    assert!(re.is_match("foo["));
+    assert!(re.is_match("["));
+    assert!(!re.is_match("foo"));
+  }
+
+  #[test]
+  fn glob_empty_bracket_is_literal() {
+    // `[]` is not a valid class (the `]` is a literal first member with no
+    // close), so the whole thing matches literally.
+    let re = glob_to_regex("[]", true);
+    assert!(re.is_match("[]"));
+    assert!(!re.is_match("["));
   }
 
   #[test]
