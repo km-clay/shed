@@ -1825,6 +1825,7 @@ impl Dispatcher {
         if let Some(fd) = self.fork_close_fd {
           let _ = nix::unistd::close(fd);
         }
+        self.fork_builtins = false;
         let _guard = Shed::term_mut(|t| t.interactive_guard(false));
         f(self);
 
