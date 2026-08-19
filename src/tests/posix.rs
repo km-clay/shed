@@ -1348,6 +1348,14 @@ mod word_expansions_2_6 {
 
     // TODO: actually figure out a way to test with filesystem I/O
     // so that we can glob on actual files
+    test_input! {
+      noglob_quoted_star     : r#"set -f; echo "a*b""#  => "a*b\n";
+      noglob_quoted_question : r#"set -f; echo "c?d""#  => "c?d\n";
+      noglob_quoted_bracket  : r#"set -f; echo "[x]""#  => "[x]\n";
+      noglob_unquoted_meta   : r"set -f; echo a*b c?d"  => "a*b c?d\n";
+      noglob_eval_bracket_cmd:
+        r#"set -f; eval "[ -n \"x\" ] && echo ok""#     => "ok\n";
+    }
   }
 
   mod _7_quote_removal {

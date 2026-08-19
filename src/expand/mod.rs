@@ -193,7 +193,7 @@ impl Expander {
     // A word collapses to its bytes (dropping the ESCAPE/quote markers it
     // carried for globbing); the glob-syntax form (markers resolved to
     // bracket-escapes) is what the glob matcher actually runs against.
-    if self.noglob {
+    if self.noglob || shopt!(set.noglob) {
       return Ok(words.into_iter().map(|w| w.into_bytes().into()).collect());
     }
 
