@@ -3,6 +3,7 @@ use std::{
   collections::VecDeque,
   fmt::{self, Debug},
   rc::Rc,
+  sync::atomic::{AtomicU32, Ordering},
 };
 
 pub(crate) mod node;
@@ -22,13 +23,18 @@ mod util;
 #[cfg(test)]
 pub mod tests;
 
-use crate::eval::parse::node::LabelCtx;
+use crate::{
+  eval::parse::node::{LabelCtx, NodeId},
+  match_loop,
+};
 
 use super::{
   lex::{self, LexFlags, LexStream, Span, Tk, TkFlags, TkRule, clean_input},
   procio, sherr, two_way_display,
   util::{self as crate_util, ShErr, ShResult},
 };
+
+static AST_GENERATION: AtomicU32 = AtomicU32::new(0);
 
 /// The parsed AST along with the source input it parsed
 ///
@@ -56,7 +62,7 @@ impl ParsedSrc {
     Self {
       src,
       name: "<stdin>".into(),
-      ast: Ast::new(vec![]),
+      ast: Ast::new(),
       lex_flags: LexFlags::empty(),
       parse_flags: ParseFlags::empty(),
       context: VecDeque::new().into(),
@@ -99,42 +105,78 @@ impl ParsedSrc {
       }
     }
 
-    let mut nodes = vec![];
-    let parser = ParseStream::new(tokens, self.context.clone()).with_flags(self.parse_flags);
+    let mut parser = ParseStream::new(tokens, self.context.clone()).with_flags(self.parse_flags);
 
-    for parse_result in parser {
-      match parse_result {
-        Ok(node) => nodes.push(node),
-        Err(error) => {
-          if self.parse_flags.contains(ParseFlags::ERR_RETURN) {
-            return Err(vec![error]);
-          }
-          errors.push(error);
+    match_loop!(parser.next() => parse_result, {
+      Ok(root) => parser.tree.mark_root(root),
+      Err(error) => {
+        if self.parse_flags.contains(ParseFlags::ERR_RETURN) {
+          return Err(vec![error]);
         }
+        errors.push(error);
       }
-    }
+    });
 
     if !errors.is_empty() {
       return Err(errors);
     }
 
-    *self.ast.tree_mut() = nodes;
+    self.ast = parser.tree;
     Ok(())
   }
-  pub fn extract_nodes(&mut self) -> Vec<Node> {
-    std::mem::take(self.ast.tree_mut())
+  pub fn into_ast(self) -> Ast {
+    self.ast
   }
 }
 
-#[derive(Default, Clone, Debug)]
-pub(crate) struct Ast(Vec<Node>);
+#[derive(Clone, Debug)]
+pub(crate) struct Ast {
+  arena: Vec<Node>,
+  roots: Vec<NodeId>,
+  ast_id: u32,
+}
 
 impl Ast {
-  pub fn new(tree: Vec<Node>) -> Self {
-    Self(tree)
+  pub fn new() -> Self {
+    Self {
+      arena: vec![],
+      roots: vec![],
+      ast_id: AST_GENERATION.fetch_add(1, Ordering::SeqCst),
+    }
   }
-  pub fn tree_mut(&mut self) -> &mut Vec<Node> {
-    &mut self.0
+  pub fn insert_node(&mut self, node: Node) -> NodeId {
+    let id = NodeId::new(self.arena.len() as u32, self.ast_id);
+    self.arena.push(node);
+    id
+  }
+  pub fn insert_root(&mut self, node: Node) -> NodeId {
+    let id = self.insert_node(node);
+    self.roots.push(id);
+    id
+  }
+  pub fn mark_root(&mut self, id: NodeId) {
+    if !self.roots.contains(&id) {
+      self.roots.push(id);
+    }
+  }
+  pub fn roots(&self) -> &[NodeId] {
+    &self.roots
+  }
+  pub fn get_root(&self) -> Option<NodeId> {
+    self.roots.first().copied()
+  }
+  pub fn break_off(&self, id: NodeId) -> Self {
+    let mut new = Self::new();
+    let root = self.copy_into(id, &mut new);
+    new.mark_root(root);
+    new
+  }
+  fn copy_into(&self, id: NodeId, dst: &mut Self) -> NodeId {
+    let mut node = self[id].clone();
+    for child in node.child_ids_mut() {
+      *child = self.copy_into(*child, dst);
+    }
+    dst.insert_node(node)
   }
 }
 
@@ -148,6 +190,7 @@ bitflags! {
 
 struct ParseStream {
   pub tokens: Vec<Tk>,
+  pub tree: Ast,
   pub cursor: usize,
   pub context: LabelCtx,
   pub flags: ParseFlags,
@@ -170,6 +213,7 @@ impl ParseStream {
       .collect();
     Self {
       tokens,
+      tree: Ast::new(),
       cursor: 0,
       context,
       flags: ParseFlags::empty(),
@@ -179,28 +223,29 @@ impl ParseStream {
     self.flags = flags;
     self
   }
-  fn parse_cmd_list(&mut self) -> ShResult<Option<Node>> {
+  fn parse_cmd_list(&mut self) -> ShResult<Option<NodeId>> {
     let mut commands = vec![];
     let mut span: Option<Span> = None;
-    while let Some(command) = self.parse_conjunction()? {
-      extend_span!(span, command.get_span());
-      commands.push(command);
+    while let Some(cmd) = self.parse_conjunction()? {
+      extend_span!(span, self.tree[cmd].get_span());
+      commands.push(cmd);
     }
 
-    if commands.is_empty() {
-      Ok(None)
-    } else {
-      Ok(Some(node!(self, span, NdRule::List { commands })))
-    }
+    let node = (!commands.is_empty()).then(|| {
+      let node = node!(self, span, NdRule::List { commands });
+      self.tree.insert_node(node)
+    });
+
+    Ok(node)
   }
-  fn parse_conjunction(&mut self) -> ShResult<Option<Node>> {
+  fn parse_conjunction(&mut self) -> ShResult<Option<NodeId>> {
     let mut elements = vec![];
     let mut span: Option<Span> = None;
 
     let mut dangling_op: Option<Span> = None;
-    while let Some(mut block) = self.parse_block(true)? {
+    while let Some(block) = self.parse_block(true)? {
       dangling_op = None;
-      extend_span!(span, block.get_span());
+      extend_span!(span, self.tree[block].get_span());
       self.catch_separator(&mut span);
 
       let conjunct_op = match self.next_tk_class() {
@@ -220,11 +265,11 @@ impl ParseStream {
       }
 
       if conjunct_op != ConjunctOp::Null {
-        block.walk_tree(&mut Node::not_err);
+        self.tree.walk_tree_mut(block, &mut Node::not_err);
       }
 
       let conjunction = ConjunctNode {
-        cmd: Box::new(block),
+        cmd: block,
         operator: conjunct_op,
       };
 
@@ -254,7 +299,8 @@ impl ParseStream {
     if elements.is_empty() {
       Ok(None)
     } else {
-      Ok(Some(node!(self, span, NdRule::Conjunction { elements })))
+      let node = node!(self, span, NdRule::Conjunction { elements });
+      Ok(Some(self.tree.insert_node(node)))
     }
   }
   /// This tries to match on different stuff that can appear in a command
@@ -262,7 +308,7 @@ impl ParseStream {
   /// Ordered from specialized to general, with more generally matchable stuff
   /// appearing at the bottom The `check_pipelines` parameter is used to prevent
   /// left-recursion issues in `self.parse_pipeln()`
-  fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<Node>> {
+  fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<NodeId>> {
     stacker::maybe_grow(64 * 1024, 1024 * 1024, || {
       if check_pipelines {
         try_match!(self.parse_pipeln()?);
@@ -286,10 +332,10 @@ impl ParseStream {
       Ok(None)
     })
   }
-  fn parse_compound(&mut self) -> ShResult<Option<Node>> {
+  fn parse_compound(&mut self) -> ShResult<Option<NodeId>> {
     // parse only a compound command, used by function definitions since any
     // compound command is a valid function body.
-    let result = || -> ShResult<Option<Node>> {
+    let result = || -> ShResult<Option<NodeId>> {
       try_match!(self.parse_brc_grp(true /* from_func_def */)?);
       try_match!(self.parse_subsh()?);
       try_match!(self.parse_case()?);
@@ -315,7 +361,7 @@ impl ParseStream {
 }
 
 impl Iterator for ParseStream {
-  type Item = Result<Node, ShErr>;
+  type Item = Result<NodeId, ShErr>;
   fn next(&mut self) -> Option<Self::Item> {
     // Empty token vector or only Soi/Eoi tokens, nothing to do
     if self.is_empty() && self.len() == 1 && self.tokens().last().unwrap().class == TkRule::Eoi {

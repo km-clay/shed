@@ -1,5 +1,5 @@
 use crate::{
-  eval::parse::node::LabelCtx,
+  eval::parse::node::{LabelCtx, NodeId},
   util::{self, error::get_context},
 };
 
@@ -102,24 +102,26 @@ impl ParseStream {
     }
     Ok(())
   }
-  pub(super) fn parse_pipeln(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_pipeln(&mut self) -> ShResult<Option<NodeId>> {
     let mut cmds = vec![];
     let mut span: Option<Span> = None;
     let mut flags = NdFlags::empty();
 
     let mut dangling_pipe: Option<Span> = None;
-    while let Some(mut cmd) = self.parse_block(false)? {
+    while let Some(cmd) = self.parse_block(false)? {
       dangling_pipe = None;
-      let is_punctuated = cmd.flags.contains(NdFlags::PUNCTUATED);
+      let is_punctuated = self.tree[cmd].flags.contains(NdFlags::PUNCTUATED);
 
-      extend_span!(span, cmd.span);
+      extend_span!(span, self.tree[cmd].span);
       let next_class = self.next_tk_class().clone();
       if next_class == TkRule::ErrPipe {
-        cmd.flags |= NdFlags::PIPE_ERR;
+        self.tree[cmd].flags |= NdFlags::PIPE_ERR;
       }
       if matches!(next_class, TkRule::Pipe | TkRule::ErrPipe) {
-        cmd.walk_tree(&mut |n| n.flags |= NdFlags::PIPE_CMD);
-        cmd.walk_tree(&mut Node::not_err);
+        self
+          .tree
+          .walk_tree_mut(cmd, &mut |n| n.flags |= NdFlags::PIPE_CMD);
+        self.tree.walk_tree_mut(cmd, &mut Node::not_err);
       }
 
       cmds.push(cmd);
@@ -148,17 +150,18 @@ impl ParseStream {
     if cmds.is_empty() {
       Ok(None)
     } else {
-      Ok(Some(node!(
+      let node = node!(
         self,
         span,
         NdRule::Pipeline { cmds },
         vec![/*redirs*/],
         flags
-      )))
+      );
+      Ok(Some(self.tree.insert_node(node)))
     }
   }
   #[expect(clippy::while_let_loop, clippy::too_many_lines)]
-  pub(super) fn parse_cmd(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_cmd(&mut self) -> ShResult<Option<NodeId>> {
     let mut span: Option<Span> = None;
 
     let result = 'out: {
@@ -231,6 +234,7 @@ impl ParseStream {
         // add this flag so we don't split words on test members
         flags |= NdFlags::NO_SPLIT;
       }
+
       if argv.is_empty() {
         if assignments.is_empty() && redirs.is_empty() {
           break 'out Ok(None);
@@ -238,7 +242,14 @@ impl ParseStream {
         // we have an empty argv, but we got here with assignments and/or redirections.
         // we still need to execute this, so emit an empty command node.
         self.commit(tk_counter);
-        let assignments_span = assignments.get_span();
+
+        // replace the Nodes with NodeId by inserting them into our arena
+        let assignments = assignments
+          .into_iter()
+          .map(|a| self.tree.insert_node(a))
+          .collect::<Vec<_>>();
+
+        let assignments_span = assignments.get_span(&self.tree);
         let mut nd = node!(
           self,
           span.clone(),
@@ -252,7 +263,7 @@ impl ParseStream {
             &assignments_span,
           ));
         }
-        return Ok(Some(nd));
+        return Ok(Some(self.tree.insert_node(nd)));
       }
       loop {
         let Some(tk) = tk_iter.next() else {
@@ -324,13 +335,21 @@ impl ParseStream {
       }
       self.commit(tk_counter);
 
-      return Ok(Some(node!(
+      // replace the Nodes with NodeId by inserting them into our arena
+      let assignments = assignments
+        .into_iter()
+        .map(|a| self.tree.insert_node(a))
+        .collect::<Vec<_>>();
+
+      let node = node!(
         self,
         span,
         NdRule::Command { assignments, argv },
         redirs,
         flags
-      )));
+      );
+
+      return Ok(Some(self.tree.insert_node(node)));
     };
 
     match result {

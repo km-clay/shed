@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use shed_macros::styled_format;
 
-use crate::util::error::get_context;
+use crate::{eval::parse::node::NodeId, util::error::get_context};
 
 use super::{
   CaseNode, CondNode, LoopKind, NdRule, Node, ParseStream, ShResult, Tk, TkFlags, TkRule,
@@ -10,7 +10,7 @@ use super::{
 };
 
 impl ParseStream {
-  pub(super) fn parse_func_def(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_func_def(&mut self) -> ShResult<Option<NodeId>> {
     let mut span: Option<Span> = None;
     let has_func_kw = self.check_keyword("function");
 
@@ -37,7 +37,7 @@ impl ParseStream {
 
     self.catch_separator(&mut span);
 
-    let Some(mut compound_cmd) = self.parse_compound()? else {
+    let Some(body) = self.parse_compound()? else {
       bail!(
         self,
         span,
@@ -45,21 +45,25 @@ impl ParseStream {
       );
     };
 
-    extend_span!(span, compound_cmd.get_span());
+    extend_span!(span, self.tree[body].get_span());
 
-    compound_cmd.propagate_context(&get_context(
-      styled_format!("in function '{name_raw}' defined here").into(),
-      &span.clone().unwrap_or_default(),
-    ));
+    self.tree.propagate_context(
+      body,
+      &get_context(
+        styled_format!("in function '{name_raw}' defined here").into(),
+        &span.clone().unwrap_or_default(),
+      ),
+    );
 
-    self.parse_redir(&mut compound_cmd.redirs, &mut span)?;
-    let body = Box::new(compound_cmd);
+    let mut redirs = vec![];
+    self.parse_redir(&mut redirs, &mut span)?;
+    self.tree[body].redirs.append(&mut redirs);
 
     let node = node!(self, span, NdRule::FuncDef { name, body });
 
-    Ok(Some(node))
+    Ok(Some(self.tree.insert_node(node)))
   }
-  pub(super) fn parse_subsh(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_subsh(&mut self) -> ShResult<Option<NodeId>> {
     if *self.next_tk_class() != TkRule::SubshStart {
       return Ok(None);
     }
@@ -79,8 +83,8 @@ impl ParseStream {
         break;
       }
       if let Some(node) = self.parse_conjunction()? {
-        extend_span!(span, node.get_span());
-        extend_span!(body_span, node.get_span());
+        extend_span!(span, self.tree[node].get_span());
+        extend_span!(body_span, self.tree[node].get_span());
         body.push(node);
       } else if *self.next_tk_class() != TkRule::SubshEnd {
         let next = self.peek_tk().cloned();
@@ -110,20 +114,17 @@ impl ParseStream {
       }
     }
 
-    let body = Box::new(node!(
-      self,
-      body_span,
-      NdRule::List { commands: body },
-      vec![]
-    ));
+    let node = node!(self, body_span, NdRule::List { commands: body }, vec![]);
+
+    let body = self.tree.insert_node(node);
 
     self.parse_redir(&mut redirs, &mut span)?;
 
     let node = node!(self, span, NdRule::Subshell { body }, redirs);
 
-    Ok(Some(node))
+    Ok(Some(self.tree.insert_node(node)))
   }
-  pub(super) fn parse_brc_grp(&mut self, from_func_def: bool) -> ShResult<Option<Node>> {
+  pub(super) fn parse_brc_grp(&mut self, from_func_def: bool) -> ShResult<Option<NodeId>> {
     if *self.next_tk_class() != TkRule::BraceGrpStart {
       return Ok(None);
     }
@@ -144,8 +145,8 @@ impl ParseStream {
         break;
       }
       if let Some(node) = self.parse_conjunction()? {
-        extend_span!(span, node.get_span());
-        extend_span!(body_span, node.get_span());
+        extend_span!(span, self.tree[node].get_span());
+        extend_span!(body_span, self.tree[node].get_span());
         body.push(node);
       } else if *self.next_tk_class() != TkRule::BraceGrpEnd {
         let next = self.peek_tk().cloned();
@@ -171,21 +172,19 @@ impl ParseStream {
       }
     }
 
-    let body = Box::new(node!(
-      self,
-      body_span,
-      NdRule::List { commands: body },
-      vec![]
-    ));
+    let node = node!(self, body_span, NdRule::List { commands: body }, vec![]);
+    let body = self.tree.insert_node(node);
 
     if !from_func_def {
       self.parse_redir(&mut redirs, &mut span)?;
     }
 
-    Ok(Some(node!(self, span, NdRule::BraceGrp { body }, redirs)))
+    let node = node!(self, span, NdRule::BraceGrp { body }, redirs);
+
+    Ok(Some(self.tree.insert_node(node)))
   }
   #[expect(clippy::too_many_lines)]
-  pub(super) fn parse_case(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_case(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword("case") {
       return Ok(None);
     }
@@ -288,7 +287,7 @@ impl ParseStream {
         let Some(conj) = self.parse_conjunction()? else {
           break;
         };
-        extend_span!(arm_span, conj.get_span());
+        extend_span!(arm_span, self.tree[conj].get_span());
 
         let trailing_dbl_semi = self
           .tokens
@@ -312,7 +311,7 @@ impl ParseStream {
 
       let case_node = CaseNode {
         patterns,
-        body: Box::new(arm_body),
+        body: self.tree.insert_node(arm_body),
       };
       case_blocks.push(case_node);
 
@@ -330,7 +329,7 @@ impl ParseStream {
       }
     }
 
-    Ok(Some(node!(
+    let node = node!(
       self,
       span,
       NdRule::CaseNode {
@@ -338,9 +337,11 @@ impl ParseStream {
         case_blocks
       },
       redirs
-    )))
+    );
+
+    Ok(Some(self.tree.insert_node(node)))
   }
-  pub(super) fn parse_time(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_time(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword("time") {
       return Ok(None);
     }
@@ -349,27 +350,26 @@ impl ParseStream {
 
     extend_span!(span, self.next_tk().unwrap().span);
 
-    let Some(mut cmd) = self.parse_block(true)? else {
+    let Some(cmd) = self.parse_block(true)? else {
       bail!(self, span, "Expected a command after 'time'");
     };
 
-    cmd.walk_tree(&mut Node::not_err);
+    self.tree.walk_tree_mut(cmd, &mut Node::not_err);
 
-    extend_span!(span, cmd.get_span());
+    extend_span!(span, self.tree[cmd].get_span());
     self.catch_separator(&mut span);
-    Ok(Some(node!(
-      self,
-      span,
-      NdRule::Timed { cmd: Box::new(cmd) }
-    )))
+
+    let node = node!(self, span, NdRule::Timed { cmd });
+
+    Ok(Some(self.tree.insert_node(node)))
   }
-  pub(super) fn parse_func_keyword(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_func_keyword(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword("function") {
       return Ok(None);
     }
     self.parse_func_def()
   }
-  pub(super) fn parse_arith(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_arith(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_flags(TkFlags::IS_ARITH) {
       return Ok(None);
     }
@@ -386,14 +386,11 @@ impl ParseStream {
       bail!(self, span, "Unexpected argument after arithmetic command");
     }
 
-    Ok(Some(node!(
-      self,
-      span,
-      NdRule::Arithmetic { body: arith_tk },
-      redirs
-    )))
+    let node = node!(self, span, NdRule::Arithmetic { body: arith_tk }, redirs);
+
+    Ok(Some(self.tree.insert_node(node)))
   }
-  pub(super) fn parse_negate(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_negate(&mut self) -> ShResult<Option<NodeId>> {
     if (!self.check_keyword("not") && !self.check_keyword("!")) || !self.next_tk_is_some() {
       return Ok(None);
     }
@@ -403,39 +400,37 @@ impl ParseStream {
 
     extend_span!(span, self.next_tk().unwrap().span);
 
-    let Some(mut cmd) = self.parse_block(true)? else {
+    let Some(cmd) = self.parse_block(true)? else {
       bail!(self, span, "Expected a command after '{display}'");
     };
-    cmd.walk_tree(&mut Node::not_err); // disable set -e for negated commands
+    self.tree.walk_tree_mut(cmd, &mut Node::not_err); // disable set -e for negated commands
 
-    extend_span!(span, cmd.get_span());
+    extend_span!(span, self.tree[cmd].get_span());
     self.catch_separator(&mut span);
 
-    Ok(Some(node!(
-      self,
-      span,
-      NdRule::Negate { cmd: Box::new(cmd) }
-    )))
+    let node = node!(self, span, NdRule::Negate { cmd });
+
+    Ok(Some(self.tree.insert_node(node)))
   }
-  pub(super) fn parse_if(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_if(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword("if") {
       return Ok(None);
     }
 
     let mut span: Option<Span> = None;
     let mut cond_nodes: Vec<CondNode> = vec![];
-    let mut else_block: Option<Node> = None;
+    let mut else_block: Option<NodeId> = None;
     let mut redirs = vec![];
 
     extend_span!(span, self.next_tk().unwrap().span);
 
     loop {
       let prefix_keywrd = if cond_nodes.is_empty() { "if" } else { "elif" };
-      let Some(mut cond) = self.parse_cmd_list()? else {
+      let Some(cond) = self.parse_cmd_list()? else {
         bail!(self, span, "Expected a command after '{prefix_keywrd}'");
       };
-      extend_span!(span, cond.get_span());
-      cond.walk_tree(&mut Node::not_err); // disable set -e for condition commands
+      extend_span!(span, self.tree[cond].get_span());
+      self.tree.walk_tree_mut(cond, &mut Node::not_err); // disable set -e for condition commands
 
       if !self.check_keyword("then") {
         bail!(
@@ -450,12 +445,9 @@ impl ParseStream {
       let Some(body) = self.parse_cmd_list()? else {
         bail!(self, span, "Expected a command after 'then'");
       };
-      extend_span!(span, body.get_span());
+      extend_span!(span, self.tree[body].get_span());
 
-      let cond_node = CondNode {
-        cond: Box::new(cond),
-        body: Box::new(body),
-      };
+      let cond_node = CondNode { cond, body };
       cond_nodes.push(cond_node);
 
       self.catch_separator(&mut span);
@@ -488,22 +480,24 @@ impl ParseStream {
 
     self.assert_separator(&mut span)?;
 
-    Ok(Some(node!(
+    let node = node!(
       self,
       span,
       NdRule::IfNode {
         cond_nodes,
-        else_block: else_block.map(Box::new)
+        else_block
       },
       redirs
-    )))
+    );
+
+    Ok(Some(self.tree.insert_node(node)))
   }
-  pub(super) fn parse_for_arith(&mut self, span: &mut Option<Span>) -> ShResult<Option<Node>> {
+  pub(super) fn parse_for_arith(&mut self, span: &mut Option<Span>) -> ShResult<Option<NodeId>> {
     let mut redirs = vec![];
 
     let arith_tk = self.next_tk().unwrap(); // we checked already
     extend_span!(*span, arith_tk.clone().span);
-    let (init, cond, step) = match split_for_arith_tk(&arith_tk)? {
+    let (init, cond, step) = match split_for_arith_tk(&mut self.tree, &arith_tk)? {
       None => (None, None, None),
       Some((init, cond, step)) => (Some(init), Some(cond), Some(step)),
     };
@@ -535,19 +529,21 @@ impl ParseStream {
 
     self.parse_redir(&mut redirs, span)?;
 
-    Ok(Some(node!(
+    let node = node!(
       self,
       span.clone(),
       NdRule::ForArith {
         init,
         cond,
         step,
-        body: Box::new(body)
+        body
       },
       redirs
-    )))
+    );
+
+    Ok(Some(self.tree.insert_node(node)))
   }
-  pub(super) fn parse_for_arr(&mut self, span: &mut Option<Span>) -> ShResult<Option<Node>> {
+  pub(super) fn parse_for_arr(&mut self, span: &mut Option<Span>) -> ShResult<Option<NodeId>> {
     let mut vars: Vec<Tk> = vec![];
     let mut arr: Vec<Tk> = vec![];
     let mut redirs = vec![];
@@ -629,19 +625,21 @@ impl ParseStream {
 
     self.assert_separator(span)?;
 
-    Ok(Some(node!(
+    let node = node!(
       self,
       span.clone(),
       NdRule::ForNode {
         vars,
         arr,
-        body: Box::new(body),
+        body,
         positional
       },
       redirs
-    )))
+    );
+
+    Ok(Some(self.tree.insert_node(node)))
   }
-  pub(super) fn parse_for(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_for(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword("for") {
       return Ok(None);
     }
@@ -655,7 +653,7 @@ impl ParseStream {
       self.parse_for_arr(&mut span)
     }
   }
-  pub(super) fn parse_loop(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_loop(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword("while") && !self.check_keyword("until") {
       return Ok(None);
     }
@@ -673,11 +671,11 @@ impl ParseStream {
     extend_span!(span, loop_tk.span);
     self.catch_separator(&mut span);
 
-    let Some(mut cond) = self.parse_cmd_list()? else {
+    let Some(cond) = self.parse_cmd_list()? else {
       bail!(self, span, "Expected a command after '{loop_kind}'");
     };
-    extend_span!(span, cond.get_span());
-    cond.walk_tree(&mut Node::not_err); // disable set -e for condition commands
+    extend_span!(span, self.tree[cond].get_span());
+    self.tree.walk_tree_mut(cond, &mut Node::not_err); // disable set -e for condition commands
 
     if !self.check_keyword("do") {
       bail!(self, span, "Expected 'do' after '{loop_kind}' condition");
@@ -699,12 +697,9 @@ impl ParseStream {
 
     self.assert_separator(&mut span)?;
 
-    let cond_node = CondNode {
-      cond: Box::new(cond),
-      body: Box::new(body),
-    };
+    let cond_node = CondNode { cond, body };
 
-    Ok(Some(node!(
+    let node = node!(
       self,
       span,
       NdRule::LoopNode {
@@ -712,10 +707,12 @@ impl ParseStream {
         cond_node
       },
       redirs
-    )))
+    );
+
+    Ok(Some(self.tree.insert_node(node)))
   }
   #[expect(clippy::too_many_lines)]
-  pub(super) fn parse_try(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_try(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword("try") {
       return Ok(None);
     }
@@ -747,8 +744,8 @@ impl ParseStream {
       }
 
       if let Some(node) = self.parse_conjunction()? {
-        extend_span!(span, node.get_span());
-        extend_span!(body_span, node.get_span());
+        extend_span!(span, self.tree[node].get_span());
+        extend_span!(body_span, self.tree[node].get_span());
         body.push(node);
       } else {
         bail!(
@@ -771,24 +768,27 @@ impl ParseStream {
       }
     }
 
-    let mut body = Box::new(node!(
+    let body = self.tree.insert_node(node!(
       self,
       body_span,
       NdRule::List { commands: body },
       vec![]
     ));
-    body.walk_tree(&mut Node::is_err);
+    self.tree.walk_tree_mut(body, &mut Node::is_err);
 
-    let try_span = body.get_span().merge_with(&try_tk_span).unwrap();
+    let try_span = self.tree[body].get_span().merge_with(&try_tk_span).unwrap();
     let try_span = if try_span.as_str().contains('\n') {
       try_span
     } else {
       try_tk_span
     };
-    body.propagate_context(&get_context(
-      styled_format!("in '{}' block defined here", "try").into(),
-      &try_span,
-    ));
+    self.tree.propagate_context(
+      body,
+      &get_context(
+        styled_format!("in '{}' block defined here", "try").into(),
+        &try_span,
+      ),
+    );
 
     extend_span!(span, self.next_tk().unwrap().span); // consume 'catch'
 
@@ -822,14 +822,14 @@ impl ParseStream {
         redirs
       );
 
-      return Ok(Some(node));
+      return Ok(Some(self.tree.insert_node(node)));
     }
 
     extend_span!(span, self.next_tk().unwrap().span); // consume 'do'
 
     self.catch_separator(&mut span);
 
-    let Some(mut catch_body) = self.parse_cmd_list()? else {
+    let Some(catch_body) = self.parse_cmd_list()? else {
       bail!(
         self,
         span,
@@ -838,9 +838,9 @@ impl ParseStream {
         "catch"
       );
     };
-    extend_span!(span, catch_body.get_span());
+    extend_span!(span, self.tree[catch_body].get_span());
 
-    catch_body.walk_tree(&mut |n| n.not_err());
+    self.tree.walk_tree_mut(catch_body, &mut |n| n.not_err());
 
     if !self.check_keyword("done") {
       bail!(
@@ -855,13 +855,13 @@ impl ParseStream {
     extend_span!(span, self.next_tk().unwrap().span);
 
     self.parse_redir(&mut redirs, &mut span)?;
-    let catch = Some(Box::new(catch_body));
+    let catch = Some(catch_body);
 
     let node = node!(self, span, NdRule::TryNode { body, err, catch }, redirs);
 
-    Ok(Some(node))
+    Ok(Some(self.tree.insert_node(node)))
   }
-  pub(super) fn parse_defer(&mut self) -> ShResult<Option<Node>> {
+  pub(super) fn parse_defer(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword("defer") {
       return Ok(None);
     }
@@ -874,35 +874,32 @@ impl ParseStream {
 
     self.catch_separator(&mut span);
 
-    let Some(mut body) = self.parse_block(true)? else {
+    let Some(body) = self.parse_block(true)? else {
       bail!(self, span, "Expected a command after '{}' keyword", "defer");
     };
 
-    let body_span = body.get_span();
+    let body_span = self.tree[body].get_span();
     let defer_span = if body_span.as_str().contains('\n') {
       body_span.merge_with(&defer_tk_span).unwrap()
     } else {
       defer_tk_span
     };
 
-    extend_span!(span, body.get_span());
+    extend_span!(span, self.tree[body].get_span());
 
-    body.propagate_context(&get_context(
-      styled_format!("in '{}' block defined here", "defer").into(),
-      &defer_span,
-    ));
+    self.tree.propagate_context(
+      body,
+      &get_context(
+        styled_format!("in '{}' block defined here", "defer").into(),
+        &defer_span,
+      ),
+    );
 
     self.catch_separator(&mut span);
 
-    let node = node!(
-      self,
-      span,
-      NdRule::DeferNode {
-        body: Box::new(body)
-      }
-    );
+    let node = node!(self, span, NdRule::DeferNode { body });
 
-    Ok(Some(node))
+    Ok(Some(self.tree.insert_node(node)))
   }
 }
 

@@ -1,6 +1,9 @@
 use crate::{
   autocmd, builtin,
-  eval::parse::node::{LabelCtx, node_has_only_builtins},
+  eval::parse::{
+    Ast,
+    node::{LabelCtx, NodeId, node_has_only_builtins},
+  },
   expand, lifecycle,
   procio::{OutputSink, SinkScope, StdinScope},
   shopt_mut, signal, socket,
@@ -244,53 +247,40 @@ pub fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
     return Ok(());
   }
 
-  let mut nodes = parser.extract_nodes();
+  let mut ast = parser.into_ast();
 
-  // Single simple command: exec directly without forking.
-  // The parser wraps single commands as Conjunction -> Pipeline -> Command.
-  // Unwrap all layers to check, then set NO_FORK on the inner Command.
-  if nodes.len() == 1 {
-    let is_single_cmd = match &nodes[0].class {
-      NdRule::Command { .. } => true,
-      NdRule::Pipeline { cmds } => {
-        cmds.len() == 1 && matches!(cmds[0].class, NdRule::Command { .. })
-      }
-      NdRule::Conjunction { elements } => {
-        elements.len() == 1
-          && match &elements[0].cmd.class {
-            NdRule::Pipeline { cmds } => {
-              cmds.len() == 1 && matches!(cmds[0].class, NdRule::Command { .. })
-            }
-            NdRule::Command { .. } => true,
-            _ => false,
-          }
-      }
-      _ => false,
-    };
-    if is_single_cmd {
-      // Unwrap to the inner Command node
-      let mut node = nodes.remove(0);
-      loop {
-        match node.class {
-          NdRule::Conjunction { mut elements } => {
-            node = *elements.remove(0).cmd;
-          }
-          NdRule::Pipeline { mut cmds } => {
-            node = cmds.remove(0);
-          }
-          _ => break,
-        }
-      }
-      node.flags |= NdFlags::NO_FORK;
-      nodes.push(node);
-    }
-  }
-
-  let mut dispatcher = Dispatcher::new(nodes, source_name);
+  let mut dispatcher = Dispatcher::new(source_name);
   // exec_cmd expects a job on the stack (normally set up by exec_pipeline).
   // For the NO_FORK exec-in-place path, create one so it doesn't panic.
   dispatcher.job_stack.new_job();
-  dispatcher.begin_dispatch()
+
+  // Single simple command: exec directly without forking.
+  // The parser wraps single commands as Conjunction -> Pipeline -> Command.
+  // Walk down to the inner Command, mark it NO_FORK, and dispatch it directly
+  // (bypassing pipeline setup).
+  fn single_command_id(ast: &Ast, root: NodeId) -> Option<NodeId> {
+    let mut id = root;
+    loop {
+      match &ast[id].class {
+        NdRule::Command { .. } => return Some(id),
+        NdRule::Pipeline { cmds } if cmds.len() == 1 => id = cmds[0],
+        NdRule::Conjunction { elements } if elements.len() == 1 => id = elements[0].cmd,
+        _ => return None,
+      }
+    }
+  }
+
+  let single_root = match ast.roots() {
+    [only] => Some(*only),
+    _ => None,
+  };
+  if let Some(cmd_id) = single_root.and_then(|root| single_command_id(&ast, root)) {
+    ast[cmd_id].flags |= NdFlags::NO_FORK;
+    let blame = ast[cmd_id].get_span();
+    return dispatcher.dispatch_node(&ast, cmd_id).try_blame(blame);
+  }
+
+  dispatcher.begin_dispatch(&ast)
 }
 
 /// Execute interactively.
@@ -335,14 +325,11 @@ pub fn exec_input(mut input: VarStr, source_name: Option<Rc<str>>) -> ShResult<(
     return Ok(());
   }
 
-  let nodes = parser.extract_nodes();
-
-  let mut dispatcher = Dispatcher::new(nodes, source_name.clone());
-  dispatcher.begin_dispatch()
+  let mut dispatcher = Dispatcher::new(source_name.clone());
+  dispatcher.begin_dispatch(&parser.ast)
 }
 
 pub struct Dispatcher {
-  nodes: VecDeque<Node>,
   source_name: Rc<str>,
   pub job_stack: JobStack,
   timer_stack: Vec<Option<CmdTimer>>,
@@ -354,10 +341,8 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
-  pub fn new(nodes: Vec<Node>, source_name: Rc<str>) -> Self {
-    let nodes = VecDeque::from(nodes);
+  pub fn new(source_name: Rc<str>) -> Self {
     Self {
-      nodes,
       source_name,
       job_stack: JobStack::new(),
       timer_stack: vec![],
@@ -365,14 +350,14 @@ impl Dispatcher {
       fork_close_fd: None,
     }
   }
-  pub fn begin_dispatch(&mut self) -> ShResult<()> {
-    while let Some(node) = self.nodes.pop_front() {
-      let blame = node.get_span();
-      self.dispatch_node(&node).try_blame(blame)?;
+  pub fn begin_dispatch(&mut self, tree: &Ast) -> ShResult<()> {
+    for &root in tree.roots() {
+      let blame = tree[root].get_span();
+      self.dispatch_node(tree, root).try_blame(blame)?;
     }
     Ok(())
   }
-  pub fn dispatch_node(&mut self, node: &Node) -> ShResult<()> {
+  pub fn dispatch_node(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
     stacker::maybe_grow(64 * 1024, 1024 * 1024, || {
       let _guard = Shed::meta_mut(MetaTab::push_procsub_frame);
 
@@ -388,45 +373,45 @@ impl Dispatcher {
         return Ok(());
       }
 
-      match node.class {
-        NdRule::List { .. } => self.exec_list(node),
-        NdRule::Conjunction { .. } => self.exec_conjunction(node),
-        NdRule::Pipeline { .. } => self.exec_pipeline(node),
-        NdRule::IfNode { .. } => self.exec_if(node),
-        NdRule::LoopNode { .. } => self.exec_loop(node),
-        NdRule::ForNode { .. } => self.exec_for_arr(node),
-        NdRule::ForArith { .. } => self.exec_for_arith(node),
-        NdRule::CaseNode { .. } => self.exec_case(node),
-        NdRule::BraceGrp { .. } => self.exec_brc_grp(node),
-        NdRule::Subshell { .. } => self.exec_subsh(node),
-        NdRule::Negate { .. } => self.exec_negated(node),
-        NdRule::Timed { .. } => self.exec_timed(node),
-        NdRule::Command { .. } => self.dispatch_cmd(node),
-        NdRule::TryNode { .. } => self.exec_try(node),
-        NdRule::DeferNode { .. } => Self::exec_defer(node),
+      match tree[node].class {
+        NdRule::List { .. } => self.exec_list(tree, node),
+        NdRule::Conjunction { .. } => self.exec_conjunction(tree, node),
+        NdRule::Pipeline { .. } => self.exec_pipeline(tree, node),
+        NdRule::IfNode { .. } => self.exec_if(tree, node),
+        NdRule::LoopNode { .. } => self.exec_loop(tree, node),
+        NdRule::ForNode { .. } => self.exec_for_arr(tree, node),
+        NdRule::ForArith { .. } => self.exec_for_arith(tree, node),
+        NdRule::CaseNode { .. } => self.exec_case(tree, node),
+        NdRule::BraceGrp { .. } => self.exec_brc_grp(tree, node),
+        NdRule::Subshell { .. } => self.exec_subsh(tree, node),
+        NdRule::Negate { .. } => self.exec_negated(tree, node),
+        NdRule::Timed { .. } => self.exec_timed(tree, node),
+        NdRule::Command { .. } => self.dispatch_cmd(tree, node),
+        NdRule::TryNode { .. } => self.exec_try(tree, node),
+        NdRule::DeferNode { .. } => Self::exec_defer(tree, node),
 
-        NdRule::FuncDef { .. } => Self::exec_func_def(node),
-        NdRule::Arithmetic { .. } => Self::exec_arith(node),
+        NdRule::FuncDef { .. } => Self::exec_func_def(tree, node),
+        NdRule::Arithmetic { .. } => Self::exec_arith(tree, node),
         NdRule::Assignment { .. } => unreachable!(),
       }
     })
   }
-  pub fn exec_list(&mut self, node: &Node) -> ShResult<()> {
-    let NdRule::List { commands } = &node.class else {
+  pub fn exec_list(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
+    let NdRule::List { commands } = &tree[node].class else {
       unreachable!()
     };
     for node in commands {
-      let blame = node.get_span();
-      self.dispatch_node(node).try_blame(blame)?;
+      let blame = tree[*node].get_span();
+      self.dispatch_node(tree, *node).try_blame(blame)?;
     }
 
     Ok(())
   }
-  pub fn dispatch_cmd(&mut self, node: &Node) -> ShResult<()> {
-    let (line, _) = node.get_span().clone().line_and_col();
+  pub fn dispatch_cmd(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
+    let (line, _) = tree[node].get_span().clone().line_and_col();
     Shed::vars_mut(|v| v.set_var("LINENO", VarKind::Int((line + 1) as i32), VarFlags::empty()))?;
 
-    let result = self.route_command(node, true);
+    let result = self.route_command(tree, node, true);
     commit_underscore();
     result
   }
@@ -437,12 +422,14 @@ impl Dispatcher {
   /// `allow_func` gates function lookup. The `command` builtin passes `false`
   /// so that, per POSIX, it suppresses function lookup while still running
   /// shell builtins and external commands.
-  ///
-  /// `expand_to_words` is idempotent on already-expanded tokens, so this is
-  /// safe to call on the pre-expanded node built by `command`/`builtin`.
-  pub(crate) fn route_command(&mut self, node: &Node, allow_func: bool) -> ShResult<()> {
-    let Some(cmd) = node.get_command() else {
-      return self.exec_cmd(node); // Argv is empty, probably an assignment
+  pub(crate) fn route_command(
+    &mut self,
+    tree: &Ast,
+    node: NodeId,
+    allow_func: bool,
+  ) -> ShResult<()> {
+    let Some(cmd) = &tree[node].get_command() else {
+      return self.exec_cmd(tree, node); // Argv is empty, probably an assignment
     };
     // We need to expand this token
     // so that a command smuggled inside of a variable is routed correctly,
@@ -450,44 +437,50 @@ impl Dispatcher {
     let words = cmd.clone().expand_to_words()?;
     let Some(cmd_word) = words.iter().next().cloned() else {
       if let NdRule::Command {
-        ref assignments,
+        assignments,
         argv: _,
-      } = node.class
+      } = &tree[node].class
         && !assignments.is_empty()
       {
-        return self.exec_cmd(node);
+        return self.exec_cmd(tree, node);
       }
       return Ok(());
     };
 
-    let cmd_tk = node.get_command();
+    let cmd_tk = &tree[node].get_command();
 
     if allow_func && is_func(&cmd_word.to_str_lossy()) {
-      self.exec_func(node)
+      self.exec_func(tree, node)
     } else if cmd.flags.contains(TkFlags::BUILTIN)
       || BUILTIN_NAMES.contains(&cmd_word.to_str_lossy().as_ref())
     {
-      self.exec_builtin(node, &cmd_word.to_str_lossy())
-    } else if is_arith(cmd_tk) {
-      Self::exec_arith(node)
+      self.exec_builtin(tree, node, &cmd_word.to_str_lossy())
+    } else if is_arith(*cmd_tk) {
+      Self::exec_arith(tree, node)
     } else if can_autocd(cmd) {
       let dir = cmd.span.as_str().to_string();
       exec_input(varstr!("cd {dir}"), Some(self.source_name.clone()))
     } else {
-      self.exec_cmd(node)
+      self.exec_cmd(tree, node)
     }
   }
-  pub fn exec_defer(node: &Node) -> ShResult<()> {
-    let NdRule::DeferNode { body } = &node.class else {
+  pub fn exec_defer(tree: &Ast, node: NodeId) -> ShResult<()> {
+    let NdRule::DeferNode { body } = &tree[node].class else {
       unreachable!()
     };
-    let mut body = body.clone();
+    let mut body = tree.break_off(*body);
+    let Some(root) = body.get_root() else {
+      return Err(sherr!(
+        InternalErr @ tree[node].get_span(),
+        "defer: No root node found",
+      ));
+    };
 
     // something like `defer eval "$(shopt core.nullglob)"`
     // needs to expand at registration time, and not at
     // execution time.
     let mut err: Option<ShErr> = None;
-    body.walk_tree(&mut |n| {
+    body.walk_tree_mut(root, &mut |n| {
       if err.is_some() {
         return;
       }
@@ -499,15 +492,15 @@ impl Dispatcher {
       return Err(e);
     }
 
-    Shed::vars_mut(|v| v.cur_scope_mut().defer_cmd(*body.clone()));
+    Shed::vars_mut(|v| v.cur_scope_mut().defer_cmd(body));
     Ok(())
   }
-  pub fn exec_try(&mut self, node: &Node) -> ShResult<()> {
-    let try_blame = node.get_span();
-    let NdRule::TryNode { body, err, catch } = &node.class else {
+  pub fn exec_try(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
+    let try_blame = tree[node].get_span();
+    let NdRule::TryNode { body, err, catch } = &tree[node].class else {
       unreachable!()
     };
-    let context = body.context.clone();
+    let context = tree[*body].context.clone();
 
     // enable set -e -o pipefail temporarily
     let errexit = shopt!(set.errexit);
@@ -517,7 +510,7 @@ impl Dispatcher {
     defer!(shopt_mut!(set.errexit = errexit));
     defer!(shopt_mut!(set.pipefail = pipefail));
 
-    match self.dispatch_node(body) {
+    match self.dispatch_node(tree, *body) {
       Ok(()) => Ok(()),
       Err(e) => {
         if e.is_flow_control() {
@@ -539,7 +532,7 @@ impl Dispatcher {
         }
 
         if let Some(catch) = catch
-          && let Err(e) = self.dispatch_node(catch)
+          && let Err(e) = self.dispatch_node(tree, *catch)
         {
           if e.is_flow_control() {
             return Err(e);
@@ -552,29 +545,29 @@ impl Dispatcher {
       }
     }
   }
-  pub fn exec_negated(&mut self, node: &Node) -> ShResult<()> {
-    let NdRule::Negate { cmd } = &node.class else {
+  pub fn exec_negated(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
+    let NdRule::Negate { cmd } = &tree[node].class else {
       unreachable!()
     };
-    self.dispatch_node(cmd)?;
+    self.dispatch_node(tree, *cmd)?;
     let status = Shed::get_status();
     Shed::set_status_from_bool(status != 0);
 
     Ok(())
   }
-  pub fn exec_timed(&mut self, node: &Node) -> ShResult<()> {
-    let NdRule::Timed { cmd } = &node.class else {
+  pub fn exec_timed(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
+    let NdRule::Timed { cmd } = &tree[node].class else {
       unreachable!();
     };
 
     self.timer_stack.push(Some(CmdTimer::new()?));
-    let res = self.dispatch_node(cmd);
+    let res = self.dispatch_node(tree, *cmd);
     self.timer_stack.pop();
     res
   }
-  pub fn exec_conjunction(&mut self, conjunction: &Node) -> ShResult<()> {
-    let span = conjunction.get_span().clone();
-    let NdRule::Conjunction { elements } = &conjunction.class else {
+  pub fn exec_conjunction(&mut self, tree: &Ast, conj: NodeId) -> ShResult<()> {
+    let span = tree[conj].get_span().clone();
+    let NdRule::Conjunction { elements } = &tree[conj].class else {
       unreachable!()
     };
 
@@ -588,7 +581,7 @@ impl Dispatcher {
     while let Some(element) = elem_iter.next() {
       let ConjunctNode { cmd, operator } = element;
       if !skip {
-        self.dispatch_node(cmd)?;
+        self.dispatch_node(tree, *cmd)?;
       }
 
       let status = Shed::get_status();
@@ -600,8 +593,8 @@ impl Dispatcher {
     }
     Ok(())
   }
-  fn exec_arith(arith: &Node) -> ShResult<()> {
-    let NdRule::Arithmetic { body } = &arith.class else {
+  fn exec_arith(tree: &Ast, arith: NodeId) -> ShResult<()> {
+    let NdRule::Arithmetic { body } = &tree[arith].class else {
       unreachable!()
     };
     let result = expand_arithmetic_wrapped(body.as_str())?;
@@ -609,15 +602,18 @@ impl Dispatcher {
     Shed::set_status_from_bool(val != 0.0);
     Ok(())
   }
-  pub fn exec_func_def(func_def: &Node) -> ShResult<()> {
-    let blame = func_def.get_span();
-    let ctx = func_def.context.clone();
-    let NdRule::FuncDef { name, body } = &func_def.class else {
+  pub fn exec_func_def(tree: &Ast, func_def: NodeId) -> ShResult<()> {
+    let blame = tree[func_def].get_span();
+    let ctx = tree[func_def].context.clone();
+    let NdRule::FuncDef { name, body } = &tree[func_def].class else {
       unreachable!()
     };
-    let mut body = body.clone();
+    let mut body = tree.break_off(*body);
     for label in ctx.iter() {
-      body.context.push_back(label.clone());
+      let Some(root) = body.get_root() else {
+        continue;
+      };
+      body[root].context.push_back(label.clone());
     }
 
     let func_name = name
@@ -633,7 +629,7 @@ impl Dispatcher {
       ));
     }
 
-    let func = ShFunc::defined(*body, blame);
+    let func = ShFunc::defined(body, blame);
     Shed::logic_mut(|l| l.insert_func(func_name, func)); // Store the AST
     if Shed::term(Terminal::interactive) {
       Shed::meta_mut(|m| {
@@ -644,16 +640,27 @@ impl Dispatcher {
     Shed::set_status(0);
     Ok(())
   }
-  fn exec_func(&mut self, func: &Node) -> ShResult<()> {
+  fn exec_func(&mut self, tree: &Ast, func_id: NodeId) -> ShResult<()> {
+    let func = &tree[func_id];
     if func.flags.contains(NdFlags::FORK_BUILTINS) {
-      let name = func
+      let mut func_body = tree.break_off(func_id);
+
+      let Some(root) = func_body.get_root() else {
+        return Err(sherr!(
+          InternalErr @ func.get_span(),
+          "Function body has no root node",
+        ));
+      };
+
+      let name = func_body[root]
         .get_command()
         .map(ToString::to_string)
         .unwrap_or_default();
-      let mut func_call = func.clone();
-      func_call.flags.remove(NdFlags::FORK_BUILTINS);
+
+      func_body[root].flags.remove(NdFlags::FORK_BUILTINS);
+
       return self.run_fork(&name, |s| {
-        catch_exit(|| s.exec_func(&func_call), exit_with);
+        catch_exit(|| s.exec_func(&func_body, root), exit_with);
       });
     }
 
@@ -697,7 +704,7 @@ impl Dispatcher {
         // retry, passing func by value
         // the scoped assignment and borrow above are done
         // so that we can pass func untouched to dispatch_cmd()
-        return self.dispatch_cmd(func);
+        return self.dispatch_cmd(tree, func_id);
       }
     };
 
@@ -725,8 +732,8 @@ impl Dispatcher {
 
     // Prefix assignments on a function call (`X=2 f`) are temporary: snapshot
     // the prior values first so they revert on return
-    let _var_guard = util::prefix_assign_guard(assignments);
-    Self::set_assignments(assignments, AssignBehavior::Export)?;
+    let _var_guard = util::prefix_assign_guard(tree, assignments);
+    Self::set_assignments(tree, assignments, AssignBehavior::Export)?;
 
     let redirs = RedirSet::from(&func.redirs);
     let _guard = match redirs.try_apply(false) {
@@ -761,14 +768,20 @@ impl Dispatcher {
     // scoped per-script and per-function call
     Shed::vars_mut(|v| v.set_var("OPTIND", VarKind::Int(1), VarFlags::LOCAL)).ok();
 
+    let Some(root) = func_body.get_root() else {
+      return Err(sherr!(
+          InternalErr @ func.get_span(),
+          "Function body has no root node",
+      ));
+    };
     for ctx in caller_contexts.into_iter().rev() {
-      func_body.propagate_context(&ctx);
+      func_body.propagate_context(root, &ctx);
     }
-    func_body.propagate_context(&func_ctx);
-    func_body.flags = func.flags;
+    func_body.propagate_context(root, &func_ctx);
+    func_body[root].flags = func.flags;
 
     let _timer = self.take_timer();
-    match self.dispatch_node(&*func_body) {
+    match self.dispatch_node(&func_body, root) {
       Ok(()) => Ok(()),
       Err(e) => match e.kind() {
         ShErrKind::FuncReturn(code) => {
@@ -788,7 +801,7 @@ impl Dispatcher {
         }
         ShErrKind::ErrInterrupt => {
           // set -e caught an error
-          Err(e.with_context(func_body.context.iter()))
+          Err(e.with_context(func_body[root].context.iter()))
         }
         _ => Err(e),
       },
@@ -803,10 +816,11 @@ impl Dispatcher {
     redirs: &[RedirSpec],
     flags: NdFlags,
     blame: Span,
+    tree: &Ast,
     mut logic: F,
   ) -> ShResult<()>
   where
-    F: FnMut(&mut Self) -> ShResult<()>,
+    F: FnMut(&mut Self, &Ast) -> ShResult<()>,
   {
     let fork_builtins = flags.contains(NdFlags::FORK_BUILTINS);
 
@@ -821,25 +835,26 @@ impl Dispatcher {
     if fork_builtins {
       log::trace!("Forking compound command: {name}");
       self.run_fork(name, |s| {
-        catch_exit(|| logic(s), exit_with);
+        catch_exit(|| logic(s, tree), exit_with);
       })?;
       Ok(())
     } else {
-      logic(self)
+      logic(self, tree)
         .try_blame(blame)
         .map_err(|e| e.with_redirs(guard))
     }
   }
-  fn exec_brc_grp(&mut self, brc_grp: &Node) -> ShResult<()> {
+  fn exec_brc_grp(&mut self, tree: &Ast, brc_grp_id: NodeId) -> ShResult<()> {
+    let brc_grp = &tree[brc_grp_id];
     let blame = brc_grp.get_span().clone();
     let NdRule::BraceGrp { body } = &brc_grp.class else {
       unreachable!()
     };
 
     let _timer = self.take_timer();
-    let brc_grp_logic = |s: &mut Self| -> ShResult<()> {
+    let brc_grp_logic = |s: &mut Self, tree: &Ast| -> ShResult<()> {
       let _guard = util::shared_scope_guard();
-      s.dispatch_node(&*body)?;
+      s.dispatch_node(tree, *body)?;
 
       Ok(())
     };
@@ -849,14 +864,16 @@ impl Dispatcher {
       &brc_grp.redirs,
       brc_grp.flags,
       blame,
+      tree,
       brc_grp_logic,
     )
   }
-  fn exec_subsh(&mut self, subsh: &Node) -> ShResult<()> {
+  fn exec_subsh(&mut self, tree: &Ast, subsh_id: NodeId) -> ShResult<()> {
+    let subsh = &tree[subsh_id];
     let NdRule::Subshell { body } = &subsh.class else {
       unreachable!()
     };
-    let span = body.get_span();
+    let span = tree[*body].get_span();
 
     let redirs = RedirSet::from(&subsh.redirs);
     let _guard = match redirs.try_apply(false) {
@@ -871,12 +888,13 @@ impl Dispatcher {
     let name = format!("( {body_display} )");
 
     self.run_fork(&name, |s| {
-      catch_exit(|| s.dispatch_node(&*body), exit_with);
+      catch_exit(|| s.dispatch_node(tree, *body), exit_with);
     })?;
 
     Ok(())
   }
-  fn exec_case(&mut self, case_stmt: &Node) -> ShResult<()> {
+  fn exec_case(&mut self, tree: &Ast, case_stmt_id: NodeId) -> ShResult<()> {
+    let case_stmt = &tree[case_stmt_id];
     let blame = case_stmt.get_span().clone();
     let NdRule::CaseNode {
       pattern,
@@ -886,7 +904,7 @@ impl Dispatcher {
       unreachable!()
     };
 
-    let case_logic = |s: &mut Self| -> ShResult<()> {
+    let case_logic = |s: &mut Self, tree: &Ast| -> ShResult<()> {
       let exp_pattern = pattern.clone().expand()?;
       let pattern_raw = exp_pattern
         .get_words()
@@ -903,14 +921,14 @@ impl Dispatcher {
           if pattern_exp.is_empty() {
             if pattern_raw.is_empty() {
               let _guard = util::shared_scope_guard();
-              s.dispatch_node(body)?;
+              s.dispatch_node(tree, *body)?;
               break 'outer;
             }
           } else {
             let pattern = Shed::meta_mut(|m| m.get_glob(&pattern_exp));
             if pattern.is_match(&pattern_raw) {
               let _guard = util::shared_scope_guard();
-              s.dispatch_node(body)?;
+              s.dispatch_node(tree, *body)?;
               break 'outer;
             }
           }
@@ -925,16 +943,18 @@ impl Dispatcher {
       &case_stmt.redirs,
       case_stmt.flags,
       blame,
+      tree,
       case_logic,
     )
   }
-  fn exec_loop(&mut self, loop_stmt: &Node) -> ShResult<()> {
+  fn exec_loop(&mut self, tree: &Ast, loop_stmt_id: NodeId) -> ShResult<()> {
+    let loop_stmt = &tree[loop_stmt_id];
     let blame = loop_stmt.get_span().clone();
     let NdRule::LoopNode { kind, cond_node } = &loop_stmt.class else {
       unreachable!();
     };
 
-    let loop_logic = |s: &mut Self| -> ShResult<()> {
+    let loop_logic = |s: &mut Self, tree: &Ast| -> ShResult<()> {
       let keep_going = |kind: LoopKind, status: i32| -> bool {
         match kind {
           LoopKind::While => status == 0,
@@ -945,14 +965,14 @@ impl Dispatcher {
       let _guard = util::shared_scope_guard();
       let mut last_body_status = 0;
       'outer: loop {
-        if let Err(e) = s.dispatch_node(cond) {
+        if let Err(e) = s.dispatch_node(tree, *cond) {
           Shed::set_status(1);
           return Err(e);
         }
 
         let status = Shed::get_status();
         if keep_going(*kind, status) {
-          if let Err(mut e) = s.dispatch_node(body) {
+          if let Err(mut e) = s.dispatch_node(tree, *body) {
             match e.kind_mut() {
               ShErrKind::LoopBreak(count) => {
                 if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
@@ -988,10 +1008,12 @@ impl Dispatcher {
       &loop_stmt.redirs,
       loop_stmt.flags,
       blame,
+      tree,
       loop_logic,
     )
   }
-  fn exec_for_arith(&mut self, for_stmt: &Node) -> ShResult<()> {
+  fn exec_for_arith(&mut self, tree: &Ast, for_stmt_id: NodeId) -> ShResult<()> {
+    let for_stmt = &tree[for_stmt_id];
     let blame = for_stmt.get_span().clone();
     let NdRule::ForArith {
       init,
@@ -1002,15 +1024,15 @@ impl Dispatcher {
     else {
       unreachable!();
     };
-    let for_logic = |s: &mut Self| -> ShResult<()> {
+    let for_logic = |s: &mut Self, tree: &Ast| -> ShResult<()> {
       if let Some(init_node) = init {
-        s.dispatch_node(init_node)?;
+        s.dispatch_node(tree, *init_node)?;
       }
 
       let mut last_body_status = 0;
       'outer: loop {
         if let Some(cond_node) = cond {
-          if let Err(e) = s.dispatch_node(cond_node) {
+          if let Err(e) = s.dispatch_node(tree, *cond_node) {
             Shed::set_status(1);
             return Err(e);
           }
@@ -1022,7 +1044,7 @@ impl Dispatcher {
         }
         let _guard = util::shared_scope_guard();
 
-        if let Err(mut e) = s.dispatch_node(&*body) {
+        if let Err(mut e) = s.dispatch_node(tree, *body) {
           match e.kind_mut() {
             ShErrKind::LoopBreak(count) => {
               if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
@@ -1045,7 +1067,7 @@ impl Dispatcher {
         last_body_status = Shed::get_status();
 
         if let Some(step_node) = step
-          && let Err(e) = s.dispatch_node(step_node)
+          && let Err(e) = s.dispatch_node(tree, *step_node)
         {
           Shed::set_status(1);
           return Err(e);
@@ -1056,9 +1078,17 @@ impl Dispatcher {
     };
 
     let _loop_guard = Shed::meta_mut(MetaTab::enter_loop);
-    self.run_compound("c_for", &for_stmt.redirs, for_stmt.flags, blame, for_logic)
+    self.run_compound(
+      "c_for",
+      &for_stmt.redirs,
+      for_stmt.flags,
+      blame,
+      tree,
+      for_logic,
+    )
   }
-  fn exec_for_arr(&mut self, for_stmt: &Node) -> ShResult<()> {
+  fn exec_for_arr(&mut self, tree: &Ast, for_stmt_id: NodeId) -> ShResult<()> {
+    let for_stmt = &tree[for_stmt_id];
     let blame = for_stmt.get_span().clone();
     let NdRule::ForNode {
       vars,
@@ -1070,7 +1100,7 @@ impl Dispatcher {
       unreachable!();
     };
 
-    let for_logic = |s: &mut Self| -> ShResult<()> {
+    let for_logic = |s: &mut Self, tree: &Ast| -> ShResult<()> {
       let to_expanded_strings = |tks: &[Tk]| -> ShResult<Vec<VarStr>> {
         let mut out = vec![];
         for tk in tks {
@@ -1107,7 +1137,7 @@ impl Dispatcher {
 
         let _guard = util::shared_scope_guard();
 
-        if let Err(mut e) = s.dispatch_node(&*body) {
+        if let Err(mut e) = s.dispatch_node(tree, *body) {
           match e.kind_mut() {
             ShErrKind::LoopBreak(count) => {
               if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
@@ -1133,9 +1163,17 @@ impl Dispatcher {
     };
 
     let _loop_guard = Shed::meta_mut(MetaTab::enter_loop);
-    self.run_compound("for", &for_stmt.redirs, for_stmt.flags, blame, for_logic)
+    self.run_compound(
+      "for",
+      &for_stmt.redirs,
+      for_stmt.flags,
+      blame,
+      tree,
+      for_logic,
+    )
   }
-  fn exec_if(&mut self, if_stmt: &Node) -> ShResult<()> {
+  fn exec_if(&mut self, tree: &Ast, if_stmt: NodeId) -> ShResult<()> {
+    let if_stmt = &tree[if_stmt];
     let blame = if_stmt.get_span().clone();
     let NdRule::IfNode {
       cond_nodes,
@@ -1145,20 +1183,20 @@ impl Dispatcher {
       unreachable!();
     };
 
-    let if_logic = |s: &mut Self| -> ShResult<()> {
+    let if_logic = |s: &mut Self, tree: &Ast| -> ShResult<()> {
       let mut matched = false;
       for node in cond_nodes {
         let CondNode { cond, body } = node;
         let _guard = util::shared_scope_guard();
 
-        if let Err(e) = s.dispatch_node(cond) {
+        if let Err(e) = s.dispatch_node(tree, *cond) {
           Shed::set_status(1);
           return Err(e);
         }
 
         if Shed::get_status() == 0 {
           matched = true;
-          s.dispatch_node(body)?;
+          s.dispatch_node(tree, *body)?;
           break; // Don't check remaining elif conditions
         }
       }
@@ -1166,7 +1204,7 @@ impl Dispatcher {
       if !matched {
         if let Some(body) = else_block {
           let _guard = util::shared_scope_guard();
-          s.dispatch_node(body)?;
+          s.dispatch_node(tree, *body)?;
         } else {
           Shed::set_status(0);
         }
@@ -1175,15 +1213,17 @@ impl Dispatcher {
       Ok(())
     };
 
-    self.run_compound("if", &if_stmt.redirs, if_stmt.flags, blame, if_logic)
+    self.run_compound("if", &if_stmt.redirs, if_stmt.flags, blame, tree, if_logic)
   }
 
   fn exec_one(
     &mut self,
-    cmd: &Node,
+    tree: &Ast,
+    cmd_id: NodeId,
     should_fork: impl Fn(&Node) -> bool,
     flags: NdFlags,
   ) -> ShResult<()> {
+    let cmd = &tree[cmd_id];
     let span = cmd.get_span();
     let context = cmd.context.clone();
     // it's a single command
@@ -1197,12 +1237,12 @@ impl Dispatcher {
         .unwrap_or_default();
 
       self.run_fork(&name, |s| {
-        if let Err(e) = s.dispatch_node(cmd) {
+        if let Err(e) = s.dispatch_node(tree, cmd_id) {
           e.print_error();
         }
       })
     } else {
-      self.dispatch_node(cmd)
+      self.dispatch_node(tree, cmd_id)
     };
 
     if let Some(job) = self.job_stack.finalize_job() {
@@ -1215,7 +1255,8 @@ impl Dispatcher {
     res
   }
 
-  fn exec_pipeline(&mut self, pipeline: &Node) -> ShResult<()> {
+  fn exec_pipeline(&mut self, tree: &Ast, pipeline: NodeId) -> ShResult<()> {
+    let pipeline = &tree[pipeline];
     let pipeline_span = pipeline.get_span().clone();
     let pipeline_flags = pipeline.flags;
     let pipeline_context = pipeline.context.clone();
@@ -1235,9 +1276,9 @@ impl Dispatcher {
     // closure that tells us if a pipeline segment should fork
     let should_fork_segment = |cmd: &Node| -> bool { is_bg && num_cmds == 1 && !will_fork(cmd) };
 
-    if cmds.len() == 1 && !is_bg && runs_inline(&cmds[0]) {
+    if cmds.len() == 1 && !is_bg && runs_inline(&tree[cmds[0]]) {
       // it's a single command. skip the I/O setup
-      return self.exec_one(&cmds[0], should_fork_segment, pipeline_flags);
+      return self.exec_one(tree, cmds[0], should_fork_segment, pipeline_flags);
     }
 
     let _underscore_guard = (num_cmds > 1).then(suppress_underscore_guard);
@@ -1272,7 +1313,7 @@ impl Dispatcher {
         let builtin_tail = match cmds
           .iter_mut()
           .rev()
-          .position(|n| !node_has_only_builtins(n))
+          .position(|n| !node_has_only_builtins(tree, *n))
         {
           Some(pos) => num_cmds - pos,
           None => 0,
@@ -1316,21 +1357,24 @@ impl Dispatcher {
         // the rest of these are non-forking builtins
         std::mem::take(&mut out_rdrs).apply_persistent().ok();
         if is_bg {
-          let tail: Vec<Node> = cmds[i..].to_vec();
+          let tail: Vec<NodeId> = cmds[i..].to_vec();
           let name = tail
             .first()
-            .and_then(Node::get_command)
+            .and_then(|id| tree[*id].get_command())
             .map(ToString::to_string)
             .unwrap_or_default();
           result = self.run_fork(&name, move |s| {
-            catch_exit(|| s.exec_internal_pipeline(&tail).map(|_| ()), exit_with);
+            catch_exit(
+              || s.exec_internal_pipeline(tree, &tail).map(|_| ()),
+              exit_with,
+            );
           });
           break;
         }
         if tail_start > 0 && Shed::term(Terminal::interactive) {
           Shed::term_mut(|t| t.attach(getpgrp())).ok();
         }
-        result = match self.exec_internal_pipeline(&cmds[i..]) {
+        result = match self.exec_internal_pipeline(tree, &cmds[i..]) {
           Ok(statuses) => {
             tail_statuses = statuses;
             Ok(())
@@ -1348,20 +1392,22 @@ impl Dispatcher {
         std::mem::take(&mut out_rdrs).apply_persistent().ok();
       }
 
-      spans.push(cmd.get_span());
+      let cmd_node = &tree[*cmd];
+
+      spans.push(cmd_node.get_span());
 
       self.fork_close_fd = downstream_read;
-      result = if should_fork_segment(cmd) {
-        let name = cmd
+      result = if should_fork_segment(cmd_node) {
+        let name = cmd_node
           .get_command()
           .map(ToString::to_string)
           .unwrap_or_default();
 
         self.run_fork(&name, |s| {
-          catch_exit(|| s.dispatch_node(cmd), exit_with);
+          catch_exit(|| s.dispatch_node(tree, *cmd), exit_with);
         })
       } else {
-        self.dispatch_node(cmd)
+        self.dispatch_node(tree, *cmd)
       };
       self.fork_close_fd = None;
 
@@ -1437,7 +1483,7 @@ impl Dispatcher {
   /// string sinks instead of pipes. Returns each stage's exit status and span
   /// so the caller can fold them into PIPESTATUS and the pipefail blame; the
   /// first hard error short-circuits the run.
-  fn exec_internal_pipeline(&mut self, cmds: &[Node]) -> ShResult<Vec<(i32, Span)>> {
+  fn exec_internal_pipeline(&mut self, tree: &Ast, cmds: &[NodeId]) -> ShResult<Vec<(i32, Span)>> {
     let mut prev: Option<OutputSink> = None;
     let num_cmds = cmds.len();
     let last = num_cmds.saturating_sub(1);
@@ -1448,11 +1494,11 @@ impl Dispatcher {
       let out_scope = (!is_last).then(SinkScope::new);
       let _in_scope = prev.take().map(StdinScope::push);
 
-      let result = match &cmd.class {
+      let result = match &tree[*cmd].class {
         NdRule::Subshell { body } => {
           let _ceiling = util::isolation_guard(None);
 
-          match self.dispatch_node(body) {
+          match self.dispatch_node(tree, *body) {
             Err(e) => {
               if let ShErrKind::CleanExit(code) = e.kind() {
                 Shed::set_status(*code);
@@ -1464,10 +1510,10 @@ impl Dispatcher {
             res => res,
           }
         }
-        _ => self.dispatch_node(cmd),
+        _ => self.dispatch_node(tree, *cmd),
       };
 
-      statuses.push((Shed::get_status(), cmd.span.clone()));
+      statuses.push((Shed::get_status(), tree[*cmd].span.clone()));
 
       if let Some(scope) = out_scope {
         let scope = scope.take();
@@ -1486,7 +1532,8 @@ impl Dispatcher {
     Ok(statuses)
   }
 
-  fn exec_builtin(&mut self, cmd: &Node, cmd_name: &str) -> ShResult<()> {
+  fn exec_builtin(&mut self, tree: &Ast, cmd_id: NodeId, cmd_name: &str) -> ShResult<()> {
+    let cmd = &tree[cmd_id];
     let fork_builtins = cmd.flags.contains(NdFlags::FORK_BUILTINS);
 
     let Some(builtin) = lookup_builtin(cmd_name) else {
@@ -1517,7 +1564,8 @@ impl Dispatcher {
     }
   }
   #[expect(clippy::too_many_lines)]
-  pub fn exec_cmd(&mut self, cmd: &Node) -> ShResult<()> {
+  pub fn exec_cmd(&mut self, tree: &Ast, cmd_id: NodeId) -> ShResult<()> {
+    let cmd = &tree[cmd_id];
     let context = cmd.context.clone();
     let NdRule::Command { assignments, argv } = &cmd.class else {
       unreachable!(
@@ -1533,10 +1581,13 @@ impl Dispatcher {
 
     if let AssignBehavior::Set = assign_behavior {
       if cmd.flags.contains(NdFlags::FORK_BUILTINS) {
-        let mut child = cmd.clone();
-        child.flags.remove(NdFlags::FORK_BUILTINS);
+        let mut child = tree.break_off(cmd_id);
+        let Some(root) = child.get_root() else {
+          unreachable!()
+        };
+        child[root].flags.remove(NdFlags::FORK_BUILTINS);
         return self.run_fork("", move |s| {
-          catch_exit(|| s.exec_cmd(&child), exit_with);
+          catch_exit(|| s.exec_cmd(&child, root), exit_with);
         });
       }
 
@@ -1544,7 +1595,7 @@ impl Dispatcher {
       // in the current shell, then apply any redirections.
       if !assignments.is_empty() {
         Shed::meta_mut(MetaTab::take_last_cmdsub_status);
-        if let Err(e) = Self::set_assignments(assignments, assign_behavior) {
+        if let Err(e) = Self::set_assignments(tree, assignments, assign_behavior) {
           Shed::set_status(1);
           e.print_error();
           return Ok(());
@@ -1597,14 +1648,15 @@ impl Dispatcher {
 
     // Resolve prefix assignments in the parent. We set them in the child later.
     if !assignments.is_empty() {
-      let _guard = util::prefix_assign_guard(assignments);
-      if let Err(e) = Self::set_assignments(assignments, assign_behavior) {
+      let _guard = util::prefix_assign_guard(tree, assignments);
+      if let Err(e) = Self::set_assignments(tree, assignments, assign_behavior) {
         Shed::set_status(1);
         e.print_error();
         return Ok(());
       }
       let mut names: HashSet<Rc<str>> = HashSet::new();
-      for a in assignments {
+      for id in assignments {
+        let a = &tree[*id];
         if let NdRule::Assignment { var, .. } = &a.class {
           let raw = var.span.as_str();
           let name: Rc<str> = state::util::parse_arr_bracket(raw)
@@ -1784,7 +1836,11 @@ impl Dispatcher {
     self.timer_stack.last_mut().and_then(Option::take)
   }
   #[expect(clippy::too_many_lines)]
-  pub fn set_assignments(assigns: &[Node], behavior: AssignBehavior) -> ShResult<Vec<VarStr>> {
+  pub fn set_assignments(
+    tree: &Ast,
+    assigns: &[NodeId],
+    behavior: AssignBehavior,
+  ) -> ShResult<Vec<VarStr>> {
     let mut new_env_vars = vec![];
     let mut flags = match behavior {
       AssignBehavior::Export => VarFlags::EXPORT,
@@ -1796,7 +1852,8 @@ impl Dispatcher {
 
     let trace = Shed::shopts(|o| o.set.xtrace);
 
-    for assign in assigns {
+    for assign_id in assigns {
+      let assign = &tree[*assign_id];
       let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
       let span = assign.get_span();
       let NdRule::Assignment { kind, var, val } = &assign.class else {

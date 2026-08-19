@@ -1,6 +1,6 @@
 use crate::{
   HashMap,
-  eval::lex::TkFlags,
+  eval::{lex::TkFlags, parse::Ast},
   expand::{Expander, expand_raw_inner, stream::SegStream},
   match_loop,
   util::{self, QuoteState},
@@ -33,10 +33,7 @@ use smol_str::{SmolStr, SmolStrBuilder};
 
 use super::{
   ShResult, Shed,
-  eval::{
-    lex::{LexFlags, LexStream, Tk, TkRule},
-    parse::node::Node,
-  },
+  eval::lex::{LexFlags, LexStream, Tk, TkRule},
   expand::{expand_arithmetic, expand_raw, markers, shell_quote_bytes},
   procio::stdin_fileno,
   readline::Candidate,
@@ -1097,7 +1094,7 @@ pub(crate) struct VarTab {
   sh_argv: VecDeque<VarStr>, /* Using a VecDeque makes the implementation of `shift` straightforward */
 
   kind: ScopeKind,
-  deferred_cmds: Vec<Node>,
+  deferred_cmds: Vec<Ast>,
 }
 
 impl VarTab {
@@ -1287,10 +1284,10 @@ impl VarTab {
       self.bpush_arg(VarStr::from(arg.into_vec()));
     }
   }
-  pub fn defer_cmd(&mut self, cmd: Node) {
+  pub fn defer_cmd(&mut self, cmd: Ast) {
     self.deferred_cmds.push(cmd);
   }
-  pub fn take_deferred_cmds(&mut self) -> Vec<Node> {
+  pub fn take_deferred_cmds(&mut self) -> Vec<Ast> {
     std::mem::take(&mut self.deferred_cmds)
   }
   pub fn sh_argv(&self) -> &VecDeque<VarStr> {

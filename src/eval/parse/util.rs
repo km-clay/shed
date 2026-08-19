@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
 
+use crate::eval::parse::{Ast, node::NodeId};
+
 use super::{
   LabelCtx, NdFlags, NdRule, Node, ParseStream, ShErr, ShResult, Span, Tk, TkFlags, TkRule,
   crate_util::split_tk, sherr,
@@ -120,14 +122,17 @@ impl ParseStream {
 }
 
 #[expect(clippy::type_complexity)]
-pub(super) fn split_for_arith_tk(tk: &Tk) -> ShResult<Option<(Box<Node>, Box<Node>, Box<Node>)>> {
+pub(super) fn split_for_arith_tk(
+  tree: &mut Ast,
+  tk: &Tk,
+) -> ShResult<Option<(NodeId, NodeId, NodeId)>> {
   let span = tk.span.clone();
   let mut tks = split_tk(&tk.strip_arith_header()?, ";").into_iter();
 
   let Some(init_tk) = tks.next() else {
     return Err(sherr!(ParseErr @ span, "Missing init statement"));
   };
-  let init = Box::new(Node {
+  let init = Node {
     class: NdRule::Arithmetic {
       body: init_tk.clone(),
     },
@@ -135,12 +140,12 @@ pub(super) fn split_for_arith_tk(tk: &Tk) -> ShResult<Option<(Box<Node>, Box<Nod
     redirs: vec![],
     span: init_tk.span,
     context: VecDeque::default().into(),
-  });
+  };
 
   let Some(cond_tk) = tks.next() else {
     return Err(sherr!(ParseErr @ span, "Missing condition statement"));
   };
-  let cond = Box::new(Node {
+  let cond = Node {
     class: NdRule::Arithmetic {
       body: cond_tk.clone(),
     },
@@ -148,12 +153,12 @@ pub(super) fn split_for_arith_tk(tk: &Tk) -> ShResult<Option<(Box<Node>, Box<Nod
     redirs: vec![],
     span: cond_tk.span,
     context: VecDeque::default().into(),
-  });
+  };
 
   let Some(step_tk) = tks.next() else {
     return Err(sherr!(ParseErr @ span, "Missing step statement"));
   };
-  let step = Box::new(Node {
+  let step = Node {
     class: NdRule::Arithmetic {
       body: step_tk.clone(),
     },
@@ -161,9 +166,15 @@ pub(super) fn split_for_arith_tk(tk: &Tk) -> ShResult<Option<(Box<Node>, Box<Nod
     redirs: vec![],
     span: step_tk.span,
     context: VecDeque::default().into(),
-  });
+  };
 
-  Ok(Some((init, cond, step)))
+  let nodes = (
+    tree.insert_node(init),
+    tree.insert_node(cond),
+    tree.insert_node(step),
+  );
+
+  Ok(Some(nodes))
 }
 
 pub(super) fn parse_err_full(reason: &str, blame: &Span, context: &LabelCtx) -> ShErr {

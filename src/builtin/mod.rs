@@ -9,7 +9,10 @@ use std::{
 
 use crate::{
   builtin::opt::{Parsed, Word, parse_opts_with},
-  eval::execute,
+  eval::{
+    execute,
+    parse::{Ast, node::NodeId},
+  },
   procio::{bytes_to_string, out_bytes},
   state::{
     meta::UtilKind,
@@ -293,7 +296,13 @@ pub(super) trait Builtin: Sync {
   }
 
   /// The main entry point for running a builtin. This is responsible for setting up the environment, handling redirections, and catching control flow errors.
-  fn setup_builtin(&self, node: &Node, dispatcher: &mut Dispatcher) -> ShResult<()> {
+  fn setup_builtin(
+    &self,
+    tree: &Ast,
+    node_id: NodeId,
+    dispatcher: &mut Dispatcher,
+  ) -> ShResult<()> {
+    let node = &tree[node_id];
     let cmd_raw = node.get_command().unwrap().to_string();
     let context = node.context.clone();
     let NdRule::Command { assignments, argv } = &node.class else {
@@ -306,10 +315,10 @@ pub(super) trait Builtin: Sync {
     };
 
     // reverts any variable assignments made by the builtin if it is a special builtin
-    let _var_guard =
-      matches!(assign_behavior, AssignBehavior::Export).then(|| prefix_assign_guard(assignments));
+    let _var_guard = matches!(assign_behavior, AssignBehavior::Export)
+      .then(|| prefix_assign_guard(tree, assignments));
 
-    Dispatcher::set_assignments(assignments, assign_behavior)?;
+    Dispatcher::set_assignments(tree, assignments, assign_behavior)?;
     let fork_builtins = node.flags.contains(NdFlags::FORK_BUILTINS);
 
     if !self.no_help() && argv.len() == 2 && argv[1].as_str() == "--help" {
@@ -358,7 +367,7 @@ pub(super) trait Builtin: Sync {
       guard.persist();
     }
 
-    let result = self.run_builtin(node, dispatcher);
+    let result = self.run_builtin(tree, node_id, dispatcher);
 
     // Now we inspect the error that we got, if any
     match result {
@@ -408,7 +417,8 @@ pub(super) trait Builtin: Sync {
     }
   }
   /// Parse arguments and options, pack `BuiltinArgs`, run `self.execute()`
-  fn run_builtin(&self, node: &Node, _dispatcher: &mut Dispatcher) -> ShResult<()> {
+  fn run_builtin(&self, tree: &Ast, node_id: NodeId, _dispatcher: &mut Dispatcher) -> ShResult<()> {
+    let node = &tree[node_id];
     let span = node.get_span().clone();
     let no_split = node.flags.contains(NdFlags::NO_SPLIT);
     let NdRule::Command {
@@ -719,7 +729,13 @@ impl Builtin for BuiltinBuiltin {
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     unreachable!("this one operates on the node directly")
   }
-  fn setup_builtin(&self, node: &Node, dispatcher: &mut Dispatcher) -> ShResult<()> {
+  fn setup_builtin(
+    &self,
+    tree: &Ast,
+    node_id: NodeId,
+    dispatcher: &mut Dispatcher,
+  ) -> ShResult<()> {
+    let node = &tree[node_id];
     let span = node.get_span();
     let NdRule::Command { assignments, argv } = &node.class else {
       unreachable!()
@@ -747,7 +763,10 @@ impl Builtin for BuiltinBuiltin {
     };
     forwarded.flags |= NdFlags::NO_TRACE;
 
-    builtin.setup_builtin(&forwarded, dispatcher)
+    let mut sub_ast = Ast::new();
+    let fwd_id = sub_ast.insert_root(forwarded);
+
+    builtin.setup_builtin(tree, fwd_id, dispatcher)
   }
 }
 
@@ -783,7 +802,8 @@ impl Builtin for CommandBuiltin {
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     unreachable!("this one operates on the node directly")
   }
-  fn run_builtin(&self, node: &Node, dispatcher: &mut Dispatcher) -> ShResult<()> {
+  fn run_builtin(&self, tree: &Ast, node_id: NodeId, dispatcher: &mut Dispatcher) -> ShResult<()> {
+    let node = &tree[node_id];
     let NdRule::Command { assignments, argv } = &node.class else {
       unreachable!()
     };
@@ -863,10 +883,10 @@ impl Builtin for CommandBuiltin {
       }
       state::util::with_vars([("PATH".into(), default_path)], || {
         Shed::meta_mut(MetaTab::rehash_path_cache);
-        Self::execute_inner(print_path, print_type, &node, dispatcher)
+        Self::execute_inner(print_path, print_type, tree, node_id, dispatcher)
       })
     } else {
-      Self::execute_inner(print_path, print_type, &node, dispatcher)
+      Self::execute_inner(print_path, print_type, tree, node_id, dispatcher)
     }
   }
 }
@@ -875,9 +895,11 @@ impl CommandBuiltin {
   fn execute_inner(
     print_path: bool,
     print_type: bool,
-    node: &Node,
+    tree: &Ast,
+    node_id: NodeId,
     dispatcher: &mut Dispatcher,
   ) -> ShResult<()> {
+    let node = &tree[node_id];
     let NdRule::Command { argv, .. } = &node.class else {
       unreachable!()
     };
@@ -943,7 +965,7 @@ impl CommandBuiltin {
     // Per POSIX, `command` suppresses alias/function lookup but must still
     // execute shell builtins (and external commands). Route through the same
     // dispatcher logic as `dispatch_cmd`, just with function lookup disabled.
-    dispatcher.route_command(node, false)
+    dispatcher.route_command(tree, node_id, false)
   }
 }
 

@@ -3,7 +3,10 @@ use scopeguard::guard;
 
 use crate::{
   HashSet,
-  eval::{NdRule, Node},
+  eval::{
+    NdRule,
+    parse::{Ast, node::NodeId},
+  },
   state::{
     util,
     vars::{Var, VarFlags, VarStr},
@@ -28,8 +31,8 @@ fn guard_drop(_: ()) {
 
   crate_util::with_saved_status(|| {
     while let Some(cmd) = deferred.pop() {
-      let mut dispatcher = Dispatcher::new(vec![cmd], "defer".into());
-      if let Err(e) = dispatcher.begin_dispatch() {
+      let mut dispatcher = Dispatcher::new("defer".into());
+      if let Err(e) = dispatcher.begin_dispatch(&cmd) {
         e.print_error();
       }
     }
@@ -132,10 +135,10 @@ pub fn var_ctx_guard(
 }
 
 /// Snapshot and restore the variables used in prefix assignment
-pub fn prefix_assign_guard(assignments: &[Node]) -> impl Drop {
+pub fn prefix_assign_guard(tree: &Ast, assignments: &[NodeId]) -> impl Drop {
   let saved: Vec<(String, Option<Var>)> = assignments
     .iter()
-    .filter_map(|a| match &a.class {
+    .filter_map(|a| match &tree[*a].class {
       NdRule::Assignment { var, .. } => {
         let raw = var.span.as_str();
         // An indexed assignment (`arr[i]=v`) touches the whole array variable,

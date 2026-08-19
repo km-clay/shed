@@ -5,10 +5,16 @@ use std::{
   path::PathBuf,
 };
 
-use crate::{HashMap, ShResult, eval::execute::exec_nonint, sherr, state::vars::VarStr, util};
+use crate::{
+  HashMap, ShResult,
+  eval::{execute::exec_nonint, parse::Ast},
+  sherr,
+  state::vars::VarStr,
+  util,
+};
 
 use super::{
-  eval::{Node, lex::Span},
+  eval::lex::Span,
   expand::shell_quote,
   keys::{KeyEvent, KeyMap, KeyMapFlags, KeyMapMatch},
   signal::parse_signal,
@@ -115,7 +121,7 @@ pub(crate) enum IsInternal {
 #[derive(Clone, Debug)]
 pub enum ShFunc {
   Defined {
-    logic: Box<Node>,
+    logic: Ast,
     source: Span,
     is_internal: Option<IsInternal>,
   },
@@ -154,9 +160,9 @@ impl AutoloadSrc {
 }
 
 impl ShFunc {
-  pub fn defined(logic: Node, source: Span) -> Self {
+  pub fn defined(logic: Ast, source: Span) -> Self {
     Self::Defined {
-      logic: Box::new(logic),
+      logic,
       source,
       is_internal: None,
     }
@@ -176,14 +182,14 @@ impl ShFunc {
     }
   }
   #[allow(dead_code)]
-  pub fn logic(&self) -> Option<&Node> {
+  pub fn logic(&self) -> Option<&Ast> {
     match self {
       Self::Defined { logic, .. } => Some(logic),
       Self::Autoload(_) => None,
     }
   }
   #[allow(dead_code)]
-  pub fn logic_mut(&mut self) -> Option<&mut Node> {
+  pub fn logic_mut(&mut self) -> Option<&mut Ast> {
     match self {
       Self::Defined { logic, .. } => Some(logic),
       Self::Autoload(_) => None,
