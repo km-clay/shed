@@ -1439,6 +1439,9 @@ impl Dispatcher {
       }
     }
 
+    // reset this here so it doesn't leak to the next command
+    self.fork_builtins = false;
+
     let job = self.job_stack.finalize_job().unwrap();
     let dispatch_result = dispatch_job(job, is_bg, Shed::term(Terminal::interactive));
 
