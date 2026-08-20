@@ -578,6 +578,11 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_search = Expander::from_raw_pattern(search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
+
+        if expanded_search.is_empty() {
+          return Ok(VarStr::from(value).into());
+        }
+
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
@@ -599,6 +604,11 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_search = Expander::from_raw_pattern(search, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
+
+        if expanded_search.is_empty() {
+          return Ok(VarStr::from(value).into());
+        }
+
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;

@@ -568,7 +568,7 @@ pub fn normalize_dir<P: AsRef<Path>>(path: &P) -> &Path {
 }
 
 enum PathSeg {
-  RecStar,
+  RecStar, // "**"
   Literal(Box<[u8]>),
   Glob { pat: Pattern, lit_dot: bool },
 }

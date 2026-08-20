@@ -190,9 +190,6 @@ impl Expander {
       vec![self.raw.clone()]
     };
 
-    // A word collapses to its bytes (dropping the ESCAPE/quote markers it
-    // carried for globbing); the glob-syntax form (markers resolved to
-    // bracket-escapes) is what the glob matcher actually runs against.
     if self.noglob || shopt!(set.noglob) {
       return Ok(words.into_iter().map(|w| w.into_bytes().into()).collect());
     }
@@ -253,8 +250,7 @@ impl Expander {
   /// Perform POSIX word splitting.
   ///
   /// Resolves escapes and the special `$@`/`$*` cases, and performs IFS field
-  /// splitting — but only inside `EXPAND_START`/`EXPAND_END` runs, i.e. on text
-  /// that came from an unquoted expansion. Literal characters are never split.
+  /// splitting, but only inside `EXPAND_START`/`EXPAND_END` runs.
   pub fn split_words(&mut self) -> Vec<stream::SegStream> {
     use stream::{Marker, Quote, SegStream, StreamSeg, Unit};
     let mut words: Vec<SegStream> = vec![];
