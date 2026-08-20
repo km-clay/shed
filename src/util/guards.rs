@@ -53,11 +53,13 @@ pub fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let cwd_guard = cwd_guard();
   let umask_guard = umask_guard();
   let shopt_guard = shopt_guard();
+  let fork = Shed::meta_mut(|m| m.enter_fork(false));
   scopeguard::guard((), move |()| {
     drop(shopt_guard);
     drop(cwd_guard);
     drop(umask_guard);
     drop(ceiling_guard);
+    drop(fork);
   })
 }
 

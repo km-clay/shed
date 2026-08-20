@@ -642,7 +642,7 @@ impl Dispatcher {
   }
   fn exec_func(&mut self, tree: &Ast, func_id: NodeId) -> ShResult<()> {
     let func = &tree[func_id];
-    if Shed::meta(MetaTab::fork_builtins) {
+    if Shed::meta_mut(MetaTab::take_fork) {
       let func_body = tree.break_off(func_id);
 
       let Some(root) = func_body.get_root() else {
@@ -820,7 +820,7 @@ impl Dispatcher {
   where
     F: FnMut(&mut Self, &Ast) -> ShResult<()>,
   {
-    let fork_builtins = Shed::meta(MetaTab::fork_builtins);
+    let fork_builtins = Shed::meta_mut(MetaTab::take_fork);
 
     let redirs = RedirSet::from(redirs);
     let guard = match redirs.try_apply(false) {
@@ -1551,7 +1551,7 @@ impl Dispatcher {
 
   fn exec_builtin(&mut self, tree: &Ast, cmd_id: NodeId, cmd_name: &str) -> ShResult<()> {
     let cmd = &tree[cmd_id];
-    let fork_builtins = Shed::meta(MetaTab::fork_builtins);
+    let fork_builtins = Shed::meta_mut(MetaTab::take_fork);
 
     let Some(builtin) = lookup_builtin(cmd_name) else {
       sherr!(NotFound @ cmd.get_span(), "builtin not found: {cmd_name}").print_error();
@@ -1597,7 +1597,7 @@ impl Dispatcher {
     };
 
     if let AssignBehavior::Set = assign_behavior {
-      if Shed::meta(MetaTab::fork_builtins) {
+      if Shed::meta_mut(MetaTab::take_fork) {
         let child = tree.break_off(cmd_id);
         let Some(root) = child.get_root() else {
           unreachable!()
@@ -1637,10 +1637,7 @@ impl Dispatcher {
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
 
-    // POSIX 2.8.1: a redirection failure on an ordinary command is non-fatal —
-    // print, set `$?`=1, skip the command, and keep executing the rest of the
-    // input. It stays fatal only for a special built-in in a non-interactive
-    // shell.
+    // POSIX 2.8.1: a redirection failure on an ordinary command is non-fatal
     let fatal = !Shed::term(Terminal::interactive)
       && lookup_builtin(cmd_name).is_some_and(builtin::Builtin::is_special);
     let _guard = match RedirSet::from(&cmd.redirs).try_apply(fatal) {

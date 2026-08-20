@@ -461,7 +461,7 @@ impl Drop for LoopGuard {
 pub(crate) struct ForkGuard(bool);
 impl Drop for ForkGuard {
   fn drop(&mut self) {
-    Shed::meta_mut(|m| m.restore_fork(self.0))
+    Shed::meta_mut(|m| m.restore_fork(self.0));
   }
 }
 
@@ -744,8 +744,8 @@ impl MetaTab {
 
     XtraceGuard
   }
-  pub fn fork_builtins(&self) -> bool {
-    self.fork_builtins
+  pub fn take_fork(&mut self) -> bool {
+    std::mem::take(&mut self.fork_builtins)
   }
   pub fn enter_fork(&mut self, fork: bool) -> ForkGuard {
     let prev = std::mem::replace(&mut self.fork_builtins, fork);
