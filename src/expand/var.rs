@@ -244,10 +244,12 @@ fn lookup_var(var_name: &SegStream) -> ShResult<SegStream> {
 
 #[cfg(test)]
 mod tests {
-  use super::super::escape_glob;
+  use bstr::ByteSlice;
+  use itertools::Itertools;
+
   use super::var;
   use crate::expand::escape::unescape_str;
-  use crate::expand::expand_glob;
+  use crate::expand::glob::expand_glob;
 
   // expand_raw is SegStream-native; render it back to a marker-char string for
   // these assertions (markers as sentinel chars). Plain-text results compare
@@ -361,44 +363,6 @@ mod tests {
     );
   }
 
-  // ===================== escape_glob =====================
-
-  #[test]
-  fn escape_glob_passthrough_when_no_escapes() {
-    // No `\` chars → output equals input.
-    assert_eq!(escape_glob("foo*bar"), "foo*bar");
-    assert_eq!(escape_glob("plain"), "plain");
-  }
-
-  #[test]
-  fn escape_glob_wraps_escaped_star() {
-    // `\*` → `[*]` (glob-literal star)
-    assert_eq!(escape_glob("foo\\*"), "foo[*]");
-  }
-
-  #[test]
-  fn escape_glob_wraps_escaped_question_mark() {
-    assert_eq!(escape_glob("foo\\?"), "foo[?]");
-  }
-
-  #[test]
-  fn escape_glob_wraps_escaped_bracket() {
-    assert_eq!(escape_glob("foo\\[bar"), "foo[[]bar");
-  }
-
-  #[test]
-  fn escape_glob_strips_non_meta_escapes() {
-    // `\ ` (escaped space) becomes literal space — not a glob meta, so
-    // bracket-wrap is unnecessary.
-    assert_eq!(escape_glob("my\\ file"), "my file");
-  }
-
-  #[test]
-  fn escape_glob_drops_trailing_escape() {
-    // Lone trailing `\` with nothing to escape — silently dropped.
-    assert_eq!(escape_glob("foo\\"), "foo");
-  }
-
   #[test]
   fn escape_glob_with_marker_form() {
     // The ESCAPE-marker → glob-literal conversion lives in
@@ -433,14 +397,16 @@ mod tests {
     // pattern the way `expand()` does before matching.
     let unescaped = unescape_str("my\\ *");
     let pattern = crate::expand::escape::markers_to_glob_escapes(&unescaped);
-    let result = expand_glob(&String::from_utf8_lossy(&pattern));
+    let result = expand_glob(&pattern, false)
+      .into_iter()
+      .map(|word| word.to_str_lossy().to_string())
+      .join(" ");
 
     if let Some(prev) = saved_dir {
       let _ = std::env::set_current_dir(prev);
     }
     std::fs::remove_dir_all(&tmp).ok();
 
-    let result = result.expect("expand_glob should succeed").join(" ");
     // Glob expansion should match `my file.txt`. Result is escape-marker-
     // wrapped post-glob; check via strip_markers.
     let stripped = strip_markers(&result);
@@ -465,10 +431,10 @@ mod tests {
     std::env::set_current_dir(&tmp).unwrap();
 
     let glob = |p: &str| -> Vec<String> {
-      expand_glob(p)
-        .unwrap()
-        .iter()
-        .map(|s| strip_markers(s))
+      expand_glob(p.as_bytes(), false)
+        .into_iter()
+        .map(|word| word.to_str_lossy().to_string())
+        .map(|s| strip_markers(&s))
         .collect()
     };
     // Capture everything before restoring cwd so an assert failure can't leak it.

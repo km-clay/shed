@@ -16,12 +16,12 @@ use std::{convert::Into, rc::Rc};
 pub(super) use alias::{expand_alias_with_pos, expand_aliases, expand_keymap};
 pub(super) use arithmetic::{expand_arithmetic, expand_arithmetic_wrapped};
 pub(super) use escape::{
-  escape_glob, escape_str, expand_ansi_c, shell_quote, shell_quote_bytes, shell_quote_fmt,
-  unescape_heredoc, unescape_prompt, unescape_str, xtrace_quote,
+  escape_str, expand_ansi_c, shell_quote, shell_quote_bytes, shell_quote_fmt, unescape_heredoc,
+  unescape_prompt, unescape_str, xtrace_quote,
 };
 pub(super) use glob::{Pattern, expand_glob, replace_posix_classes};
 pub(super) use prompt::expand_prompt;
-pub(super) use util::{expand_case_pattern, glob_to_regex, glob_to_regex_bytes};
+pub(super) use util::expand_case_pattern;
 pub(super) use var::{expand_raw, expand_raw_inner};
 
 use crate::state::vars::{VarStr, VarStrSliceExt};
@@ -197,31 +197,22 @@ impl Expander {
       return Ok(words.into_iter().map(|w| w.into_bytes().into()).collect());
     }
 
-    let nullglob = shopt!(core.nullglob);
     let mut glob_words: Vec<VarStr> = Vec::with_capacity(words.len());
 
     for word in words {
       let pattern_bytes = escape::markers_to_glob_escapes(&word);
-      let pattern = String::from_utf8_lossy(&pattern_bytes);
       let literal: VarStr = word.into_bytes().into();
 
-      if !glob::might_be_glob(&pattern) {
+      if !glob::might_be_glob(&pattern_bytes) {
         glob_words.push(literal);
         continue;
       }
 
-      let expansions = expand_glob(&pattern).unwrap_or_else(|_| vec![literal.to_string()]);
+      let expansions = glob::expand_glob(&pattern_bytes, false)
+        .into_iter()
+        .map(VarStr::from);
 
-      if expansions.is_empty() {
-        if !nullglob {
-          glob_words.push(literal);
-        }
-        continue;
-      }
-
-      for exp in expansions {
-        glob_words.push(glob::restore_glob_prefix(&pattern, exp).into());
-      }
+      glob_words.extend(expansions);
     }
 
     Ok(glob_words)

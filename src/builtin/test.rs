@@ -10,7 +10,7 @@ use super::{
     execute::prepare_argv_with,
     lex::{Span, TkVecUtils},
   },
-  expand, sherr,
+  sherr,
   state::{vars::VarFlags, vars::VarKind},
   util::{ShErr, ShResult, with_status},
 };
@@ -177,16 +177,16 @@ fn eval_binary(
   match op {
     BinaryOp::StringEq => {
       if extended {
-        let pattern = expand::glob_to_regex(&rhs.0.to_str_lossy(), true);
-        Ok(pattern.is_match(&lhs.0.to_str_lossy()))
+        let pattern = Shed::meta_mut(|m| m.get_glob(&rhs.0.to_str_lossy()));
+        Ok(pattern.is_match(lhs.0.as_bytes()))
       } else {
         Ok(lhs.0 == rhs.0)
       }
     }
     BinaryOp::StringNeq => {
       if extended {
-        let pattern = expand::glob_to_regex(&rhs.0.to_str_lossy(), true);
-        Ok(!pattern.is_match(&lhs.0.to_str_lossy()))
+        let pattern = Shed::meta_mut(|m| m.get_glob(&rhs.0.to_str_lossy()));
+        Ok(!pattern.is_match(lhs.0.as_bytes()))
       } else {
         Ok(lhs.0 != rhs.0)
       }

@@ -155,26 +155,8 @@ pub fn ends_with_unescaped(slice: &str, pat: &str) -> bool {
   slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
 }
 
-pub fn starts_with_unescaped(slice: &str, pat: &str) -> bool {
-  slice.starts_with(pat) && !pos_is_escaped(slice, 0)
-}
-
-pub fn count_unescaped(slice: &str, pat: &str) -> usize {
-  let mut count = 0;
-  let mut start = 0;
-  while let Some((pos, skip)) = split_at_unescaped(&slice[start..], pat) {
-    count += 1;
-    start += pos + skip;
-  }
-  count
-}
-
 pub fn has_unescaped(slice: &str, pat: &str) -> bool {
   split_at_unescaped(slice, pat).is_some()
-}
-
-pub fn has_any_unescaped(slice: &str, pats: &[&str]) -> bool {
-  split_at_any_unescaped(slice, pats).is_some()
 }
 
 pub fn scan_parens(chars: &mut Peekable<Chars>, pos: &mut usize, depth: usize) -> bool {

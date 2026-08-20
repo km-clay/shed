@@ -1,10 +1,14 @@
 use std::{
-  collections::VecDeque, iter::Peekable, os::unix::fs::PermissionsExt, path::Path, str::CharIndices,
+  collections::VecDeque,
+  iter::Peekable,
+  os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+  path::Path,
+  str::CharIndices,
 };
 
 use bitflags::bitflags;
 
-use crate::{Shed, state::vars::VarStr, varstr};
+use crate::{Shed, state::vars::VarStr, util, varstr};
 
 use super::{
   builtin::BUILTIN_NAMES,
@@ -816,8 +820,13 @@ fn check_path_exists(path: &str) -> bool {
     return false;
   }
 
-  let pat = format!("{}*", glob::Pattern::escape(&stripped));
-  glob::glob(&pat).ok().and_then(|mut it| it.next()).is_some()
+  // Does any entry start with `stripped`?
+  let bytes = stripped.as_bytes();
+  let (dir, prefix): (&Path, &[u8]) = match bytes.iter().rposition(|&b| b == b'/') {
+    Some(idx) => (util::path_from_bytes(&bytes[..=idx]), &bytes[idx + 1..]),
+    None => (Path::new("."), bytes),
+  };
+  util::path_entries(dir).any(|e| e.file_name().as_bytes().starts_with(prefix))
 }
 
 /// Break a token at `comp_wordbreaks`

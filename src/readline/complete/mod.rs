@@ -1,4 +1,4 @@
-use crate::{HashSet, state::vars::VarStr, varstr};
+use crate::{HashSet, expand, state::vars::VarStr, varstr};
 use std::{
   fmt::{Debug, Display},
   os::unix::fs::PermissionsExt,
@@ -30,7 +30,7 @@ use super::{
   context::{CtxTk, CtxTkRule, get_context_tokens},
   editmode,
   eval::{execute::exec_nonint, lex::Span},
-  expand::{escape_glob, escape_str, expand_raw_inner, shell_quote, unescape_str},
+  expand::{escape_str, expand_raw_inner, shell_quote, unescape_str},
   key,
   keys::{self, KeyEvent as K},
   linebuf, shopt,
@@ -796,19 +796,13 @@ fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
     prefix
   };
 
-  let escaped_pre = escape_glob(prefix);
-  let escaped_post = escape_glob(postfix);
+  let pat = format!("{prefix}*{postfix}");
+  let ci = shopt!(prompt.completion_ignore_case);
 
-  let ignore_case = shopt!(prompt.completion_ignore_case);
-  let pat = format!("{escaped_pre}*{escaped_post}");
-  let match_opts = glob::MatchOptions {
-    case_sensitive: !ignore_case,
-    require_literal_separator: false,
-    require_literal_leading_dot: false,
-  };
-  let candidates: Vec<Candidate> = glob::glob_with(&pat, match_opts)
-    .map(|it| it.filter_map(Result::ok).map(Into::into).collect())
-    .unwrap_or_default();
+  let candidates: Vec<Candidate> = expand::expand_glob(pat.as_bytes(), ci)
+    .into_iter()
+    .map(|it| util::path_from_bytes(&it).to_path_buf().into())
+    .collect();
 
   candidates
     .into_iter()

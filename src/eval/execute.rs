@@ -926,7 +926,7 @@ impl Dispatcher {
             }
           } else {
             let pattern = Shed::meta_mut(|m| m.get_glob(&pattern_exp));
-            if pattern.is_match(&pattern_raw) {
+            if pattern.is_match(pattern_raw.as_bytes()) {
               let _guard = util::shared_scope_guard();
               s.dispatch_node(tree, *body)?;
               break 'outer;

@@ -17,7 +17,8 @@ pub(super) use guards::{
   function_scope_guard, isolation_guard, prefix_assign_guard, shared_scope_guard, var_ctx_guard,
 };
 pub(super) use path::{
-  PathCache, is_executable_file, path_list_entries, resolve_in_path, split_path_list,
+  PathCache, is_executable_file, path_entries, path_from_bytes, path_list_entries, resolve_in_path,
+  split_path_list,
 };
 pub(super) use pos::{Pos, SignedPos};
 pub(super) use ui::{
@@ -35,9 +36,8 @@ pub(crate) enum Direction {
 pub(super) use error::{ShErr, ShErrKind, ShResult, ShResultExt, get_context};
 
 pub(super) use strops::{
-  QuoteState, VarStrDisplay, count_unescaped, ends_with_unescaped, format_mode, format_size,
-  format_time, has_any_unescaped, has_unescaped, parse_size, scan_param_exp, scan_parens,
-  split_at_unescaped, split_tk, starts_with_unescaped,
+  QuoteState, VarStrDisplay, ends_with_unescaped, format_mode, format_size, format_time,
+  has_unescaped, parse_size, scan_param_exp, scan_parens, split_at_unescaped, split_tk,
 };
 
 pub(super) struct FdWriter<'a>(pub BorrowedFd<'a>);

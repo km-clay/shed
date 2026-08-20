@@ -33,6 +33,11 @@ enum EntryCache {
   File(SystemTime),
 }
 
+pub(crate) fn path_from_bytes(bytes: &[u8]) -> &Path {
+  use std::os::unix::ffi::OsStrExt;
+  std::ffi::OsStr::from_bytes(bytes).as_ref()
+}
+
 fn mtime_of(path: &Path) -> SystemTime {
   std::fs::metadata(path)
     .and_then(|m| m.modified())
@@ -157,6 +162,16 @@ pub fn split_path_list(path_list: &str) -> impl Iterator<Item = PathBuf> {
   );
 
   paths.into_iter().map(PathBuf::from)
+}
+
+pub fn path_entries<P: AsRef<Path>>(path: P) -> impl Iterator<Item = std::fs::DirEntry> {
+  path
+    .as_ref()
+    .read_dir()
+    .ok()
+    .into_iter()
+    .flatten()
+    .filter_map(Result::ok)
 }
 
 pub fn path_list_entries(path_list: &str) -> impl Iterator<Item = std::fs::DirEntry> {

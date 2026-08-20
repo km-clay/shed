@@ -520,12 +520,12 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded = Expander::from_raw_no_brace_pattern(prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded.to_str_lossy(), true));
-        for i in 0..=value.len() {
-          if pattern.is_match(&value[..i]) {
-            return Ok(VarStr::from(&value[i..]).into());
-          }
+
+        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded.to_str_lossy()));
+        if let Some(len) = pattern.match_shortest_prefix(value) {
+          return Ok(VarStr::from(&value[len..]).into());
         }
+
         Ok(VarStr::from(value).into())
       }
       ParamExp::RemLongestPrefix(prefix) => {
@@ -534,12 +534,12 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded = Expander::from_raw_no_brace_pattern(prefix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded.to_str_lossy(), true));
-        for i in (0..=value.len()).rev() {
-          if pattern.is_match(&value[..i]) {
-            return Ok(VarStr::from(&value[i..]).into());
-          }
+
+        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded.to_str_lossy()));
+        if let Some(len) = pattern.match_longest_prefix(value) {
+          return Ok(VarStr::from(&value[len..]).into());
         }
+
         Ok(VarStr::from(value).into()) // no match
       }
       ParamExp::RemShortestSuffix(suffix) => {
@@ -548,12 +548,13 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded = Expander::from_raw_no_brace_pattern(suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded.to_str_lossy(), true));
-        for i in (0..=value.len()).rev() {
-          if pattern.is_match(&value[i..]) {
-            return Ok(VarStr::from(&value[..i]).into());
-          }
+
+        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded.to_str_lossy()));
+        if let Some(len) = pattern.match_shortest_suffix(value) {
+          let pos = value.len() - len;
+          return Ok(VarStr::from(&value[..pos]).into());
         }
+
         Ok(VarStr::from(value).into())
       }
       ParamExp::RemLongestSuffix(suffix) => {
@@ -562,12 +563,13 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_suffix = Expander::from_raw_no_brace_pattern(suffix, TkFlags::empty())
           .no_glob()
           .expand_for_glob()?;
-        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded_suffix.to_str_lossy(), true));
-        for i in 0..=value.len() {
-          if pattern.is_match(&value[i..]) {
-            return Ok(VarStr::from(&value[..i]).into());
-          }
+
+        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded_suffix.to_str_lossy()));
+        if let Some(len) = pattern.match_longest_suffix(value) {
+          let pos = value.len() - len;
+          return Ok(VarStr::from(&value[..pos]).into());
         }
+
         Ok(VarStr::from(value).into())
       }
       ParamExp::ReplaceFirstMatch(search, replace) => {
@@ -579,13 +581,13 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let regex = Shed::meta_mut(|m| m.get_byte_regex(&expanded_search.to_str_lossy(), false)); // unanchored
+        let glob = Shed::meta_mut(|m| m.get_glob(&expanded_search.to_str_lossy())); // unanchored
 
-        if let Some(mat) = regex.find(value) {
+        if let Some((start, end)) = glob.find(value, 0) {
           let mut result = Vec::with_capacity(value.len());
-          result.extend_from_slice(&value[..mat.start()]);
+          result.extend_from_slice(&value[..start]);
           result.extend_from_slice(expanded_replace.as_bytes());
-          result.extend_from_slice(&value[mat.end()..]);
+          result.extend_from_slice(&value[end..]);
           Ok(VarStr::from(result).into())
         } else {
           Ok(VarStr::from(value).into())
@@ -600,14 +602,17 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let regex = Shed::meta_mut(|m| m.get_byte_regex(&expanded_search.to_str_lossy(), false));
+        let glob = Shed::meta_mut(|m| m.get_glob(&expanded_search.to_str_lossy()));
         let mut result: Vec<u8> = Vec::new();
         let mut last_match_end = 0;
+        let mut from = 0;
 
-        for mat in regex.find_iter(value) {
-          result.extend_from_slice(&value[last_match_end..mat.start()]);
+        while let Some((start, end)) = glob.find(value, from) {
+          result.extend_from_slice(&value[last_match_end..start]);
           result.extend_from_slice(expanded_replace.as_bytes());
-          last_match_end = mat.end();
+          last_match_end = end;
+          // non-overlapping; step past a zero-width match so we don't spin
+          from = if end > start { end } else { end + 1 };
         }
 
         // Append the rest of the string
@@ -623,14 +628,14 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded_search.to_str_lossy(), true));
-        for i in (0..=value.len()).rev() {
-          if pattern.is_match(&value[..i]) {
-            let mut result = expanded_replace.as_bytes().to_vec();
-            result.extend_from_slice(&value[i..]);
-            return Ok(VarStr::from(result).into());
-          }
+
+        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded_search.to_str_lossy()));
+        if let Some(len) = pattern.match_longest_prefix(value) {
+          let mut result = expanded_replace.as_bytes().to_vec();
+          result.extend_from_slice(&value[len..]);
+          return Ok(VarStr::from(result).into());
         }
+
         Ok(VarStr::from(value).into())
       }
       ParamExp::ReplaceSuffix(search, replace) => {
@@ -642,14 +647,16 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let pattern = Shed::meta_mut(|m| m.get_byte_regex(&expanded_search.to_str_lossy(), true));
-        for i in (0..=value.len()).rev() {
-          if pattern.is_match(&value[i..]) {
-            let mut result = value[..i].to_vec();
-            result.extend_from_slice(expanded_replace.as_bytes());
-            return Ok(VarStr::from(result).into());
-          }
+
+        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded_search.to_str_lossy()));
+        if let Some(len) = pattern.match_longest_suffix(value) {
+          let pos = value.len() - len;
+          let mut result = Vec::with_capacity(pos + expanded_replace.as_bytes().len());
+          result.extend_from_slice(&value[..pos]);
+          result.extend_from_slice(expanded_replace.as_bytes());
+          return Ok(VarStr::from(result).into());
         }
+
         Ok(VarStr::from(value).into())
       }
       ParamExp::VarNamesWithPrefix(prefix) => {

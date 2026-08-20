@@ -48,6 +48,11 @@ pub(super) fn markers_to_glob_escapes(s: &SegStream) -> Vec<u8> {
   let mut cursor = s.cursor();
   while let Some(unit) = cursor.next() {
     match unit {
+      // A raw literal backslash (e.g. the `\` in `"a\*b"`, where `\` is literal
+      // in double quotes) must be escaped so the matcher's `\`-escape doesn't
+      // read it as escaping the following byte. Unquoted `*`/`?`/`[` stay raw so
+      // they still glob.
+      Unit::Byte(b'\\') => out.extend_from_slice(b"\\\\"),
       Unit::Byte(b) => out.push(b),
       Unit::Mark(m) => match m {
         Marker::Escape => {
@@ -77,21 +82,6 @@ pub(super) fn markers_to_glob_escapes(s: &SegStream) -> Vec<u8> {
       },
     }
   }
-  out
-}
-
-pub fn escape_glob(raw: &str) -> String {
-  let mut out = String::new();
-  let mut chars = raw.chars();
-  match_loop!(chars.next() => ch, {
-    '\\' => {
-      if let Some(nch) = chars.next() {
-        out.push_str(&glob::Pattern::escape(&nch.to_string()));
-      }
-    }
-    _ => out.push(ch),
-  });
-
   out
 }
 
