@@ -13,7 +13,10 @@ use nix::{
   unistd::pipe,
 };
 
-use crate::{HashMap, state::scopes::ScopeStack};
+use crate::{
+  HashMap,
+  state::{scopes::ScopeStack, util},
+};
 
 #[macro_export]
 macro_rules! assert_output {
@@ -166,6 +169,7 @@ pub(crate) struct TestGuard {
 
 impl TestGuard {
   pub fn new() -> Self {
+    util::register_fork_marker();
     let pty = openpty(None, None).unwrap();
     let (pty_master, pty_slave) = (pty.master, pty.slave);
     let master_raw = pty_master.as_raw_fd();

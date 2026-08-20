@@ -458,6 +458,13 @@ impl Drop for LoopGuard {
   }
 }
 
+pub(crate) struct ForkGuard(bool);
+impl Drop for ForkGuard {
+  fn drop(&mut self) {
+    Shed::meta_mut(|m| m.restore_fork(self.0))
+  }
+}
+
 /// Automatically manages function depth in the meta table.
 ///
 /// When dropped, decrements the function depth in the meta table.
@@ -547,6 +554,7 @@ pub(crate) struct MetaTab {
   func_depth: usize,
   loop_depth: usize,
   xtrace_depth: usize,
+  fork_builtins: bool,
 
   // completion candidates given by compadd
   comp_add_candidates: Vec<Candidate>,
@@ -580,6 +588,7 @@ impl Clone for MetaTab {
       loop_depth: self.loop_depth,
       func_depth: self.func_depth,
       xtrace_depth: self.xtrace_depth,
+      fork_builtins: self.fork_builtins,
       envp_cache: self.envp_cache.clone(),
       comp_add_candidates: self.comp_add_candidates.clone(),
       regexes: self.regexes.clone(),
@@ -612,6 +621,7 @@ impl Default for MetaTab {
       loop_depth: 0,
       func_depth: 0,
       xtrace_depth: 0,
+      fork_builtins: false,
       envp_cache: None,
       procsub_stack: vec![],
       comp_add_candidates: vec![],
@@ -733,6 +743,16 @@ impl MetaTab {
     self.xtrace_depth += 1;
 
     XtraceGuard
+  }
+  pub fn fork_builtins(&self) -> bool {
+    self.fork_builtins
+  }
+  pub fn enter_fork(&mut self, fork: bool) -> ForkGuard {
+    let prev = std::mem::replace(&mut self.fork_builtins, fork);
+    ForkGuard(prev)
+  }
+  pub fn restore_fork(&mut self, prev: bool) {
+    self.fork_builtins = prev;
   }
   pub fn enter_func(&mut self) -> FuncGuard {
     self.func_depth += 1;

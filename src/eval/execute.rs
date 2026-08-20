@@ -338,7 +338,6 @@ pub struct Dispatcher {
   /// downstream read end it inherited but doesn't exec away). Set per-segment in
   /// `exec_pipeline`, consumed in `run_fork`.
   fork_close_fd: Option<RawFd>,
-  fork_builtins: bool,
 }
 
 impl Dispatcher {
@@ -349,7 +348,6 @@ impl Dispatcher {
       timer_stack: vec![],
       fg_job: true,
       fork_close_fd: None,
-      fork_builtins: false,
     }
   }
   pub fn begin_dispatch(&mut self, tree: &Ast) -> ShResult<()> {
@@ -644,7 +642,7 @@ impl Dispatcher {
   }
   fn exec_func(&mut self, tree: &Ast, func_id: NodeId) -> ShResult<()> {
     let func = &tree[func_id];
-    if std::mem::take(&mut self.fork_builtins) {
+    if Shed::meta(MetaTab::fork_builtins) {
       let func_body = tree.break_off(func_id);
 
       let Some(root) = func_body.get_root() else {
@@ -822,7 +820,7 @@ impl Dispatcher {
   where
     F: FnMut(&mut Self, &Ast) -> ShResult<()>,
   {
-    let fork_builtins = std::mem::take(&mut self.fork_builtins);
+    let fork_builtins = Shed::meta(MetaTab::fork_builtins);
 
     let redirs = RedirSet::from(redirs);
     let guard = match redirs.try_apply(false) {
@@ -1359,7 +1357,8 @@ impl Dispatcher {
       let has_redirs = has_redirs || (r.is_some() || w.is_some());
 
       // builtins must fork in the middle of multi-command pipelines
-      self.fork_builtins = num_cmds > 1 && i != tail_start;
+      let fork_builtins = num_cmds > 1 && i != tail_start;
+      let _fork = Shed::meta_mut(|m| m.enter_fork(fork_builtins));
 
       let _guard = (has_redirs).then(RedirGuard::stdio);
 
@@ -1438,9 +1437,6 @@ impl Dispatcher {
         break;
       }
     }
-
-    // reset this here so it doesn't leak to the next command
-    self.fork_builtins = false;
 
     let job = self.job_stack.finalize_job().unwrap();
     let dispatch_result = dispatch_job(job, is_bg, Shed::term(Terminal::interactive));
@@ -1555,7 +1551,7 @@ impl Dispatcher {
 
   fn exec_builtin(&mut self, tree: &Ast, cmd_id: NodeId, cmd_name: &str) -> ShResult<()> {
     let cmd = &tree[cmd_id];
-    let fork_builtins = std::mem::take(&mut self.fork_builtins);
+    let fork_builtins = Shed::meta(MetaTab::fork_builtins);
 
     let Some(builtin) = lookup_builtin(cmd_name) else {
       sherr!(NotFound @ cmd.get_span(), "builtin not found: {cmd_name}").print_error();
@@ -1601,7 +1597,7 @@ impl Dispatcher {
     };
 
     if let AssignBehavior::Set = assign_behavior {
-      if std::mem::take(&mut self.fork_builtins) {
+      if Shed::meta(MetaTab::fork_builtins) {
         let child = tree.break_off(cmd_id);
         let Some(root) = child.get_root() else {
           unreachable!()
@@ -1828,7 +1824,6 @@ impl Dispatcher {
         if let Some(fd) = self.fork_close_fd {
           let _ = nix::unistd::close(fd);
         }
-        self.fork_builtins = false;
         let _guard = Shed::term_mut(|t| t.interactive_guard(false));
         f(self);
 
