@@ -206,8 +206,8 @@ fn sweep_inner(atoms: &[Atom], text: &[u8], mode: SweepMode, ci: bool) -> Option
    * https://swtch.com/~rsc/regexp/regexp1.html
    *
    * The algorithm works by flipping between two sets of booleans to map any possible pathway that
-   * matches the target string. There are two types of Atoms: Star, and One(_). One set (cur) is initialized
-   * by setting `set[0]` to true, and the other set (next) is filled with `false`.
+   * matches the target string. There are two types of Atoms: Star, and One(_). One of the two sets (cur)
+   * is initialized by setting `set[0]` to true, and the other set (next) is filled with `false`.
    *
    * For each byte, and then for each atom, if the corresponding boolean of the *previous set* is "true"
    * then that Atom is "active" and should try to match on the current byte. Star atoms remain active *permanently*
@@ -498,7 +498,6 @@ fn parse_class(p: &[u8]) -> Option<(bool, Vec<ClassItem>, usize)> {
         if after + 1 < n && p[after] == b'-' && p[after + 1] != b']' {
           // lo-hi range
           let (hi, after2) = member(after + 1)?;
-          let (lo, hi) = crate::util::ordered(lo, hi);
           items.push(ClassItem::Range(lo, hi));
           j = after2;
         } else {
