@@ -1,4 +1,4 @@
-use std::{iter::Peekable, str::Chars};
+use std::iter::Peekable;
 
 use bitflags::bitflags;
 use bstr::ByteSlice;
@@ -8,7 +8,7 @@ use crate::{
   procio::out_bytes,
   sherr,
   state::vars::VarStr,
-  util::{self, with_status},
+  util::{self, ByteCursor, SliceCursor, with_status},
 };
 
 bitflags! {
@@ -53,29 +53,26 @@ enum DynNum {
 pub struct PrintFormatter(Box<[Segment]>);
 
 impl PrintFormatter {
-  pub fn parse(fmt_str: &str) -> ShResult<Self> {
+  pub fn parse(fmt_str: &[u8]) -> ShResult<Self> {
     let mut segments = vec![];
-    let mut chars = fmt_str.chars().peekable();
+    let mut cur = SliceCursor::new(fmt_str);
     let mut literal = util::scratch_buf();
 
-    match_loop!(chars.next() => ch, {
-      '%' => {
+    match_loop!(cur.next_byte() => b, {
+      b'%' => {
         if !literal.is_empty() {
-          let lit: String = std::mem::take(&mut literal).into();
-          let expanded = expand::expand_ansi_c(lit.as_bytes());
-          segments.push(Segment::Literal(expanded));
+          segments.push(Segment::Literal(expand::expand_ansi_c(&literal)));
+          literal.clear();
         }
 
-        let spec = FmtSpec::parse(&mut chars);
+        let spec = FmtSpec::parse(&mut cur);
         segments.push(Segment::Spec(spec?));
       }
-      _ => literal.push(ch),
+      _ => literal.push(b),
     });
 
     if !literal.is_empty() {
-      let lit: String = std::mem::take(&mut literal).into();
-      let expanded = expand::expand_ansi_c(lit.as_bytes());
-      segments.push(Segment::Literal(expanded));
+      segments.push(Segment::Literal(expand::expand_ansi_c(&literal)));
     }
 
     Ok(Self(segments.into_boxed_slice()))
@@ -146,12 +143,12 @@ fn emit_printf_errors(errors: &[PrintfErr]) -> bool {
 }
 
 impl FmtSpec {
-  pub fn parse(chars: &mut Peekable<Chars>) -> ShResult<Self> {
+  pub fn parse(cur: &mut SliceCursor) -> ShResult<Self> {
     Ok(Self {
-      flags: Self::parse_flags(chars)?,
-      width: Self::parse_width(chars)?,
-      precision: Self::parse_precision(chars)?,
-      conversion: Self::parse_conversion(chars)?,
+      flags: Self::parse_flags(cur)?,
+      width: Self::parse_width(cur)?,
+      precision: Self::parse_precision(cur)?,
+      conversion: Self::parse_conversion(cur)?,
     })
   }
 
@@ -542,92 +539,92 @@ impl FmtSpec {
     Ok(String::from_utf8_lossy(&arg).parse::<i32>().unwrap_or(0))
   }
 
-  fn parse_flags(chars: &mut Peekable<Chars>) -> ShResult<PrintFlags> {
+  fn parse_flags(cur: &mut SliceCursor) -> ShResult<PrintFlags> {
     let mut flags = PrintFlags::empty();
-    match_loop!(chars.peek() => &ch => ch, {
-      '-' => { flags |= PrintFlags::JUST_LEFT; chars.next(); },
-      '+' => { flags |= PrintFlags::SHOW_SIGN; chars.next(); },
-      ' ' => { flags |= PrintFlags::SPACE_SIGN; chars.next(); },
-      '#' => { flags |= PrintFlags::ALT_FORM; chars.next(); },
-      '0' => { flags |= PrintFlags::ZERO_PAD; chars.next(); },
+    match_loop!(cur.peek_byte() => b, {
+      b'-' => { flags |= PrintFlags::JUST_LEFT; cur.bump(); },
+      b'+' => { flags |= PrintFlags::SHOW_SIGN; cur.bump(); },
+      b' ' => { flags |= PrintFlags::SPACE_SIGN; cur.bump(); },
+      b'#' => { flags |= PrintFlags::ALT_FORM; cur.bump(); },
+      b'0' => { flags |= PrintFlags::ZERO_PAD; cur.bump(); },
       _ => break,
     });
     Ok(flags)
   }
-  fn parse_width(chars: &mut Peekable<Chars>) -> ShResult<Option<DynNum>> {
-    match chars.peek() {
-      Some('*') => {
-        chars.next();
+  fn parse_width(cur: &mut SliceCursor) -> ShResult<Option<DynNum>> {
+    match cur.peek_byte() {
+      Some(b'*') => {
+        cur.bump();
         Ok(Some(DynNum::Star))
       }
-      Some('0'..='9') => {
-        let width = Self::parse_uint(chars)?;
+      Some(b'0'..=b'9') => {
+        let width = Self::parse_uint(cur)?;
         Ok(Some(DynNum::Number(width)))
       }
       _ => Ok(None),
     }
   }
-  fn parse_precision(chars: &mut Peekable<Chars>) -> ShResult<Option<DynNum>> {
-    if chars.peek() != Some(&'.') {
+  fn parse_precision(cur: &mut SliceCursor) -> ShResult<Option<DynNum>> {
+    if !cur.bump_if_eq(b'.') {
       return Ok(None);
     }
-    chars.next();
-    match chars.peek() {
-      Some('*') => {
-        chars.next();
+    match cur.peek_byte() {
+      Some(b'*') => {
+        cur.bump();
         Ok(Some(DynNum::Star))
       }
-      Some('0'..='9') => {
-        let precision = Self::parse_uint(chars)?;
+      Some(b'0'..=b'9') => {
+        let precision = Self::parse_uint(cur)?;
         Ok(Some(DynNum::Number(precision)))
       }
       _ => Ok(Some(DynNum::Number(0))),
     }
   }
-  fn parse_conversion(chars: &mut Peekable<Chars>) -> ShResult<Conversion> {
-    let Some(char) = chars.next() else {
+  fn parse_conversion(cur: &mut SliceCursor) -> ShResult<Conversion> {
+    let Some(b) = cur.next_byte() else {
       return Err(sherr!(ParseErr, "invalid conversion specification"));
     };
 
-    match char {
-      '%' => Ok(Conversion::Percent),
-      'd' | 'i' => Ok(Conversion::SignedDecimal),
-      'u' => Ok(Conversion::UnsignedDecimal),
-      'o' => Ok(Conversion::UnsignedOctal),
-      'x' => Ok(Conversion::UnsignedHex(Case::Lower)),
-      'X' => Ok(Conversion::UnsignedHex(Case::Upper)),
-      'f' => Ok(Conversion::FixedPointDecimal),
-      'e' => Ok(Conversion::Scientific(Case::Lower)),
-      'E' => Ok(Conversion::Scientific(Case::Upper)),
-      'g' => Ok(Conversion::ShortestFloat(Case::Lower)),
-      'G' => Ok(Conversion::ShortestFloat(Case::Upper)),
-      'c' => Ok(Conversion::Char),
-      's' => Ok(Conversion::Str),
-      'r' => Ok(Conversion::RepeatStr),
-      'b' => Ok(Conversion::AnsiC),
-      'q' => Ok(Conversion::ShellQuote),
-      '(' => {
+    match b {
+      b'%' => Ok(Conversion::Percent),
+      b'd' | b'i' => Ok(Conversion::SignedDecimal),
+      b'u' => Ok(Conversion::UnsignedDecimal),
+      b'o' => Ok(Conversion::UnsignedOctal),
+      b'x' => Ok(Conversion::UnsignedHex(Case::Lower)),
+      b'X' => Ok(Conversion::UnsignedHex(Case::Upper)),
+      b'f' => Ok(Conversion::FixedPointDecimal),
+      b'e' => Ok(Conversion::Scientific(Case::Lower)),
+      b'E' => Ok(Conversion::Scientific(Case::Upper)),
+      b'g' => Ok(Conversion::ShortestFloat(Case::Lower)),
+      b'G' => Ok(Conversion::ShortestFloat(Case::Upper)),
+      b'c' => Ok(Conversion::Char),
+      b's' => Ok(Conversion::Str),
+      b'r' => Ok(Conversion::RepeatStr),
+      b'b' => Ok(Conversion::AnsiC),
+      b'q' => Ok(Conversion::ShellQuote),
+      b'(' => {
         let mut strftime = util::scratch_buf();
-        match_loop!(chars.next() => ch, {
-          '\\' => {
-            let Some(escaped) = chars.next() else {
+        match_loop!(cur.next_byte() => b, {
+          b'\\' => {
+            let Some(escaped) = cur.next_byte() else {
               return Err(sherr!(ParseErr, "unterminated strftime format"))
             };
             strftime.push(escaped);
           }
-          ')' => break,
-          _ => strftime.push(ch),
+          b')' => break,
+          _ => strftime.push(b),
         });
 
         // The `T` after the closing paren is the actual conversion letter.
         // Without it, `%(...)T` was being parsed as `%(...)` followed by a
         // literal `T`, leaking the T into the output.
-        match chars.next() {
-          Some('T') => {}
+        match cur.next_byte() {
+          Some(b'T') => {}
           Some(other) => {
             return Err(sherr!(
               ParseErr,
-              "expected 'T' after strftime format, got '{other}'",
+              "expected 'T' after strftime format, got '{}'",
+              other as char,
             ));
           }
           None => {
@@ -638,22 +635,21 @@ impl FmtSpec {
           }
         }
 
-        Ok(Conversion::StrfTime(strftime.into()))
+        Ok(Conversion::StrfTime(strftime.as_slice().into()))
       }
       _ => Err(sherr!(ParseErr, "invalid conversion specification")),
     }
   }
 
-  fn parse_uint(chars: &mut Peekable<Chars>) -> ShResult<i32> {
-    let mut width_str = util::scratch_buf();
-
-    while let Some(c @ ('0'..='9')) = chars.peek() {
-      width_str.push(*c);
-      chars.next();
+  fn parse_uint(cur: &mut SliceCursor) -> ShResult<i32> {
+    let mut digits = util::scratch_buf();
+    while let Some(b) = cur.next_byte_if(|b| b.is_ascii_digit()) {
+      digits.push(b);
     }
-    let width = width_str
-      .parse::<usize>()
-      .map_err(|_| sherr!(ParseErr, "invalid width"))?;
+    let width = std::str::from_utf8(&digits)
+      .ok()
+      .and_then(|s| s.parse::<usize>().ok())
+      .ok_or_else(|| sherr!(ParseErr, "invalid width"))?;
 
     Ok(width as i32)
   }
@@ -813,7 +809,7 @@ impl super::Builtin for Printf {
     }
     let (format_str, _) = first;
 
-    let formatter = PrintFormatter::parse(&format_str.to_str_lossy())?;
+    let formatter = PrintFormatter::parse(format_str.as_bytes())?;
     let remaining: Vec<Vec<u8>> = arg_iter.map(|(s, _)| s.as_bytes().to_vec()).collect();
 
     let mut values = remaining.into_iter().peekable();

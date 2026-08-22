@@ -88,11 +88,11 @@ use opt::{Opt, OptSpec};
 
 macro_rules! register_builtins {
   ($($name:literal => $ty:expr),* $(,)?) => {
-    static BUILTIN_TABLE: &[(&str, &dyn Builtin)] = &[
+    static BUILTIN_TABLE: &[(&[u8], &dyn Builtin)] = &[
       $(($name, &$ty)),*
     ];
 
-    pub const BUILTIN_NAMES: &[&str] = &[
+    pub const BUILTIN_NAMES: &[&[u8]] = &[
       $($name),*
     ];
 
@@ -105,91 +105,91 @@ macro_rules! register_builtins {
 // if you're using vim, you can visual select the block and filter it through ''<,'>:!LC_ALL=C sort'
 // if you're not using vim, idk. you know the alphabet right?
 register_builtins! {
-  "."        => source::Source,
-  ":"        => Colon,
-  "["        => test::Test,
-  "[["       => test::Test,
-  "accept"   => sock::Accept,
-  "alias"    => alias::Alias,
-  "autocmd"  => autocmd::AutoCmdBuiltin,
-  "bg"       => jobctl::Bg,
-  "break"    => flowctl::Break,
-  "builtin"  => BuiltinBuiltin,
-  "cd"       => cd::Cd,
-  "command"  => CommandBuiltin,
-  "compadd"  => complete::Compadd,
-  "compgen"  => complete::CompGen,
-  "complete" => complete::Complete,
-  "continue" => flowctl::Continue,
-  "declare"  => varcmds::Declare,
-  "dirs"     => dirstack::Dirs,
-  "disown"   => jobctl::Disown,
-  "echo"     => echo::Echo,
-  "eval"     => evaluate::Eval,
-  "excmd"    => alias::ExCmd,
-  "exec"     => exec::Exec,
-  "exit"     => flowctl::Exit,
-  "export"   => varcmds::Export,
-  "false"    => False,
-  "fc"       => fixcmd::FixCmd,
-  "fg"       => jobctl::Fg,
-  "flog"     => flog::Flog,
-  "fpop"     => arrops::FrontPop,
-  "fpush"    => arrops::FrontPush,
-  "genrc"    => genrc::GenRc,
-  "getopts"  => getopts::GetOpts,
-  "hash"     => hash::Hash,
-  "help"     => help::Help,
-  "hist"     => hist::Hist,
-  "jobs"     => jobctl::Jobs,
-  "keymap"   => keymap::KeyMapBuiltin,
-  "kill"     => jobctl::Kill,
-  "let"      => Let,
-  "listen"   => sock::Listen,
-  "local"    => varcmds::Local,
-  "msg"      => msg::Msg,
-  "pop"      => arrops::Pop,
-  "popd"     => dirstack::PopDir,
-  "printf"   => printf::Printf,
-  "push"     => arrops::Push,
-  "pushd"    => dirstack::PushDir,
-  "pwd"      => pwd::Pwd,
-  "quote"    => quote::Quote,
-  "raise"    => flowctl::Raise,
-  "read"     => read::Read,
-  "readkey"  => read::ReadKey,
-  "readonly" => varcmds::Readonly,
-  "return"   => flowctl::Return,
-  "rotate"   => arrops::Rotate,
-  "scry"     => scry::Scry,
-  "seek"     => seek::Seek,
-  "set"      => set::Set,
-  "shift"    => shift::Shift,
-  "shopt"    => shopt::Shopt,
-  "sock"     => sock::Sock,
-  "source"   => source::Source,
-  "stash"    => stash::StashBuiltin,
-  "stat"     => stat::Stat,
-  "test"     => test::Test,
-  "thru"     => Thru,
-  "times"    => times::Times,
-  "trap"     => trap::Trap,
-  "true"     => True,
-  "type"     => intro::Type,
-  "typeset"  => varcmds::Declare,
-  "ulimit"   => resource::ULimit,
-  "umask"    => resource::UMask,
-  "unalias"  => alias::Unalias,
-  "unquote"  => quote::Unquote,
-  "unset"    => varcmds::Unset,
-  "vice"     => vice::Vice,
-  "wait"     => jobctl::Wait,
-  "width"    => width::Width,
-  "zd"       => cd::Zd,
+  b"."        => source::Source,
+  b":"        => Colon,
+  b"["        => test::Test,
+  b"[["       => test::Test,
+  b"accept"   => sock::Accept,
+  b"alias"    => alias::Alias,
+  b"autocmd"  => autocmd::AutoCmdBuiltin,
+  b"bg"       => jobctl::Bg,
+  b"break"    => flowctl::Break,
+  b"builtin"  => BuiltinBuiltin,
+  b"cd"       => cd::Cd,
+  b"command"  => CommandBuiltin,
+  b"compadd"  => complete::Compadd,
+  b"compgen"  => complete::CompGen,
+  b"complete" => complete::Complete,
+  b"continue" => flowctl::Continue,
+  b"declare"  => varcmds::Declare,
+  b"dirs"     => dirstack::Dirs,
+  b"disown"   => jobctl::Disown,
+  b"echo"     => echo::Echo,
+  b"eval"     => evaluate::Eval,
+  b"excmd"    => alias::ExCmd,
+  b"exec"     => exec::Exec,
+  b"exit"     => flowctl::Exit,
+  b"export"   => varcmds::Export,
+  b"false"    => False,
+  b"fc"       => fixcmd::FixCmd,
+  b"fg"       => jobctl::Fg,
+  b"flog"     => flog::Flog,
+  b"fpop"     => arrops::FrontPop,
+  b"fpush"    => arrops::FrontPush,
+  b"genrc"    => genrc::GenRc,
+  b"getopts"  => getopts::GetOpts,
+  b"hash"     => hash::Hash,
+  b"help"     => help::Help,
+  b"hist"     => hist::Hist,
+  b"jobs"     => jobctl::Jobs,
+  b"keymap"   => keymap::KeyMapBuiltin,
+  b"kill"     => jobctl::Kill,
+  b"let"      => Let,
+  b"listen"   => sock::Listen,
+  b"local"    => varcmds::Local,
+  b"msg"      => msg::Msg,
+  b"pop"      => arrops::Pop,
+  b"popd"     => dirstack::PopDir,
+  b"printf"   => printf::Printf,
+  b"push"     => arrops::Push,
+  b"pushd"    => dirstack::PushDir,
+  b"pwd"      => pwd::Pwd,
+  b"quote"    => quote::Quote,
+  b"raise"    => flowctl::Raise,
+  b"read"     => read::Read,
+  b"readkey"  => read::ReadKey,
+  b"readonly" => varcmds::Readonly,
+  b"return"   => flowctl::Return,
+  b"rotate"   => arrops::Rotate,
+  b"scry"     => scry::Scry,
+  b"seek"     => seek::Seek,
+  b"set"      => set::Set,
+  b"shift"    => shift::Shift,
+  b"shopt"    => shopt::Shopt,
+  b"sock"     => sock::Sock,
+  b"source"   => source::Source,
+  b"stash"    => stash::StashBuiltin,
+  b"stat"     => stat::Stat,
+  b"test"     => test::Test,
+  b"thru"     => Thru,
+  b"times"    => times::Times,
+  b"trap"     => trap::Trap,
+  b"true"     => True,
+  b"type"     => intro::Type,
+  b"typeset"  => varcmds::Declare,
+  b"ulimit"   => resource::ULimit,
+  b"umask"    => resource::UMask,
+  b"unalias"  => alias::Unalias,
+  b"unquote"  => quote::Unquote,
+  b"unset"    => varcmds::Unset,
+  b"vice"     => vice::Vice,
+  b"wait"     => jobctl::Wait,
+  b"width"    => width::Width,
+  b"zd"       => cd::Zd,
 }
 
 /// Lookup a name in the builtin table via binary search
-pub(super) fn lookup_builtin(name: &str) -> Option<&'static dyn Builtin> {
+pub(super) fn lookup_builtin(name: &[u8]) -> Option<&'static dyn Builtin> {
   BUILTIN_TABLE
     .binary_search_by_key(&name, |(n, _)| n)
     .ok()
@@ -303,7 +303,7 @@ pub(super) trait Builtin: Sync {
     dispatcher: &mut Dispatcher,
   ) -> ShResult<()> {
     let node = &tree[node_id];
-    let cmd_raw = node.get_command().unwrap().to_string();
+    let cmd_raw = node.get_command().unwrap().as_bytes();
     let context = node.context.clone();
     let NdRule::Command { assignments, argv } = &node.class else {
       unreachable!()
@@ -321,11 +321,11 @@ pub(super) trait Builtin: Sync {
     Dispatcher::set_assignments(tree, assignments, assign_behavior)?;
     let fork_builtins = node.flags.contains(NdFlags::FORK_BUILTINS);
 
-    if !self.no_help() && argv.len() == 2 && argv[1].as_str() == "--help" {
+    if !self.no_help() && argv.len() == 2 && argv[1].as_bytes() == b"--help" {
       // we have been asked for help
       // is this a hack? only the nose knows.
       return exec_nonint(
-        varstr!("help builtin-{cmd_raw}"),
+        [b"help builtin-", cmd_raw].concat().into(),
         Some("<builtin-help>".into()),
       );
     }
@@ -353,7 +353,7 @@ pub(super) trait Builtin: Sync {
       };
       let child = ChildProc::new(
         Pid::this(),
-        Some(&cmd_raw),
+        Some(cmd_raw),
         fork_builtins.then_some(child_pgid),
         timer,
       );
@@ -361,7 +361,7 @@ pub(super) trait Builtin: Sync {
     }
 
     // Handle exec specially - persist redirections before dispatch
-    if cmd_raw.as_str() == "exec"
+    if cmd_raw == b"exec"
       && let Some(guard) = guard
     {
       guard.persist();
@@ -579,7 +579,7 @@ impl Builtin for Let {
     }
     let mut last = 0i64;
     for (expr, _) in args.arguments() {
-      let result = expand::expand_arithmetic(&expr.to_str_lossy())?;
+      let result = expand::expand_arithmetic(expr.as_bytes())?;
       last = result.to_str_lossy().trim().parse::<i64>().unwrap_or(0);
     }
     with_status(i32::from(last == 0))
@@ -609,10 +609,10 @@ impl Builtin for Thru {
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new("count").short('c').long("count"),
-      OptSpec::new("append").short('a').long("append"),
-      OptSpec::new("tee").short('t').long("tee").argc(1),
-      OptSpec::new("limit").short('L').long("limit").argc(1),
+      OptSpec::new("count").short(b'c').long("count"),
+      OptSpec::new("append").short(b'a').long("append"),
+      OptSpec::new("tee").short(b't').long("tee").argc(1),
+      OptSpec::new("limit").short(b'L').long("limit").argc(1),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
@@ -751,7 +751,7 @@ impl Builtin for BuiltinBuiltin {
     }
 
     let cmd = inner_argv.first().map(Tk::word).unwrap_or_default();
-    let Some(builtin) = lookup_builtin(&cmd.to_str_lossy()) else {
+    let Some(builtin) = lookup_builtin(cmd.as_bytes()) else {
       sherr!(NotFound @ span, "builtin not found: {cmd}").print_error();
       return with_status(127);
     };
@@ -924,7 +924,7 @@ impl CommandBuiltin {
           UtilKind::Function | UtilKind::Builtin => outln!("{name_str}"),
           UtilKind::Command(p) | UtilKind::File(p) => outln!("{}", p.display()),
         },
-        None if KEYWORDS.contains(&name_str.as_ref()) => outln!("{name_str}"),
+        None if KEYWORDS.contains(&name_str.as_bytes()) => outln!("{name_str}"),
         None => return with_status(127),
       }
 
@@ -953,7 +953,7 @@ impl CommandBuiltin {
             outln!("{name_str} is {}", p.display());
           }
         },
-        None if KEYWORDS.contains(&name_str.as_ref()) => outln!("{name_str} is a shell keyword"),
+        None if KEYWORDS.contains(&name_str.as_bytes()) => outln!("{name_str} is a shell keyword"),
         None => {
           errln!("command: {name_str}: not found");
           return with_status(127);

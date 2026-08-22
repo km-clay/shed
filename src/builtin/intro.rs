@@ -17,8 +17,8 @@ pub(super) struct Type;
 impl super::Builtin for Type {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("short", 's'),
-      OptSpec::new_short("terse", 't'),
+      OptSpec::new_short("short", b's'),
+      OptSpec::new_short("terse", b't'),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -35,7 +35,7 @@ impl super::Builtin for Type {
             UtilKind::Builtin => Some("builtin"),
             UtilKind::Command(_) | UtilKind::File(_) => Some("file"),
           }
-        } else if KEYWORDS.contains(&arg.to_str_lossy().as_ref()) {
+        } else if KEYWORDS.contains(&arg.as_bytes()) {
           Some("keyword")
         } else {
           None
@@ -111,7 +111,7 @@ impl super::Builtin for Type {
             }
           }
         }
-      } else if KEYWORDS.contains(&arg.to_str_lossy().as_ref()) {
+      } else if KEYWORDS.contains(&arg.as_bytes()) {
         if short {
           outln!("keyword");
         } else {

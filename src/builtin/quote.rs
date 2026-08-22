@@ -23,7 +23,7 @@ fn join_bytes(parts: &[Vec<u8>], sep: &[u8]) -> Vec<u8> {
 pub(super) struct Quote;
 impl super::Builtin for Quote {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![opt!("var" | 'v', 1)]
+    vec![opt!("var" | b'v', 1)]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     if let Some(stdin) = self.get_input(&mut args) {
@@ -94,10 +94,10 @@ pub(super) struct Unquote;
 impl super::Builtin for Unquote {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("null", '0'),
-      opt!("array" | 'a', 1),
-      opt!("var" | 'v', 1),
-      opt!("sep" | 's', 1),
+      OptSpec::new_short("null", b'0'),
+      opt!("array" | b'a', 1),
+      opt!("var" | b'v', 1),
+      opt!("sep" | b's', 1),
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {

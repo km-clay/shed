@@ -1,5 +1,6 @@
 use crate::{HashSet, expand, state::vars::VarStr, varstr};
 use std::{
+  borrow::Cow,
   fmt::{Debug, Display},
   os::unix::fs::PermissionsExt,
   path::{Path, PathBuf},
@@ -7,6 +8,7 @@ use std::{
 };
 
 use bitflags::bitflags;
+use bstr::ByteSlice;
 use nix::sys::signal::Signal;
 
 mod fuzzy;
@@ -125,12 +127,12 @@ impl CompStrat {
       if after_redirect {
         return (
           Self::Files {
-            path: tok.span().as_str().to_string(),
+            path: tok.span().to_str_lossy().to_string(),
           },
           tok.span().clone(),
           tok
             .relative_cursor_pos(cursor_pos)
-            .unwrap_or(tok.span().as_str().len()),
+            .unwrap_or(tok.span().to_str_lossy().len()),
         );
       }
     }
@@ -180,8 +182,9 @@ impl CompStrat {
   /// `$VAR`/`~` in the user's literal text) or wholesale-replace (for glob
   /// patterns where the literal text doesn't appear in the match).
   fn from_leaf(leaf: &CtxTk, cursor_pos: usize) -> (Self, Span, usize) {
-    let prefix = leaf.prefix_from(cursor_pos).unwrap_or_default().to_string();
-    let whole = leaf.span().as_str();
+    let prefix =
+      String::from_utf8_lossy(leaf.prefix_from(cursor_pos).unwrap_or_default()).into_owned();
+    let whole = leaf.span().to_str_lossy();
     let cursor_pos = leaf.relative_cursor_pos(cursor_pos);
     let strat = match leaf.class() {
       CtxTkRule::ValidCommand(kind) => match kind {
@@ -356,6 +359,17 @@ impl From<String> for Candidate {
   fn from(value: String) -> Self {
     Self {
       content: value,
+      weight: 0,
+      desc: None,
+      id: None,
+    }
+  }
+}
+
+impl From<Cow<'_, str>> for Candidate {
+  fn from(value: Cow<'_, str>) -> Self {
+    Self {
+      content: value.into_owned(),
       weight: 0,
       desc: None,
       id: None,
@@ -640,7 +654,7 @@ pub(crate) fn complete_vars_raw(raw: &str) -> Vec<Candidate> {
 fn complete_builtins(start: &str) -> Vec<Candidate> {
   BUILTIN_NAMES
     .iter()
-    .map(Candidate::from)
+    .map(|n| Candidate::from(n.to_str_lossy()))
     .filter(|b| b.is_match(start))
     .collect()
 }
@@ -676,7 +690,7 @@ fn command_utils() -> Vec<Utility> {
 }
 
 fn complete_commands(start: &str, cursor_pos: usize) -> Vec<Candidate> {
-  if has_unescaped(start, "/") {
+  if has_unescaped(start.as_bytes(), b"/") {
     return complete_path(start, cursor_pos)
       .into_iter()
       .filter(|c| {
@@ -713,7 +727,7 @@ fn complete_dirs(start: &str, cursor_pos: usize) -> Vec<Candidate> {
 }
 
 fn unescape_for_completion(raw: &str) -> String {
-  let unescaped = unescape_str(raw);
+  let unescaped = unescape_str(raw.as_bytes());
   expand_raw_inner(&mut unescaped.cursor(), false, false).map_or_else(
     |_| raw.to_string(),
     |s| String::from_utf8_lossy(&s.into_bytes()).into_owned(),
@@ -790,7 +804,7 @@ where
 /// splicing.
 fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
   let (prefix, postfix) = path.split_at_checked(cursor_pos).unwrap_or((path, ""));
-  let prefix = if ends_with_unescaped(prefix, "\\") {
+  let prefix = if ends_with_unescaped(prefix.as_bytes(), b"\\") {
     &prefix[..prefix.len() - 1]
   } else {
     prefix
@@ -1042,7 +1056,7 @@ impl CompSpec for BashCompSpec {
   fn complete(&self, ctx: &CompContext) -> ShResult<Vec<Candidate>> {
     let prefix = &ctx.words[ctx.cword];
 
-    let unescaped = unescape_str(prefix.as_str());
+    let unescaped = unescape_str(prefix.as_bytes());
     let expanded = expand_raw_inner(&mut unescaped.cursor(), false, false)?;
     let stripped = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
 
@@ -1407,9 +1421,9 @@ impl SimpleCompleter {
       self.candidates = std::mem::take(&mut self.candidates)
         .into_iter()
         .map(|c| {
-          if !ends_with_unescaped(&c, "/") 		// directory
-					&& !ends_with_unescaped(&c, "=") 		// '='-type arg
-					&& !ends_with_unescaped(&c, " ")
+          if !ends_with_unescaped(c.as_bytes(), b"/") 		// directory
+					&& !ends_with_unescaped(c.as_bytes(), b"=") 		// '='-type arg
+					&& !ends_with_unescaped(c.as_bytes(), b" ")
           {
             // already has a space
             Candidate::from(format!("{c} "))
@@ -1519,7 +1533,7 @@ impl SimpleCompleter {
 
     let mut words = relevant
       .iter()
-      .map(|s| s.span().as_str().to_string())
+      .map(|s| s.span().to_str_lossy().to_string())
       .collect::<Vec<_>>();
 
     let cword = if let Some(pos) = relevant

@@ -177,7 +177,7 @@ fn eval_binary(
   match op {
     BinaryOp::StringEq => {
       if extended {
-        let pattern = Shed::meta_mut(|m| m.get_glob(&rhs.0.to_str_lossy()));
+        let pattern = Shed::meta_mut(|m| m.get_glob(rhs.0.as_bytes()));
         Ok(pattern.is_match(lhs.0.as_bytes()))
       } else {
         Ok(lhs.0 == rhs.0)
@@ -185,7 +185,7 @@ fn eval_binary(
     }
     BinaryOp::StringNeq => {
       if extended {
-        let pattern = Shed::meta_mut(|m| m.get_glob(&rhs.0.to_str_lossy()));
+        let pattern = Shed::meta_mut(|m| m.get_glob(rhs.0.as_bytes()));
         Ok(!pattern.is_match(lhs.0.as_bytes()))
       } else {
         Ok(lhs.0 != rhs.0)
@@ -412,10 +412,10 @@ impl super::Builtin for Test {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     let cmd_span = args.cmd_span();
-    let cmd = cmd_span.as_str();
-    let extended = cmd == "[[";
+    let cmd = cmd_span.as_bytes();
+    let extended = cmd == b"[[";
     let (mut arg_vec, _) = args.take_argv();
-    if (cmd == "[" || cmd == "[[") && !arg_vec.is_empty() {
+    if (cmd == b"[" || cmd == b"[[") && !arg_vec.is_empty() {
       arg_vec.pop();
     }
 

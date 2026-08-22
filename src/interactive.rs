@@ -6,7 +6,6 @@ use std::{
   collections::VecDeque,
   os::fd::{AsRawFd, BorrowedFd},
   path::Path,
-  rc::Rc,
   sync::{
     OnceLock,
     atomic::{AtomicUsize, Ordering},
@@ -25,7 +24,8 @@ use smallvec::SmallVec;
 use crate::{
   exec_term,
   signal::FOCUS_GAINED,
-  state::{logic::AutoCmdKind, terminal::CursorCtl, util::with_vars},
+  state::{logic::AutoCmdKind, terminal::CursorCtl, util::with_vars, vars::VarStr},
+  varstr,
 };
 
 use super::{
@@ -54,9 +54,9 @@ thread_local! {
 }
 
 /// Return a string that identifies the command being submitted
-fn get_repl_entry_name() -> Rc<str> {
+fn get_repl_entry_name() -> VarStr {
   let id = REPL_ENTRIES.with(|c| c.fetch_add(1, Ordering::SeqCst));
-  format!("repl_entry #{id}").into()
+  varstr!("repl_entry #{id}")
 }
 
 /// If the parent process has changed since we started, return true.
@@ -631,7 +631,7 @@ pub(crate) enum Redraw {
 pub(crate) fn run_prompt_command(
   input: String,
   clear_prompt: Option<Redraw>,
-  source: Option<Rc<str>>,
+  source: Option<VarStr>,
 ) -> ShResult<LoopAction> {
   exec_term!(TermCtl::Osc(ExecStart)).ok();
 

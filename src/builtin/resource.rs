@@ -97,11 +97,11 @@ pub(super) struct ULimit;
 impl super::Builtin for ULimit {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("fds", 'n').argc(1),
-      OptSpec::new_short("procs", 'u').argc(1),
-      OptSpec::new_short("stack", 's').argc(1),
-      OptSpec::new_short("core", 'c').argc(1),
-      OptSpec::new_short("vmem", 'v').argc(1),
+      OptSpec::new_short("fds", b'n').argc(1),
+      OptSpec::new_short("procs", b'u').argc(1),
+      OptSpec::new_short("stack", b's').argc(1),
+      OptSpec::new_short("core", b'c').argc(1),
+      OptSpec::new_short("vmem", b'v').argc(1),
     ]
   }
   fn strict_opts(&self) -> bool {
@@ -297,7 +297,7 @@ fn format_symbolic(bits: stat::mode_t) -> String {
 pub(super) struct UMask;
 impl super::Builtin for UMask {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::new_short("symbolic", 'S')]
+    vec![OptSpec::new_short("symbolic", b'S')]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();

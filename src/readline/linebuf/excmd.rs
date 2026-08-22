@@ -2,7 +2,6 @@ use std::{
   fs::OpenOptions,
   io::Write,
   path::PathBuf,
-  rc::Rc,
   sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -27,6 +26,7 @@ use super::{
 };
 use crate::{
   HashSet, sherr,
+  state::vars::VarStr,
   util::{format_size, var_ctx_guard},
   varstr,
 };
@@ -40,7 +40,7 @@ fn get_entry_id() -> usize {
   EX_MODE_ENTRIES.with(|counter| counter.fetch_add(1, Ordering::SeqCst))
 }
 
-fn get_entry_name() -> Rc<str> {
+fn get_entry_name() -> VarStr {
   let id = get_entry_id();
   format!("ex_entry #{id}").into()
 }
@@ -590,7 +590,7 @@ impl super::LineBuf {
         return Ok(());
       }
       WriteDest::Cmd(cmd) => {
-        let buf = self.to_string();
+        let buf: VarStr = self.to_string().into();
         let spec = RedirSpec::Buffer {
           fd: STDIN_FILENO,
           buf,
@@ -633,7 +633,7 @@ impl super::LineBuf {
       ReadSrc::Cmd(cmd) => {
         autocmd!(PreCmd);
         defer!(autocmd!(PostCmd));
-        match capture_command(&cmd.to_str_lossy(), None, Some(&get_entry_name())) {
+        match capture_command(cmd.as_bytes(), None, Some(&get_entry_name())) {
           Ok(out) => out,
           Err(e) => {
             e.print_error();
@@ -697,9 +697,9 @@ impl super::LineBuf {
     vars.insert("ANCHOR".into());
     let _guard = var_ctx_guard(vars);
 
-    let mut buf: crate::state::vars::VarStr = self.to_string().into();
+    let mut buf: VarStr = self.to_string().into();
     let cursor_raw = self.cursor_to_flat();
-    let mut cursor: crate::state::vars::VarStr = cursor_raw.to_string().into();
+    let mut cursor: VarStr = cursor_raw.to_string().into();
     let mut anchor = self.anchor_to_flat();
 
     Shed::vars_mut(|v| -> ShResult<()> {
@@ -720,8 +720,8 @@ impl super::LineBuf {
       defer!(autocmd!(PostCmd));
       let _guard = Shed::term_mut(|t| t.yield_terminal(false));
       Some(capture_command(
-        sh_cmd,
-        Some(stdin),
+        sh_cmd.as_bytes(),
+        Some(stdin.as_bytes()),
         Some(&get_entry_name()),
       )?)
     } else {

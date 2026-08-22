@@ -25,8 +25,8 @@ impl super::Builtin for Trap {
 
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("list", 'l'),
-      OptSpec::new_short("print", 'p'),
+      OptSpec::new_short("list", b'l'),
+      OptSpec::new_short("print", b'p'),
     ]
   }
 

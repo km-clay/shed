@@ -1,6 +1,11 @@
 use std::{cell::Cell, str::FromStr};
 
-use crate::{state::vars::VarStr, util};
+use bstr::ByteSlice;
+
+use crate::{
+  state::vars::VarStr,
+  util::{self, ByteCursor},
+};
 
 use super::{
   ShErr, ShResult,
@@ -142,17 +147,27 @@ impl StackVal {
 /// Digit value for a `base#digits` radix literal (bash rules): 0-9 → 0-9;
 /// for base <= 36 letters are case-insensitive 10-35; for base > 36, `a-z` →
 /// 10-35, `A-Z` → 36-61, `@` → 62, `_` → 63. Returns `None` if out of range.
-fn radix_digit_value(c: char, base: u32) -> Option<u32> {
+fn radix_digit_value(c: u8, base: u32) -> Option<u32> {
   let v = match c {
-    '0'..='9' => c as u32 - '0' as u32,
-    'a'..='z' => c as u32 - 'a' as u32 + 10,
-    'A'..='Z' if base <= 36 => c as u32 - 'A' as u32 + 10,
-    'A'..='Z' => c as u32 - 'A' as u32 + 36,
-    '@' => 62,
-    '_' => 63,
+    b'0'..=b'9' => u32::from(c - b'0'),
+    b'a'..=b'z' => u32::from(c - b'a') + 10,
+    b'A'..=b'Z' if base <= 36 => u32::from(c - b'A') + 10,
+    b'A'..=b'Z' => u32::from(c - b'A') + 36,
+    b'@' => 62,
+    b'_' => 63,
     _ => return None,
   };
   (v < base).then_some(v)
+}
+
+/// Parse an ASCII byte buffer as a base-10 `i64` (arithmetic literals are ASCII).
+fn parse_decimal(bytes: &[u8]) -> Option<i64> {
+  std::str::from_utf8(bytes).ok()?.parse().ok()
+}
+
+/// Parse an ASCII byte buffer as an `i64` in the given radix.
+fn parse_radix(bytes: &[u8], radix: u32) -> Option<i64> {
+  i64::from_str_radix(std::str::from_utf8(bytes).ok()?, radix).ok()
 }
 
 /// Depth limit for recursive arithmetic variable resolution.
@@ -178,12 +193,11 @@ impl Drop for DepthGuard {
 /// references are cut off by [`MAX_ARITH_DEPTH`].
 fn resolve_var_num(name: &str) -> ShResult<i64> {
   let val = try_var!(name).unwrap_or_default();
-  let val = val.to_str_lossy();
   let trimmed = val.trim();
   if trimmed.is_empty() {
     return Ok(0);
   }
-  if let Ok(n) = trimmed.parse::<i64>() {
+  if let Some(n) = util::parse_bytes::<i64>(trimmed) {
     return Ok(n);
   }
   if ARITH_DEPTH.with(Cell::get) >= MAX_ARITH_DEPTH {
@@ -201,83 +215,369 @@ fn resolve_var_num(name: &str) -> ShResult<i64> {
     .map_err(|_| sherr!(ParseErr, "Variable '{name}' does not contain an integer"))
 }
 
+/// Evaluate a binary/assignment operator against the RPN value stack.
+#[inline(never)]
+fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
+  macro_rules! pop_num {
+    () => {
+      stack
+        .pop()
+        .ok_or_else(|| sherr!(ParseErr, "Missing operand in arithmetic expression"))?
+        .to_num()?
+    };
+  }
+
+  macro_rules! pop_var {
+    () => {
+      match stack
+        .pop()
+        .ok_or_else(|| sherr!(ParseErr, "Missing operand in arithmetic expression"))?
+      {
+        StackVal::Var(name) => name,
+        StackVal::Num(_) => return Err(sherr!(ParseErr, "Assignment target must be a variable")),
+      }
+    };
+  }
+
+  match op {
+    // Assignment ops
+    // LHS must be a Var
+    ArithOp::Assign => {
+      let rhs = pop_num!();
+      let lhs = pop_var!();
+      Shed::vars_mut(|v| {
+        v.set_var(
+          &lhs,
+          VarKind::string(rhs.to_string().into()),
+          VarFlags::empty(),
+        )
+      })
+      .unwrap();
+      stack.push(StackVal::Num(rhs));
+    }
+    ArithOp::PlusAssign => {
+      let rhs = pop_num!();
+      let lhs = pop_var!();
+      let new_val = read_var_as_i64(&lhs)? + rhs;
+      Shed::vars_mut(|v| {
+        v.set_var(
+          &lhs,
+          VarKind::string(new_val.to_string().into()),
+          VarFlags::empty(),
+        )
+      })
+      .unwrap();
+      stack.push(StackVal::Num(new_val));
+    }
+    ArithOp::MinusAssign => {
+      let rhs = pop_num!();
+      let lhs = pop_var!();
+      let new_val = read_var_as_i64(&lhs)? - rhs;
+      Shed::vars_mut(|v| {
+        v.set_var(
+          &lhs,
+          VarKind::string(new_val.to_string().into()),
+          VarFlags::empty(),
+        )
+      })
+      .unwrap();
+      stack.push(StackVal::Num(new_val));
+    }
+    ArithOp::MulAssign => {
+      let rhs = pop_num!();
+      let lhs = pop_var!();
+      let new_val = read_var_as_i64(&lhs)? * rhs;
+      Shed::vars_mut(|v| {
+        v.set_var(
+          &lhs,
+          VarKind::string(new_val.to_string().into()),
+          VarFlags::empty(),
+        )
+      })
+      .unwrap();
+      stack.push(StackVal::Num(new_val));
+    }
+    ArithOp::DivAssign => {
+      let rhs = pop_num!();
+      if rhs == 0 {
+        return Err(sherr!(InternalErr, "Division by zero"));
+      }
+      let lhs = pop_var!();
+      let new_val = read_var_as_i64(&lhs)? / rhs;
+      Shed::vars_mut(|v| {
+        v.set_var(
+          &lhs,
+          VarKind::string(new_val.to_string().into()),
+          VarFlags::empty(),
+        )
+      })
+      .unwrap();
+      stack.push(StackVal::Num(new_val));
+    }
+    ArithOp::ModAssign => {
+      let rhs = pop_num!();
+      if rhs == 0 {
+        return Err(sherr!(InternalErr, "Modulo by zero"));
+      }
+      let lhs = pop_var!();
+      let new_val = read_var_as_i64(&lhs)? % rhs;
+      Shed::vars_mut(|v| {
+        v.set_var(
+          &lhs,
+          VarKind::string(new_val.to_string().into()),
+          VarFlags::empty(),
+        )
+      })
+      .unwrap();
+      stack.push(StackVal::Num(new_val));
+    }
+
+    // Binary math
+    ArithOp::Add => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(lhs + rhs));
+    }
+    ArithOp::Sub => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(lhs - rhs));
+    }
+    ArithOp::Mul => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(lhs * rhs));
+    }
+    ArithOp::Div => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      if rhs == 0 {
+        return Err(sherr!(InternalErr, "Division by zero"));
+      }
+      stack.push(StackVal::Num(lhs / rhs));
+    }
+    ArithOp::Pow => {
+      let exp = pop_num!();
+      let base = pop_num!();
+      if exp < 0 {
+        return Err(sherr!(InternalErr, "exponent less than 0"));
+      }
+      stack.push(StackVal::Num(base.wrapping_pow(exp as u32)));
+    }
+    ArithOp::Mod => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      if rhs == 0 {
+        return Err(sherr!(InternalErr, "Modulo by zero"));
+      }
+      stack.push(StackVal::Num(lhs % rhs));
+    }
+
+    // Comparison (result is 1 or 0)
+    ArithOp::Lt => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(i64::from(lhs < rhs)));
+    }
+    ArithOp::Gt => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(i64::from(lhs > rhs)));
+    }
+    ArithOp::Le => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(i64::from(lhs <= rhs)));
+    }
+    ArithOp::Ge => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(i64::from(lhs >= rhs)));
+    }
+    ArithOp::Eq => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(i64::from(lhs == rhs)));
+    }
+    ArithOp::Ne => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(i64::from(lhs != rhs)));
+    }
+
+    // && and || are decomposed into JIFZ_PEEK/JIFNZ_PEEK + Pop + Nez at
+    // to_rpn time (see the ArithTk::Op handler). They never reach eval.
+    ArithOp::And | ArithOp::Or => {
+      return Err(sherr!(
+        ParseErr,
+        "Internal: && / || should have been decomposed before eval"
+      ));
+    }
+
+    // Bitwise
+    ArithOp::BitAnd => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(lhs & rhs));
+    }
+    ArithOp::BitOr => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(lhs | rhs));
+    }
+    ArithOp::BitXor => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(lhs ^ rhs));
+    }
+    ArithOp::ShiftL => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(lhs.wrapping_shl(rhs as u32)));
+    }
+    ArithOp::ShiftR => {
+      let rhs = pop_num!();
+      let lhs = pop_num!();
+      stack.push(StackVal::Num(lhs.wrapping_shr(rhs as u32)));
+    }
+
+    // Bitwise/shift compound assignment
+    ArithOp::BitAndAssign => {
+      let rhs = pop_num!();
+      let lhs = pop_var!();
+      let new_val = read_var_as_i64(&lhs)? & rhs;
+      Shed::vars_mut(|v| {
+        v.set_var(
+          &lhs,
+          VarKind::string(new_val.to_string().into()),
+          VarFlags::empty(),
+        )
+      })
+      .unwrap();
+      stack.push(StackVal::Num(new_val));
+    }
+    ArithOp::BitOrAssign => {
+      let rhs = pop_num!();
+      let lhs = pop_var!();
+      let new_val = read_var_as_i64(&lhs)? | rhs;
+      Shed::vars_mut(|v| {
+        v.set_var(
+          &lhs,
+          VarKind::string(new_val.to_string().into()),
+          VarFlags::empty(),
+        )
+      })
+      .unwrap();
+      stack.push(StackVal::Num(new_val));
+    }
+    ArithOp::BitXorAssign => {
+      let rhs = pop_num!();
+      let lhs = pop_var!();
+      let new_val = read_var_as_i64(&lhs)? ^ rhs;
+      Shed::vars_mut(|v| {
+        v.set_var(
+          &lhs,
+          VarKind::string(new_val.to_string().into()),
+          VarFlags::empty(),
+        )
+      })
+      .unwrap();
+      stack.push(StackVal::Num(new_val));
+    }
+    ArithOp::ShiftLAssign => {
+      let rhs = pop_num!();
+      let lhs = pop_var!();
+      let new_val = read_var_as_i64(&lhs)?.wrapping_shl(rhs as u32);
+      Shed::vars_mut(|v| v.set_var(&lhs, VarKind::Int(new_val as i32), VarFlags::empty())).unwrap();
+      stack.push(StackVal::Num(new_val));
+    }
+    ArithOp::ShiftRAssign => {
+      let rhs = pop_num!();
+      let lhs = pop_var!();
+      let new_val = read_var_as_i64(&lhs)?.wrapping_shr(rhs as u32);
+      Shed::vars_mut(|v| v.set_var(&lhs, VarKind::Int(new_val as i32), VarFlags::empty())).unwrap();
+      stack.push(StackVal::Num(new_val));
+    }
+  }
+  Ok(())
+}
+
 fn read_var_as_i64(name: &str) -> ShResult<i64> {
   resolve_var_num(name)
 }
 
 impl ArithTk {
   #[expect(clippy::too_many_lines)]
-  pub fn tokenize(raw: &str) -> ShResult<Vec<Self>> {
+  pub fn tokenize(raw: &[u8]) -> ShResult<Vec<Self>> {
     let mut tokens = Vec::new();
-    let mut chars = raw.chars().peekable();
+    let mut cur = util::SliceCursor::new(raw);
     // Track whether the last emitted token was an operand, to distinguish
     // unary minus from binary subtraction.
     let mut last_was_operand = false;
 
-    match_loop!(chars.peek() => &ch => ch, {
-      ' ' | '\t' => { chars.next(); }
+    match_loop!(cur.peek_byte() => b, {
+      b' ' | b'\t' => { cur.next_byte(); }
 
-      '0'..='9' => {
+      b'0'..=b'9' => {
         let mut num = util::scratch_buf();
-        let first = chars.next().unwrap();
+        let first = cur.next_byte().unwrap();
         num.push(first);
 
         // Hex (0x... / 0X...) or octal (0NNN); otherwise decimal.
-        let parsed: i64 = if first == '0' && matches!(chars.peek(), Some('x' | 'X')) {
-          chars.next(); // consume x/X
+        let parsed: i64 = if first == b'0' && matches!(cur.peek_byte(), Some(b'x' | b'X')) {
+          cur.next_byte(); // consume x/X
           let mut hex = util::scratch_buf();
-          while let Some(&d) = chars.peek() {
+          while let Some(d) = cur.peek_byte() {
             if d.is_ascii_hexdigit() {
               hex.push(d);
-              chars.next();
+              cur.next_byte();
             } else {
               break;
             }
           }
           if hex.is_empty() {
-            return Err(sherr!(ParseErr, "Invalid hex literal '0{}'", first));
+            return Err(sherr!(ParseErr, "Invalid hex literal '0{}'", first as char));
           }
-          i64::from_str_radix(&hex, 16).map_err(|_| sherr!(
-            ParseErr, "Invalid hex literal: '0x{}'", hex,
+          parse_radix(&hex, 16).ok_or_else(|| sherr!(
+            ParseErr, "Invalid hex literal: '0x{}'", hex.as_bstr(),
           ))?
-        } else if first == '0' && chars.peek().is_some_and(char::is_ascii_digit) {
+        } else if first == b'0' && cur.peek_byte().is_some_and(|d| d.is_ascii_digit()) {
           // Octal, collect remaining octal digits.
           let mut oct = util::scratch_buf();
-          while let Some(&d) = chars.peek() {
-            if matches!(d, '0'..='7') {
+          while let Some(d) = cur.peek_byte() {
+            if matches!(d, b'0'..=b'7') {
               oct.push(d);
-              chars.next();
+              cur.next_byte();
             } else if d.is_ascii_digit() {
-              return Err(sherr!(ParseErr, "Invalid digit '{}' in octal literal", d));
+              return Err(sherr!(ParseErr, "Invalid digit '{}' in octal literal", d as char));
             } else {
               break;
             }
           }
-          i64::from_str_radix(&oct, 8).map_err(|_| sherr!(
-            ParseErr, "Invalid octal literal: '0{}'", oct,
+          parse_radix(&oct, 8).ok_or_else(|| sherr!(
+            ParseErr, "Invalid octal literal: '0{}'", oct.as_bstr(),
           ))?
         } else {
-          while let Some(&d) = chars.peek() {
+          while let Some(d) = cur.peek_byte() {
             if d.is_ascii_digit() {
               num.push(d);
-              chars.next();
+              cur.next_byte();
             } else {
               break;
             }
           }
           // `base#digits` radix literal (bash), base 2..=64.
-          if chars.peek() == Some(&'#') {
-            chars.next(); // consume '#'
-            let base: u32 = num
-              .parse()
-              .ok()
+          if cur.peek_byte() == Some(b'#') {
+            cur.next_byte(); // consume '#'
+            let base: u32 = parse_decimal(&num)
+              .and_then(|n| u32::try_from(n).ok())
               .filter(|b| (2..=64).contains(b))
-              .ok_or_else(|| sherr!(ParseErr, "Invalid arithmetic base '{num}' (must be 2..64)"))?;
+              .ok_or_else(|| sherr!(ParseErr, "Invalid arithmetic base '{}' (must be 2..64)", num.as_bstr()))?;
             let mut digits = util::scratch_buf();
-            while let Some(&d) = chars.peek() {
-              if d.is_ascii_alphanumeric() || d == '@' || d == '_' {
+            while let Some(d) = cur.peek_byte() {
+              if d.is_ascii_alphanumeric() || d == b'@' || d == b'_' {
                 digits.push(d);
-                chars.next();
+                cur.next_byte();
               } else {
                 break;
               }
@@ -286,16 +586,16 @@ impl ArithTk {
               return Err(sherr!(ParseErr, "Missing digits after base '{base}#'"));
             }
             let mut result: i64 = 0;
-            for c in digits.chars() {
+            for &c in &digits {
               let d = radix_digit_value(c, base).ok_or_else(|| {
-                sherr!(ParseErr, "Invalid digit '{c}' for base {base}")
+                sherr!(ParseErr, "Invalid digit '{}' for base {base}", c as char)
               })?;
               result = result * i64::from(base) + i64::from(d);
             }
             result
           } else {
-            num.parse::<i64>().map_err(|_| sherr!(
-              ParseErr, "Invalid number in arithmetic expression: '{}'", num,
+            parse_decimal(&num).ok_or_else(|| sherr!(
+              ParseErr, "Invalid number in arithmetic expression: '{}'", num.as_bstr(),
             ))?
           }
         };
@@ -304,14 +604,14 @@ impl ArithTk {
         last_was_operand = true;
       }
 
-      '-' => {
-        chars.next();
-        if chars.peek() == Some(&'-') {
-          chars.next();
+      b'-' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'-') {
+          cur.next_byte();
           tokens.push(Self::Dec);
           // postfix Dec: last_was_operand stays true if it was; prefix Dec: next is a var
-        } else if chars.peek() == Some(&'=') {
-          chars.next();
+        } else if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::MinusAssign));
           last_was_operand = false;
         } else if last_was_operand {
@@ -323,13 +623,13 @@ impl ArithTk {
         }
       }
 
-      '+' => {
-        chars.next();
-        if chars.peek() == Some(&'+') {
-          chars.next();
+      b'+' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'+') {
+          cur.next_byte();
           tokens.push(Self::Inc);
-        } else if chars.peek() == Some(&'=') {
-          chars.next();
+        } else if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::PlusAssign));
           last_was_operand = false;
         } else if last_was_operand {
@@ -341,13 +641,13 @@ impl ArithTk {
         }
       }
 
-      '*' => {
-        chars.next();
-        if chars.peek() == Some(&'*') {
-          chars.next();
+      b'*' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'*') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::Pow));
-        } else if chars.peek() == Some(&'=') {
-          chars.next();
+        } else if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::MulAssign));
         } else {
           tokens.push(Self::Op(ArithOp::Mul));
@@ -355,10 +655,10 @@ impl ArithTk {
         last_was_operand = false;
       }
 
-      '/' => {
-        chars.next();
-        if chars.peek() == Some(&'=') {
-          chars.next();
+      b'/' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::DivAssign));
         } else {
           tokens.push(Self::Op(ArithOp::Div));
@@ -366,10 +666,10 @@ impl ArithTk {
         last_was_operand = false;
       }
 
-      '%' => {
-        chars.next();
-        if chars.peek() == Some(&'=') {
-          chars.next();
+      b'%' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::ModAssign));
         } else {
           tokens.push(Self::Op(ArithOp::Mod));
@@ -377,15 +677,15 @@ impl ArithTk {
         last_was_operand = false;
       }
 
-      '<' => {
-        chars.next();
-        if chars.peek() == Some(&'=') {
-          chars.next();
+      b'<' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::Le));
-        } else if chars.peek() == Some(&'<') {
-          chars.next();
-          if chars.peek() == Some(&'=') {
-            chars.next();
+        } else if cur.peek_byte() == Some(b'<') {
+          cur.next_byte();
+          if cur.peek_byte() == Some(b'=') {
+            cur.next_byte();
             tokens.push(Self::Op(ArithOp::ShiftLAssign));
           } else {
             tokens.push(Self::Op(ArithOp::ShiftL));
@@ -396,15 +696,15 @@ impl ArithTk {
         last_was_operand = false;
       }
 
-      '>' => {
-        chars.next();
-        if chars.peek() == Some(&'=') {
-          chars.next();
+      b'>' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::Ge));
-        } else if chars.peek() == Some(&'>') {
-          chars.next();
-          if chars.peek() == Some(&'=') {
-            chars.next();
+        } else if cur.peek_byte() == Some(b'>') {
+          cur.next_byte();
+          if cur.peek_byte() == Some(b'=') {
+            cur.next_byte();
             tokens.push(Self::Op(ArithOp::ShiftRAssign));
           } else {
             tokens.push(Self::Op(ArithOp::ShiftR));
@@ -415,10 +715,10 @@ impl ArithTk {
         last_was_operand = false;
       }
 
-      '=' => {
-        chars.next();
-        if chars.peek() == Some(&'=') {
-          chars.next();
+      b'=' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::Eq));
         } else {
           tokens.push(Self::Op(ArithOp::Assign));
@@ -426,10 +726,10 @@ impl ArithTk {
         last_was_operand = false;
       }
 
-      '!' => {
-        chars.next();
-        if chars.peek() == Some(&'=') {
-          chars.next();
+      b'!' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::Ne));
           last_was_operand = false;
         } else {
@@ -438,13 +738,13 @@ impl ArithTk {
         }
       }
 
-      '&' => {
-        chars.next();
-        if chars.peek() == Some(&'&') {
-          chars.next();
+      b'&' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'&') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::And));
-        } else if chars.peek() == Some(&'=') {
-          chars.next();
+        } else if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::BitAndAssign));
         } else {
           tokens.push(Self::Op(ArithOp::BitAnd));
@@ -452,13 +752,13 @@ impl ArithTk {
         last_was_operand = false;
       }
 
-      '|' => {
-        chars.next();
-        if chars.peek() == Some(&'|') {
-          chars.next();
+      b'|' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'|') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::Or));
-        } else if chars.peek() == Some(&'=') {
-          chars.next();
+        } else if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::BitOrAssign));
         } else {
           tokens.push(Self::Op(ArithOp::BitOr));
@@ -466,10 +766,10 @@ impl ArithTk {
         last_was_operand = false;
       }
 
-      '^' => {
-        chars.next();
-        if chars.peek() == Some(&'=') {
-          chars.next();
+      b'^' => {
+        cur.next_byte();
+        if cur.peek_byte() == Some(b'=') {
+          cur.next_byte();
           tokens.push(Self::Op(ArithOp::BitXorAssign));
         } else {
           tokens.push(Self::Op(ArithOp::BitXor));
@@ -477,52 +777,52 @@ impl ArithTk {
         last_was_operand = false;
       }
 
-      '~' => {
-        chars.next();
+      b'~' => {
+        cur.next_byte();
         tokens.push(Self::BitNot);
         // last_was_operand stays false, BitNot is unary prefix
       }
 
-      ',' => {
+      b',' => {
         tokens.push(Self::Comma);
-        chars.next();
+        cur.next_byte();
         last_was_operand = false;
       }
 
-      '?' => {
+      b'?' => {
         tokens.push(Self::Question);
-        chars.next();
+        cur.next_byte();
         last_was_operand = false;
       }
 
-      ':' => {
+      b':' => {
         tokens.push(Self::Colon);
-        chars.next();
+        cur.next_byte();
         last_was_operand = false;
       }
 
-      '(' => {
+      b'(' => {
         tokens.push(Self::LParen);
-        chars.next();
+        cur.next_byte();
         last_was_operand = false;
       }
 
-      ')' => {
+      b')' => {
         tokens.push(Self::RParen);
-        chars.next();
+        cur.next_byte();
         last_was_operand = true;
       }
 
-      _ if ch.is_alphabetic() || ch == '_' => {
-        chars.next();
-        let mut var_name = ch.to_string();
-        while let Some(ch) = chars.peek() {
-          match ch {
-            _ if ch.is_alphabetic() || *ch == '_' || ch.is_ascii_digit() => {
-              var_name.push(*ch);
-              chars.next();
-            }
-            _ => break,
+      _ if b.is_ascii_alphabetic() || b == b'_' => {
+        cur.next_byte();
+        let mut var_name = String::new();
+        var_name.push(b as char);
+        while let Some(c) = cur.peek_byte() {
+          if c.is_ascii_alphanumeric() || c == b'_' {
+            var_name.push(c as char);
+            cur.next_byte();
+          } else {
+            break;
           }
         }
         tokens.push(Self::Var(var_name));
@@ -532,7 +832,7 @@ impl ArithTk {
       _ => {
         return Err(sherr!(
           ParseErr,
-          "Unexpected character in arithmetic expression: '{ch}'",
+          "Unexpected character in arithmetic expression: '{}'", b as char,
         ));
       }
     });
@@ -816,7 +1116,7 @@ impl ArithTk {
     Ok(output)
   }
 
-  #[expect(clippy::too_many_lines, clippy::cast_sign_loss)]
+  #[expect(clippy::too_many_lines)]
   pub fn eval_rpn(tokens: &[ArithTk]) -> ShResult<i64> {
     let mut stack: Vec<StackVal> = Vec::new();
 
@@ -826,18 +1126,6 @@ impl ArithTk {
           .pop()
           .ok_or_else(|| sherr!(ParseErr, "Missing operand in arithmetic expression"))?
           .to_num()?
-      };
-    }
-
-    macro_rules! pop_var {
-      () => {
-        match stack
-          .pop()
-          .ok_or_else(|| sherr!(ParseErr, "Missing operand in arithmetic expression"))?
-        {
-          StackVal::Var(name) => name,
-          StackVal::Num(_) => return Err(sherr!(ParseErr, "Assignment target must be a variable")),
-        }
       };
     }
 
@@ -920,270 +1208,7 @@ impl ArithTk {
           stack.push(rhs);
         }
 
-        ArithTk::Op(op) => {
-          match op {
-            // Assignment ops
-            // LHS must be a Var
-            ArithOp::Assign => {
-              let rhs = pop_num!();
-              let lhs = pop_var!();
-              Shed::vars_mut(|v| {
-                v.set_var(
-                  &lhs,
-                  VarKind::string(rhs.to_string().into()),
-                  VarFlags::empty(),
-                )
-              })
-              .unwrap();
-              stack.push(StackVal::Num(rhs));
-            }
-            ArithOp::PlusAssign => {
-              let rhs = pop_num!();
-              let lhs = pop_var!();
-              let new_val = read_var_as_i64(&lhs)? + rhs;
-              Shed::vars_mut(|v| {
-                v.set_var(
-                  &lhs,
-                  VarKind::string(new_val.to_string().into()),
-                  VarFlags::empty(),
-                )
-              })
-              .unwrap();
-              stack.push(StackVal::Num(new_val));
-            }
-            ArithOp::MinusAssign => {
-              let rhs = pop_num!();
-              let lhs = pop_var!();
-              let new_val = read_var_as_i64(&lhs)? - rhs;
-              Shed::vars_mut(|v| {
-                v.set_var(
-                  &lhs,
-                  VarKind::string(new_val.to_string().into()),
-                  VarFlags::empty(),
-                )
-              })
-              .unwrap();
-              stack.push(StackVal::Num(new_val));
-            }
-            ArithOp::MulAssign => {
-              let rhs = pop_num!();
-              let lhs = pop_var!();
-              let new_val = read_var_as_i64(&lhs)? * rhs;
-              Shed::vars_mut(|v| {
-                v.set_var(
-                  &lhs,
-                  VarKind::string(new_val.to_string().into()),
-                  VarFlags::empty(),
-                )
-              })
-              .unwrap();
-              stack.push(StackVal::Num(new_val));
-            }
-            ArithOp::DivAssign => {
-              let rhs = pop_num!();
-              if rhs == 0 {
-                return Err(sherr!(InternalErr, "Division by zero"));
-              }
-              let lhs = pop_var!();
-              let new_val = read_var_as_i64(&lhs)? / rhs;
-              Shed::vars_mut(|v| {
-                v.set_var(
-                  &lhs,
-                  VarKind::string(new_val.to_string().into()),
-                  VarFlags::empty(),
-                )
-              })
-              .unwrap();
-              stack.push(StackVal::Num(new_val));
-            }
-            ArithOp::ModAssign => {
-              let rhs = pop_num!();
-              if rhs == 0 {
-                return Err(sherr!(InternalErr, "Modulo by zero"));
-              }
-              let lhs = pop_var!();
-              let new_val = read_var_as_i64(&lhs)? % rhs;
-              Shed::vars_mut(|v| {
-                v.set_var(
-                  &lhs,
-                  VarKind::string(new_val.to_string().into()),
-                  VarFlags::empty(),
-                )
-              })
-              .unwrap();
-              stack.push(StackVal::Num(new_val));
-            }
-
-            // Binary math
-            ArithOp::Add => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(lhs + rhs));
-            }
-            ArithOp::Sub => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(lhs - rhs));
-            }
-            ArithOp::Mul => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(lhs * rhs));
-            }
-            ArithOp::Div => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              if rhs == 0 {
-                return Err(sherr!(InternalErr, "Division by zero"));
-              }
-              stack.push(StackVal::Num(lhs / rhs));
-            }
-            ArithOp::Pow => {
-              let exp = pop_num!();
-              let base = pop_num!();
-              if exp < 0 {
-                return Err(sherr!(InternalErr, "exponent less than 0"));
-              }
-              stack.push(StackVal::Num(base.wrapping_pow(exp as u32)));
-            }
-            ArithOp::Mod => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              if rhs == 0 {
-                return Err(sherr!(InternalErr, "Modulo by zero"));
-              }
-              stack.push(StackVal::Num(lhs % rhs));
-            }
-
-            // Comparison (result is 1 or 0)
-            ArithOp::Lt => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(i64::from(lhs < rhs)));
-            }
-            ArithOp::Gt => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(i64::from(lhs > rhs)));
-            }
-            ArithOp::Le => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(i64::from(lhs <= rhs)));
-            }
-            ArithOp::Ge => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(i64::from(lhs >= rhs)));
-            }
-            ArithOp::Eq => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(i64::from(lhs == rhs)));
-            }
-            ArithOp::Ne => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(i64::from(lhs != rhs)));
-            }
-
-            // && and || are decomposed into JIFZ_PEEK/JIFNZ_PEEK + Pop + Nez at
-            // to_rpn time (see the ArithTk::Op handler). They never reach eval.
-            ArithOp::And | ArithOp::Or => {
-              return Err(sherr!(
-                ParseErr,
-                "Internal: && / || should have been decomposed before eval"
-              ));
-            }
-
-            // Bitwise
-            ArithOp::BitAnd => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(lhs & rhs));
-            }
-            ArithOp::BitOr => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(lhs | rhs));
-            }
-            ArithOp::BitXor => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(lhs ^ rhs));
-            }
-            ArithOp::ShiftL => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(lhs.wrapping_shl(rhs as u32)));
-            }
-            ArithOp::ShiftR => {
-              let rhs = pop_num!();
-              let lhs = pop_num!();
-              stack.push(StackVal::Num(lhs.wrapping_shr(rhs as u32)));
-            }
-
-            // Bitwise/shift compound assignment
-            ArithOp::BitAndAssign => {
-              let rhs = pop_num!();
-              let lhs = pop_var!();
-              let new_val = read_var_as_i64(&lhs)? & rhs;
-              Shed::vars_mut(|v| {
-                v.set_var(
-                  &lhs,
-                  VarKind::string(new_val.to_string().into()),
-                  VarFlags::empty(),
-                )
-              })
-              .unwrap();
-              stack.push(StackVal::Num(new_val));
-            }
-            ArithOp::BitOrAssign => {
-              let rhs = pop_num!();
-              let lhs = pop_var!();
-              let new_val = read_var_as_i64(&lhs)? | rhs;
-              Shed::vars_mut(|v| {
-                v.set_var(
-                  &lhs,
-                  VarKind::string(new_val.to_string().into()),
-                  VarFlags::empty(),
-                )
-              })
-              .unwrap();
-              stack.push(StackVal::Num(new_val));
-            }
-            ArithOp::BitXorAssign => {
-              let rhs = pop_num!();
-              let lhs = pop_var!();
-              let new_val = read_var_as_i64(&lhs)? ^ rhs;
-              Shed::vars_mut(|v| {
-                v.set_var(
-                  &lhs,
-                  VarKind::string(new_val.to_string().into()),
-                  VarFlags::empty(),
-                )
-              })
-              .unwrap();
-              stack.push(StackVal::Num(new_val));
-            }
-            ArithOp::ShiftLAssign => {
-              let rhs = pop_num!();
-              let lhs = pop_var!();
-              let new_val = read_var_as_i64(&lhs)?.wrapping_shl(rhs as u32);
-              Shed::vars_mut(|v| v.set_var(&lhs, VarKind::Int(new_val as i32), VarFlags::empty()))
-                .unwrap();
-              stack.push(StackVal::Num(new_val));
-            }
-            ArithOp::ShiftRAssign => {
-              let rhs = pop_num!();
-              let lhs = pop_var!();
-              let new_val = read_var_as_i64(&lhs)?.wrapping_shr(rhs as u32);
-              Shed::vars_mut(|v| v.set_var(&lhs, VarKind::Int(new_val as i32), VarFlags::empty()))
-                .unwrap();
-              stack.push(StackVal::Num(new_val));
-            }
-          }
-        }
+        ArithTk::Op(op) => eval_op(&op, &mut stack)?,
 
         ArithTk::Inc
         | ArithTk::Dec
@@ -1215,10 +1240,10 @@ impl ArithTk {
 
 /// Evaluate an arithmetic expression string, returning the result.
 /// The caller is responsible for stripping any `((...))` or `(...)` wrappers.
-pub fn expand_arithmetic(expr: &str) -> ShResult<VarStr> {
+pub fn expand_arithmetic(expr: &[u8]) -> ShResult<VarStr> {
   let unescaped = unescape_math(expr)?;
   let expanded = expand_raw(&mut unescaped.cursor())?.into_bytes();
-  let tokens = ArithTk::tokenize(&String::from_utf8_lossy(&expanded))?;
+  let tokens = ArithTk::tokenize(&expanded)?;
   let rpn = ArithTk::to_rpn(tokens)?;
   let result = ArithTk::eval_rpn(&rpn)?;
   Ok(result.into())
@@ -1226,7 +1251,7 @@ pub fn expand_arithmetic(expr: &str) -> ShResult<VarStr> {
 
 /// Strip `((...))` or `(...)` wrappers and evaluate. Convenience for call sites
 /// that receive the raw token including its delimiters.
-pub fn expand_arithmetic_wrapped(raw: &str) -> ShResult<VarStr> {
+pub fn expand_arithmetic_wrapped(raw: &[u8]) -> ShResult<VarStr> {
   let mut expr = raw.trim();
   while let Some(inner) = strip_enclosing_parens(expr) {
     expr = inner.trim();
@@ -1234,14 +1259,13 @@ pub fn expand_arithmetic_wrapped(raw: &str) -> ShResult<VarStr> {
   expand_arithmetic(expr)
 }
 
-fn strip_enclosing_parens(s: &str) -> Option<&str> {
-  let inner = s.strip_prefix('(')?;
-  let mut chars = inner.chars().peekable();
-  let mut pos = 0;
+fn strip_enclosing_parens(s: &[u8]) -> Option<&[u8]> {
+  let inner = s.strip_prefix(b"(")?;
+  let mut cur = util::SliceCursor::new(inner);
   // The opening `(` is already consumed (depth 1); scan to its matching `)`.
-  // `pos` lands just past that `)`; if that is the end of `inner`, the opening
-  // paren enclosed the whole string.
-  (util::scan_parens(&mut chars, &mut pos, 1) && pos == inner.len()).then(|| &inner[..pos - 1])
+  // The cursor lands just past that `)`; if that is the end of `inner`, the
+  // opening paren enclosed the whole string.
+  (util::scan_parens(&mut cur, 1) && cur.pos() == inner.len()).then(|| &inner[..cur.pos() - 1])
 }
 
 #[cfg(test)]
@@ -1253,11 +1277,15 @@ mod tests {
 
   fn arith(s: &str) -> f64 {
     // Tests pass raw expressions - no outer ((...)) wrapper stripping
-    expand_arithmetic(s)
+    expand_arithmetic(s.as_bytes())
       .unwrap()
       .to_str_lossy()
       .parse::<f64>()
       .unwrap()
+  }
+
+  fn strip_enclosing_parens(s: &str) -> Option<&str> {
+    super::strip_enclosing_parens(s.as_bytes()).map(|inner| std::str::from_utf8(inner).unwrap())
   }
 
   // ===================== Wrapper stripping =====================
@@ -1279,7 +1307,7 @@ mod tests {
     // Regression: greedy `((`/`))` stripping dropped a real paren when the body
     // began/ended with one, so these all raised a parse error.
     let w = |s: &str| {
-      expand_arithmetic_wrapped(s)
+      expand_arithmetic_wrapped(s.as_bytes())
         .unwrap()
         .to_str_lossy()
         .parse::<f64>()
@@ -1349,8 +1377,8 @@ mod tests {
   #[test]
   fn arith_radix_invalid() {
     // base out of range, and a digit out of range for the base
-    assert!(expand_arithmetic("1#0").is_err());
-    assert!(expand_arithmetic("2#5").is_err());
+    assert!(expand_arithmetic(b"1#0").is_err());
+    assert!(expand_arithmetic(b"2#5").is_err());
   }
 
   #[test]
@@ -1373,11 +1401,11 @@ mod tests {
     // Self-reference must error (via the depth cap), not overflow the stack.
     let _g = TestGuard::new();
     Shed::vars_mut(|v| v.set_var("z", VarKind::string("z".into()), VarFlags::empty())).unwrap();
-    assert!(expand_arithmetic("z").is_err());
+    assert!(expand_arithmetic(b"z").is_err());
     // Mutual reference likewise.
     Shed::vars_mut(|v| v.set_var("p", VarKind::string("q".into()), VarFlags::empty())).unwrap();
     Shed::vars_mut(|v| v.set_var("q", VarKind::string("p".into()), VarFlags::empty())).unwrap();
-    assert!(expand_arithmetic("p").is_err());
+    assert!(expand_arithmetic(b"p").is_err());
   }
 
   #[test]
@@ -1766,27 +1794,27 @@ mod tests {
   #[test]
   fn arith_division_by_zero_errors() {
     let _g = TestGuard::new();
-    assert!(expand_arithmetic("(5 / 0)").is_err());
+    assert!(expand_arithmetic(b"(5 / 0)").is_err());
   }
 
   #[test]
   fn arith_modulo_by_zero_errors() {
     let _g = TestGuard::new();
-    assert!(expand_arithmetic("(5 % 0)").is_err());
+    assert!(expand_arithmetic(b"(5 % 0)").is_err());
   }
 
   #[test]
   fn arith_div_assign_by_zero_errors() {
     let _g = TestGuard::new();
     Shed::vars_mut(|v| v.set_var("x", VarKind::Str("5".into()), VarFlags::empty())).unwrap();
-    assert!(expand_arithmetic("(x /= 0)").is_err());
+    assert!(expand_arithmetic(b"(x /= 0)").is_err());
   }
 
   #[test]
   fn arith_mod_assign_by_zero_errors() {
     let _g = TestGuard::new();
     Shed::vars_mut(|v| v.set_var("x", VarKind::Str("5".into()), VarFlags::empty())).unwrap();
-    assert!(expand_arithmetic("(x %= 0)").is_err());
+    assert!(expand_arithmetic(b"(x %= 0)").is_err());
   }
 
   // ===================== ArithOp::from_str =====================

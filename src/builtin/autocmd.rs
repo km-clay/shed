@@ -11,7 +11,7 @@ use super::{
 pub(super) struct AutoCmdBuiltin;
 impl super::Builtin for AutoCmdBuiltin {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![opt!("clear" | 'c')]
+    vec![opt!("clear" | b'c')]
   }
   fn strict_opts(&self) -> bool {
     true

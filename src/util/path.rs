@@ -156,8 +156,8 @@ pub fn split_path_list(path_list: &str) -> impl Iterator<Item = PathBuf> {
   // slice expression honest; the previous `start + len` form treated it as
   // a length and ran past the buffer once `cursor` grew large.
   let paths = super::strops::split_all_with(
-    path_list,
-    |paths| super::split_at_unescaped(paths, ":"),
+    path_list.as_bytes(),
+    |paths| super::split_at_unescaped(paths, b":"),
     |start, end| path_list[start..end].to_string(),
   );
 

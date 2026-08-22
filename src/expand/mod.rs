@@ -45,7 +45,7 @@ impl Tk {
       return Ok(self.clone());
     }
     if self.is_literal() {
-      let raw = self.span.as_str().into();
+      let raw = self.span.as_bytes().into();
       let class = TkRule::Expanded { exp: [raw].into() };
       return Ok(Self {
         class,
@@ -64,7 +64,7 @@ impl Tk {
       return Ok(exp.clone());
     }
     if self.is_literal() {
-      return Ok([self.span.as_str().into()].into());
+      return Ok([self.span.as_bytes().into()].into());
     }
     let span = self.span.clone();
     Expander::new(self)
@@ -77,7 +77,7 @@ impl Tk {
       return Ok(self.clone());
     }
     if self.is_literal() {
-      let raw = self.span.as_str().into();
+      let raw = self.span.as_bytes().into();
       let class = TkRule::Expanded { exp: [raw].into() };
       return Ok(Self {
         class,
@@ -99,7 +99,7 @@ impl Tk {
       return Ok(exp.join_with(" "));
     }
     if self.is_literal() {
-      return Ok(self.span.as_str().into());
+      return Ok(self.span.as_bytes().into());
     }
 
     let span = self.span.clone();
@@ -114,7 +114,7 @@ impl Tk {
   pub fn get_words(&self) -> Rc<[VarStr]> {
     match &self.class {
       TkRule::Expanded { exp } => exp.clone(),
-      _ => [self.as_str().into()].into(),
+      _ => [self.as_bytes().into()].into(),
     }
   }
 
@@ -133,14 +133,14 @@ pub struct Expander {
 
 impl Expander {
   pub fn new(raw: &Tk) -> Self {
-    let tk_raw = raw.span.as_str();
+    let tk_raw = raw.span.as_bytes();
     Self::from_raw(tk_raw, raw.flags)
   }
-  pub fn from_raw(raw: &str, flags: TkFlags) -> Self {
-    let raw = if raw.contains('{') {
-      brace::expand_braces_full(raw).join(" ")
+  pub fn from_raw(raw: &[u8], flags: TkFlags) -> Self {
+    let raw = if raw.contains(&b'{') {
+      brace::expand_braces_full(raw).join_with(" ")
     } else {
-      raw.to_string()
+      VarStr::from(raw)
     };
     let unescaped = if flags.contains(TkFlags::IS_HEREDOC) {
       unescape_heredoc(&raw)
@@ -534,7 +534,7 @@ mod tests {
   fn word_split_escaped_space() {
     let _guard = TestGuard::new();
 
-    let raw = format!("hello{}world", render(&unescape_str("\\ ")));
+    let raw = format!("hello{}world", render(&unescape_str(b"\\ ")));
     let mut exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),
@@ -550,7 +550,7 @@ mod tests {
   fn word_split_escaped_tab() {
     let _guard = TestGuard::new();
 
-    let raw = format!("hello{}world", render(&unescape_str("\\\t")));
+    let raw = format!("hello{}world", render(&unescape_str(b"\\\t")));
     let mut exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),
@@ -567,7 +567,7 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
 
-    let raw = format!("a{}b:c", render(&unescape_str("\\:")));
+    let raw = format!("a{}b:c", render(&unescape_str(b"\\:")));
     let mut exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),

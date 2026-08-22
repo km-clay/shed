@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+use bstr::ByteSlice;
+
+use crate::util::{ByteCursor, SliceCursor};
 use crate::{shopt_mut, state::vars::VarStr, util};
 
 use super::{
@@ -35,79 +38,79 @@ pub enum PromptTk {
 }
 
 #[expect(clippy::too_many_lines)]
-fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
-  let mut chars = raw.chars().peekable();
+fn tokenize_prompt(raw: &[u8]) -> Vec<PromptTk> {
+  let mut cur = SliceCursor::new(raw);
   let mut tk_text = util::scratch_buf();
   let mut tokens = vec![];
 
-  match_loop!(chars.next() => ch, {
-    '\\' => {
+  match_loop!(cur.next_byte() => ch, {
+    b'\\' => {
       // Push any accumulated text as a token
       if !tk_text.is_empty() {
         tokens.push(PromptTk::Text(std::mem::take(&mut tk_text).into()));
       }
 
       // Handle the escape sequence
-      let Some(ch) = chars.next() else {
+      let Some(ch) = cur.next_byte() else {
         // Handle trailing backslash
         tokens.push(PromptTk::Text("\\".into()));
         break
       };
       match ch {
-        'w' => tokens.push(PromptTk::Pwd),
-        'W' => tokens.push(PromptTk::PwdShort),
-        'h' => tokens.push(PromptTk::HostnameShort),
-        'H' => tokens.push(PromptTk::Hostname),
-        's' => tokens.push(PromptTk::ShellName),
-        'u' => tokens.push(PromptTk::Username),
-        '$' => tokens.push(PromptTk::PromptSymbol),
-        'n' => tokens.push(PromptTk::Text("\n".into())),
-        'r' => tokens.push(PromptTk::Text("\r".into())),
-        't' => tokens.push(PromptTk::RuntimeMillis),
-        'j' => tokens.push(PromptTk::JobCount),
-        'T' => tokens.push(PromptTk::RuntimeFormatted),
-        '\\' => tokens.push(PromptTk::Text("\\".into())),
-        '"' => tokens.push(PromptTk::Text("\"".into())),
-        '\'' => tokens.push(PromptTk::Text("'".into())),
-        'c' => {
-          let Some('{') = chars.peek() else {
-            tk_text.push_str("\\c");
+        b'w' => tokens.push(PromptTk::Pwd),
+        b'W' => tokens.push(PromptTk::PwdShort),
+        b'h' => tokens.push(PromptTk::HostnameShort),
+        b'H' => tokens.push(PromptTk::Hostname),
+        b's' => tokens.push(PromptTk::ShellName),
+        b'u' => tokens.push(PromptTk::Username),
+        b'$' => tokens.push(PromptTk::PromptSymbol),
+        b'n' => tokens.push(PromptTk::Text("\n".into())),
+        b'r' => tokens.push(PromptTk::Text("\r".into())),
+        b't' => tokens.push(PromptTk::RuntimeMillis),
+        b'j' => tokens.push(PromptTk::JobCount),
+        b'T' => tokens.push(PromptTk::RuntimeFormatted),
+        b'\\' => tokens.push(PromptTk::Text("\\".into())),
+        b'"' => tokens.push(PromptTk::Text("\"".into())),
+        b'\'' => tokens.push(PromptTk::Text("'".into())),
+        b'c' => {
+          let Some(b'{') = cur.peek_byte() else {
+            tk_text.extend_from_slice(b"\\c");
             continue;
           };
-          chars.next(); // consume the '{'
+          cur.next_byte(); // consume the '{'
           let mut desc = util::scratch_buf();
-          match_loop!(chars.next() => ch, {
-            '}' => break,
+          match_loop!(cur.next_byte() => ch, {
+            b'}' => break,
             _ => desc.push(ch)
           });
           tokens.push(PromptTk::Color(desc.into()));
         }
-        '@' => {
+        b'@' => {
           let mut func_name = util::scratch_buf();
-          let is_braced = chars.peek() == Some(&'{');
+          let is_braced = cur.peek_byte() == Some(b'{');
           let mut handled = false;
-          match_loop!(chars.peek() => &ch => ch, {
-            '}' if is_braced => {
-              chars.next();
+          match_loop!(cur.peek_byte() => ch, {
+            b'}' if is_braced => {
+              cur.next_byte();
               handled = true;
               break;
             }
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '_' => {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' => {
               func_name.push(ch);
-              chars.next();
+              cur.next_byte();
             }
             _ => {
               handled = true;
               if is_braced {
                 // Invalid character in braced function name
-                tokens.push(PromptTk::Text(format_smolstr!("\\@{{{func_name}").into()));
+                tokens.push(PromptTk::Text(format_smolstr!("\\@{{{}", func_name.as_bstr()).into()));
               } else {
                 // End of unbraced function name
-                let func_exists = Shed::logic(|l| l.get_func(&func_name).is_some());
+                let func_exists = Shed::logic(|l| l.get_func(&String::from_utf8_lossy(&func_name)).is_some());
                 if func_exists {
                   tokens.push(PromptTk::Function(func_name.clone().into()));
                 } else {
-                  tokens.push(PromptTk::Text(format_smolstr!("\\@{func_name}").into()));
+                  tokens.push(PromptTk::Text(format_smolstr!("\\@{}", func_name.as_bstr()).into()));
                 }
               }
               break;
@@ -115,49 +118,49 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
           });
           // Handle end-of-input: function name collected but loop ended without pushing
           if !handled && !func_name.is_empty() {
-            let func_exists = Shed::logic(|l| l.get_func(&func_name).is_some());
+            let func_exists = Shed::logic(|l| l.get_func(&String::from_utf8_lossy(&func_name)).is_some());
             if func_exists {
               tokens.push(PromptTk::Function(func_name.into()));
             } else {
-              tokens.push(PromptTk::Text(format_smolstr!("\\@{func_name}").into()));
+              tokens.push(PromptTk::Text(format_smolstr!("\\@{}", func_name.as_bstr()).into()));
             }
           }
         }
-        'e' => {
-          if chars.next() == Some('[') {
+        b'e' => {
+          if cur.next_byte() == Some(b'[') {
             let mut params = util::scratch_buf();
 
             // Collect parameters and final character
-            match_loop!(chars.next() => ch, {
-              '0'..='9' | ';' | '?' | ':' => params.push(ch), // Valid parameter characters
-              'A'..='Z' | 'a'..='z' => {
+            match_loop!(cur.next_byte() => ch, {
+              b'0'..=b'9' | b';' | b'?' | b':' => params.push(ch), // Valid parameter characters
+              b'A'..=b'Z' | b'a'..=b'z' => {
                 // Final character (letter)
                 params.push(ch);
                 break;
               }
               _ => {
                 // Invalid character in ANSI sequence
-                tokens.push(PromptTk::Text(format_smolstr!("\x1b[{params}").into()));
+                tokens.push(PromptTk::Text(format_smolstr!("\x1b[{}", params.as_bstr()).into()));
                 break;
               }
             });
 
-            tokens.push(PromptTk::AnsiSeq(format_smolstr!("\x1b[{params}").into()));
+            tokens.push(PromptTk::AnsiSeq(format_smolstr!("\x1b[{}", params.as_bstr()).into()));
           } else {
             // Handle case where 'e' is not followed by '['
             tokens.push(PromptTk::Text("\\e".into()));
           }
         }
-        '0'..='7' => {
+        b'0'..=b'7' => {
           // Handle octal escape
           let mut octal_str = util::scratch_buf();
           octal_str.push(ch);
 
           // Collect up to 2 more octal digits
           for _ in 0..2 {
-            if let Some(&next_ch) = chars.peek() {
-              if ('0'..='7').contains(&next_ch) {
-                octal_str.push(chars.next().unwrap());
+            if let Some(next_ch) = cur.peek_byte() {
+              if (b'0'..=b'7').contains(&next_ch) {
+                octal_str.push(cur.next_byte().unwrap());
               } else {
                 break;
               }
@@ -166,17 +169,20 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
             }
           }
 
-          // Parse the octal string into an integer
-          if let Ok(octal) = i32::from_str_radix(&octal_str, 8) {
+          // Parse the octal string into an integer (digits only, so always UTF-8)
+          let parsed = std::str::from_utf8(&octal_str)
+            .ok()
+            .and_then(|s| i32::from_str_radix(s, 8).ok());
+          if let Some(octal) = parsed {
             tokens.push(PromptTk::AsciiOct(octal));
           } else {
             // Fallback: treat as raw text
-            tokens.push(PromptTk::Text(format_smolstr!("\\{octal_str}").into()));
+            tokens.push(PromptTk::Text(format_smolstr!("\\{}", octal_str.as_bstr()).into()));
           }
         }
         _ => {
           // Unknown escape sequence: treat as raw text
-          tokens.push(PromptTk::Text(format_smolstr!("\\{ch}").into()));
+          tokens.push(PromptTk::Text(format_smolstr!("\\{}", ch as char).into()));
         }
       }
     }
@@ -193,7 +199,7 @@ fn tokenize_prompt(raw: &str) -> Vec<PromptTk> {
   tokens
 }
 
-pub fn expand_prompt(raw: &str) -> ShResult<String> {
+pub fn expand_prompt(raw: &[u8]) -> ShResult<String> {
   let mut tokens = tokenize_prompt(raw).into_iter();
   let mut result = String::new();
 
@@ -336,63 +342,63 @@ mod tests {
 
   #[test]
   fn prompt_username() {
-    let tokens = tokenize_prompt("\\u");
+    let tokens = tokenize_prompt(b"\\u");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::Username));
   }
 
   #[test]
   fn prompt_hostname() {
-    let tokens = tokenize_prompt("\\H");
+    let tokens = tokenize_prompt(b"\\H");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::Hostname));
   }
 
   #[test]
   fn prompt_pwd() {
-    let tokens = tokenize_prompt("\\w");
+    let tokens = tokenize_prompt(b"\\w");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::Pwd));
   }
 
   #[test]
   fn prompt_pwd_short() {
-    let tokens = tokenize_prompt("\\W");
+    let tokens = tokenize_prompt(b"\\W");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::PwdShort));
   }
 
   #[test]
   fn prompt_symbol() {
-    let tokens = tokenize_prompt("\\$");
+    let tokens = tokenize_prompt(b"\\$");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::PromptSymbol));
   }
 
   #[test]
   fn prompt_newline() {
-    let tokens = tokenize_prompt("\\n");
+    let tokens = tokenize_prompt(b"\\n");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::Text(ref t) if t == "\n"));
   }
 
   #[test]
   fn prompt_shell_name() {
-    let tokens = tokenize_prompt("\\s");
+    let tokens = tokenize_prompt(b"\\s");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::ShellName));
   }
 
   #[test]
   fn prompt_literal_backslash() {
-    let tokens = tokenize_prompt("\\\\");
+    let tokens = tokenize_prompt(b"\\\\");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::Text(ref t) if t == "\\"));
   }
 
   #[test]
   fn prompt_mixed() {
-    let tokens = tokenize_prompt("\\u@\\h \\w\\$ ");
+    let tokens = tokenize_prompt(b"\\u@\\h \\w\\$ ");
     // \u, Text("@"), \h, Text(" "), \w, \$, Text(" ")
     assert_eq!(tokens.len(), 7);
     assert!(matches!(tokens[0], PromptTk::Username));
@@ -406,14 +412,14 @@ mod tests {
 
   #[test]
   fn prompt_ansi_sequence() {
-    let tokens = tokenize_prompt("\\e[31m");
+    let tokens = tokenize_prompt(b"\\e[31m");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::AnsiSeq(ref s) if s == "\x1b[31m"));
   }
 
   #[test]
   fn prompt_octal() {
-    let tokens = tokenize_prompt("\\141"); // 'a' in octal
+    let tokens = tokenize_prompt(b"\\141"); // 'a' in octal
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::AsciiOct(97)));
   }
@@ -454,49 +460,49 @@ mod tests {
 
   #[test]
   fn prompt_carriage_return_escape() {
-    let tokens = tokenize_prompt("\\r");
+    let tokens = tokenize_prompt(b"\\r");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::Text(ref t) if t == "\r"));
   }
 
   #[test]
   fn prompt_runtime_millis_token() {
-    let tokens = tokenize_prompt("\\t");
+    let tokens = tokenize_prompt(b"\\t");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::RuntimeMillis));
   }
 
   #[test]
   fn prompt_runtime_formatted_token() {
-    let tokens = tokenize_prompt("\\T");
+    let tokens = tokenize_prompt(b"\\T");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::RuntimeFormatted));
   }
 
   #[test]
   fn prompt_job_count_token() {
-    let tokens = tokenize_prompt("\\j");
+    let tokens = tokenize_prompt(b"\\j");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::JobCount));
   }
 
   #[test]
   fn prompt_escaped_double_quote() {
-    let tokens = tokenize_prompt("\\\"");
+    let tokens = tokenize_prompt(b"\\\"");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::Text(ref t) if t == "\""));
   }
 
   #[test]
   fn prompt_escaped_single_quote() {
-    let tokens = tokenize_prompt("\\'");
+    let tokens = tokenize_prompt(b"\\'");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::Text(ref t) if t == "'"));
   }
 
   #[test]
   fn prompt_color_braced() {
-    let tokens = tokenize_prompt("\\c{red}");
+    let tokens = tokenize_prompt(b"\\c{red}");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::Color(ref c) if c == "red"));
   }
@@ -507,7 +513,7 @@ mod tests {
     // current implementation `break`s out of the outer tokenize loop in
     // this arm, so any chars following `\c` are dropped from the token
     // stream — we pin that observed behavior here.
-    let tokens = tokenize_prompt("\\cfoo");
+    let tokens = tokenize_prompt(b"\\cfoo");
     assert_eq!(tokens.len(), 1);
     assert!(matches!(tokens[0], PromptTk::Text(ref t) if t == "\\cfoo"));
   }
@@ -516,7 +522,7 @@ mod tests {
   fn prompt_function_undefined_becomes_text() {
     // `\@somename` with no defined function falls back to Text.
     let _g = crate::tests::testutil::TestGuard::new();
-    let tokens = tokenize_prompt("\\@nope_unlikely_to_exist 1");
+    let tokens = tokenize_prompt(b"\\@nope_unlikely_to_exist 1");
     // The non-alphanumeric ' ' terminates the function name → Text fallback
     assert!(matches!(tokens[0], PromptTk::Text(ref t) if t == "\\@nope_unlikely_to_exist"));
   }
@@ -525,13 +531,13 @@ mod tests {
   fn prompt_function_defined_becomes_function_token() {
     let _g = crate::tests::testutil::TestGuard::new();
     crate::tests::testutil::test_input("prompt_fn() { echo hi; }").unwrap();
-    let tokens = tokenize_prompt("\\@prompt_fn ");
+    let tokens = tokenize_prompt(b"\\@prompt_fn ");
     assert!(matches!(tokens[0], PromptTk::Function(ref f) if f == "prompt_fn"));
   }
 
   #[test]
   fn prompt_trailing_backslash_is_literal() {
-    let tokens = tokenize_prompt("foo\\");
+    let tokens = tokenize_prompt(b"foo\\");
     // First token: Text("foo"), second: Text("\\")
     assert_eq!(tokens.len(), 2);
     assert!(matches!(tokens[0], PromptTk::Text(ref t) if t == "foo"));
@@ -548,7 +554,7 @@ mod tests {
   #[test]
   fn expand_color_emits_ansi_sequence() {
     let _g = crate::tests::testutil::TestGuard::new();
-    let out = expand_prompt("\\c{red}").unwrap();
+    let out = expand_prompt(b"\\c{red}").unwrap();
     // ansi_from_description("red") yields a CSI sequence containing "31".
     assert!(out.contains("\x1b["), "no escape in {out:?}");
     assert!(out.contains("31"), "no red code in {out:?}");
@@ -558,14 +564,14 @@ mod tests {
   fn expand_color_unknown_falls_through_silently() {
     // Unknown color description → status_msg fires, nothing appended.
     let _g = crate::tests::testutil::TestGuard::new();
-    let out = expand_prompt("X\\c{notacolor}Y").unwrap();
+    let out = expand_prompt(b"X\\c{notacolor}Y").unwrap();
     assert_eq!(out, "XY");
   }
 
   #[test]
   fn expand_runtime_millis_when_timer_unset_emits_nothing() {
     let _g = crate::tests::testutil::TestGuard::new();
-    let out = expand_prompt("X\\tY").unwrap();
+    let out = expand_prompt(b"X\\tY").unwrap();
     assert_eq!(out, "XY");
   }
 
@@ -578,7 +584,7 @@ mod tests {
       std::thread::sleep(Duration::from_millis(2));
       m.stop_timer();
     });
-    let out = expand_prompt("\\t").unwrap();
+    let out = expand_prompt(b"\\t").unwrap();
     assert!(
       out.chars().all(|c| c.is_ascii_digit()),
       "expected only digits, got {out:?}"
@@ -594,7 +600,7 @@ mod tests {
       std::thread::sleep(Duration::from_millis(2));
       m.stop_timer();
     });
-    let out = expand_prompt("\\T").unwrap();
+    let out = expand_prompt(b"\\T").unwrap();
     // format_time appends "ms"/"s"/"µs" — at minimum the output is non-empty
     // and contains at least one non-digit unit suffix character.
     assert!(!out.is_empty());
@@ -618,7 +624,7 @@ mod tests {
       )
       .unwrap();
     });
-    let out = expand_prompt("\\w").unwrap();
+    let out = expand_prompt(b"\\w").unwrap();
     assert_eq!(out, "~/proj");
   }
 
@@ -640,7 +646,7 @@ mod tests {
       )
       .unwrap();
     });
-    let out = expand_prompt("\\W").unwrap();
+    let out = expand_prompt(b"\\W").unwrap();
     // 5 segments + leading "/" → 6 PathBuf components; trim down to 2 → "d/e"
     // PathBuf iter on "/a/b/c/d/e" yields ["/", "a", "b", "c", "d", "e"] (6 segments).
     // We trim while segments > 2: 6→5→4→3→2 stops. Last two: ["d","e"] → "d/e".
@@ -669,7 +675,7 @@ mod tests {
       )
       .unwrap();
     });
-    let out = expand_prompt("\\W").unwrap();
+    let out = expand_prompt(b"\\W").unwrap();
     assert_eq!(out, "~/proj");
   }
 
@@ -684,7 +690,7 @@ mod tests {
       )
       .unwrap();
     });
-    let out = expand_prompt("\\H").unwrap();
+    let out = expand_prompt(b"\\H").unwrap();
     assert_eq!(out, "box.example.com");
   }
 
@@ -699,14 +705,14 @@ mod tests {
       )
       .unwrap();
     });
-    let out = expand_prompt("\\h").unwrap();
+    let out = expand_prompt(b"\\h").unwrap();
     assert_eq!(out, "box");
   }
 
   #[test]
   fn expand_job_count_is_zero_with_no_jobs() {
     let _g = crate::tests::testutil::TestGuard::new();
-    let out = expand_prompt("\\j").unwrap();
+    let out = expand_prompt(b"\\j").unwrap();
     assert_eq!(out, "0");
   }
 
@@ -714,7 +720,7 @@ mod tests {
   fn expand_ascii_octal_emits_char() {
     // \141 → octal 141 = 0x61 = 'a'
     let _g = crate::tests::testutil::TestGuard::new();
-    let out = expand_prompt("\\141").unwrap();
+    let out = expand_prompt(b"\\141").unwrap();
     assert_eq!(out, "a");
   }
 
@@ -725,7 +731,7 @@ mod tests {
     // expands: "[" + "hello" + " ]".
     let _g = crate::tests::testutil::TestGuard::new();
     crate::tests::testutil::test_input("prompt_greet() { printf hello; }").unwrap();
-    let out = expand_prompt("[\\@prompt_greet ]").unwrap();
+    let out = expand_prompt(b"[\\@prompt_greet ]").unwrap();
     assert_eq!(out, "[hello ]");
   }
 
@@ -748,7 +754,7 @@ mod tests {
     let _g = crate::tests::testutil::TestGuard::new();
     set_var("MY_PROMPT_VAR", "hello");
     with_substitute(false, || {
-      let out = expand_prompt("$MY_PROMPT_VAR").unwrap();
+      let out = expand_prompt(b"$MY_PROMPT_VAR").unwrap();
       assert_eq!(out, "$MY_PROMPT_VAR");
     });
   }
@@ -758,7 +764,7 @@ mod tests {
     let _g = crate::tests::testutil::TestGuard::new();
     set_var("MY_PROMPT_VAR", "hello");
     with_substitute(true, || {
-      let out = expand_prompt("$MY_PROMPT_VAR").unwrap();
+      let out = expand_prompt(b"$MY_PROMPT_VAR").unwrap();
       assert_eq!(out, "hello");
     });
   }
@@ -768,7 +774,7 @@ mod tests {
     let _g = crate::tests::testutil::TestGuard::new();
     set_var("MY_PROMPT_VAR", "hello");
     with_substitute(true, || {
-      let out = expand_prompt("[${MY_PROMPT_VAR}]").unwrap();
+      let out = expand_prompt(b"[${MY_PROMPT_VAR}]").unwrap();
       assert_eq!(out, "[hello]");
     });
   }
@@ -778,7 +784,7 @@ mod tests {
     // ${UNSET:-fallback} → "fallback" when UNSET is undefined.
     let _g = crate::tests::testutil::TestGuard::new();
     with_substitute(true, || {
-      let out = expand_prompt("${DEFINITELY_UNSET:-fallback}").unwrap();
+      let out = expand_prompt(b"${DEFINITELY_UNSET:-fallback}").unwrap();
       assert_eq!(out, "fallback");
     });
   }
@@ -790,7 +796,7 @@ mod tests {
     let _g = crate::tests::testutil::TestGuard::new();
     set_var("SUFFIX", "world");
     with_substitute(true, || {
-      let out = expand_prompt("\\s/$SUFFIX").unwrap();
+      let out = expand_prompt(b"\\s/$SUFFIX").unwrap();
       assert_eq!(out, "shed/world");
     });
   }
@@ -800,7 +806,7 @@ mod tests {
     let _g = crate::tests::testutil::TestGuard::new();
     set_var("MID", "X");
     with_substitute(true, || {
-      let out = expand_prompt("-- $MID --").unwrap();
+      let out = expand_prompt(b"-- $MID --").unwrap();
       assert_eq!(out, "-- X --");
     });
   }
@@ -811,7 +817,7 @@ mod tests {
     // `$`, which silently ate the `\x1b` in colored prompts like `\e[0m`.
     let _g = crate::tests::testutil::TestGuard::new();
     with_substitute(true, || {
-      let out = expand_prompt("\\e[32m$ \\e[0m").unwrap();
+      let out = expand_prompt(b"\\e[32m$ \\e[0m").unwrap();
       assert!(out.contains("$ \x1b[0m"), "got {out:?}");
       assert!(out.starts_with("\x1b[32m"), "got {out:?}");
     });
@@ -826,7 +832,7 @@ mod tests {
     let _g = crate::tests::testutil::TestGuard::new();
     Shed::set_status(7);
     with_substitute(true, || {
-      let out = expand_prompt("[${?:-fallback}]").unwrap();
+      let out = expand_prompt(b"[${?:-fallback}]").unwrap();
       assert_eq!(out, "[7]");
     });
   }
@@ -838,7 +844,7 @@ mod tests {
     let _g = crate::tests::testutil::TestGuard::new();
     Shed::set_status(0);
     with_substitute(true, || {
-      let out = expand_prompt("${?:-fallback}").unwrap();
+      let out = expand_prompt(b"${?:-fallback}").unwrap();
       assert_eq!(out, "0");
     });
   }
@@ -849,7 +855,7 @@ mod tests {
     set_var("A", "1");
     set_var("B", "2");
     with_substitute(true, || {
-      let out = expand_prompt("$A-$B").unwrap();
+      let out = expand_prompt(b"$A-$B").unwrap();
       assert_eq!(out, "1-2");
     });
   }
@@ -862,7 +868,7 @@ mod tests {
     // just the literal `$shed`, no marker char.
     let _g = crate::tests::testutil::TestGuard::new();
     with_substitute(true, || {
-      let out = expand_prompt("\\\\$foo").unwrap();
+      let out = expand_prompt(b"\\\\$foo").unwrap();
       assert_eq!(out, "$foo");
       assert!(
         !out.contains(crate::expand::markers::ESCAPE),
@@ -879,7 +885,7 @@ mod tests {
     set_var("OUTER", "$INNER");
     set_var("INNER", "should-not-appear");
     with_substitute(true, || {
-      let out = expand_prompt("$OUTER").unwrap();
+      let out = expand_prompt(b"$OUTER").unwrap();
       assert_eq!(out, "$INNER");
     });
   }

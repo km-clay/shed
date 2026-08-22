@@ -3,7 +3,7 @@ use crate::{
   eval::{lex::TkFlags, parse::Ast},
   expand::{Expander, expand_raw_inner, stream::SegStream},
   match_loop,
-  util::{self, QuoteState},
+  util::{self, ByteCursor, QuoteState, SliceCursor},
 };
 
 use super::{meta::MetaTab, scopes::ScopeStack};
@@ -29,6 +29,7 @@ use nix::{
   unistd::{Pid, User, gethostname, getppid, isatty},
 };
 use rusqlite::{ToSql, types::FromSql};
+use smallvec::SmallVec;
 use smol_str::{SmolStr, SmolStrBuilder};
 
 use super::{
@@ -312,7 +313,7 @@ impl ArrIndex {
         )),
         VarKindTag::AssocArr => Ok(Self::Key(s)),
         VarKindTag::Arr | VarKindTag::Str | VarKindTag::Int | VarKindTag::Magic => {
-          let evaluated = expand_arithmetic(&s)?;
+          let evaluated = expand_arithmetic(s.as_bytes())?;
           let n: usize = evaluated
             .to_str_lossy()
             .parse()
@@ -515,15 +516,36 @@ impl VarStrSliceExt for [&VarStr] {
   }
 }
 
-/// shed's internal string type for variable values.
+/// shed's internal string type. Basically just a very fancy `&[u8]`. Used mainly when you need
+/// ownership of a byte slice that doesn't necessarily allocate like `Vec<u8>` would.
 ///
-/// It is a wrapper around `HipByt`.
+/// `VarStr` is immutable, unlike [`String`].
+///
+/// It is a wrapper around [`hipstr::HipByt`], which is itself a shared-ownership byte sequence.
+/// It does not have the same UTF-8 guarantees as [`String`] and [`str`], which is necessary to preserve
+/// exact byte structure instead of mangling with functions like `to_string_lossy()`.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
 pub(crate) struct VarStr(HipByt<'static>);
 
 impl VarStr {
   pub fn as_bytes(&self) -> &[u8] {
     &self.0
+  }
+
+  pub fn contains_slice(&self, needle: &[u8]) -> bool {
+    self.0.windows(needle.len()).any(|window| window == needle)
+  }
+
+  /// Check to see if two instances of [`VarStr`] point to the same data.
+  ///
+  /// For small `VarStr` instances (under 24 bytes), just checks content equality since `HipByt` remains
+  /// stack allocated for small buffers.
+  pub fn ptr_eq(&self, other: &VarStr) -> bool {
+    if self.0.len() >= 24 {
+      std::ptr::eq(self.0.as_ptr(), other.0.as_ptr())
+    } else {
+      self.0 == other.0
+    }
   }
 
   /// Borrowed UTF-8 view, or `None` if the bytes aren't valid UTF-8. Cheap
@@ -567,6 +589,12 @@ impl FromSql for VarStr {
       }
       _ => Err(rusqlite::types::FromSqlError::InvalidType),
     }
+  }
+}
+
+impl From<SmallVec<[u8; 24]>> for VarStr {
+  fn from(value: SmallVec<[u8; 24]>) -> Self {
+    Self(HipByt::from(value.as_slice()))
   }
 }
 
@@ -771,17 +799,21 @@ impl VarKind {
 
 impl VarKind {
   pub fn arr_from_tk(tk: &Tk) -> ShResult<Self> {
-    let raw = tk.as_str();
+    let raw = tk.as_bytes();
     Self::arr_from_raw(raw)
   }
 
-  pub fn arr_from_raw(raw: &str) -> ShResult<Self> {
-    if !raw.starts_with('(') || !raw.ends_with(')') {
-      return Err(sherr!(ParseErr, "Invalid array syntax: {}", raw,));
+  pub fn arr_from_raw(raw: &[u8]) -> ShResult<Self> {
+    if !raw.starts_with(b"(") || !raw.ends_with(b")") {
+      return Err(sherr!(
+        ParseErr,
+        "Invalid array syntax: {}",
+        raw.to_str_lossy(),
+      ));
     }
-    let raw = raw[1..raw.len() - 1].to_string();
+    let raw = &raw[1..raw.len() - 1];
 
-    let tokens = LexStream::new(raw.into(), LexFlags::empty())
+    let tokens = LexStream::new(raw, LexFlags::empty())
       .filter(|tk| {
         !tk.as_ref().is_ok_and(|tk| {
           matches!(
@@ -802,7 +834,7 @@ impl VarKind {
     Ok(Self::Arr(tokens.into()))
   }
 
-  pub fn parse(raw: &str) -> Self {
+  pub fn parse(raw: &[u8]) -> Self {
     Self::arr_from_raw(raw).unwrap_or_else(|_| Self::Str(raw.into()))
   }
 
@@ -825,29 +857,28 @@ impl VarKind {
     Self::AssocArr(pairs)
   }
 
-  pub fn assoc_arr_from_raw(raw: &str) -> ShResult<Self> {
-    if !raw.starts_with('(') || !raw.ends_with(')') {
+  pub fn assoc_arr_from_raw(raw: &[u8]) -> ShResult<Self> {
+    if !raw.starts_with(b"(") || !raw.ends_with(b")") {
       return Err(sherr!(
         ParseErr,
         "Invalid associative array syntax: {}",
-        raw,
+        raw.to_str_lossy(),
       ));
     }
     let body = &raw[1..raw.len() - 1];
     let mut pairs = Vec::new();
-    let mut chars = body.chars().peekable();
+    let mut bytes = SliceCursor::new(body);
 
     loop {
       // Skip whitespace
-      while chars.peek().is_some_and(|c| c.is_whitespace()) {
-        chars.next();
-      }
-      if chars.peek().is_none() {
+      bytes.bump_while(|b| b.is_ascii_whitespace());
+
+      if bytes.is_empty() {
         break;
       }
 
       // Expect '[' to open the key.
-      if chars.next() != Some('[') {
+      if bytes.next_byte() != Some(b'[') {
         return Err(sherr!(
           ParseErr,
           "Invalid associative array element: expected '[' to start key",
@@ -858,29 +889,29 @@ impl VarKind {
       let mut key = util::scratch_buf();
       let mut depth = 1usize;
       loop {
-        let Some(c) = chars.next() else {
+        let Some(b) = bytes.next_byte() else {
           return Err(sherr!(ParseErr, "Unclosed '[' in associative array key",));
         };
-        match c {
-          '[' => {
+        match b {
+          b'[' => {
             depth += 1;
-            key.push(c);
+            key.push(b);
           }
-          ']' => {
+          b']' => {
             depth -= 1;
             if depth == 0 {
               break;
             }
-            key.push(c);
+            key.push(b);
           }
-          _ => key.push(c),
+          _ => key.push(b),
         }
       }
 
       let expanded_key = Expander::from_raw(&key, TkFlags::empty()).expand_no_split()?;
 
       // Expect '=' immediately after ']'.
-      if chars.next() != Some('=') {
+      if !bytes.bump_if_eq(b'=') {
         return Err(sherr!(
           ParseErr,
           "Expected '=' after ']' in associative array element",
@@ -890,29 +921,29 @@ impl VarKind {
       // Read the value up to top-level whitespace. Quote chars are kept (and
       // tracked only to tell when whitespace is inside them) so the expander
       // still handles the original quoting, e.g. $'...' ANSI-C strings.
-      let mut val = String::new();
+      let mut val = util::scratch_buf();
       let mut qt_state = QuoteState::default();
-      match_loop!(chars.peek() => &c => c, {
-        '\\' if !qt_state.in_single() => {
-          chars.next();
+      match_loop!(bytes.peek_byte() => c, {
+        b'\\' if !qt_state.in_single() => {
+          bytes.bump();
           val.push(c);
-          if let Some(next) = chars.next() {
+          if let Some(next) = bytes.next_byte() {
             val.push(next);
           }
         }
-        '"' => {
-          chars.next();
+        b'"' => {
+          bytes.bump();
           qt_state.toggle_double();
           val.push(c);
         }
-        '\'' => {
-          chars.next();
+        b'\'' => {
+          bytes.bump();
           qt_state.toggle_single();
           val.push(c);
         }
-        _ if c.is_whitespace() && qt_state.outside() => break,
+        _ if c.is_ascii_whitespace() && qt_state.outside() => break,
         _ => {
-          chars.next();
+          bytes.bump();
           val.push(c);
         }
       });
@@ -1849,7 +1880,7 @@ mod set_index_tests {
   fn assoc_from_raw_handles_escaped_quote_in_value() {
     // `'\''` (a single quote escaped between single-quoted spans) must not
     // throw off the whitespace-delimited value-boundary scan.
-    let kind = VarKind::assoc_arr_from_raw(r"([bar]='biz ba'\''zz buzz' [bam]='foo')").unwrap();
+    let kind = VarKind::assoc_arr_from_raw(br"([bar]='biz ba'\''zz buzz' [bam]='foo')").unwrap();
     let VarKind::AssocArr(pairs) = kind else {
       panic!("expected assoc array");
     };

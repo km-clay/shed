@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
-use crate::opt;
+use bstr::ByteSlice;
+
+use crate::{opt, state::vars::VarStr, util, varstr};
 
 use super::{
   ShResult, Shed, expand::markers, join_raw_args, match_loop, opt::OptSpec, sherr, try_var,
@@ -10,7 +12,7 @@ use super::{
 pub struct Flog;
 impl super::Builtin for Flog {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![opt!("prefix" | 'p', 1)]
+    vec![opt!("prefix" | b'p', 1)]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
@@ -44,7 +46,13 @@ impl super::Builtin for Flog {
     }
 
     let (rest, _) = join_raw_args(arg_vec);
-    let formatted = Self::expand_prefix_fmt(&prefix_fmt.to_str_lossy(), &level, source, line, col);
+    let formatted = Self::expand_prefix_fmt(
+      prefix_fmt.as_bytes(),
+      level.as_bytes(),
+      source.as_bytes(),
+      line,
+      col,
+    );
 
     let out = format!("{formatted} {rest}");
 
@@ -55,44 +63,44 @@ impl super::Builtin for Flog {
 }
 
 impl Flog {
-  fn expand_prefix_fmt(fmt: &str, level: &str, source: &str, line: usize, col: usize) -> String {
-    let mut chars = fmt.chars();
-    let mut out = String::new();
-    match_loop!(chars.next() => ch, {
-      '\\' => {
-        out.push(ch);
-        if let Some(next_ch) = chars.next() {
+  fn expand_prefix_fmt(fmt: &[u8], level: &[u8], source: &[u8], line: usize, col: usize) -> VarStr {
+    let mut bytes = fmt.bytes();
+    let mut out = util::scratch_buf();
+    match_loop!(bytes.next() => b, {
+      b'\\' => {
+        out.push(b);
+        if let Some(next_ch) = bytes.next() {
           out.push(next_ch);
         }
       }
-      '{' => {
-        let mut fmt_arg = String::new();
+      b'{' => {
+        let mut fmt_arg = util::scratch_buf();
 
-        match_loop!(chars.next() => ch, {
-          '}' => break,
-          _ => fmt_arg.push(ch),
+        match_loop!(bytes.next() => b, {
+          b'}' => break,
+          _ => fmt_arg.push(b),
         });
 
-        match fmt_arg.as_str() {
-          "level" => out.push_str(level),
-          "line" => out.push_str(&line.to_string()),
-          "col" => out.push_str(&col.to_string()),
-          "source" => {
-            let source = source.replace('%', &format!("{}",markers::ESCAPE));
-            out.push_str(&source);
+        match fmt_arg.as_slice() {
+          b"level" => out.extend_from_slice(level),
+          b"line" => out.extend_from_slice(varstr!("{line}").as_bytes()),
+          b"col" => out.extend_from_slice(varstr!("{col}").as_bytes()),
+          b"source" => {
+            let source = source.replace(b"%", varstr!("{}",markers::ESCAPE).as_bytes());
+            out.extend_from_slice(source.as_bytes());
           }
-          _ => out.push_str(&fmt_arg),
+          _ => out.extend_from_slice(&fmt_arg),
         }
       }
-      _ => out.push(ch),
+      _ => out.push(b),
     });
 
-    out = chrono::Local::now()
-      .format(&out)
+    let out = chrono::Local::now()
+      .format(&out.to_str_lossy()) // alas, we must call to_str_lossy(). Sad!
       .to_string()
       .replace(markers::ESCAPE, "%");
 
-    out
+    VarStr::from(out)
   }
 
   fn get_log_level() -> Option<log::Level> {

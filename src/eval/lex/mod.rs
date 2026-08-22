@@ -1,16 +1,25 @@
+//! This module contains `shed`'s lexer: [`LexStream`]
+//! `LexStream` operates by taking a slice of bytes, and then iterating over them one byte at a time.
+//! As it iterates over the bytes, it slices them into separate tokens which are returned through the `next()` method.
+//!
+//! `LexStream` implements `Iterator`, so lexing is a lazy operation.
+
 use std::{
+  borrow::Cow,
   cmp::Ordering,
+  collections::VecDeque,
   fmt::Display,
-  ops::{Bound, Range, RangeBounds},
+  ops::{Bound, Index, Range, RangeBounds, RangeFrom, RangeTo, RangeToInclusive},
   rc::Rc,
 };
 
 use bitflags::bitflags;
+use bstr::ByteSlice;
 
 use crate::{
   assert_sorted,
   state::vars::{VarStr, VarStrSliceExt},
-  util,
+  util::{self, ByteCursor, SliceCursor},
 };
 
 use super::{
@@ -20,9 +29,28 @@ use super::{
   util::{Pos, QuoteState, ShResult, ends_with_unescaped, scan_param_exp, scan_parens},
 };
 
-pub const KEYWORDS: [&str; 21] = [
-  "!", "case", "catch", "defer", "do", "done", "elif", "else", "esac", "fi", "for", "function",
-  "if", "in", "not", "select", "then", "time", "try", "until", "while",
+pub const KEYWORDS: [&[u8]; 21] = [
+  b"!",
+  b"case",
+  b"catch",
+  b"defer",
+  b"do",
+  b"done",
+  b"elif",
+  b"else",
+  b"esac",
+  b"fi",
+  b"for",
+  b"function",
+  b"if",
+  b"in",
+  b"not",
+  b"select",
+  b"then",
+  b"time",
+  b"try",
+  b"until",
+  b"while",
 ];
 
 assert_sorted!(KEYWORDS);
@@ -73,29 +101,72 @@ macro_rules! lex_err {
 
 #[derive(Clone, PartialEq, Default, Debug, Eq, Hash)]
 pub struct SpanSource {
-  name: Rc<str>,
-  content: Rc<str>,
+  name: VarStr,
+  content: VarStr,
 }
 
 thread_local! {
   /// Cached default source name, so `Span::new`
   /// doesn't re-allocate `"<stdin>"` on every call.
-  static STDIN_NAME: Rc<str> = Rc::from("<stdin>");
+  static STDIN_NAME: VarStr = VarStr::from("<stdin>");
 }
 
-fn stdin_name() -> Rc<str> {
-  STDIN_NAME.with(Rc::clone)
+fn stdin_name() -> VarStr {
+  STDIN_NAME.with(VarStr::clone)
 }
 
 impl SpanSource {
-  pub fn new(name: Rc<str>, content: Rc<str>) -> Self {
+  pub fn new(name: VarStr, content: VarStr) -> Self {
     Self { name, content }
   }
-  pub fn name(&self) -> &str {
-    &self.name
+  pub fn name(&self) -> VarStr {
+    self.name.clone()
   }
-  pub fn content(&self) -> Rc<str> {
+  pub fn content(&self) -> VarStr {
     self.content.clone()
+  }
+  pub fn len(&self) -> usize {
+    self.content.len()
+  }
+}
+
+impl Index<usize> for SpanSource {
+  type Output = u8;
+
+  fn index(&self, index: usize) -> &Self::Output {
+    &self.content[index]
+  }
+}
+
+impl Index<RangeTo<usize>> for SpanSource {
+  type Output = [u8];
+
+  fn index(&self, index: RangeTo<usize>) -> &Self::Output {
+    &self.content[index]
+  }
+}
+
+impl Index<RangeToInclusive<usize>> for SpanSource {
+  type Output = [u8];
+
+  fn index(&self, index: RangeToInclusive<usize>) -> &Self::Output {
+    &self.content[index]
+  }
+}
+
+impl Index<RangeFrom<usize>> for SpanSource {
+  type Output = [u8];
+
+  fn index(&self, index: RangeFrom<usize>) -> &Self::Output {
+    &self.content[index]
+  }
+}
+
+impl Index<Range<usize>> for SpanSource {
+  type Output = [u8];
+
+  fn index(&self, index: Range<usize>) -> &Self::Output {
+    &self.content[index]
   }
 }
 
@@ -106,31 +177,31 @@ impl Display for SpanSource {
   }
 }
 
-/// A slice of some source text. Ultimately wraps an `Rc<str>`, which means these are cheap to clone.
+/// A slice of some source text. Ultimately wraps a [`crate::state::vars::VarStr`], which means these are cheap to clone.
 ///
 /// Load-bearing struct. Used extensively throughout the codebase for slicing shell input for various reasons (error reporting, tab completion, etc)
 #[derive(Clone, PartialEq, Default, Debug)]
 pub(crate) struct Span {
   range: Range<usize>,
   pos: Pos,
-  source: Rc<SpanSource>,
+  source: SpanSource,
 }
 
 impl Span {
   /// New `Span`. Wraps a range and a string that it refers to.
-  pub fn new(range: Range<usize>, content: Rc<str>) -> Self {
+  pub fn new(range: Range<usize>, content: VarStr) -> Self {
     Span {
       range,
       pos: Pos::MIN,
-      source: Rc::new(SpanSource {
+      source: SpanSource {
         name: stdin_name(),
         content,
-      }),
+      },
     }
   }
   /// Like `new`, but reuses an already-built, shared `Rc<SpanSource>` — no
   /// allocation and no per-token rename.
-  pub fn with_source(range: Range<usize>, source: Rc<SpanSource>) -> Self {
+  pub fn with_source(range: Range<usize>, source: SpanSource) -> Self {
     Span {
       range,
       pos: Pos::MIN,
@@ -138,8 +209,7 @@ impl Span {
     }
   }
   pub fn merge_inplace(&mut self, other: &Span) {
-    // make sure these two spans originate from the same input
-    if !Rc::ptr_eq(&self.source.content, &other.source.content) {
+    if !VarStr::ptr_eq(&self.source.content, &other.source.content) {
       return;
     }
 
@@ -150,8 +220,11 @@ impl Span {
     self.range.end = self.range.end.max(other.range.end);
   }
   pub fn merge_with(mut self, other: &Span) -> Option<Self> {
-    // make sure these two spans originate from the same input
-    if !Rc::ptr_eq(&self.source.content, &other.source.content) {
+    // make sure these two spans originate from the same input. See
+    // `merge_inplace` for why the `ptr_eq` fast path needs a value fallback.
+    if !VarStr::ptr_eq(&self.source.content, &other.source.content)
+      && self.source.content != other.source.content
+    {
       return None;
     }
 
@@ -166,24 +239,35 @@ impl Span {
     self.pos = pos;
     self
   }
-  pub fn rename(&mut self, name: Rc<str>) {
+  pub fn rename(&mut self, name: VarStr) {
     // Fork this span's shared source (copy-on-write) so renaming it — e.g. to
     // attribute a function body to its name for error blame — doesn't rename
     // every other span sharing the source.
-    Rc::make_mut(&mut self.source).name = name;
+    self.source.name = name;
   }
   pub fn line_and_col(&self) -> (usize, usize) {
     (self.pos.row, self.pos.col)
   }
   /// Slice the source string at the wrapped range
-  pub fn as_str(&self) -> &str {
+  pub fn to_str_lossy(&self) -> Cow<'_, str> {
+    self.as_bytes().to_str_lossy()
+  }
+  pub fn as_var_str(&self) -> VarStr {
+    self.as_bytes().into()
+  }
+  pub fn as_bytes(&self) -> &[u8] {
     &self.source.content[self.range().start..self.range().end]
   }
-  pub fn get_source(&self) -> Rc<str> {
+  pub fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
+    self.source.content[self.range().start..self.range().end]
+      .iter()
+      .copied()
+  }
+  pub fn get_source(&self) -> VarStr {
     self.source.content.clone()
   }
   pub fn span_source(&self) -> &SpanSource {
-    self.source.as_ref()
+    &self.source
   }
   pub fn range(&self) -> Range<usize> {
     self.range.clone()
@@ -315,12 +399,14 @@ impl Tk {
     self.filter_meta()
       && self
         .span
-        .as_str()
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c))
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"-_./".contains(&b))
   }
-  pub fn as_str(&self) -> &str {
-    self.span.as_str()
+  pub fn as_bytes(&self) -> &[u8] {
+    self.span.as_bytes()
+  }
+  pub fn to_str_lossy(&self) -> Cow<'_, str> {
+    self.span.to_str_lossy()
   }
   /// The token's effective text as a `VarStr`: the joined expansion for an
   /// expanded token, or the raw span otherwise. Mirrors `Display` without
@@ -328,10 +414,10 @@ impl Tk {
   pub fn word(&self) -> VarStr {
     match &self.class {
       TkRule::Expanded { exp } => exp.join_with(" "),
-      _ => self.span.as_str().into(),
+      _ => self.span.as_bytes().into(),
     }
   }
-  pub fn source(&self) -> Rc<str> {
+  pub fn source(&self) -> VarStr {
     self.span.source.content.clone()
   }
   pub fn mark(&mut self, flag: TkFlags) {
@@ -342,7 +428,7 @@ impl Tk {
     let TkRule::Sep = self.class else {
       return false;
     };
-    self.span.as_str().trim() == ";;"
+    self.span.as_bytes().trim() == b";;"
   }
 
   pub fn filter_meta(&self) -> bool {
@@ -360,10 +446,10 @@ impl Tk {
   /// returns a new `Tk` instead of mutating in-place. Altering spans directly
   /// feels like a potential footgun.
   pub fn strip_arith_header(&self) -> ShResult<Self> {
-    let s = self.as_str();
+    let s = self.as_bytes();
     let trimmed = s.trim();
 
-    if trimmed.len() < 4 || !trimmed.starts_with("((") || !trimmed.ends_with("))") {
+    if trimmed.len() < 4 || !trimmed.starts_with(b"((") || !trimmed.ends_with(b"))") {
       return Err(sherr!(ParseErr @ self.span.clone(), "malformed arithmetic for-loop header"));
     }
 
@@ -375,15 +461,6 @@ impl Tk {
       self.class.clone(),
       Span::new(start..end, self.source()),
     ))
-  }
-}
-
-impl Display for Tk {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match &self.class {
-      TkRule::Expanded { exp } => write!(f, "{}", exp.join_with(" ")),
-      _ => write!(f, "{}", self.span.as_str()),
-    }
   }
 }
 
@@ -410,7 +487,7 @@ bitflags! {
 }
 
 bitflags! {
-  #[derive(Debug, Clone, Copy)]
+  #[derive(Debug, Clone, Default, PartialEq, Copy)]
   pub struct LexFlags: u32 {
     /// The lexer is operating in interactive mode
     const INTERACTIVE    = 1 << 0;
@@ -437,126 +514,175 @@ bitflags! {
   }
 }
 
-pub fn clean_input(input: &str) -> String {
-  let input = input.to_string();
-  let mut chars = input.char_indices().peekable();
-  let mut output = String::new();
+pub fn clean_input(input: &[u8]) -> VarStr {
+  let mut bytes = SliceCursor::new(input);
+  let mut output = vec![];
   let mut quotes = QuoteState::default();
   let mut in_comment = false;
   // FIFO queue: heredocs on the same line are consumed in order
-  let mut heredoc_queue: std::collections::VecDeque<VarStr> = std::collections::VecDeque::new();
-  match_loop!(chars.next() => (i,ch) => ch, {
-    _ if in_comment && ch != '\n' && ch != '\r' => output.push(ch),
-    '\'' => {
+  let mut heredoc_queue: VecDeque<VarStr> = VecDeque::new();
+  match_loop!(bytes.next_byte() => b, {
+    _ if in_comment && b != b'\n' && b != b'\r' => output.push(b),
+    b'\'' => {
       quotes.toggle_single();
-      output.push(ch);
+      output.push(b);
     }
-    '"' => {
+    b'"' => {
       quotes.toggle_double();
-      output.push(ch);
+      output.push(b);
     }
-    '#' if quotes.outside()
-      && matches!(output.chars().next_back(), None | Some(' ' | '\t' | '\n' | ';' | '&' | '|' | '(' | ')')) =>
+    b'#' if quotes.outside()
+      && matches!(output.bytes().next_back(), None | Some(b' ' | b'\t' | b'\n' | b';' | b'&' | b'|' | b'(' | b')')) =>
     {
       in_comment = true;
-      output.push(ch);
+      output.push(b);
     }
-    '\\' if !quotes.in_single() && matches!(chars.peek(), Some((_, '\n' | '\r'))) => {
+    b'\\' if !quotes.in_single() && matches!(bytes.peek_byte(), Some(b'\n' | b'\r')) => {
       // line continuation
-      let nl = chars.next().map(|(_, c)| c);
-      if nl == Some('\r') && matches!(chars.peek(), Some((_, '\n'))) {
-        chars.next();
+      let nl = bytes.next_byte();
+      if nl == Some(b'\r') {
+        bytes.bump_if(|b| b == b'\n');
       }
     }
-    '\r' => {
+    b'\r' => {
       in_comment = false;
-      if let Some(&(_, '\n')) = chars.peek() {
-        chars.next();
-      }
-      output.push('\n');
+      bytes.bump_if(|b| b == b'\n');
+      output.push(b'\n');
     }
-    '\n' if !heredoc_queue.is_empty() => {
+    b'\n' if let Some(delim) = heredoc_queue.pop_front() => {
       in_comment = false;
-      output.push('\n');
-      let delim = heredoc_queue.pop_front().unwrap();
-      let delim = delim.to_str_lossy();
-      let tab_strip = delim.starts_with('-');
-      let match_delim = delim.trim_start_matches('-');
-      let start = i + 1;
+      output.push(b'\n');
+      let tab_strip = delim.starts_with(b"-");
+      let match_delim = delim.trim_start_with(|b| b == '-');
+      let start = bytes.pos();
       let mut end = start;
-      for line in input[start..].split('\n') {
-        output.push_str(line);
-        output.push('\n');
+      for line in input[start..].split(|b| *b == b'\n') {
+        output.extend_from_slice(line);
+        output.push(b'\n');
         end += line.len() + 1;
         let line_to_match = if tab_strip {
-          line.trim_start_matches('\t')
+          line.trim_start_with(|b| b == '\t')
         } else {
           line
         };
         if line_to_match == match_delim {
-          // Advance chars iterator past all bytes we just copied
-          while chars.peek().is_some_and(|&(j, _)| j < end) {
-            chars.next();
+          // Advance the cursor past all the body bytes we just copied
+          while bytes.pos() < end {
+            if bytes.next_byte().is_none() {
+              break;
+            }
           }
           break;
         }
       }
     }
-    '\n' => {
+    b'\n' => {
       in_comment = false;
-      output.push('\n');
+      output.push(b'\n');
     }
-    '<' if quotes.outside() && chars.peek().is_some_and(|(_,c)| *c == '<') => {
-      output.push(ch);
-      let (_, second) = chars.next().unwrap();
-      output.push(second);
+    b'<' if quotes.outside() && bytes.peek_byte() == Some(b'<') => {
+      output.push(b); // first '<'
+      output.push(bytes.next_byte().unwrap()); // second '<'
 
       // <<< is a here-string — no multi-line body, don't push to queue
-      if chars.peek().is_some_and(|(_,c)| *c == '<') {
-        let (_, third) = chars.next().unwrap();
+      if let Some(third) = bytes.next_byte_if(|b| b == b'<') {
         output.push(third);
       } else {
         // Skip optional '-' for <<-
-        let mut tab_strip = false;
-        if chars.peek().is_some_and(|(_,c)| *c == '-') {
-          tab_strip = true;
-        }
+        let tab_strip = bytes.peek_byte() == Some(b'-');
 
         // Skip horizontal whitespace between << and delimiter
-        while chars.peek().is_some_and(|(_,c)| *c == ' ' || *c == '\t') {
-          let (_, wc) = chars.next().unwrap();
+        while let Some(wc) = bytes.next_byte_if(|b| b == b' ' || b == b'\t') {
           output.push(wc);
         }
 
         // Collect delimiter word, stripping quotes for the match key
         let mut delim = util::scratch_buf();
         if tab_strip {
-          delim.push('-');
+          delim.push(b'-');
         }
         let mut in_dquote = false;
         let mut in_squote_inner = false;
-        while let Some(&(_, c)) = chars.peek() {
+        while let Some(c) = bytes.peek_byte() {
           match c {
-            '\'' if !in_dquote => in_squote_inner = !in_squote_inner,
-            '"' if !in_squote_inner => in_dquote = !in_dquote,
-            c if (c.is_whitespace() || matches!(c, ';' | '&' | '|' | '(' | ')' | '<' | '>')) && !in_dquote && !in_squote_inner => break,
+            b'\'' if !in_dquote => in_squote_inner = !in_squote_inner,
+            b'"' if !in_squote_inner => in_dquote = !in_dquote,
+            c if (c.is_ascii_whitespace()
+              || matches!(c, b';' | b'&' | b'|' | b'(' | b')' | b'<' | b'>'))
+              && !in_dquote
+              && !in_squote_inner =>
+            {
+              break
+            }
             _ => {}
           }
           // Add to match key only if it's not a quote character
-          if c != '\'' && c != '"' {
+          if c != b'\'' && c != b'"' {
             delim.push(c);
           }
           output.push(c);
-          chars.next();
+          bytes.next_byte();
         }
-        if !delim.trim_start_matches('-').is_empty() {
-          heredoc_queue.push_back(delim.into());
+        if !delim.trim_start_with(|b| b == '-').is_empty() {
+          heredoc_queue.push_back(delim.as_slice().into());
         }
       }
     }
-    _ => output.push(ch),
+    _ => output.push(b),
   });
-  output
+  output.into()
+}
+
+/// The state of the lexer at a given point in time.
+///
+/// This is used to save and restore the state of the lexer when a transactional operation fails.
+#[derive(Clone, Debug, PartialEq, Default, Copy)]
+struct LexState {
+  pub cursor: usize,
+  pos_offset: usize,
+  pos: Pos,
+  quote_state: QuoteState,
+  brc_grp_depth: usize,
+  brc_grp_start: Option<usize>,
+  subsh_depth: usize,
+  subsh_start: Option<usize>,
+  case_depth: usize,
+  heredoc_skip: Option<usize>,
+  flags: LexFlags,
+}
+
+impl LexState {
+  fn load_into(self, stream: &mut LexStream) {
+    stream.cursor = self.cursor;
+    stream.pos_offset = self.pos_offset;
+    stream.pos = self.pos;
+    stream.quote_state = self.quote_state;
+    stream.brc_grp_depth = self.brc_grp_depth;
+    stream.brc_grp_start = self.brc_grp_start;
+    stream.subsh_depth = self.subsh_depth;
+    stream.subsh_start = self.subsh_start;
+    stream.case_depth = self.case_depth;
+    stream.heredoc_skip = self.heredoc_skip;
+    stream.flags = self.flags;
+  }
+}
+
+impl From<&LexStream> for LexState {
+  fn from(lexer: &LexStream) -> Self {
+    Self {
+      cursor: lexer.cursor,
+      pos_offset: lexer.pos_offset,
+      pos: lexer.pos,
+      quote_state: lexer.quote_state,
+      brc_grp_depth: lexer.brc_grp_depth,
+      brc_grp_start: lexer.brc_grp_start,
+      subsh_depth: lexer.subsh_depth,
+      subsh_start: lexer.subsh_start,
+      case_depth: lexer.case_depth,
+      heredoc_skip: lexer.heredoc_skip,
+      flags: lexer.flags,
+    }
+  }
 }
 
 /// The main struct for lexical analysis of shell input.
@@ -567,12 +693,10 @@ pub fn clean_input(input: &str) -> String {
 /// Notes:
 /// The first and last lexed token will be an empty token with class `TkRule::Soi` and `TkRule::Eoi` respectively. These tokens must be handled specially if you are using the lexer for internal stuff like the cases mentioned above.
 pub(crate) struct LexStream {
-  source: Rc<str>,
-  span_source: Rc<SpanSource>,
+  source: SpanSource,
   pub cursor: usize,
   pos_offset: usize,
   pos: Pos,
-  pub name: Rc<str>,
   quote_state: QuoteState,
   brc_grp_depth: usize,
   brc_grp_start: Option<usize>,
@@ -584,15 +708,12 @@ pub(crate) struct LexStream {
 }
 
 impl LexStream {
-  pub fn new(source: Rc<str>, flags: LexFlags) -> Self {
+  pub fn new(source: &[u8], flags: LexFlags) -> Self {
     let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
-    let name: Rc<str> = "<stdin>".into();
-    let span_source = Rc::new(SpanSource::new(name.clone(), source.clone()));
+    let source = SpanSource::new(stdin_name(), source.into());
     Self {
       flags,
       source,
-      span_source,
-      name,
       cursor: 0,
       pos_offset: 0,
       pos: Pos::new(0, 0),
@@ -614,7 +735,7 @@ impl LexStream {
   /// `LexStream.slice(1..=10)`
   /// `LexStream.slice(..10)`
   /// `LexStream.slice(1..)`
-  pub fn slice<R: RangeBounds<usize>>(&self, range: R) -> Option<&str> {
+  pub fn slice<R: RangeBounds<usize>>(&self, range: R) -> Option<&[u8]> {
     let start = match range.start_bound() {
       Bound::Included(&start) => start,
       Bound::Excluded(&start) => start + 1,
@@ -623,14 +744,32 @@ impl LexStream {
     let end = match range.end_bound() {
       Bound::Included(&end) => end + 1,
       Bound::Excluded(&end) => end,
-      Bound::Unbounded => self.source.len(),
+      Bound::Unbounded => self.source.content.len(),
     };
-    self.source.get(start..end)
+    self.source.content.get(start..end)
   }
-  pub fn with_name(mut self, name: Rc<str>) -> Self {
-    self.span_source = Rc::new(SpanSource::new(name.clone(), self.source.clone()));
-    self.name = name;
+  fn save_state(&self) -> LexState {
+    LexState::from(self)
+  }
+  fn load_state(&mut self, state: LexState) {
+    state.load_into(self);
+  }
+  pub fn attempt<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+    let saved = self.save_state();
+    if let Some(thing) = f(self) {
+      Some(thing)
+    } else {
+      self.load_state(saved); // restore state
+      None
+    }
+  }
+  pub fn with_name(mut self, name: VarStr) -> Self {
+    self.source.name = name;
     self
+  }
+  /// The source byte at an absolute index, if in bounds.
+  fn byte_at(&self, idx: usize) -> Option<u8> {
+    self.source.content.as_bytes().get(idx).copied()
   }
   pub fn in_brc_grp(&self) -> bool {
     self.brc_grp_depth > 0
@@ -701,547 +840,434 @@ impl LexStream {
       self.flags &= !LexFlags::NEXT_IS_CMD;
     }
   }
-  #[expect(clippy::too_many_lines)]
-  pub fn read_redir(&mut self) -> Option<ShResult<Tk>> {
-    assert!(self.cursor <= self.source.len());
-    let slice = self.slice(self.cursor..)?;
-    let mut pos = self.cursor;
-    let mut chars = slice.chars().peekable();
-    let mut tk = Tk::default();
+  fn read_redir(&mut self) -> Option<ShResult<Tk>> {
+    self.attempt(|this| {
+      let start = this.cursor;
 
-    match_loop!(chars.next() => ch, {
-      '&' if chars.peek() == Some(&'>') => {
-      }
-      '>' => {
-        if chars.peek() == Some(&'(') {
-          return None; // It's a process sub
+      match_loop!(this.peek_byte() => b, {
+        b'&' if this.peek_nth(1) == Some(b'>') => {
+          this.bump();
         }
-        pos += 1;
-        if let Some('|') = chars.peek() {
-          // noclobber force '>|'
-          chars.next();
-          pos += 1;
-          tk = self.get_token(self.cursor..pos, TkRule::Redir);
-          break;
-        }
-
-        if let Some('>') = chars.peek() {
-          chars.next();
-          pos += 1;
-        }
-        let Some('&') = chars.peek() else {
-          tk = self.get_token(self.cursor..pos, TkRule::Redir);
-          break;
-        };
-
-        chars.next();
-        pos += 1;
-
-        if chars.peek().is_some_and(|ch| *ch == '-') {
-          chars.next();
-          pos += 1;
-        } else {
-          while chars.peek().is_some_and(char::is_ascii_digit) {
-            chars.next();
-            pos += 1;
+        b'>' => {
+          if this.peek_nth(1) == Some(b'(') {
+            return None; // It's a process sub
           }
+          this.bump();
+          if this.bump_if_eq(b'|') {
+            // noclobber force '>|'
+            let tk = this.get_token(start..this.cursor, TkRule::Redir);
+            return Some(Ok(tk));
+          }
+
+          this.bump_if_eq(b'>'); // append '>>'
+
+          if !this.bump_if_eq(b'&') {
+            let tk = this.get_token(start..this.cursor, TkRule::Redir);
+            return Some(Ok(tk));
+          }
+
+          // '&' consumed by bump_if_eq above; now lex the dup target (fd or '-')
+          if !this.bump_if_eq(b'-') {
+            this.bump_while(|b| b.is_ascii_digit());
+          }
+
+          let tk = this.get_token(start..this.cursor, TkRule::Redir);
+          return Some(Ok(tk));
         }
+        b'<' => {
+          if this.peek_nth(1) == Some(b'(') {
+            return None; // It's a process sub
+          }
+          this.bump();
 
-        tk = self.get_token(self.cursor..pos, TkRule::Redir);
-        break;
-      }
-      '<' => {
-        if chars.peek() == Some(&'(') {
-          return None; // It's a process sub
-        }
-        pos += 1;
+          match this.peek_byte() {
+            Some(b'<') => {
+              this.bump();
 
-        match chars.peek() {
-          Some('<') => {
-            chars.next();
-            pos += 1;
-
-            match chars.peek() {
-              Some('<') => {
-                chars.next();
-                pos += 1;
-              }
-
-              Some(ch) => {
-                let mut ch = *ch;
-                // skip whitespace
-                while is_field_sep(ch) {
-                  let consumed = chars.next().unwrap();
-                  pos += consumed.len_utf8();
-                  match chars.peek() {
-                    Some(next) => ch = *next,
-                    None => break, // ran out, handled below
-                  }
+              match this.peek_byte() {
+                Some(b'<') => {
+                  this.bump(); // herestring, '<<<'
                 }
 
-                if is_field_sep(ch) {
-                  // Ran out of input while skipping whitespace, fall through
-                } else {
-                  let saved_cursor = self.cursor;
-                  match self.read_heredoc(pos) {
-                    Ok(Some(heredoc_tk)) => {
-                      // cursor is set to after the delimiter word;
-                      // heredoc_skip is set to after the body
-                      pos = self.cursor;
-                      self.update_cursor(saved_cursor);
-                      tk = heredoc_tk;
-                      break;
+                Some(b) => {
+                  let mut b = b;
+                  // skip whitespace
+                  while is_field_sep(b) {
+                    this.bump();
+                    match this.peek_byte() {
+                      Some(next) => b = next,
+                      None => break, // ran out, handled below
                     }
-                    Ok(None) => {
-                      // Incomplete heredoc - restore cursor and fall through
-                      self.update_cursor(saved_cursor);
-                    }
-                    Err(e) => return Some(Err(e)),
+                  }
+
+                  if !is_field_sep(b) {
+                    return Some(this.read_heredoc())
                   }
                 }
-              }
-              _ => {
-                // No delimiter yet - input is incomplete
-                // Fall through to emit the << as a Redir token
-              }
-            }
-          }
-          Some('>') => {
-            chars.next();
-            pos += 1;
-            tk = self.get_token(self.cursor..pos, TkRule::Redir);
-            break;
-          }
-          Some('&') => {
-            chars.next();
-            pos += 1;
-
-            if chars.peek().is_some_and(|ch| *ch == '-') {
-              chars.next();
-              pos += 1;
-            } else {
-              while chars.peek().is_some_and(char::is_ascii_digit) {
-                chars.next();
-                pos += 1;
+                _ => {
+                  // No delimiter yet - input is incomplete
+                  // Fall through to emit the << as a Redir token
+                }
               }
             }
+            Some(b'>') => {
+              this.bump();
+              let tk = this.get_token(start..this.cursor, TkRule::Redir);
+              return Some(Ok(tk));
+            }
+            Some(b'&') => {
+              this.bump();
 
-            tk = self.get_token(self.cursor..pos, TkRule::Redir);
-            break;
+              if !this.bump_if_eq(b'-') {
+                this.bump_while(|b| b.is_ascii_digit());
+              }
+
+              let tk = this.get_token(start..this.cursor, TkRule::Redir);
+              return Some(Ok(tk));
+            }
+            _ => {}
           }
-          _ => {}
+
+          let tk = this.get_token(start..this.cursor, TkRule::Redir);
+          return Some(Ok(tk));
         }
+        b'0'..=b'9' => {
+          this.bump_while(|b| b.is_ascii_digit());
+        }
+        _ => {
+          return None;
+        }
+      });
 
-        tk = self.get_token(self.cursor..pos, TkRule::Redir);
-        break;
+      None
+    })
+  }
+
+  fn read_heredoc(&mut self) -> ShResult<Tk> {
+    let start = self.cursor;
+    let mut flags = TkFlags::empty();
+    let mut delim = util::scratch_buf();
+    let mut qt_state = QuoteState::default();
+
+    match_loop!(self.peek_byte() => b, {
+      b'-' if start == self.cursor => {
+        self.bump();
+        flags |= TkFlags::TAB_HEREDOC;
+
+        self.bump_while(is_field_sep);
       }
-      '0'..='9' => {
-        pos += 1;
-        while chars.peek().is_some_and(char::is_ascii_digit) {
-          chars.next();
-          pos += 1;
-        }
+      b'"' => {
+        self.bump();
+        qt_state.toggle_double();
+        flags |= TkFlags::LIT_HEREDOC;
+      }
+      b'\'' => {
+        self.bump();
+        qt_state.toggle_single();
+        flags |= TkFlags::LIT_HEREDOC;
+      }
+      _ if qt_state.in_quote() => {
+        self.bump();
+        delim.push(b);
+      }
+      _ if is_hard_sep(b) => {
+        break;
       }
       _ => {
-        return None;
+        self.bump();
+        delim.push(b);
       }
     });
-
-    if tk == Tk::default() {
-      return None;
-    }
-
-    self.update_cursor(pos);
-    Some(Ok(tk))
-  }
-  #[expect(clippy::too_many_lines)]
-  pub fn read_heredoc(&mut self, mut pos: usize) -> ShResult<Option<Tk>> {
-    let source = self.source.clone();
-    let slice = source.get(pos..).unwrap_or_default();
-    let span_start = pos;
-    let mut chars = slice.chars().peekable();
-    let mut delim = util::scratch_buf();
-    let mut flags = TkFlags::empty();
-    let mut first_char = true;
-    // Parse the delimiter word, stripping quotes
-    while let Some(ch) = chars.next() {
-      match ch {
-        '-' if first_char => {
-          pos += 1;
-          flags |= TkFlags::TAB_HEREDOC;
-          // skip whitespace
-          while chars.peek().is_some_and(|c| is_field_sep(*c)) {
-            let c = chars.next().unwrap();
-            pos += c.len_utf8();
-          }
-        }
-        '\"' => {
-          pos += 1;
-          self.quote_state.toggle_double();
-          flags |= TkFlags::LIT_HEREDOC;
-        }
-        '\'' => {
-          pos += 1;
-          self.quote_state.toggle_single();
-          flags |= TkFlags::LIT_HEREDOC;
-        }
-        _ if self.quote_state.in_quote() => {
-          pos += ch.len_utf8();
-          delim.push(ch);
-        }
-        ch if is_hard_sep(ch) => {
-          break;
-        }
-        ch => {
-          pos += ch.len_utf8();
-          delim.push(ch);
-        }
-      }
-      first_char = false;
-    }
-
-    // pos is now right after the delimiter word, this is where
-    // the cursor should return so the rest of the line gets lexed
-    let cursor_after_delim = pos;
-
-    // Re-slice from cursor_after_delim so iterator and pos are in sync
-    // (the old chars iterator consumed the hard_sep without advancing pos)
-    let source = self.source.clone();
-    let rest = source.get(cursor_after_delim..).unwrap_or_default();
-    let mut chars = rest.chars();
+    let delim_end = self.cursor;
 
     // Scan forward to the newline (or use heredoc_skip from a previous heredoc)
     let body_start = if let Some(skip) = self.heredoc_skip {
       // A previous heredoc on this line already read its body;
       // our body starts where that one ended
-      let skip_offset = skip - cursor_after_delim;
-      for _ in 0..skip_offset {
-        chars.next();
-      }
+      debug_assert!(
+        skip >= self.cursor,
+        "heredoc_skip is before the current cursor"
+      );
+      let skip_offset = skip - self.cursor;
+      self.inc_cursor(skip_offset);
       skip
     } else {
-      // Skip the rest of the current line to find where the body begins
-      let mut scan = pos;
-      let mut found_newline = false;
-      while let Some(ch) = chars.next() {
-        scan += ch.len_utf8();
-        if ch == '\n' {
-          found_newline = true;
-          break;
-        }
-      }
-      if !found_newline {
+      self.bump_while(|b| b != b'\n');
+      if !self.bump_if_eq(b'\n') {
+        // bump_while did not end at a newline, it hit EOF.
         return Err(lex_err!(
           self,
-          pos,
-          span_start..pos,
+          self.cursor,
+          start..self.cursor,
           "Heredoc delimiter not found",
         ));
       }
-      scan
+
+      self.cursor
     };
 
-    pos = body_start;
-    let start = pos;
+    let mut line_start = body_start;
+
+    // throw-away macro for creating and returning the heredoc token
+    macro_rules! ret_heredoc {
+      ($delim_start:expr) => {{
+        // well formed, found both delimiters
+        let start_delim = Box::new(self.get_span(start..delim_end));
+        let end_delim = Box::new(self.get_span($delim_start..self.cursor));
+        let rule = TkRule::HereDoc {
+          start_delim,
+          end_delim: Some(end_delim),
+        };
+        let mut tk = self.get_token(body_start..line_start, rule);
+        tk.flags |= TkFlags::IS_HEREDOC | flags;
+        self.heredoc_skip = Some(self.cursor);
+        self.update_cursor(delim_end);
+        return Ok(tk);
+      }};
+      () => {{
+        // missing a closing delimiter, but we are allowing unclosed quotes
+        let start_delim = Box::new(self.get_span(start..delim_end));
+        let rule = TkRule::HereDoc {
+          start_delim,
+          end_delim: None,
+        };
+        let mut tk = self.get_token(body_start..self.cursor, rule);
+        tk.flags |= TkFlags::IS_HEREDOC | flags;
+        self.heredoc_skip = Some(self.cursor);
+        self.update_cursor(delim_end);
+        Ok(tk)
+      }};
+    }
 
     // Read lines until we find one that matches the delimiter exactly
-    let mut line = String::new();
-    let mut line_start = pos;
+    let mut line = util::scratch_buf();
     let mut leading_tabs = true;
     let strip_tabs = flags.contains(TkFlags::TAB_HEREDOC);
-    while let Some(ch) = chars.next() {
-      pos += ch.len_utf8();
-      if strip_tabs && leading_tabs && ch == '\t' {
+    while let Some(b) = self.next_byte() {
+      if strip_tabs && leading_tabs && b == b'\t' {
         continue;
       }
-      if ch == '\n' {
-        let trimmed = line.trim_end_matches('\r');
-        if trimmed == delim {
-          let start_delim = Box::new(self.get_span(span_start..cursor_after_delim));
-          let end_delim = Box::new(self.get_span(line_start..pos));
-          let rule = TkRule::HereDoc {
-            start_delim,
-            end_delim: Some(end_delim),
-          };
-          let mut tk = self.get_token(start..line_start, rule);
-          tk.flags |= TkFlags::IS_HEREDOC | flags;
-          log::debug!("heredoc lex: delim={:?} body={:?}", delim, tk.span.as_str());
-          self.heredoc_skip = Some(pos);
-          self.update_cursor(cursor_after_delim);
-          return Ok(Some(tk));
+      leading_tabs = false;
+
+      if b == b'\n' {
+        let trimmed = line.trim_end_with(|c| c == '\r');
+        if *trimmed == *delim {
+          // found our delimiter
+          ret_heredoc!(line_start)
         }
+
+        // no match, clear the line and go to the next
         line.clear();
         leading_tabs = true;
-        line_start = pos;
+        line_start = self.cursor;
       } else {
-        line.push(ch);
+        line.push(b);
       }
     }
+
     // Check the last line (no trailing newline)
-    let trimmed = line.trim_end_matches('\r');
-    if trimmed == delim {
-      let start_delim = Box::new(self.get_span(span_start..cursor_after_delim));
-      let end_delim = Box::new(self.get_span(line_start..pos));
-      let rule = TkRule::HereDoc {
-        start_delim,
-        end_delim: Some(end_delim),
-      };
-      let mut tk = self.get_token(start..line_start, rule);
-      log::debug!("heredoc lex: delim={:?} body={:?}", delim, tk.span.as_str());
-      tk.flags |= TkFlags::IS_HEREDOC | flags;
-      self.heredoc_skip = Some(pos);
-      self.update_cursor(cursor_after_delim);
-      return Ok(Some(tk));
+    let trimmed = line.trim_end_with(|c| c == '\r');
+    if *trimmed == *delim {
+      ret_heredoc!(line_start)
     }
 
-    if self.flags.contains(LexFlags::LEX_UNFINISHED_QUOTES) {
-      let start_delim = Box::new(self.get_span(span_start..cursor_after_delim));
-      let rule = TkRule::HereDoc {
-        start_delim,
-        end_delim: None,
-      };
-      let mut tk = self.get_token(start..pos, rule);
-      tk.flags |= TkFlags::IS_HEREDOC | flags;
-      self.heredoc_skip = Some(pos);
-      self.update_cursor(cursor_after_delim);
-      Ok(Some(tk))
+    if self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+      ret_heredoc!()
     } else {
       Err(lex_err!(
         self,
-        pos,
-        span_start..pos,
+        self.cursor,
+        start..self.cursor,
         "Heredoc delimiter '{}' not found",
-        delim
+        delim.to_str_lossy()
       ))
     }
   }
-  #[expect(clippy::too_many_lines)]
-  pub fn read_string(&mut self) -> ShResult<Tk> {
-    assert!(self.cursor <= self.source.len());
-    let source = self.source.clone();
-    let slice = source.get(self.cursor..).unwrap_or_default();
-    let mut pos = self.cursor;
-    let mut chars = slice.chars().peekable();
-    let can_be_subshell = chars.peek() == Some(&'(');
 
-    match_loop!(chars.next() => ch, {
+  fn read_string(&mut self) -> ShResult<Tk> {
+    let start = self.cursor;
+    let can_be_subshell = self.peek_byte() == Some(b'(');
+
+    match_loop!(self.peek_byte() => b, {
       _ if self.flags.contains(LexFlags::RAW) => {
-        if ch.is_whitespace() {
+        if b.is_ascii_whitespace() {
           break;
         }
-        pos += ch.len_utf8();
+        self.bump();
       }
-      '\\' if !self.quote_state.in_single() => {
-        pos += 1;
-        if let Some(ch) = chars.next() {
-          pos += ch.len_utf8();
-          if ch == '\n' || ch == '\r' {
-            while let Some(&c) = chars.peek() {
-              if matches!(c, ' ' | '\t') {
-                chars.next();
-                pos += 1;
-              } else {
-                break;
-              }
-            }
-          }
+      b'\\' if !self.quote_state.in_single() => {
+        self.bump(); // '\'
+        if let Some(nb) = self.next_byte() && matches!(nb, b'\n' | b'\r') {
+          self.bump_while(|b| matches!(b, b' ' | b'\t'));
         }
       }
-      '$' if !self.quote_state.in_single() && chars.peek() == Some(&'\'') => {
-        pos += 1;        // '$'
-        chars.next();    // consume opening '
-        pos += 1;
-        // this needs its own branch
-        // because escaping a single quote in $'...' is valid
-        while let Some(c) = chars.next() {
-          pos += c.len_utf8();
-          if c == '\\' {
-            if let Some(esc) = chars.next() {
-              pos += esc.len_utf8();
-            }
-          } else if c == '\'' {
+      b'$' if !self.quote_state.in_single() && self.peek_nth(1) == Some(b'\'') => {
+        self.bump();         // '$'
+        self.next_byte();    // consume opening '
+                             // this needs its own branch
+                             // because escaping a single quote in $'...' is valid
+        while let Some(b) = self.next_byte() {
+          if b == b'\\' && let Some(_) = self.peek_byte() {
+            self.bump();
+          } else if b == b'\'' {
             break;
           }
         }
       }
-      '\'' => {
-        pos += 1;
+      b'\'' => {
         self.quote_state.toggle_single();
+        self.bump();
       }
-      '`' if !self.quote_state.in_single() => {
-        pos += 1;
-        match_loop!(chars.next() => ch, {
-          '\\' => {
-            pos += 1;
-            if let Some(next_ch) = chars.next() {
-              pos += next_ch.len_utf8();
-            }
-          }
-          '$' if chars.peek() == Some(&'(') => {
-            pos += 2;
-            chars.next();
-            let paren_pos = pos;
-            if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+      b'`' if !self.quote_state.in_single() => {
+        self.bump(); // opening `
+        match_loop!(self.next_byte() => b, {
+          b'\\' => self.bump(),
+          b'$' if self.peek_byte() == Some(b'(') => {
+            self.bump();
+            let paren_pos = self.cursor;
+            if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
               return Err(lex_err!(
-                self,
-                pos,
-                paren_pos..paren_pos + 1,
-                "Unclosed subshell",
+                  self,
+                  self.cursor,
+                  paren_pos..paren_pos + 1,
+                  "Unclosed subshell",
               ));
             }
           }
-          '`' => {
-            pos += 1;
-            break;
-          }
-          _ => pos += ch.len_utf8(),
+          b'`' => break,
+          _ => { /* do nothing */ }
         });
       }
-      _ if self.quote_state.in_single() => pos += ch.len_utf8(),
-      '$' if chars.peek() == Some(&'(') && self.slice(pos + 2..).is_some_and(|s| s.starts_with('(')) => {
-        pos += 2;
-        chars.next();
-        let paren_pos = pos;
-        if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
-          return Err(lex_err!(self, pos, paren_pos..paren_pos + 1, "Unclosed subshell"));
+      _ if self.quote_state.in_single() => { self.bump(); }
+      b'$' if self.peek_nth(1) == Some(b'(') && self.peek_nth(2) == Some(b'(') => {
+        self.inc_cursor(2); // '$('
+        let paren_pos = self.cursor;
+        if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+          return Err(lex_err!(self, self.cursor, paren_pos..paren_pos + 1, "Unclosed subshell"));
         }
       }
-      '$' if chars.peek() == Some(&'(') => {
-        pos += 2;
-        chars.next();
-        let paren_pos = pos;
+      b'$' if self.peek_nth(1) == Some(b'(') => {
+        self.inc_cursor(2); // '$('
+        let paren_pos = self.cursor;
         // Delimit `$(...)` with the case-aware subshell scanner rather than a
         // bare paren count, so a `case` pattern's `)` doesn't close it early.
-        match scan_cmd_sub_body(self.slice(pos..).unwrap_or("")) {
+        match scan_cmd_sub_body(self.slice(self.cursor..).unwrap_or_default()) {
           Some(close) => {
             let consumed = close + 1; // include the closing `)`
-            for _ in 0..self.slice(pos..pos + consumed).unwrap_or("").chars().count() {
-              chars.next();
-            }
-            pos += consumed;
+            self.inc_cursor(consumed);
           }
           None if !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) => {
             return Err(lex_err!(
-              self,
-              pos,
-              paren_pos..paren_pos + 1,
-              "Unclosed subshell",
+                self,
+                self.cursor,
+                paren_pos..paren_pos + 1,
+                "Unclosed subshell",
             ));
           }
           None => {
             // Tolerant of partial input (e.g. tab completion): consume the rest.
-            let rest = self.slice(pos..).unwrap_or("");
-            let (bytes, count) = (rest.len(), rest.chars().count());
-            for _ in 0..count {
-              chars.next();
-            }
-            pos += bytes;
+            let rest = self.slice(self.cursor..).unwrap_or_default();
+            self.inc_cursor(rest.len());
           }
         }
       }
-      '$' if chars.peek() == Some(&'{') => {
-        pos += 2;
-        chars.next();
-        let open_pos = pos - 2;
-        if !scan_param_exp(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+      b'$' if self.peek_nth(1) == Some(b'{') => {
+        self.inc_cursor(2); // '${'
+        let open_pos = self.cursor - 2;
+        if !scan_param_exp(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
-            self,
-            pos,
-            open_pos..open_pos + 2,
-            "Unclosed parameter expansion",
+              self,
+              self.cursor,
+              open_pos..open_pos + 2,
+              "Unclosed parameter expansion",
           ));
         }
       }
-      '"' => {
-        pos += 1;
+      b'"' => {
         self.quote_state.toggle_double();
+        self.bump();
       }
-      _ if self.quote_state.in_double() => pos += ch.len_utf8(),
-      '<' | '>' => {
-        if chars.peek() != Some(&'(') {
+      _ if self.quote_state.in_double() => { self.bump(); }
+      b'<' | b'>' => {
+        if self.peek_nth(1) != Some(b'(') {
+          // not a process sub; leave the operator for read_redir
           break
         }
         // it's a process sub
-        pos += 2;
-        chars.next();
-        let paren_pos = pos;
-        if !scan_parens(&mut chars, &mut pos, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+        self.inc_cursor(2); // '<' or '>', then '('
+        let paren_pos = self.cursor;
+        if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
-            self,
-            pos,
-            paren_pos..paren_pos + 1,
-            "Unclosed subshell",
+              self,
+              self.cursor,
+              paren_pos..paren_pos + 1,
+              "Unclosed subshell",
           ));
         }
       }
-      '(' if self.next_is_cmd() && chars.peek() == Some(&')') && pos != self.cursor => {
+      b'(' if self.next_is_cmd() && self.peek_nth(1) == Some(b')') && self.cursor != start => {
         // standalone "()" - function definition marker
-        // this will be handled below by self.func_paren_lookahead()
+        // this will be handled below by self.func_paren_lookahead();
+        // leave the '(' unconsumed for the next lex pass
         break;
       }
-      '(' if self.flags.contains(LexFlags::CASE_PAT_EXPECTED) && can_be_subshell => {
-        pos += 1;
-        let tk = self.get_token(self.cursor..pos, TkRule::SubshStart);
-        self.update_cursor(pos);
+      b'(' if self.flags.contains(LexFlags::CASE_PAT_EXPECTED) && can_be_subshell => {
+        self.bump(); // '('
+        let tk = self.get_token(start..self.cursor, TkRule::SubshStart);
         return Ok(tk);
       }
-      '(' if (self.next_is_cmd() || chars.peek() == Some(&'(')) && can_be_subshell => {
-        pos += 1;
+      b'(' if (self.next_is_cmd() || self.peek_nth(1) == Some(b'(')) && can_be_subshell => {
+        self.bump(); // first '('
         let mut paren_count = 1;
-        let paren_pos = pos;
+        let paren_pos = self.cursor;
         let mut flags = TkFlags::IS_CMD;
-        if chars.peek() == Some(&'(') {
+        if self.peek_byte() == Some(b'(') {
           // arithmetic
           paren_count += 1;
-          chars.next();
-          pos += 1;
+          self.bump();
           flags |= TkFlags::IS_ARITH;
         } else {
-          let mut tk = self.get_token(self.cursor..pos, TkRule::SubshStart);
+          let mut tk = self.get_token(start..self.cursor, TkRule::SubshStart);
           tk.flags |= TkFlags::IS_CMD;
           self.enter_subsh();
-          self.update_cursor(pos);
           self.set_next_is_cmd(true);
 
           return Ok(tk);
         }
-        if !scan_parens(&mut chars, &mut pos, paren_count) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+        if !scan_parens(self, paren_count) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
-            self,
-            pos,
-            paren_pos..paren_pos + 1,
-            "Unclosed subshell",
+              self,
+              self.cursor,
+              paren_pos..paren_pos + 1,
+              "Unclosed subshell",
           ));
         }
-        let mut tk = self.get_token(self.cursor..pos, TkRule::Str);
+        let mut tk = self.get_token(start..self.cursor, TkRule::Str);
         tk.flags |= flags;
-        self.update_cursor(pos);
         self.set_next_is_cmd(true);
         return Ok(tk);
       }
-      '{' if pos == self.cursor && self.next_is_cmd() => {
-        pos += 1;
-        let mut tk = self.get_token(self.cursor..pos, TkRule::BraceGrpStart);
+      b'{' if self.cursor == start && self.next_is_cmd() => {
+        self.bump(); // '{'
+        let mut tk = self.get_token(start..self.cursor, TkRule::BraceGrpStart);
         tk.flags |= TkFlags::IS_CMD;
         self.enter_brc_grp();
         self.set_next_is_cmd(true);
 
-        self.update_cursor(pos);
         return Ok(tk);
       }
-      '}' if pos == self.cursor && self.in_brc_grp() && self.next_is_cmd() => {
-        pos += 1;
-        let tk = self.get_token(self.cursor..pos, TkRule::BraceGrpEnd);
+      b'}' if start == self.cursor && self.in_brc_grp() && self.next_is_cmd() => {
+        self.bump(); // '}'
+        let tk = self.get_token(start..self.cursor, TkRule::BraceGrpEnd);
         self.leave_brc_grp();
         self.set_next_is_cmd(true);
-        self.update_cursor(pos);
         return Ok(tk);
       }
-      ')' if pos == self.cursor
+      b')' if start == self.cursor
         && (self.in_subsh() || self.flags.contains(LexFlags::CASE_PAT_EXPECTED)) =>
       {
-        pos += 1;
-        let tk = self.get_token(self.cursor..pos, TkRule::SubshEnd);
+        self.bump(); // ')'
+        let tk = self.get_token(start..self.cursor, TkRule::SubshEnd);
         if self.flags.contains(LexFlags::CASE_PAT_EXPECTED) {
           // this paren closes a case pattern. consume it and continue
           self.flags &= !LexFlags::CASE_PAT_EXPECTED;
@@ -1249,100 +1275,74 @@ impl LexStream {
           self.leave_subsh();
         }
         self.set_next_is_cmd(true);
-        self.update_cursor(pos);
         return Ok(tk);
       }
-      '=' if chars.peek() == Some(&'(') => {
-        pos += 1; // '='
-        let mut depth = 1;
-        chars.next();
-        pos += 1; // '('
-                  // looks like an array
-        let mut found_end = false;
-        match_loop!(chars.next() => arr_ch, {
-          '\\' => {
-            pos += 1;
-            if let Some(next_ch) = chars.next() {
-              pos += next_ch.len_utf8();
-            }
-          }
-          '(' => {
-            depth += 1;
-            pos += 1;
-          }
-          ')' => {
-            depth -= 1;
-            pos += 1;
-            if depth == 0 {
-              found_end = true;
-              break;
-            }
-          }
-          _ => pos += arr_ch.len_utf8(),
-        });
-
-        if !found_end && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+      b'=' if self.peek_nth(1) == Some(b'(') => {
+        self.inc_cursor(2); // '=('
+                            // looks like an array
+        if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
-            self,
-            pos,
-            pos..pos + 1,
-            "Unclosed array assignment",
+              self,
+              self.cursor,
+              self.cursor..self.cursor + 1,
+              "Unclosed array assignment",
           ));
         }
       }
-      ')' => {
+      b')' => {
         if !self.in_subsh() && !self.flags.contains(LexFlags::CASE_PAT_EXPECTED) {
-          pos += 1;
-          let bad_pos = pos;
-          self.update_cursor(pos);
-          return Err(lex_err!(
-            self,
-            pos,
-            bad_pos..pos,
-            "Unexpected ')'",
-          ));
+          let bad = self.cursor;
+          self.bump(); // ')'
+          return Err(lex_err!(self, self.cursor, bad..self.cursor, "Unexpected ')'"));
         }
         break
       }
-      '|' => break, // pipe operator outside of quotes
-      _ if is_hard_sep(ch) => break,
-      _ => pos += ch.len_utf8(),
+      b'|' => break, // pipe operator outside of quotes
+      _ if is_hard_sep(b) => break,
+      _ => { self.bump(); }
     });
-    let mut new_tk = self.get_token(self.cursor..pos, TkRule::Str);
+
+    self.interpret(start)
+  }
+
+  /// Interpret a string lexed by [`LexStream::read_string`]
+  ///
+  /// The second step of normal word lexing
+  fn interpret(&mut self, start: usize) -> ShResult<Tk> {
+    let mut new_tk = self.get_token(start..self.cursor, TkRule::Str);
     if self.quote_state.in_quote() && !self.flags.contains(LexFlags::LEX_UNFINISHED_QUOTES) {
-      self.update_cursor(pos);
       return Err(sherr!(
-        ParseErr @ new_tk.span,
-        "Unterminated quote",
+          ParseErr @ new_tk.span,
+          "Unterminated quote",
       ));
     }
 
-    let text = new_tk.span.as_str();
+    let text = new_tk.span.as_bytes();
     let is_cmd = self.flags.contains(LexFlags::NEXT_IS_CMD)
       && !self.flags.contains(LexFlags::NEXT_IS_REDIR)
       && !self.flags.contains(LexFlags::CASE_PAT_EXPECTED);
     if is_cmd {
       match text {
-        "function" => {
+        b"function" => {
           new_tk.mark(TkFlags::KEYWORD);
           self.flags |= LexFlags::NEXT_IS_FUNC;
         }
-        _ if self.func_paren_lookahead(&mut pos) => {
+        _ if self.attempt(Self::func_paren_lookahead).is_some() => {
           new_tk.mark(TkFlags::FUNCNAME);
           self.set_next_is_cmd(true);
         }
-        "case" => {
+        b"case" => {
           new_tk.mark(TkFlags::KEYWORD);
           self.flags |= LexFlags::EXPECTING_IN | LexFlags::EXPECTING_CASE_IN;
           self.case_depth += 1;
           self.set_next_is_cmd(false);
         }
-        "select" | "for" => {
+        b"select" | b"for" => {
           new_tk.mark(TkFlags::KEYWORD);
           self.flags |= LexFlags::EXPECTING_IN;
           self.set_next_is_cmd(false);
         }
-        "in" if self.flags.contains(LexFlags::EXPECTING_IN) => {
+        b"in" if self.flags.contains(LexFlags::EXPECTING_IN) => {
           new_tk.mark(TkFlags::KEYWORD);
           self.flags &= !LexFlags::EXPECTING_IN;
           if self.flags.contains(LexFlags::EXPECTING_CASE_IN) {
@@ -1351,7 +1351,7 @@ impl LexStream {
           }
         }
         _ if is_keyword(text) => {
-          if text == "esac" && self.case_depth > 0 {
+          if text == b"esac" && self.case_depth > 0 {
             self.case_depth -= 1;
             self.flags &= !LexFlags::CASE_PAT_EXPECTED;
           }
@@ -1379,7 +1379,7 @@ impl LexStream {
           self.set_next_is_cmd(false);
         }
       }
-    } else if self.flags.contains(LexFlags::EXPECTING_IN) && text == "in" {
+    } else if self.flags.contains(LexFlags::EXPECTING_IN) && text == b"in" {
       new_tk.mark(TkFlags::KEYWORD);
       self.flags &= !LexFlags::EXPECTING_IN;
       if self.flags.contains(LexFlags::EXPECTING_CASE_IN) {
@@ -1388,14 +1388,14 @@ impl LexStream {
       }
     } else if self.flags.contains(LexFlags::EXPECTING_IN)
       && !self.flags.contains(LexFlags::EXPECTING_CASE_IN)
-      && text == "do"
+      && text == b"do"
     {
       // "do" directly after the variable means that we implicitly
       // use the shell's positional parameters instead of an explicit array
       new_tk.mark(TkFlags::KEYWORD);
       self.flags &= !LexFlags::EXPECTING_IN;
       self.set_next_is_cmd(true);
-    } else if text == "esac"
+    } else if text == b"esac"
       && self.case_depth > 0
       && self.flags.contains(LexFlags::CASE_PAT_EXPECTED)
     {
@@ -1410,44 +1410,51 @@ impl LexStream {
     } else if is_cmd_sub(text) {
       new_tk.mark(TkFlags::IS_CMDSUB);
     }
-    self.update_cursor(pos);
     Ok(new_tk)
   }
-  pub fn func_paren_lookahead(&mut self, pos: &mut usize) -> bool {
-    let saved_pos = *pos;
-    let slice = self.slice(*pos..).unwrap_or_default();
-    let mut chars = slice.chars().peekable();
-    match_loop!(chars.next() => ch, {
-      ' ' | '\t' => {
-        *pos += 1;
-      }
-      '(' => {
-        *pos += 1;
+  pub fn func_paren_lookahead(&mut self) -> Option<()> {
+    // this returns Some(()) if it finds the parens.
+    // kind of weird but it makes the function
+    // usable as an argument to Self::attempt()
 
-        if chars.next() == Some(')') {
-          *pos += 1;
-          self.update_cursor(*pos);
-          return true;
+    match_loop!(self.next_byte() => b, {
+      b' ' | b'\t' => {
+        // continue
+      }
+      b'(' => {
+        if self.next_byte() == Some(b')') {
+          return Some(());
         }
         // Not "()" - restore pos
-        *pos = saved_pos;
-        return false;
+        return None;
       }
       _ => {
-        *pos = saved_pos;
-        return false;
+        return None;
       }
     });
-    *pos = saved_pos;
-    false
+    None
   }
   pub fn get_span(&mut self, range: Range<usize>) -> Span {
     self.update_pos();
-    Span::with_source(range, self.span_source.clone()).at(self.pos)
+    Span::with_source(range, self.source.clone()).at(self.pos)
   }
   pub fn get_token(&mut self, range: Range<usize>, class: TkRule) -> Tk {
     let span = self.get_span(range);
     Tk::new(class, span)
+  }
+}
+
+impl ByteCursor for LexStream {
+  fn peek_byte(&self) -> Option<u8> {
+    self.source.content.get(self.cursor).copied()
+  }
+  fn peek_nth(&self, n: usize) -> Option<u8> {
+    self.source.content.get(self.cursor + n).copied()
+  }
+  fn next_byte(&mut self) -> Option<u8> {
+    let b = self.peek_byte()?;
+    self.inc_cursor(1);
+    Some(b)
   }
 }
 
@@ -1501,9 +1508,11 @@ impl Iterator for LexStream {
 
     loop {
       let pos = self.cursor;
-      if self.slice(pos..pos + 2) == Some("\\\n") || self.slice(pos..pos + 3) == Some("\\\r\n") {
+      if self.slice(pos..pos + 2) == Some(b"\\\n".as_slice())
+        || self.slice(pos..pos + 3) == Some(b"\\\r\n".as_slice())
+      {
         self.inc_cursor(2);
-      } else if pos < self.source.len() && is_field_sep(get_char(&self.source, pos).unwrap()) {
+      } else if pos < self.source.len() && is_field_sep(self.byte_at(pos).unwrap()) {
         self.inc_cursor(1);
       } else {
         break;
@@ -1523,9 +1532,9 @@ impl Iterator for LexStream {
       return None;
     }
 
-    let token = match get_char(&self.source, self.cursor).unwrap() {
-      '\r' | '\n' | ';' => {
-        let ch = get_char(&self.source, self.cursor).unwrap();
+    let token = match self.byte_at(self.cursor).unwrap() {
+      b'\r' | b'\n' | b';' => {
+        let ch = self.byte_at(self.cursor).unwrap();
         let ch_idx = self.cursor;
         self.inc_cursor(1);
         let mut heredoc_skipped = false;
@@ -1533,21 +1542,21 @@ impl Iterator for LexStream {
 
         // If a heredoc was parsed on this line, skip past the body
         // Only on newline - ';' is a command separator within the same line
-        if (ch == '\n' || ch == '\r')
+        if (ch == b'\n' || ch == b'\r')
           && let Some(skip) = self.heredoc_skip.take()
         {
           heredoc_skipped = true;
           self.update_cursor(skip);
         }
 
-        match_loop!(get_char(&self.source, self.cursor) => ch, {
-          '\\' if get_char(&self.source, self.cursor + 1) == Some('\n') => {
+        match_loop!(self.byte_at(self.cursor) => ch, {
+          b'\\' if self.byte_at(self.cursor + 1) == Some(b'\n') => {
             self.update_cursor((self.cursor + 2).min(self.source.len()));
           }
           _ if is_hard_sep(ch) => {
             self.inc_cursor(1);
             // If we just consumed a newline and there's a pending heredoc, skip past the body
-            if (ch == '\n' || ch == '\r')
+            if (ch == b'\n' || ch == b'\r')
               && let Some(skip) = self.heredoc_skip.take()
             {
               heredoc_skipped = true;
@@ -1576,18 +1585,18 @@ impl Iterator for LexStream {
         }
         sep_tk
       }
-      '#'
+      b'#'
         if !self.flags.contains(LexFlags::INTERACTIVE)
           || Shed::shopts(|s| s.core.interactive_comments) =>
       {
         let ch_idx = self.cursor;
         self.inc_cursor(1);
 
-        while let Some(ch) = get_char(&self.source, self.cursor) {
-          if ch == '\n' {
+        while let Some(ch) = self.byte_at(self.cursor) {
+          if ch == b'\n' {
             break;
           }
-          self.inc_cursor(ch.len_utf8());
+          self.inc_cursor(1);
         }
 
         if self.flags.contains(LexFlags::LEX_UNFINISHED) {
@@ -1596,10 +1605,11 @@ impl Iterator for LexStream {
           return self.next();
         }
       }
-      '!'
+      b'!'
         if self.next_is_cmd()
-          && get_char(&self.source, self.cursor + 1)
-            .is_none_or(|c| c.is_whitespace() || matches!(c, ';' | '|' | '&')) =>
+          && self
+            .byte_at(self.cursor + 1)
+            .is_none_or(|c| c.is_ascii_whitespace() || matches!(c, b';' | b'|' | b'&')) =>
       {
         self.inc_cursor(1);
         let tk_type = TkRule::Bang;
@@ -1608,15 +1618,15 @@ impl Iterator for LexStream {
         tk.flags |= TkFlags::KEYWORD;
         tk
       }
-      '|' => {
+      b'|' => {
         let ch_idx = self.cursor;
         self.inc_cursor(1);
         self.set_next_is_cmd(true);
 
-        let tk_type = if let Some('|') = get_char(&self.source, self.cursor) {
+        let tk_type = if let Some(b'|') = self.byte_at(self.cursor) {
           self.inc_cursor(1);
           TkRule::Or
-        } else if let Some('&') = get_char(&self.source, self.cursor) {
+        } else if let Some(b'&') = self.byte_at(self.cursor) {
           self.inc_cursor(1);
           TkRule::ErrPipe
         } else {
@@ -1625,24 +1635,24 @@ impl Iterator for LexStream {
 
         self.get_token(ch_idx..self.cursor, tk_type)
       }
-      '&' => {
+      b'&' => {
         let ch_idx = self.cursor;
         self.inc_cursor(1);
         self.set_next_is_cmd(true);
         let mut flags = TkFlags::empty();
 
-        let tk_type = match get_char(&self.source, self.cursor) {
-          Some('&') => {
+        let tk_type = match self.byte_at(self.cursor) {
+          Some(b'&') => {
             self.inc_cursor(1);
             TkRule::And
           }
-          Some('|') => {
+          Some(b'|') => {
             self.inc_cursor(1);
             TkRule::ErrPipe
           }
-          Some('>') => {
+          Some(b'>') => {
             self.inc_cursor(1);
-            let append = matches!(get_char(&self.source, self.cursor), Some('>'));
+            let append = matches!(self.byte_at(self.cursor), Some(b'>'));
             if append {
               self.inc_cursor(1);
             }
@@ -1668,10 +1678,9 @@ impl Iterator for LexStream {
           // if already points at a number or has '-', it doesn't.
           let dup_style = tk
             .span
-            .as_str()
-            .chars()
+            .as_bytes()
             .last()
-            .is_some_and(|c| c.is_ascii_digit() || c == '-');
+            .is_some_and(|b| b.is_ascii_digit() || *b == b'-');
 
           let is_heredoc = matches!(tk.class, TkRule::HereDoc { .. });
 
@@ -1697,41 +1706,39 @@ impl Iterator for LexStream {
   }
 }
 
-pub fn get_char(src: &str, idx: usize) -> Option<char> {
-  src.get(idx..)?.chars().next()
-}
+pub fn is_assignment(text: &[u8]) -> bool {
+  let mut bytes = text.bytes();
 
-pub fn is_assignment(text: &str) -> bool {
-  let mut chars = text.chars();
-
-  match_loop!(chars.next() => ch, {
-    '\\' => {
-      chars.next();
+  match_loop!(bytes.next() => b, {
+    b'\\' => {
+      bytes.next();
     }
-    '=' => return true,
+    b'=' => return true,
     _ => continue,
   });
   false
 }
 
 /// Is whitespace or a semicolon
-pub fn is_hard_sep(ch: char) -> bool {
-  matches!(ch, ' ' | '\t' | '\n' | ';')
+pub fn is_hard_sep(ch: u8) -> bool {
+  matches!(ch, b' ' | b'\t' | b'\n' | b';')
 }
 
 /// Is whitespace, but not a newline
-pub fn is_field_sep(ch: char) -> bool {
-  matches!(ch, ' ' | '\t')
+pub fn is_field_sep(ch: u8) -> bool {
+  matches!(ch, b' ' | b'\t')
 }
 
-pub fn is_keyword(slice: &str) -> bool {
+pub fn is_keyword(slice: &[u8]) -> bool {
   KEYWORDS.binary_search(&slice).is_ok()
 }
 
-pub fn scan_cmd_sub_body(body: &str) -> Option<usize> {
+pub fn scan_cmd_sub_body(body: &[u8]) -> Option<usize> {
   // Prepend `(` so the lexer enters a subshell context
-  let src: std::rc::Rc<str> = format!("({body}").into();
-  let mut lex = LexStream::new(src, LexFlags::LEX_UNFINISHED);
+  let mut prefixed = Vec::with_capacity(body.len() + 1);
+  prefixed.push(b'(');
+  prefixed.extend_from_slice(body);
+  let mut lex = LexStream::new(&prefixed, LexFlags::LEX_UNFINISHED);
   let mut entered = false;
   while let Some(tk) = lex.next() {
     let tk = tk.ok()?;
@@ -1746,18 +1753,16 @@ pub fn scan_cmd_sub_body(body: &str) -> Option<usize> {
   None
 }
 
-pub fn is_cmd_sub(slice: &str) -> bool {
-  slice.starts_with("$(") && ends_with_unescaped(slice, ")")
+pub fn is_cmd_sub(slice: &[u8]) -> bool {
+  slice.starts_with(b"$(") && ends_with_unescaped(slice, b")")
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::rc::Rc;
 
   fn lex_classes(src: &str) -> Vec<TkRule> {
-    let rc: Rc<str> = src.into();
-    LexStream::new(rc, LexFlags::LEX_UNFINISHED)
+    LexStream::new(src.as_bytes(), LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .filter(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi))
       .map(|t| t.class)
@@ -1765,11 +1770,10 @@ mod tests {
   }
 
   fn lex_first_nontrivial_text(src: &str) -> String {
-    let rc: Rc<str> = src.into();
-    LexStream::new(rc, LexFlags::LEX_UNFINISHED)
+    LexStream::new(src.as_bytes(), LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .find(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi | TkRule::Sep))
-      .map(|t| t.span.as_str().to_string())
+      .map(|t| t.span.to_str_lossy().into_owned())
       .unwrap_or_default()
   }
 
@@ -1856,37 +1860,40 @@ mod tests {
   fn continuation_preserves_next_line_whitespace() {
     // `\<newline>` drops only the pair; the next line's indentation stays, so
     // `a=1\<nl>    b=2` splits into two words (issue #119).
-    assert_eq!(clean_input("export a=1\\\n    b=2"), "export a=1    b=2");
+    assert_eq!(
+      clean_input(b"export a=1\\\n    b=2").as_bytes(),
+      b"export a=1    b=2"
+    );
   }
 
   #[test]
   fn continuation_joins_adjacent_words() {
-    assert_eq!(clean_input("echo one\\\ntwo"), "echo onetwo");
+    assert_eq!(clean_input(b"echo one\\\ntwo").as_bytes(), b"echo onetwo");
   }
 
   #[test]
   fn continuation_not_applied_in_single_quotes() {
     // Inside single quotes a `\<newline>` is literal, not a continuation.
-    let src = "'a\\\nb'";
-    assert_eq!(clean_input(src), src);
+    let src = b"'a\\\nb'";
+    assert_eq!(clean_input(src).as_bytes(), src);
   }
 
   #[test]
   fn continuation_applied_in_double_quotes() {
-    assert_eq!(clean_input("\"a\\\nb\""), "\"ab\"");
+    assert_eq!(clean_input(b"\"a\\\nb\"").as_bytes(), b"\"ab\"");
   }
 
   #[test]
   fn trailing_backslash_in_comment_is_not_continuation() {
     // A `\` ending a comment line does not splice the next line (issue #120):
     // the newline ends the comment, so the source is unchanged.
-    let src = "# comment \\\na=1";
-    assert_eq!(clean_input(src), src);
+    let src = b"# comment \\\na=1";
+    assert_eq!(clean_input(src).as_bytes(), src);
   }
 
   #[test]
   fn hash_mid_word_is_not_a_comment() {
     // `#` not at a word boundary stays literal, so the continuation still fires.
-    assert_eq!(clean_input("a#b\\\nc"), "a#bc");
+    assert_eq!(clean_input(b"a#b\\\nc").as_bytes(), b"a#bc");
   }
 }

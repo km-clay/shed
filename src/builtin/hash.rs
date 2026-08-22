@@ -13,7 +13,7 @@ pub(super) struct Hash;
 impl super::Builtin for Hash {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("clear", 'r'),
+      OptSpec::new_short("clear", b'r'),
       OptSpec::new_long("refresh"),
     ]
   }

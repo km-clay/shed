@@ -16,7 +16,7 @@ const DEPRECATED_SHOPTS: &[(&str, &str)] =
 pub(super) struct Shopt;
 impl super::Builtin for Shopt {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::new_short("print-help", 'h')]
+    vec![OptSpec::new_short("print-help", b'h')]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();

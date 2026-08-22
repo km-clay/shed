@@ -500,12 +500,12 @@ impl RegexCache {
     self.regexes.insert(pat.to_string(), Rc::clone(&rx));
     Ok(rx)
   }
-  pub fn get_glob(&mut self, pat: &str) -> Rc<Pattern> {
-    if let Some(p) = self.globs.get(pat.as_bytes()) {
+  pub fn get_glob(&mut self, pat: &[u8]) -> Rc<Pattern> {
+    if let Some(p) = self.globs.get(pat) {
       return p.clone();
     }
     // `case`/`[[ == ]]` matching is case-sensitive (no `nocasematch` shopt).
-    let p = Rc::from(Pattern::compile(pat.as_bytes(), false));
+    let p = Rc::from(Pattern::compile(pat, false));
     self.globs.insert(p.orig().clone(), p.clone());
     p
   }
@@ -867,7 +867,7 @@ impl MetaTab {
   pub fn get_regex(&mut self, pat: &str) -> Result<Rc<Regex>, String> {
     self.regexes.get_regex(pat)
   }
-  pub fn get_glob(&mut self, pat: &str) -> Rc<Pattern> {
+  pub fn get_glob(&mut self, pat: &[u8]) -> Rc<Pattern> {
     self.regexes.get_glob(pat)
   }
   pub fn take_pending_widget_keys(&mut self) -> Option<Vec<KeyEvent>> {

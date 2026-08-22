@@ -2,7 +2,6 @@ use bitflags::bitflags;
 use std::{
   collections::VecDeque,
   fmt::{self, Debug},
-  rc::Rc,
   sync::atomic::{AtomicU32, Ordering},
 };
 
@@ -26,6 +25,7 @@ pub mod tests;
 use crate::{
   eval::parse::node::{LabelCtx, NodeId},
   match_loop,
+  state::vars::VarStr,
 };
 
 use super::{
@@ -48,8 +48,8 @@ static AST_GENERATION: AtomicU32 = AtomicU32::new(0);
 /// &str for this use-case dramatically overcomplicates the code
 #[derive(Clone, Debug)]
 pub(crate) struct ParsedSrc {
-  pub src: Rc<str>,
-  pub name: Rc<str>,
+  pub src: VarStr,
+  pub name: VarStr,
   pub ast: Ast,
   pub lex_flags: LexFlags,
   pub parse_flags: ParseFlags,
@@ -57,9 +57,9 @@ pub(crate) struct ParsedSrc {
 }
 
 impl ParsedSrc {
-  pub fn new(src: Rc<str>) -> Self {
-    let src = if src.contains("\\\n") || src.contains('\r') {
-      clean_input(&src).as_str().into()
+  pub fn new(src: VarStr) -> Self {
+    let src = if src.contains_slice(b"\\\n") || src.contains(&b'\r') {
+      clean_input(&src)
     } else {
       src
     };
@@ -72,7 +72,7 @@ impl ParsedSrc {
       context: VecDeque::new().into(),
     }
   }
-  pub fn with_name(mut self, name: Rc<str>) -> Self {
+  pub fn with_name(mut self, name: VarStr) -> Self {
     self.name = name;
     self
   }
@@ -87,7 +87,7 @@ impl ParsedSrc {
   pub fn parse_src(&mut self) -> Result<(), Vec<ShErr>> {
     let mut tokens = vec![];
     let mut errors = vec![];
-    let mut stream = LexStream::new(self.src.clone(), self.lex_flags).with_name(self.name.clone());
+    let mut stream = LexStream::new(&self.src, self.lex_flags).with_name(self.name.clone());
 
     while let Some(lex_result) = stream.next() {
       // inline what the previous .filter() did

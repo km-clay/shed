@@ -19,21 +19,21 @@ pub(super) struct Complete;
 impl super::Builtin for Complete {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("jobs", 'j'),
-      OptSpec::new_short("print_specs", 'p'),
-      OptSpec::new_short("remove_spec", 'r'),
-      OptSpec::new_short("filenames", 'f'),
-      OptSpec::new_short("directories", 'd'),
-      OptSpec::new_short("commands", 'c'),
-      OptSpec::new_short("users", 'u'),
-      OptSpec::new_short("variables", 'v'),
-      OptSpec::new_short("aliases", 'a'),
-      OptSpec::new_short("builtins", 'b'),
-      OptSpec::new_short("signals", 'S'),
-      OptSpec::new_short("option", 'o').argc(1),
-      OptSpec::new_short("function", 'F').argc(1),
-      OptSpec::new_short("wordlist", 'W').argc(1),
-      OptSpec::new_short("action", 'A').argc(1),
+      OptSpec::new_short("jobs", b'j'),
+      OptSpec::new_short("print_specs", b'p'),
+      OptSpec::new_short("remove_spec", b'r'),
+      OptSpec::new_short("filenames", b'f'),
+      OptSpec::new_short("directories", b'd'),
+      OptSpec::new_short("commands", b'c'),
+      OptSpec::new_short("users", b'u'),
+      OptSpec::new_short("variables", b'v'),
+      OptSpec::new_short("aliases", b'a'),
+      OptSpec::new_short("builtins", b'b'),
+      OptSpec::new_short("signals", b'S'),
+      OptSpec::new_short("option", b'o').argc(1),
+      OptSpec::new_short("function", b'F').argc(1),
+      OptSpec::new_short("wordlist", b'W').argc(1),
+      OptSpec::new_short("action", b'A').argc(1),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -95,18 +95,18 @@ pub(super) struct CompGen;
 impl super::Builtin for CompGen {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("jobs", 'j'),
-      OptSpec::new_short("filenames", 'f'),
-      OptSpec::new_short("directories", 'd'),
-      OptSpec::new_short("commands", 'c'),
-      OptSpec::new_short("users", 'u'),
-      OptSpec::new_short("variables", 'v'),
-      OptSpec::new_short("aliases", 'a'),
-      OptSpec::new_short("signals", 'S'),
-      OptSpec::new_short("builtins", 'b'),
-      OptSpec::new_short("option", 'o').argc(1),
-      OptSpec::new_short("function", 'F').argc(1),
-      OptSpec::new_short("wordlist", 'W').argc(1),
+      OptSpec::new_short("jobs", b'j'),
+      OptSpec::new_short("filenames", b'f'),
+      OptSpec::new_short("directories", b'd'),
+      OptSpec::new_short("commands", b'c'),
+      OptSpec::new_short("users", b'u'),
+      OptSpec::new_short("variables", b'v'),
+      OptSpec::new_short("aliases", b'a'),
+      OptSpec::new_short("signals", b'S'),
+      OptSpec::new_short("builtins", b'b'),
+      OptSpec::new_short("option", b'o').argc(1),
+      OptSpec::new_short("function", b'F').argc(1),
+      OptSpec::new_short("wordlist", b'W').argc(1),
     ]
   }
   fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
@@ -169,12 +169,12 @@ pub(super) struct Compadd;
 impl super::Builtin for Compadd {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("prefix", 'P').argc(1),
-      OptSpec::new_short("suffix", 'S').argc(1),
-      OptSpec::new_short("desc_arr", 'd').argc(1),
-      OptSpec::new_short("desc", 'D').argc(1),
-      OptSpec::new_short("cand_arr", 'a').argc(1),
-      OptSpec::new_short("assoc_arr", 'A').argc(1),
+      OptSpec::new_short("prefix", b'P').argc(1),
+      OptSpec::new_short("suffix", b'S').argc(1),
+      OptSpec::new_short("desc_arr", b'd').argc(1),
+      OptSpec::new_short("desc", b'D').argc(1),
+      OptSpec::new_short("cand_arr", b'a').argc(1),
+      OptSpec::new_short("assoc_arr", b'A').argc(1),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -262,7 +262,7 @@ fn build_source(args: &BuiltinArgs) -> VarStr {
   let mut parts: Vec<VarStr> = vec!["complete".into()];
   for opt in args.options() {
     // the flag as written (e.g. `-W`), followed by its argument words
-    parts.push(opt.span().as_str().into());
+    parts.push(opt.span().as_bytes().into());
     for (arg, _) in opt.args() {
       parts.push(arg.clone());
     }

@@ -7,7 +7,7 @@ use crate::state::{
   Shed, scopes::ScopeStack, vars::ArrIndex, vars::ShellParam, vars::VarFlags, vars::VarKind,
   vars::VarName,
 };
-use crate::util::ShResult;
+use crate::util::{ByteCursor, ShResult, SliceCursor};
 use crate::{match_loop, util};
 use crate::{sherr, shopt, var};
 
@@ -250,7 +250,6 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
   let body = expand_body_subscripts(body, allow_side_effects)?;
   let body_bytes = body.to_bytes();
   let raw = String::from_utf8_lossy(&body_bytes);
-  let mut chars = raw.chars();
   let mut var_name = util::scratch_buf();
   let mut rest = util::scratch_buf();
   if raw.starts_with('#') {
@@ -301,25 +300,31 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
     );
   }
 
-  // Scan for the variable name (may include [index]) and the operator
+  // Scan for the variable name (may include [index]) and the operator.
+  // Delimiters are all ASCII, so byte scanning is UTF-8-safe, and the byte
+  // count of `var_name` is the exact offset at which the operand begins — it
+  // is fed straight to `body.split_off_front` below. (Scanning a lossy string
+  // view would desync those offsets on non-UTF-8 input, since each invalid
+  // byte becomes a 3-byte U+FFFD.)
+  let mut cur = SliceCursor::new(&body_bytes);
   let mut is_glob_index = false;
   let mut seen_bracket = false;
-  match_loop!(chars.next() => ch, {
-    _ if ch == '[' => {
+  match_loop!(cur.next_byte() => ch, {
+    b'[' => {
       // Include brackets as part of the var name
       let is_first_bracket = !seen_bracket;
       seen_bracket = true;
       var_name.push(ch);
       let mut idx_content = util::scratch_buf();
       let mut bracket_depth = 1;
-      match_loop!(chars.next() => bc, {
-        '[' => { bracket_depth += 1; var_name.push(bc); idx_content.push(bc); }
-        ']' => {
+      match_loop!(cur.next_byte() => bc, {
+        b'[' => { bracket_depth += 1; var_name.push(bc); idx_content.push(bc); }
+        b']' => {
           bracket_depth -= 1;
           var_name.push(bc);
           if bracket_depth == 0 {
             if is_first_bracket {
-              is_glob_index = idx_content == "@" || idx_content == "*";
+              is_glob_index = *idx_content == *b"@" || *idx_content == *b"*";
             }
             break;
           }
@@ -328,37 +333,36 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         _ => { var_name.push(bc); idx_content.push(bc); }
       });
     }
-    _ if is_glob_index && (ch == ':' || ch.is_ascii_digit()) => {
+    _ if is_glob_index && (ch == b':' || ch.is_ascii_digit()) => {
       // For [@] and [*], include :start:len as part of the var name
       // so VarName::parse handles it as an array slice
       var_name.push(ch);
     }
 
     // it's a shell parameter, don't get it confused with the operators below
-    ch if var_name.is_empty() && matches!(ch, '?' | '!' | '#' | '-') => {
+    ch if var_name.is_empty() && matches!(ch, b'?' | b'!' | b'#' | b'-') => {
 
-      let next_is_name_char = chars
-        .clone()
-        .next()
-        .is_some_and(|c| c.is_alphanumeric() || c == '_');
+      let next_is_name_char = cur
+        .peek_byte()
+        .is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_');
       if next_is_name_char {
         rest.push(ch);
-        rest.push_str(&chars.collect::<String>());
+        rest.extend_from_slice(&body_bytes[cur.pos()..]);
       } else {
         var_name.push(ch);
-        rest.push_str(&chars.collect::<String>());
+        rest.extend_from_slice(&body_bytes[cur.pos()..]);
       }
       break;
     }
-    '!' | '#' | '%' | ':' | '-' | '+' | '^' | ',' | '=' | '/' | '?' => {
+    b'!' | b'#' | b'%' | b':' | b'-' | b'+' | b'^' | b',' | b'=' | b'/' | b'?' => {
       rest.push(ch);
-      rest.push_str(&chars.collect::<String>());
+      rest.extend_from_slice(&body_bytes[cur.pos()..]);
       break;
     }
     _ => var_name.push(ch),
   });
 
-  let mut parsed = VarName::parse(&var_name, allow_side_effects)?;
+  let mut parsed = VarName::parse(&String::from_utf8_lossy(&var_name), allow_side_effects)?;
 
   if matches!(parsed.index(), Some(ArrIndex::Raw(_))) {
     let tag = Shed::vars(|v| v.try_get_var_kind_tag(parsed.name()));
@@ -521,7 +525,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
           .no_glob()
           .expand_for_glob()?;
 
-        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded.to_str_lossy()));
+        let pattern = Shed::meta_mut(|m| m.get_glob(expanded.as_bytes()));
         if let Some(len) = pattern.match_shortest_prefix(value) {
           return Ok(VarStr::from(&value[len..]).into());
         }
@@ -535,7 +539,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
           .no_glob()
           .expand_for_glob()?;
 
-        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded.to_str_lossy()));
+        let pattern = Shed::meta_mut(|m| m.get_glob(expanded.as_bytes()));
         if let Some(len) = pattern.match_longest_prefix(value) {
           return Ok(VarStr::from(&value[len..]).into());
         }
@@ -549,7 +553,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
           .no_glob()
           .expand_for_glob()?;
 
-        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded.to_str_lossy()));
+        let pattern = Shed::meta_mut(|m| m.get_glob(expanded.as_bytes()));
         if let Some(len) = pattern.match_shortest_suffix(value) {
           let pos = value.len() - len;
           return Ok(VarStr::from(&value[..pos]).into());
@@ -564,7 +568,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
           .no_glob()
           .expand_for_glob()?;
 
-        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded_suffix.to_str_lossy()));
+        let pattern = Shed::meta_mut(|m| m.get_glob(expanded_suffix.as_bytes()));
         if let Some(len) = pattern.match_longest_suffix(value) {
           let pos = value.len() - len;
           return Ok(VarStr::from(&value[..pos]).into());
@@ -586,7 +590,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let glob = Shed::meta_mut(|m| m.get_glob(&expanded_search.to_str_lossy())); // unanchored
+        let glob = Shed::meta_mut(|m| m.get_glob(expanded_search.as_bytes())); // unanchored
 
         if let Some((start, end)) = glob.find(value, 0) {
           let mut result = Vec::with_capacity(value.len());
@@ -612,7 +616,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let glob = Shed::meta_mut(|m| m.get_glob(&expanded_search.to_str_lossy()));
+        let glob = Shed::meta_mut(|m| m.get_glob(expanded_search.as_bytes()));
         let mut result: Vec<u8> = Vec::new();
         let mut last_match_end = 0;
         let mut from = 0;
@@ -639,7 +643,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
           .no_glob()
           .expand_no_split()?;
 
-        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded_search.to_str_lossy()));
+        let pattern = Shed::meta_mut(|m| m.get_glob(expanded_search.as_bytes()));
         if let Some(len) = pattern.match_longest_prefix(value) {
           let mut result = expanded_replace.as_bytes().to_vec();
           result.extend_from_slice(&value[len..]);
@@ -658,7 +662,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
           .no_glob()
           .expand_no_split()?;
 
-        let pattern = Shed::meta_mut(|m| m.get_glob(&expanded_search.to_str_lossy()));
+        let pattern = Shed::meta_mut(|m| m.get_glob(expanded_search.as_bytes()));
         if let Some(len) = pattern.match_longest_suffix(value) {
           let pos = value.len() - len;
           let mut result = Vec::with_capacity(pos + expanded_replace.as_bytes().len());
@@ -697,7 +701,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
   } else {
     let var = Shed::vars(try_get);
     // "${@}" must expand to zero fields
-    if var_name.as_str() == "@" && var.as_deref().unwrap_or_default().is_empty() {
+    if *var_name == *b"@" && var.as_deref().unwrap_or_default().is_empty() {
       let mut out = SegStream::new();
       out.push_marker(Marker::NullExpand);
       return Ok(out);

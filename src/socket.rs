@@ -1,4 +1,5 @@
 use std::{
+  fmt::{Debug, Display},
   io::Write,
   os::{
     fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, RawFd},
@@ -8,10 +9,10 @@ use std::{
     },
   },
   path::{Path, PathBuf},
-  str::FromStr,
   sync::LazyLock,
 };
 
+use bstr::ByteSlice;
 use itertools::Itertools;
 use nix::{
   fcntl::{FcntlArg, fcntl},
@@ -24,7 +25,9 @@ use nix::{
 
 use crate::{
   state::vars::{VarStr, VarStrSliceExt},
-  try_var, util, varstr,
+  try_var,
+  util::{self, ByteCursor, SliceCursor},
+  varstr,
 };
 
 use super::{
@@ -50,8 +53,26 @@ use super::{
 /// Used in operations that are somewhat heavy, such as tab-completion autosuggestions.
 /// A thread is dispatched, and then writes it's findings to the socket via the private interface.
 /// This allows us to have actual async in a mostly single-threaded program.
-pub(crate) static PRIVATE_TOKEN: LazyLock<String> =
-  LazyLock::new(|| uuid::Uuid::new_v4().to_string());
+static PRIVATE_TOKEN: LazyLock<PrivateToken> = LazyLock::new(PrivateToken::new);
+
+/// Generate a string that can be sent to the socket to authorize a request to the private interface.
+pub(crate) fn authorize(request: impl Display) -> String {
+  PRIVATE_TOKEN.authorize(request)
+}
+
+struct PrivateToken(String);
+impl PrivateToken {
+  fn new() -> Self {
+    Self(uuid::Uuid::new_v4().to_string())
+  }
+  fn check(&self, other: &str) -> bool {
+    self.0 == other
+  }
+  fn authorize(&self, request: impl Display) -> String {
+    let token = &self.0;
+    format!("PRIVATE {token} {request}")
+  }
+}
 
 /// Write something to the socket as a client.
 pub(crate) fn send_to_socket(msg: &str) -> ShResult<()> {
@@ -84,8 +105,8 @@ pub(crate) enum StatusHeader {
 #[derive(Debug)]
 pub(crate) enum QueryHeader {
   Cwd,
-  GetVar(String),
-  SetVar(String, String, VarFlags),
+  GetVar(VarStr),
+  SetVar(VarStr, VarStr, VarFlags),
   Status(Vec<StatusHeader>),
 }
 
@@ -95,10 +116,10 @@ pub(crate) enum PrivateHeader {
   /// where the completed token began in the buffer at request time;
   /// the receiver uses it to clear the hint when the user backspaces
   /// past the token boundary.
-  SetCompletionHint(u64, usize, String),
+  SetCompletionHint(u64, usize, VarStr),
 
   /// Used for reporting errors from child processes.
-  PostError(String),
+  PostError(VarStr),
 }
 
 #[derive(Debug)]
@@ -114,10 +135,10 @@ pub(crate) enum LineHeader {
 pub(crate) enum SocketRequest {
   /// Posts a system message. System messages appear above the prompt, the same way that job status notifications do.
   /// Useful for important information.
-  PostSystemMessage(String),
+  PostSystemMessage(VarStr),
   /// Posts a status message. Status messages appear under the prompt, and are short lived. Will only survive redraws for a few seconds.
   /// Useful for quick notifications.
-  PostStatusMessage(String),
+  PostStatusMessage(VarStr),
 
   /// Requests information from the shell. The shell will respond with a `SocketResponse` containing the requested information, or an error if the query was invalid.
   Query(QueryHeader),
@@ -129,7 +150,7 @@ pub(crate) enum SocketRequest {
   RefreshPrompt,
 
   LineGet(LineHeader),
-  LineSet(LineHeader, String),
+  LineSet(LineHeader, VarStr),
   LineSendKeys(Vec<KeyEvent>),
 
   /// Namespace used by internal async stuff.
@@ -143,126 +164,126 @@ impl SocketRequest {
   ///
   /// These take the form 'PRIVATE <token> request-kind <payload>'
   /// Intentionally deviates from the public interface's format.
-  fn parse_private_request(s: &str) -> Result<Self, ShErr> {
+  fn parse_private_request(s: &[u8]) -> Result<Self, ShErr> {
     // if this fails, we write the same error that the normal 'not found' path does
     // basically we're playing dumb instead of telling the user that this interface exists
     let err = Err(sherr!(ParseErr, "Unknown socket request kind: private"));
 
-    let Some((token, rest)) = s.split_once(' ') else {
+    let Some((token, rest)) = s.split_once_str(" ") else {
       return err;
     };
 
-    if token != *PRIVATE_TOKEN {
+    if !PRIVATE_TOKEN.check(&token.to_str_lossy()) {
       log::warn!("Received socket request with invalid private token");
       return err;
     }
 
-    let (kind, payload) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
+    let (kind, payload) = rest
+      .trim()
+      .split_once_str(" ")
+      .unwrap_or((rest.trim(), b""));
 
     let header = match kind {
-      "set-comp-hint" => {
-        let (req_gen_str, rest) = payload.split_once(' ').unwrap_or((payload, ""));
-        let (token_start_str, line) = rest.split_once(' ').unwrap_or((rest, ""));
-        let Ok(req_gen) = req_gen_str.parse::<u64>() else {
+      b"set-comp-hint" => {
+        let (req_gen_str, rest) = payload.split_once_str(" ").unwrap_or((payload, b""));
+        let (token_start_str, line) = rest.split_once_str(" ").unwrap_or((rest, b""));
+        let Some(req_gen) = util::parse_bytes::<u64>(req_gen_str) else {
           return err;
         };
-        let Ok(token_start) = token_start_str.parse::<usize>() else {
+        let Some(token_start) = util::parse_bytes::<usize>(token_start_str) else {
           return err;
         };
-        PrivateHeader::SetCompletionHint(req_gen, token_start, line.to_string())
+        PrivateHeader::SetCompletionHint(req_gen, token_start, line.into())
       }
-      "post-error" => PrivateHeader::PostError(payload.to_string()),
+      b"post-error" => PrivateHeader::PostError(payload.into()),
       _ => return err,
     };
 
     Ok(Self::Private(header))
   }
-}
 
-impl FromStr for SocketRequest {
-  type Err = ShErr;
   #[expect(clippy::too_many_lines)]
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    if let Some(stripped) = s.strip_prefix("PRIVATE ") {
+  pub(crate) fn parse_request(r: &[u8]) -> ShResult<Self> {
+    if let Some(stripped) = r.strip_prefix(b"PRIVATE ") {
       return Self::parse_private_request(stripped);
     }
 
-    let request_kind = s
-      .chars()
-      .peeking_take_while(char::is_ascii_alphabetic)
-      .collect::<String>()
-      .to_lowercase();
+    let request_kind = r
+      .iter()
+      .peeking_take_while(|b| b.is_ascii_alphabetic())
+      .copied()
+      .collect::<Vec<u8>>()
+      .to_ascii_lowercase();
 
     // take care of no-argument requests
     match request_kind.trim() {
-      "subscribe" => return Ok(Self::Subscribe),
-      "redraw" => return Ok(Self::RefreshPrompt),
+      b"subscribe" => return Ok(Self::Subscribe),
+      b"redraw" => return Ok(Self::RefreshPrompt),
       _ => {}
     }
 
-    let rest = s[request_kind.len()..].trim();
+    let rest = r[request_kind.len()..].trim();
     let mut sep = util::scratch_buf();
-    let mut rest_chars = rest.chars().peekable();
+    let mut bytes = SliceCursor::new(rest);
 
     // collect the separator
-    while let Some(ch) = rest_chars.peek() {
-      if !ch.is_ascii_alphanumeric() && ch.is_ascii_graphic() {
-        sep.push(*ch);
-        rest_chars.next();
+    while let Some(b) = bytes.peek_byte() {
+      if !b.is_ascii_alphanumeric() && b.is_ascii_graphic() {
+        sep.push(b);
+        bytes.bump();
       } else {
         break;
       }
     }
-    let rest = rest_chars.collect::<VarStr>();
-    let rest = rest.to_str_lossy();
-    let mut args = rest.split(&*sep);
+    let rest = bytes.into_slice();
+    let mut args = rest.split_str(&*sep);
 
     match request_kind.trim() {
-      "msg" => {
+      b"msg" => {
         let Some(msg_kind) = args.next() else {
           return Err(sherr!(ParseErr, "Missing message kind in 'msg' request",));
         };
-        match msg_kind.to_lowercase().as_str() {
-          "system" => {
+        match msg_kind.to_ascii_lowercase().as_slice() {
+          b"system" => {
             let Some(msg) = args.next() else {
               return Err(sherr!(ParseErr, "Missing message in system msg request",));
             };
-            Ok(Self::PostSystemMessage(msg.to_string()))
+            Ok(Self::PostSystemMessage(msg.into()))
           }
-          "status" => {
+          b"status" => {
             let Some(msg) = args.next() else {
               return Err(sherr!(ParseErr, "Missing message in status msg request",));
             };
-            Ok(Self::PostStatusMessage(msg.to_string()))
+            Ok(Self::PostStatusMessage(msg.into()))
           }
           _ => Err(sherr!(
             ParseErr,
             "Unknown message kind in 'msg' request: {}",
-            msg_kind,
+            msg_kind.to_str_lossy(),
           )),
         }
       }
 
-      "query" => {
+      b"query" => {
         let Some(query_kind) = args.next() else {
           return Err(sherr!(ParseErr, "Missing query kind in 'query' request",));
         };
-        match query_kind.to_lowercase().as_str() {
-          "cwd" => Ok(Self::Query(QueryHeader::Cwd)),
-          "status" => {
+        match query_kind.to_ascii_lowercase().as_slice() {
+          b"cwd" => Ok(Self::Query(QueryHeader::Cwd)),
+          b"status" => {
             let mut headers = vec![];
             while let Some(header) = args.next() {
-              let status_header = match header.to_lowercase().as_str() {
-                "code" => StatusHeader::ExitCode,
-                "command" => StatusHeader::CommandName,
-                "runtime" => StatusHeader::Runtime,
-                "pid" => StatusHeader::Pid,
-                "pgid" => StatusHeader::Pgid,
+              let status_header = match header.to_ascii_lowercase().as_slice() {
+                b"code" => StatusHeader::ExitCode,
+                b"command" => StatusHeader::CommandName,
+                b"runtime" => StatusHeader::Runtime,
+                b"pid" => StatusHeader::Pid,
+                b"pgid" => StatusHeader::Pgid,
                 _ => {
                   return Err(sherr!(
                     ParseErr,
                     "Unknown status header in 'query status' request: {}",
-                    header,
+                    header.to_str_lossy(),
                   ));
                 }
               };
@@ -279,21 +300,21 @@ impl FromStr for SocketRequest {
             }
             Ok(Self::Query(QueryHeader::Status(headers)))
           }
-          "var" => {
+          b"var" => {
             let Some(kind) = args.next() else {
               return Err(sherr!(ParseErr, "Expected 'get' or 'set' in 'var' query",));
             };
             match kind {
-              "get" => {
+              b"get" => {
                 let Some(var_name) = args.next() else {
                   return Err(sherr!(
                     ParseErr,
                     "Missing variable name in 'query var get' request",
                   ));
                 };
-                Ok(Self::Query(QueryHeader::GetVar(var_name.to_string())))
+                Ok(Self::Query(QueryHeader::GetVar(var_name.into())))
               }
-              "set" => {
+              b"set" => {
                 let Some(var_name) = args.next() else {
                   return Err(sherr!(
                     ParseErr,
@@ -308,46 +329,46 @@ impl FromStr for SocketRequest {
                 };
                 let mut flags = VarFlags::empty();
                 while let Some(flag) = args.next() {
-                  match flag.to_lowercase().as_str() {
-                    "export" => flags |= VarFlags::EXPORT,
-                    "local" => flags |= VarFlags::LOCAL,
-                    "readonly" => flags |= VarFlags::READONLY,
+                  match flag.to_ascii_lowercase().as_slice() {
+                    b"export" => flags |= VarFlags::EXPORT,
+                    b"local" => flags |= VarFlags::LOCAL,
+                    b"readonly" => flags |= VarFlags::READONLY,
                     _ => {
                       return Err(sherr!(
                         ParseErr,
                         "Unknown variable flag in 'query var set' request: {}",
-                        flag,
+                        flag.to_str_lossy(),
                       ));
                     }
                   }
                 }
                 Ok(Self::Query(QueryHeader::SetVar(
-                  var_name.to_string(),
-                  value.to_string(),
+                  var_name.into(),
+                  value.into(),
                   flags,
                 )))
               }
               _ => Err(sherr!(
                 ParseErr,
                 "Unknown query kind in 'query var' request: {}",
-                kind,
+                kind.to_str_lossy(),
               )),
             }
           }
           _ => Err(sherr!(
             ParseErr,
             "Unknown query kind in 'query' request: {}",
-            query_kind,
+            query_kind.to_str_lossy(),
           )),
         }
       }
 
-      "line" => {
+      b"line" => {
         let Some(header) = args.next() else {
           return Err(sherr!(ParseErr, "Missing line header in 'line' request",));
         };
         match header {
-          "get" => {
+          b"get" => {
             let Some(header2) = args.next() else {
               return Err(sherr!(
                 ParseErr,
@@ -355,18 +376,19 @@ impl FromStr for SocketRequest {
               ));
             };
             match header2 {
-              "buffer" => Ok(Self::LineGet(LineHeader::Buffer)),
-              "cursor" => Ok(Self::LineGet(LineHeader::Cursor)),
-              "hint" => Ok(Self::LineGet(LineHeader::Hint)),
-              "mode" => Ok(Self::LineGet(LineHeader::Mode)),
-              "anchor" => Ok(Self::LineGet(LineHeader::Anchor)),
+              b"buffer" => Ok(Self::LineGet(LineHeader::Buffer)),
+              b"cursor" => Ok(Self::LineGet(LineHeader::Cursor)),
+              b"hint" => Ok(Self::LineGet(LineHeader::Hint)),
+              b"mode" => Ok(Self::LineGet(LineHeader::Mode)),
+              b"anchor" => Ok(Self::LineGet(LineHeader::Anchor)),
               _ => Err(sherr!(
                 ParseErr,
-                "Unknown line header kind in 'line get' request: {header2}"
+                "Unknown line header kind in 'line get' request: {}",
+                header2.to_str_lossy()
               )),
             }
           }
-          "set" => {
+          b"set" => {
             let Some(header2) = args.next() else {
               return Err(sherr!(
                 ParseErr,
@@ -377,34 +399,36 @@ impl FromStr for SocketRequest {
               return Err(sherr!(ParseErr, "Missing value in 'line set' request",));
             };
             match header2 {
-              "buffer" => Ok(Self::LineSet(LineHeader::Buffer, value.to_string())),
-              "cursor" => Ok(Self::LineSet(LineHeader::Cursor, value.to_string())),
-              "hint" => Ok(Self::LineSet(LineHeader::Hint, value.to_string())),
-              "mode" => Ok(Self::LineSet(LineHeader::Mode, value.to_string())),
-              "anchor" => Ok(Self::LineSet(LineHeader::Anchor, value.to_string())),
+              b"buffer" => Ok(Self::LineSet(LineHeader::Buffer, value.into())),
+              b"cursor" => Ok(Self::LineSet(LineHeader::Cursor, value.into())),
+              b"hint" => Ok(Self::LineSet(LineHeader::Hint, value.into())),
+              b"mode" => Ok(Self::LineSet(LineHeader::Mode, value.into())),
+              b"anchor" => Ok(Self::LineSet(LineHeader::Anchor, value.into())),
               _ => Err(sherr!(
                 ParseErr,
-                "Unknown line header kind in 'line set' request: {header2}"
+                "Unknown line header kind in 'line set' request: {}",
+                header2.to_str_lossy()
               )),
             }
           }
-          "keys" => {
+          b"keys" => {
             let Some(value) = args.next() else {
               return Err(sherr!(ParseErr, "Missing value in 'line keys' request",));
             };
-            let events = expand_keymap(value);
+            let events = expand_keymap(&value.to_str_lossy());
             Ok(Self::LineSendKeys(events))
           }
           _ => Err(sherr!(
             ParseErr,
-            "Unknown line request kind in 'line' request: {header}"
+            "Unknown line request kind in 'line' request: {}",
+            header.to_str_lossy()
           )),
         }
       }
       _ => Err(sherr!(
         ParseErr,
         "Unknown socket request kind: {}",
-        request_kind,
+        request_kind.to_str_lossy(),
       )),
     }
   }
@@ -566,56 +590,59 @@ pub(super) fn handle_socket_request(
         }
       }
     }
-    SocketRequest::LineSet(line_header, value) => match line_header {
-      LineHeader::Buffer => {
-        let joined = readline.editor().to_string();
-        let pos = readline.editor().cursor_to_flat();
+    SocketRequest::LineSet(line_header, value) => {
+      let value = value.to_str_lossy();
+      match line_header {
+        LineHeader::Buffer => {
+          let joined = readline.editor().to_string();
+          let pos = readline.editor().cursor_to_flat();
 
-        readline.editor_mut().edit(|this| {
-          this.set_buffer(&value);
-        });
+          readline.editor_mut().edit(|this| {
+            this.set_buffer(&value);
+          });
 
-        readline.history_mut().update_pending_cmd((&joined, pos));
+          readline.history_mut().update_pending_cmd((&joined, pos));
 
-        let hint = readline.history().get_hint();
+          let hint = readline.history().get_hint();
 
-        readline.editor_mut().set_hint(hint);
-        readline.editor_mut().move_cursor_to_end();
-        readline.mark_dirty();
-      }
-      LineHeader::Cursor => readline.editor_mut().with_hint(|this| {
-        if let Some((row, col)) = value.split_once(':')
-          && let Ok(row) = row.parse::<usize>()
-          && let Ok(col) = col.parse::<usize>()
-        {
-          this.set_cursor(Pos::new(row, col));
-        } else if let Ok(pos) = value.parse::<usize>() {
-          this.set_cursor_from_flat(pos);
+          readline.editor_mut().set_hint(hint);
+          readline.editor_mut().move_cursor_to_end();
+          readline.mark_dirty();
         }
-      }),
-      LineHeader::Hint => {
-        log::debug!("Setting hint from socket: {value}");
-        readline
-          .editor_mut()
-          .set_hint(Some(Hint::Override(Lines::to_lines(&value))));
-        readline.mark_dirty();
-      }
-      LineHeader::Mode => {
-        if !readline.try_swap_mode_from_str(&value) {
-          return Ok(None);
+        LineHeader::Cursor => readline.editor_mut().with_hint(|this| {
+          if let Some((row, col)) = value.split_once(':')
+            && let Ok(row) = row.parse::<usize>()
+            && let Ok(col) = col.parse::<usize>()
+          {
+            this.set_cursor(Pos::new(row, col));
+          } else if let Ok(pos) = value.parse::<usize>() {
+            this.set_cursor_from_flat(pos);
+          }
+        }),
+        LineHeader::Hint => {
+          log::debug!("Setting hint from socket: {value}");
+          readline
+            .editor_mut()
+            .set_hint(Some(Hint::Override(Lines::to_lines(&value))));
+          readline.mark_dirty();
+        }
+        LineHeader::Mode => {
+          if !readline.try_swap_mode_from_str(&value) {
+            return Ok(None);
+          }
+        }
+        LineHeader::Anchor => {
+          if let Some((row, col)) = value.split_once(':')
+            && let Ok(row) = row.parse::<usize>()
+            && let Ok(col) = col.parse::<usize>()
+          {
+            readline.editor_mut().set_anchor(Pos::new(row, col));
+          } else if let Ok(pos) = value.parse::<usize>() {
+            readline.editor_mut().set_anchor_from_flat(pos);
+          }
         }
       }
-      LineHeader::Anchor => {
-        if let Some((row, col)) = value.split_once(':')
-          && let Ok(row) = row.parse::<usize>()
-          && let Ok(col) = col.parse::<usize>()
-        {
-          readline.editor_mut().set_anchor(Pos::new(row, col));
-        } else if let Ok(pos) = value.parse::<usize>() {
-          readline.editor_mut().set_anchor_from_flat(pos);
-        }
-      }
-    },
+    }
     SocketRequest::LineSendKeys(events) => {
       if let Some(event) = readline.replay_keys(events, true)? {
         return Ok(Some(event));
@@ -628,12 +655,12 @@ pub(super) fn handle_socket_request(
         write(&conn, b"\n").ok();
       }
       QueryHeader::GetVar(var) => {
-        let var = var!(&var);
+        let var = var!(&var.to_str_lossy());
         write(&conn, var.as_bytes()).ok();
         write(&conn, b"\n").ok();
       }
       QueryHeader::SetVar(var, val, flags) => {
-        Shed::vars_mut(|v| v.set_var(&var, VarKind::string(val.into()), flags)).ok();
+        Shed::vars_mut(|v| v.set_var(&var.to_str_lossy(), VarKind::string(val), flags)).ok();
         write(&conn, b"ok\n").ok();
       }
       QueryHeader::Status(headers) => {
@@ -696,7 +723,7 @@ pub(super) fn handle_socket_request(
         let cur_gen = readline.worker_req_gen();
         if cur_gen == req_gen && !hint.is_empty() {
           readline.editor_mut().set_hint(Some(Hint::Completion {
-            lines: Lines::to_lines(&hint),
+            lines: Lines::to_lines(&hint.to_str_lossy()),
             token_start,
           }));
           readline.mark_dirty();
@@ -716,7 +743,7 @@ mod tests {
   #[test]
   fn subscribe() {
     assert!(matches!(
-      SocketRequest::from_str("subscribe").unwrap(),
+      SocketRequest::parse_request(b"subscribe").unwrap(),
       SocketRequest::Subscribe
     ));
   }
@@ -724,11 +751,11 @@ mod tests {
   #[test]
   fn subscribe_case_insensitive() {
     assert!(matches!(
-      SocketRequest::from_str("Subscribe").unwrap(),
+      SocketRequest::parse_request(b"Subscribe").unwrap(),
       SocketRequest::Subscribe
     ));
     assert!(matches!(
-      SocketRequest::from_str("SUBSCRIBE").unwrap(),
+      SocketRequest::parse_request(b"SUBSCRIBE").unwrap(),
       SocketRequest::Subscribe
     ));
   }
@@ -736,7 +763,7 @@ mod tests {
   #[test]
   fn redraw() {
     assert!(matches!(
-      SocketRequest::from_str("redraw").unwrap(),
+      SocketRequest::parse_request(b"redraw").unwrap(),
       SocketRequest::RefreshPrompt
     ));
   }
@@ -746,7 +773,7 @@ mod tests {
     // No-arg requests match on the alphabetic prefix only; trailing junk after
     // the keyword shouldn't affect the result for these.
     assert!(matches!(
-      SocketRequest::from_str("redraw:ignored").unwrap(),
+      SocketRequest::parse_request(b"redraw:ignored").unwrap(),
       SocketRequest::RefreshPrompt
     ));
   }
@@ -755,7 +782,7 @@ mod tests {
 
   #[test]
   fn separator_colon() {
-    let req = SocketRequest::from_str("msg:system:hello").unwrap();
+    let req = SocketRequest::parse_request(b"msg:system:hello").unwrap();
     let SocketRequest::PostSystemMessage(s) = req else {
       panic!()
     };
@@ -764,7 +791,7 @@ mod tests {
 
   #[test]
   fn separator_slash() {
-    let req = SocketRequest::from_str("msg/system/hello").unwrap();
+    let req = SocketRequest::parse_request(b"msg/system/hello").unwrap();
     let SocketRequest::PostSystemMessage(s) = req else {
       panic!()
     };
@@ -773,7 +800,7 @@ mod tests {
 
   #[test]
   fn separator_pipe() {
-    let req = SocketRequest::from_str("msg|system|hello").unwrap();
+    let req = SocketRequest::parse_request(b"msg|system|hello").unwrap();
     let SocketRequest::PostSystemMessage(s) = req else {
       panic!()
     };
@@ -784,7 +811,7 @@ mod tests {
   fn separator_multichar() {
     // The separator-collection loop grabs a contiguous run of non-alphanumeric
     // graphic chars, so "::" and ":::" both work as long as they're consistent.
-    let req = SocketRequest::from_str("msg::system::hello").unwrap();
+    let req = SocketRequest::parse_request(b"msg::system::hello").unwrap();
     let SocketRequest::PostSystemMessage(s) = req else {
       panic!()
     };
@@ -795,7 +822,7 @@ mod tests {
 
   #[test]
   fn msg_system() {
-    let req = SocketRequest::from_str("msg:system:notice").unwrap();
+    let req = SocketRequest::parse_request(b"msg:system:notice").unwrap();
     let SocketRequest::PostSystemMessage(s) = req else {
       panic!()
     };
@@ -804,7 +831,7 @@ mod tests {
 
   #[test]
   fn msg_status() {
-    let req = SocketRequest::from_str("msg:status:notice").unwrap();
+    let req = SocketRequest::parse_request(b"msg:status:notice").unwrap();
     let SocketRequest::PostStatusMessage(s) = req else {
       panic!()
     };
@@ -813,7 +840,7 @@ mod tests {
 
   #[test]
   fn msg_with_spaces_in_body() {
-    let req = SocketRequest::from_str("msg:system:hello world").unwrap();
+    let req = SocketRequest::parse_request(b"msg:system:hello world").unwrap();
     let SocketRequest::PostSystemMessage(s) = req else {
       panic!()
     };
@@ -822,17 +849,17 @@ mod tests {
 
   #[test]
   fn msg_missing_kind() {
-    assert!(SocketRequest::from_str("msg").is_err());
+    assert!(SocketRequest::parse_request(b"msg").is_err());
   }
 
   #[test]
   fn msg_missing_body() {
-    assert!(SocketRequest::from_str("msg:system").is_err());
+    assert!(SocketRequest::parse_request(b"msg:system").is_err());
   }
 
   #[test]
   fn msg_unknown_kind() {
-    assert!(SocketRequest::from_str("msg:loud:hi").is_err());
+    assert!(SocketRequest::parse_request(b"msg:loud:hi").is_err());
   }
 
   // ─── query ───────────────────────────────────────────────────────────
@@ -840,14 +867,14 @@ mod tests {
   #[test]
   fn query_cwd() {
     assert!(matches!(
-      SocketRequest::from_str("query:cwd").unwrap(),
+      SocketRequest::parse_request(b"query:cwd").unwrap(),
       SocketRequest::Query(QueryHeader::Cwd)
     ));
   }
 
   #[test]
   fn query_status_defaults_when_no_headers() {
-    let req = SocketRequest::from_str("query:status").unwrap();
+    let req = SocketRequest::parse_request(b"query:status").unwrap();
     let SocketRequest::Query(QueryHeader::Status(headers)) = req else {
       panic!()
     };
@@ -861,7 +888,7 @@ mod tests {
 
   #[test]
   fn query_status_single_header() {
-    let req = SocketRequest::from_str("query:status:code").unwrap();
+    let req = SocketRequest::parse_request(b"query:status:code").unwrap();
     let SocketRequest::Query(QueryHeader::Status(headers)) = req else {
       panic!()
     };
@@ -871,7 +898,7 @@ mod tests {
 
   #[test]
   fn query_status_multiple_headers() {
-    let req = SocketRequest::from_str("query:status:pid:pgid").unwrap();
+    let req = SocketRequest::parse_request(b"query:status:pid:pgid").unwrap();
     let SocketRequest::Query(QueryHeader::Status(headers)) = req else {
       panic!()
     };
@@ -882,12 +909,12 @@ mod tests {
 
   #[test]
   fn query_status_unknown_header() {
-    assert!(SocketRequest::from_str("query:status:bogus").is_err());
+    assert!(SocketRequest::parse_request(b"query:status:bogus").is_err());
   }
 
   #[test]
   fn query_var_get() {
-    let req = SocketRequest::from_str("query:var:get:PATH").unwrap();
+    let req = SocketRequest::parse_request(b"query:var:get:PATH").unwrap();
     let SocketRequest::Query(QueryHeader::GetVar(name)) = req else {
       panic!()
     };
@@ -896,7 +923,7 @@ mod tests {
 
   #[test]
   fn query_var_set_no_flags() {
-    let req = SocketRequest::from_str("query:var:set:FOO:bar").unwrap();
+    let req = SocketRequest::parse_request(b"query:var:set:FOO:bar").unwrap();
     let SocketRequest::Query(QueryHeader::SetVar(name, val, flags)) = req else {
       panic!()
     };
@@ -907,7 +934,7 @@ mod tests {
 
   #[test]
   fn query_var_set_with_export_flag() {
-    let req = SocketRequest::from_str("query:var:set:FOO:bar:export").unwrap();
+    let req = SocketRequest::parse_request(b"query:var:set:FOO:bar:export").unwrap();
     let SocketRequest::Query(QueryHeader::SetVar(_, _, flags)) = req else {
       panic!()
     };
@@ -916,7 +943,7 @@ mod tests {
 
   #[test]
   fn query_var_set_with_multiple_flags() {
-    let req = SocketRequest::from_str("query:var:set:FOO:bar:export:readonly").unwrap();
+    let req = SocketRequest::parse_request(b"query:var:set:FOO:bar:export:readonly").unwrap();
     let SocketRequest::Query(QueryHeader::SetVar(_, _, flags)) = req else {
       panic!()
     };
@@ -926,32 +953,32 @@ mod tests {
 
   #[test]
   fn query_var_set_with_unknown_flag() {
-    assert!(SocketRequest::from_str("query:var:set:FOO:bar:invalid").is_err());
+    assert!(SocketRequest::parse_request(b"query:var:set:FOO:bar:invalid").is_err());
   }
 
   #[test]
   fn query_var_get_missing_name() {
-    assert!(SocketRequest::from_str("query:var:get").is_err());
+    assert!(SocketRequest::parse_request(b"query:var:get").is_err());
   }
 
   #[test]
   fn query_var_set_missing_value() {
-    assert!(SocketRequest::from_str("query:var:set:FOO").is_err());
+    assert!(SocketRequest::parse_request(b"query:var:set:FOO").is_err());
   }
 
   #[test]
   fn query_var_unknown_subkind() {
-    assert!(SocketRequest::from_str("query:var:bogus:FOO").is_err());
+    assert!(SocketRequest::parse_request(b"query:var:bogus:FOO").is_err());
   }
 
   #[test]
   fn query_unknown_kind() {
-    assert!(SocketRequest::from_str("query:bogus").is_err());
+    assert!(SocketRequest::parse_request(b"query:bogus").is_err());
   }
 
   #[test]
   fn query_missing_kind() {
-    assert!(SocketRequest::from_str("query").is_err());
+    assert!(SocketRequest::parse_request(b"query").is_err());
   }
 
   // ─── line ────────────────────────────────────────────────────────────
@@ -959,7 +986,7 @@ mod tests {
   #[test]
   fn line_get_buffer() {
     assert!(matches!(
-      SocketRequest::from_str("line:get:buffer").unwrap(),
+      SocketRequest::parse_request(b"line:get:buffer").unwrap(),
       SocketRequest::LineGet(LineHeader::Buffer)
     ));
   }
@@ -967,7 +994,7 @@ mod tests {
   #[test]
   fn line_get_cursor() {
     assert!(matches!(
-      SocketRequest::from_str("line:get:cursor").unwrap(),
+      SocketRequest::parse_request(b"line:get:cursor").unwrap(),
       SocketRequest::LineGet(LineHeader::Cursor)
     ));
   }
@@ -975,7 +1002,7 @@ mod tests {
   #[test]
   fn line_get_hint() {
     assert!(matches!(
-      SocketRequest::from_str("line:get:hint").unwrap(),
+      SocketRequest::parse_request(b"line:get:hint").unwrap(),
       SocketRequest::LineGet(LineHeader::Hint)
     ));
   }
@@ -983,7 +1010,7 @@ mod tests {
   #[test]
   fn line_get_mode() {
     assert!(matches!(
-      SocketRequest::from_str("line:get:mode").unwrap(),
+      SocketRequest::parse_request(b"line:get:mode").unwrap(),
       SocketRequest::LineGet(LineHeader::Mode)
     ));
   }
@@ -991,24 +1018,24 @@ mod tests {
   #[test]
   fn line_get_anchor() {
     assert!(matches!(
-      SocketRequest::from_str("line:get:anchor").unwrap(),
+      SocketRequest::parse_request(b"line:get:anchor").unwrap(),
       SocketRequest::LineGet(LineHeader::Anchor)
     ));
   }
 
   #[test]
   fn line_get_unknown_header() {
-    assert!(SocketRequest::from_str("line:get:bogus").is_err());
+    assert!(SocketRequest::parse_request(b"line:get:bogus").is_err());
   }
 
   #[test]
   fn line_get_missing_header() {
-    assert!(SocketRequest::from_str("line:get").is_err());
+    assert!(SocketRequest::parse_request(b"line:get").is_err());
   }
 
   #[test]
   fn line_set_buffer() {
-    let req = SocketRequest::from_str("line:set:buffer:hello").unwrap();
+    let req = SocketRequest::parse_request(b"line:set:buffer:hello").unwrap();
     let SocketRequest::LineSet(LineHeader::Buffer, val) = req else {
       panic!()
     };
@@ -1017,7 +1044,7 @@ mod tests {
 
   #[test]
   fn line_set_cursor() {
-    let req = SocketRequest::from_str("line:set:cursor:5").unwrap();
+    let req = SocketRequest::parse_request(b"line:set:cursor:5").unwrap();
     let SocketRequest::LineSet(LineHeader::Cursor, val) = req else {
       panic!()
     };
@@ -1026,17 +1053,17 @@ mod tests {
 
   #[test]
   fn line_set_unknown_header() {
-    assert!(SocketRequest::from_str("line:set:bogus:val").is_err());
+    assert!(SocketRequest::parse_request(b"line:set:bogus:val").is_err());
   }
 
   #[test]
   fn line_set_missing_value() {
-    assert!(SocketRequest::from_str("line:set:buffer").is_err());
+    assert!(SocketRequest::parse_request(b"line:set:buffer").is_err());
   }
 
   #[test]
   fn line_keys() {
-    let req = SocketRequest::from_str("line:keys:foo").unwrap();
+    let req = SocketRequest::parse_request(b"line:keys:foo").unwrap();
     let SocketRequest::LineSendKeys(events) = req else {
       panic!()
     };
@@ -1046,34 +1073,34 @@ mod tests {
 
   #[test]
   fn line_keys_missing_value() {
-    assert!(SocketRequest::from_str("line:keys").is_err());
+    assert!(SocketRequest::parse_request(b"line:keys").is_err());
   }
 
   #[test]
   fn line_unknown_subkind() {
-    assert!(SocketRequest::from_str("line:bogus:foo").is_err());
+    assert!(SocketRequest::parse_request(b"line:bogus:foo").is_err());
   }
 
   #[test]
   fn line_missing_header() {
-    assert!(SocketRequest::from_str("line").is_err());
+    assert!(SocketRequest::parse_request(b"line").is_err());
   }
 
   // ─── Top-level errors ────────────────────────────────────────────────
 
   #[test]
   fn unknown_request_kind() {
-    assert!(SocketRequest::from_str("notarequest:foo").is_err());
+    assert!(SocketRequest::parse_request(b"notarequest:foo").is_err());
   }
 
   #[test]
   fn empty_input() {
-    assert!(SocketRequest::from_str("").is_err());
+    assert!(SocketRequest::parse_request(b"").is_err());
   }
 
   #[test]
   fn only_whitespace() {
-    assert!(SocketRequest::from_str("   ").is_err());
+    assert!(SocketRequest::parse_request(b"   ").is_err());
   }
 
   // ─── handle_socket_request ───────────────────────────────────────────
@@ -1473,7 +1500,7 @@ mod tests {
     use nix::unistd::Pid;
     let mut bldr = JobBldr::new();
     bldr.set_pgid(Pid::this());
-    let child = ChildProc::new(Pid::this(), Some(cmd), Some(Pid::this()), None);
+    let child = ChildProc::new(Pid::this(), Some(cmd.as_bytes()), Some(Pid::this()), None);
     bldr.push_child(child);
     bldr.build()
   }

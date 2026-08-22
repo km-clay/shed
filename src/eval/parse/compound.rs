@@ -1,8 +1,9 @@
-use std::rc::Rc;
-
 use shed_macros::styled_format;
 
-use crate::{eval::parse::node::NodeId, util::error::get_context};
+use crate::{
+  eval::parse::node::NodeId,
+  util::{error::get_context, parse_bytes},
+};
 
 use super::{
   CaseNode, CondNode, LoopKind, NdRule, Node, ParseStream, ShResult, Tk, TkFlags, TkRule,
@@ -12,7 +13,7 @@ use super::{
 impl ParseStream {
   pub(super) fn parse_func_def(&mut self) -> ShResult<Option<NodeId>> {
     let mut span: Option<Span> = None;
-    let has_func_kw = self.check_keyword("function");
+    let has_func_kw = self.check_keyword(b"function");
 
     if has_func_kw {
       extend_span!(span, self.next_tk().unwrap().span);
@@ -33,7 +34,6 @@ impl ParseStream {
     extend_span!(span, name_tk.span);
 
     let name = name_tk.clone();
-    let name_raw: Rc<str> = name.as_str().into();
 
     self.catch_separator(&mut span);
 
@@ -50,7 +50,7 @@ impl ParseStream {
     self.tree.propagate_context(
       body,
       &get_context(
-        styled_format!("in function '{name_raw}' defined here").into(),
+        styled_format!("in function '{}' defined here", name.to_str_lossy()).into(),
         &span.clone().unwrap_or_default(),
       ),
     );
@@ -93,7 +93,7 @@ impl ParseStream {
             self,
             span.clone(),
             "Unexpected token '{}' in subshell body",
-            tk.as_str()
+            tk.to_str_lossy()
           )),
           None => Err(parse_err!(
             self,
@@ -155,7 +155,7 @@ impl ParseStream {
             self,
             span.clone(),
             "Unexpected token '{}' in brace group body",
-            tk.as_str()
+            tk.to_str_lossy()
           )),
           None => Err(parse_err!(
             self,
@@ -185,7 +185,7 @@ impl ParseStream {
   }
   #[expect(clippy::too_many_lines)]
   pub(super) fn parse_case(&mut self) -> ShResult<Option<NodeId>> {
-    if !self.check_keyword("case") {
+    if !self.check_keyword(b"case") {
       return Ok(None);
     }
 
@@ -208,7 +208,7 @@ impl ParseStream {
       return Err(pat_err);
     };
 
-    if matches!(pat_tk.class, TkRule::Sep) || pat_tk.span.as_str() == "in" {
+    if matches!(pat_tk.class, TkRule::Sep) || pat_tk.span.as_bytes() == b"in" {
       return Err(pat_err);
     }
 
@@ -216,7 +216,7 @@ impl ParseStream {
 
     extend_span!(span, pattern.clone().span);
 
-    if !self.check_keyword("in") {
+    if !self.check_keyword(b"in") {
       bail!(self, span, "Expected 'in' after case variable name");
     }
     extend_span!(span, self.next_tk().unwrap().span);
@@ -224,7 +224,7 @@ impl ParseStream {
     self.catch_separator(&mut span);
 
     loop {
-      if self.check_keyword("esac") {
+      if self.check_keyword(b"esac") {
         extend_span!(span, self.next_tk().unwrap().span);
         self.parse_redir(&mut redirs, &mut span)?;
         self.assert_separator(&mut span)?;
@@ -317,7 +317,7 @@ impl ParseStream {
 
       self.catch_separator(&mut span);
 
-      if self.check_keyword("esac") {
+      if self.check_keyword(b"esac") {
         extend_span!(span, self.next_tk().unwrap().span);
         self.parse_redir(&mut redirs, &mut span)?;
         self.assert_separator(&mut span)?;
@@ -342,7 +342,7 @@ impl ParseStream {
     Ok(Some(self.tree.insert_node(node)))
   }
   pub(super) fn parse_time(&mut self) -> ShResult<Option<NodeId>> {
-    if !self.check_keyword("time") {
+    if !self.check_keyword(b"time") {
       return Ok(None);
     }
 
@@ -364,7 +364,7 @@ impl ParseStream {
     Ok(Some(self.tree.insert_node(node)))
   }
   pub(super) fn parse_func_keyword(&mut self) -> ShResult<Option<NodeId>> {
-    if !self.check_keyword("function") {
+    if !self.check_keyword(b"function") {
       return Ok(None);
     }
     self.parse_func_def()
@@ -391,10 +391,10 @@ impl ParseStream {
     Ok(Some(self.tree.insert_node(node)))
   }
   pub(super) fn parse_negate(&mut self) -> ShResult<Option<NodeId>> {
-    if (!self.check_keyword("not") && !self.check_keyword("!")) || !self.next_tk_is_some() {
+    if (!self.check_keyword(b"not") && !self.check_keyword(b"!")) || !self.next_tk_is_some() {
       return Ok(None);
     }
-    let display = if self.check_keyword("!") { "!" } else { "not" };
+    let display = if self.check_keyword(b"!") { "!" } else { "not" };
 
     let mut span: Option<Span> = None;
 
@@ -413,7 +413,7 @@ impl ParseStream {
     Ok(Some(self.tree.insert_node(node)))
   }
   pub(super) fn parse_if(&mut self) -> ShResult<Option<NodeId>> {
-    if !self.check_keyword("if") {
+    if !self.check_keyword(b"if") {
       return Ok(None);
     }
 
@@ -432,7 +432,7 @@ impl ParseStream {
       extend_span!(span, self.tree[cond].get_span());
       self.tree.walk_tree_mut(cond, &mut Node::not_err); // disable set -e for condition commands
 
-      if !self.check_keyword("then") {
+      if !self.check_keyword(b"then") {
         bail!(
           self,
           span,
@@ -451,7 +451,7 @@ impl ParseStream {
       cond_nodes.push(cond_node);
 
       self.catch_separator(&mut span);
-      if self.check_keyword("elif") {
+      if self.check_keyword(b"elif") {
         extend_span!(span, self.next_tk().unwrap().span);
         self.catch_separator(&mut span);
       } else {
@@ -460,7 +460,7 @@ impl ParseStream {
     }
 
     self.catch_separator(&mut span);
-    if self.check_keyword("else") {
+    if self.check_keyword(b"else") {
       extend_span!(span, self.next_tk().unwrap().span);
       self.catch_separator(&mut span);
 
@@ -471,7 +471,7 @@ impl ParseStream {
     }
 
     self.catch_separator(&mut span);
-    if !self.check_keyword("fi") {
+    if !self.check_keyword(b"fi") {
       bail!(self, span, "Expected 'fi' after if statement");
     }
     extend_span!(span, self.next_tk().unwrap().span);
@@ -503,7 +503,7 @@ impl ParseStream {
     };
     self.catch_separator(span);
 
-    if !self.check_keyword("do") {
+    if !self.check_keyword(b"do") {
       bail!(
         self,
         span.clone(),
@@ -522,7 +522,7 @@ impl ParseStream {
     };
 
     self.catch_separator(span);
-    if !self.check_keyword("done") {
+    if !self.check_keyword(b"done") {
       bail!(self, span.clone(), "Expected 'done' after for loop body");
     }
     extend_span!(*span, self.next_tk().unwrap().span);
@@ -555,9 +555,9 @@ impl ParseStream {
     let mut positional = true;
     let array_checks = |this: &Self| {
       this.peek_tk().map(|tk| {
-        let is_in = tk.as_str() == "in";
+        let is_in = tk.as_bytes() == b"in";
         let is_sep = tk.class == TkRule::Sep;
-        let is_do = tk.as_str() == "do";
+        let is_do = tk.as_bytes() == b"do";
         (is_in, is_sep, is_do)
       })
     };
@@ -597,7 +597,7 @@ impl ParseStream {
         "Expected a variable name for this for loop"
       );
     }
-    if self.peek_tk().is_none_or(|tk| tk.as_str() != "do") {
+    if self.peek_tk().is_none_or(|tk| tk.as_bytes() != b"do") {
       bail!(
         self,
         span.clone(),
@@ -616,7 +616,7 @@ impl ParseStream {
     };
 
     self.catch_separator(span);
-    if !self.check_keyword("done") {
+    if !self.check_keyword(b"done") {
       bail!(self, span.clone(), "Expected 'done' after for loop body");
     }
     extend_span!(*span, self.next_tk().unwrap().span);
@@ -640,7 +640,7 @@ impl ParseStream {
     Ok(Some(self.tree.insert_node(node)))
   }
   pub(super) fn parse_for(&mut self) -> ShResult<Option<NodeId>> {
-    if !self.check_keyword("for") {
+    if !self.check_keyword(b"for") {
       return Ok(None);
     }
 
@@ -654,7 +654,7 @@ impl ParseStream {
     }
   }
   pub(super) fn parse_loop(&mut self) -> ShResult<Option<NodeId>> {
-    if !self.check_keyword("while") && !self.check_keyword("until") {
+    if !self.check_keyword(b"while") && !self.check_keyword(b"until") {
       return Ok(None);
     }
 
@@ -662,10 +662,7 @@ impl ParseStream {
     let mut redirs = vec![];
 
     let loop_tk = self.next_tk().unwrap();
-    let loop_kind: LoopKind = loop_tk
-      .span
-      .as_str()
-      .parse() // LoopKind implements FromStr
+    let loop_kind: LoopKind = parse_bytes(loop_tk.as_bytes()) // LoopKind implements FromStr
       .unwrap();
 
     extend_span!(span, loop_tk.span);
@@ -677,7 +674,7 @@ impl ParseStream {
     extend_span!(span, self.tree[cond].get_span());
     self.tree.walk_tree_mut(cond, &mut Node::not_err); // disable set -e for condition commands
 
-    if !self.check_keyword("do") {
+    if !self.check_keyword(b"do") {
       bail!(self, span, "Expected 'do' after '{loop_kind}' condition");
     }
     extend_span!(span, self.next_tk().unwrap().span);
@@ -688,7 +685,7 @@ impl ParseStream {
     };
 
     self.catch_separator(&mut span);
-    if !self.check_keyword("done") {
+    if !self.check_keyword(b"done") {
       bail!(self, span, "Expected 'done' after loop body");
     }
     extend_span!(span, self.next_tk().unwrap().span);
@@ -713,7 +710,7 @@ impl ParseStream {
   }
   #[expect(clippy::too_many_lines)]
   pub(super) fn parse_try(&mut self) -> ShResult<Option<NodeId>> {
-    if !self.check_keyword("try") {
+    if !self.check_keyword(b"try") {
       return Ok(None);
     }
 
@@ -730,7 +727,7 @@ impl ParseStream {
     let mut body_span: Option<Span> = None;
 
     loop {
-      if self.check_keyword("catch") {
+      if self.check_keyword(b"catch") {
         if body.is_empty() {
           bail!(
             self,
@@ -777,7 +774,7 @@ impl ParseStream {
     self.tree.walk_tree_mut(body, &mut Node::is_err);
 
     let try_span = self.tree[body].get_span().merge_with(&try_tk_span).unwrap();
-    let try_span = if try_span.as_str().contains('\n') {
+    let try_span = if try_span.as_bytes().contains(&b'\n') {
       try_span
     } else {
       try_tk_span
@@ -796,7 +793,7 @@ impl ParseStream {
 
     while let Some(tk) = self.peek_tk() {
       let is_sep = tk.class == TkRule::Sep;
-      let is_done = tk.flags.contains(TkFlags::KEYWORD) && tk.span.as_str() == "done";
+      let is_done = tk.flags.contains(TkFlags::KEYWORD) && tk.as_bytes() == b"done";
       let is_terminator = matches!(tk.class, TkRule::Eoi | TkRule::Comment);
       if is_sep || is_done || is_terminator {
         break;
@@ -808,7 +805,7 @@ impl ParseStream {
 
     self.catch_separator(&mut span);
 
-    if !self.check_keyword("do") {
+    if !self.check_keyword(b"do") {
       self.parse_redir(&mut redirs, &mut span)?;
 
       let node = node!(
@@ -842,7 +839,7 @@ impl ParseStream {
 
     self.tree.walk_tree_mut(catch_body, &mut |n| n.not_err());
 
-    if !self.check_keyword("done") {
+    if !self.check_keyword(b"done") {
       bail!(
         self,
         span,
@@ -862,7 +859,7 @@ impl ParseStream {
     Ok(Some(self.tree.insert_node(node)))
   }
   pub(super) fn parse_defer(&mut self) -> ShResult<Option<NodeId>> {
-    if !self.check_keyword("defer") {
+    if !self.check_keyword(b"defer") {
       return Ok(None);
     }
     let mut span: Option<Span> = None;
@@ -879,7 +876,7 @@ impl ParseStream {
     };
 
     let body_span = self.tree[body].get_span();
-    let defer_span = if body_span.as_str().contains('\n') {
+    let defer_span = if body_span.as_bytes().contains(&b'\n') {
       body_span.merge_with(&defer_tk_span).unwrap()
     } else {
       defer_tk_span

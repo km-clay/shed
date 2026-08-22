@@ -519,13 +519,20 @@ pub enum ShErrKind {
   DeprecationWarning,
 
   // Not really errors, more like internal signals
+  /// Created by the `exit` builtin
   CleanExit(i32),
+  /// Created by the `return` builtin
   FuncReturn(i32),
+  /// Created by the `continue` builtin
   LoopContinue(i32),
+  /// Created by the `break` builtin
   LoopBreak(i32),
+  /// Created by the `raise` builtin
   Raised(Option<VarStr>, i32),
-  ErrInterrupt, // used for set -e
-  Interrupt,    // used for Ctrl+C on loops
+  /// Created by non-zero exit status when `errexit` is set
+  ErrInterrupt,
+  /// Created by `SIGINT` in scripts or `Ctrl+C` in interactive mode
+  Interrupt,
 }
 
 impl ShErrKind {

@@ -72,19 +72,22 @@ pub mod tests;
 
 /// The entry point for `shed`.
 ///
-/// Dispatches setup, teardown, and execution.
+/// Dispatches [`lifecycle::setup()`], [`input::dispatch_input()`], and [`lifecycle::tear_down()`].
 fn main() -> ExitCode {
   let Some(args) = lifecycle::setup() else {
     return ExitCode::SUCCESS;
   };
 
+  // each type of input (`-c`, stdin, script path, etc) is handled in `input::dispatch_input()`
   match input::dispatch_input(args) {
     Ok(()) => QUIT_CODE.store(Shed::get_status(), Ordering::SeqCst),
 
     Err(e) => {
       if let ShErrKind::CleanExit(code) = e.kind() {
+        // manual `exit` call or something similar
         QUIT_CODE.store(*code, Ordering::SeqCst);
       } else {
+        // actual error
         e.print_error();
         if QUIT_CODE.load(Ordering::SeqCst) == 0 {
           QUIT_CODE.store(1, Ordering::SeqCst);

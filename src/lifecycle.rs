@@ -126,6 +126,11 @@ where
 }
 
 /// Handle a `--long` invocation flag.
+///
+/// Takes an iterator of [`VarStr`] and [`Span`], and mutates the given [`ShedArgs`] accordingly.
+///
+/// ### Errors:
+/// Returns an error if the flag is unrecognized or missing a required argument.
 fn handle_long_flag<I>(words: &mut std::iter::Peekable<I>, cfg: &mut ShedArgs) -> ShResult<()>
 where
   I: Iterator<Item = (VarStr, Span)>,
@@ -166,8 +171,12 @@ where
 }
 
 /// Parse `shed`'s command-line arguments.
+///
+/// Converts arguments provided by [`std::env::args_os`]
 fn parse_args() -> ShResult<ShedArgs> {
   let mut cfg = ShedArgs::default();
+
+  // we use a placeholder `Span::default()` here since we re-use the `set` builtin's option parser
   let mut words = std::env::args_os()
     .skip(1)
     .map(|a| (VarStr::from(a.into_vec()), Span::default()))

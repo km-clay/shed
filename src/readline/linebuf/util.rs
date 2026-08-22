@@ -182,7 +182,6 @@ impl super::LineBuf {
   fn try_incremental_relex(&mut self, new_joined: &str, new_hash: u64) -> Option<HighlightCache> {
     use crate::eval::lex::Span;
     use crate::readline::context::{CtxTkRule, get_context_tokens};
-    use std::rc::Rc;
 
     let cache = self.highlight_cache.as_ref()?;
 
@@ -221,7 +220,7 @@ impl super::LineBuf {
     }
 
     // "master span", other spans are rebased into this one
-    let outer_span = Span::new(0..new_joined.len(), Rc::from(new_joined));
+    let outer_span = Span::new(0..new_joined.len(), new_joined.into());
 
     // lex the chunk; rebase its tokens into the full-buffer coord
     // space (offset by `left`) AND onto the outer source.

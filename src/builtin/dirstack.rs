@@ -61,7 +61,7 @@ fn parse_dirstack_args(args: &super::BuiltinArgs, cmd: &str) -> ShResult<DirStac
 pub(super) struct PushDir;
 impl super::Builtin for PushDir {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::new_short("no_cd", 'n')]
+    vec![OptSpec::new_short("no_cd", b'n')]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let blame = args.span();
@@ -129,7 +129,7 @@ impl super::Builtin for PushDir {
 pub(super) struct PopDir;
 impl super::Builtin for PopDir {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::new_short("no_cd", 'n')]
+    vec![OptSpec::new_short("no_cd", b'n')]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let blame = args.span();
@@ -207,10 +207,10 @@ pub(super) struct Dirs;
 impl super::Builtin for Dirs {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("one_per_line", 'p'),
-      OptSpec::new_short("one_per_line_indexed", 'v'),
-      OptSpec::new_short("clear_stack", 'c'),
-      OptSpec::new_short("no_home_truncation", 'l'),
+      OptSpec::new_short("one_per_line", b'p'),
+      OptSpec::new_short("one_per_line_indexed", b'v'),
+      OptSpec::new_short("clear_stack", b'c'),
+      OptSpec::new_short("no_home_truncation", b'l'),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {

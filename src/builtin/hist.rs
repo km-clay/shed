@@ -497,8 +497,8 @@ pub(super) struct Hist;
 impl super::Builtin for Hist {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("no-numbers", 'n'),
-      OptSpec::new_short("reverse", 'r'),
+      OptSpec::new_short("no-numbers", b'n'),
+      OptSpec::new_short("reverse", b'r'),
       opt!("delete"),
       opt!("ex"),
       opt!("restore"),

@@ -1,5 +1,6 @@
 //! Functions for handling input to the shell.
 //! The functions contained within handle both interactive and non-interactive contexts.
+//! This includes the `-c <COMMAND>` flag, script path arguments, commands from stdin, and interactive mode.
 
 use std::{path::Path, sync::atomic::Ordering};
 
@@ -120,18 +121,6 @@ pub(crate) fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult
 #[cfg(test)]
 mod dispatch_input_tests {
   //! Tests for `dispatch_input`'s routing logic.
-  //!
-  //! What's covered: the `exec_dash_c` and `read_commands` branches —
-  //! both reachable through `TestGuard` without touching signal handlers,
-  //! sockets, or rc files.
-  //!
-  //! What's not covered: every `edit_script=true` arm and the no-input
-  //! interactive fallback route to `interactive::shed_interactive`,
-  //! which installs process-wide signal handlers, opens a control
-  //! socket on disk, and may execute the user's real ~/.shedrc — not
-  //! safe to invoke from tests without a hermetic harness. The
-  //! `run_script` arm is also gated by stdin being a real tty, which
-  //! `TestGuard` can't currently provide.
 
   use super::*;
   use crate::lifecycle::ShedArgs;

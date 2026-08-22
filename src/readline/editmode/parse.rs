@@ -130,7 +130,7 @@ impl ViParser {
     {
       return None;
     }
-    let mut count = util::scratch_buf();
+    let mut count = util::scratch_str();
 
     while chars.peek().is_some_and(char::is_ascii_digit) {
       count.push(chars.next().unwrap());

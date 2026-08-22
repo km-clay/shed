@@ -105,7 +105,7 @@ pub struct ChildProc {
 
 #[expect(clippy::similar_names)]
 impl ChildProc {
-  pub fn new(pid: Pid, command: Option<&str>, pgid: Option<Pid>, timer: Option<CmdTimer>) -> Self {
+  pub fn new(pid: Pid, command: Option<&[u8]>, pgid: Option<Pid>, timer: Option<CmdTimer>) -> Self {
     let command = command.map(VarStr::from);
     let stat = if kill(pid, None).is_ok() {
       WtStat::StillAlive

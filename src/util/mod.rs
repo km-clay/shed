@@ -8,10 +8,11 @@ pub mod posix_extension;
 mod strops;
 mod ui;
 
-use std::os::fd::BorrowedFd;
+use std::{os::fd::BorrowedFd, str::FromStr};
 
 use super::{Shed, eval, match_loop, procio, sherr, state, system_msg, var};
 
+use bstr::ByteSlice;
 use compact_str::CompactString;
 pub(super) use guards::{
   function_scope_guard, isolation_guard, prefix_assign_guard, shared_scope_guard, var_ctx_guard,
@@ -21,6 +22,7 @@ pub(super) use path::{
   split_path_list,
 };
 pub(super) use pos::{Pos, SignedPos};
+use smallvec::SmallVec;
 pub(super) use ui::{
   BOT_LEFT, BOT_RIGHT, HOR_LINE, PaletteEntry, TOP_LEFT, TOP_RIGHT, VERT_LINE,
   ansi_from_description, pad_line_into, style_from_description, stylize_loglevel,
@@ -36,8 +38,9 @@ pub(crate) enum Direction {
 pub(super) use error::{ShErr, ShErrKind, ShResult, ShResultExt, get_context};
 
 pub(super) use strops::{
-  QuoteState, VarStrDisplay, ends_with_unescaped, format_mode, format_size, format_time,
-  has_unescaped, parse_size, scan_param_exp, scan_parens, split_at_unescaped, split_tk,
+  ByteCursor, QuoteState, SliceCursor, VarStrDisplay, ends_with_unescaped, format_mode,
+  format_size, format_time, has_unescaped, parse_size, scan_param_exp, scan_parens,
+  split_at_unescaped, split_tk,
 };
 
 pub(super) struct FdWriter<'a>(pub BorrowedFd<'a>);
@@ -53,11 +56,15 @@ impl std::io::Write for FdWriter<'_> {
 
 /// Returns a default `CompactString` with capacity 24
 ///
-/// Used for temporary buffers that are ideally put together via `push` or `push_str`
+/// Used for temporary strings that are ideally put together via `push` or `push_str`
 /// like variable names and stuff for instance.
 /// Buffers under 24 bytes in length remain on the stack.
-pub(super) fn scratch_buf() -> CompactString {
+pub(super) fn scratch_str() -> CompactString {
   CompactString::with_capacity(24)
+}
+
+pub(super) fn scratch_buf() -> SmallVec<[u8; 24]> {
+  SmallVec::new()
 }
 
 pub(super) fn with_saved_status<F, T>(f: F) -> T
@@ -107,6 +114,13 @@ pub(super) fn ordered<T: Ord>(start: T, end: T) -> (T, T) {
   } else {
     (start, end)
   }
+}
+
+/// Allows an implementor of [`core::str::FromStr`] to parse a slice of bytes.
+///
+/// Non-UTF-8 bytes will return None, as will any parse errors.
+pub(super) fn parse_bytes<T: FromStr>(bytes: &[u8]) -> Option<T> {
+  bytes.to_str().ok()?.parse().ok()
 }
 
 /// Sets status code and always returns Ok(())

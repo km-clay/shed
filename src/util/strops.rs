@@ -1,4 +1,4 @@
-use std::{fmt::Display, iter::Peekable, str::Chars};
+use std::fmt::Display;
 
 use crate::{state::vars::VarStr, varstr};
 
@@ -19,7 +19,7 @@ impl<T: Display + ?Sized> VarStrDisplay for T {
 }
 
 /// Used to track whether the lexer is currently inside a quote, and if so, which type
-#[derive(Default, Debug, PartialEq, Clone)]
+#[derive(Default, Copy, Debug, PartialEq, Clone)]
 pub enum QuoteState {
   #[default]
   Outside,
@@ -28,16 +28,16 @@ pub enum QuoteState {
 }
 
 impl QuoteState {
-  pub fn outside(&self) -> bool {
+  pub fn outside(self) -> bool {
     matches!(self, QuoteState::Outside)
   }
-  pub fn in_single(&self) -> bool {
+  pub fn in_single(self) -> bool {
     matches!(self, QuoteState::Single)
   }
-  pub fn in_double(&self) -> bool {
+  pub fn in_double(self) -> bool {
     matches!(self, QuoteState::Double)
   }
-  pub fn in_quote(&self) -> bool {
+  pub fn in_quote(self) -> bool {
     !self.outside()
   }
   /// Toggles whether we are in a double quote. If self = `QuoteState::Single` or `QuoteState::Backtick,` this does nothing, since double quotes inside those quotes are just literal characters
@@ -63,8 +63,8 @@ impl QuoteState {
  * so we have to roll our own stuff. we can take a functional approach to to this that generalizes quite well
  */
 
-pub fn split_tk(tk: &Tk, pat: &str) -> Vec<Tk> {
-  let slice = tk.as_str();
+pub fn split_tk(tk: &Tk, pat: &[u8]) -> Vec<Tk> {
+  let slice = tk.as_bytes();
   let base = tk.span.range().start;
   split_all_with(
     slice,
@@ -78,9 +78,9 @@ pub fn split_tk(tk: &Tk, pat: &str) -> Vec<Tk> {
   )
 }
 
-pub fn split_all_with<T, F, B>(slice: &str, segment_fn: F, mut build: B) -> Vec<T>
+pub fn split_all_with<T, F, B>(slice: &[u8], segment_fn: F, mut build: B) -> Vec<T>
 where
-  F: Fn(&str) -> Option<(usize, usize)>,
+  F: Fn(&[u8]) -> Option<(usize, usize)>,
   B: FnMut(usize, usize) -> T,
 {
   let mut cursor = 0;
@@ -95,38 +95,42 @@ where
   splits
 }
 
-/// Splits a string at the first occurrence of a pattern, but only if the pattern is not escaped by a backslash
+/// Splits a byte slice at the first occurrence of a pattern, but only if the pattern is not escaped by a backslash
 /// and not in quotes. Returns None if the pattern is not found or only found escaped.
-pub fn split_at_unescaped(slice: &str, pat: &str) -> Option<(usize, usize)> {
+pub fn split_at_unescaped(slice: &[u8], pat: &[u8]) -> Option<(usize, usize)> {
   split_at_any_unescaped(slice, &[pat])
 }
 
-pub fn split_at_any_unescaped(slice: &str, pats: &[&str]) -> Option<(usize, usize)> {
-  split_at_any_inner(slice, pats, '\\', '\'', '"')
+pub fn split_at_any_unescaped(slice: &[u8], pats: &[&[u8]]) -> Option<(usize, usize)> {
+  split_at_any_inner(slice, pats, b'\\', b'\'', b'"')
 }
 
 /// Split at the first of `pats` not escaped by `esc` and not inside a
 /// `sng_quote`/`dub_quote` region. Shared by the backslash and marker
 /// variants; only the escape/quote characters differ.
 fn split_at_any_inner(
-  slice: &str,
-  pats: &[&str],
-  esc: char,
-  sng_quote: char,
-  dub_quote: char,
+  slice: &[u8],
+  pats: &[&[u8]],
+  esc: u8,
+  sng_quote: u8,
+  dub_quote: u8,
 ) -> Option<(usize, usize)> {
-  let mut chars = slice.char_indices().peekable();
   let mut qt_state = QuoteState::default();
+  let mut i = 0;
 
-  while let Some((i, ch)) = chars.next() {
-    match ch {
-      _ if ch == esc => {
-        chars.next();
+  while i < slice.len() {
+    let b = slice[i];
+    match b {
+      _ if b == esc => {
+        i += 2;
         continue;
       }
-      _ if ch == sng_quote => qt_state.toggle_single(),
-      _ if ch == dub_quote => qt_state.toggle_double(),
-      _ if qt_state.in_quote() => continue,
+      _ if b == sng_quote => qt_state.toggle_single(),
+      _ if b == dub_quote => qt_state.toggle_double(),
+      _ if qt_state.in_quote() => {
+        i += 1;
+        continue;
+      }
       _ => {}
     }
 
@@ -135,108 +139,178 @@ fn split_at_any_inner(
         return Some((i, pat.len()));
       }
     }
+
+    i += 1;
   }
 
   None
 }
 
-pub fn pos_is_escaped(slice: &str, pos: usize) -> bool {
-  let bytes = slice.as_bytes();
+pub fn pos_is_escaped(slice: &[u8], pos: usize) -> bool {
   let mut escaped = false;
   let mut i = pos;
-  while i > 0 && bytes[i - 1] == b'\\' {
+  while i > 0 && slice[i - 1] == b'\\' {
     escaped = !escaped;
     i -= 1;
   }
   escaped
 }
 
-pub fn ends_with_unescaped(slice: &str, pat: &str) -> bool {
+pub fn ends_with_unescaped(slice: &[u8], pat: &[u8]) -> bool {
   slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
 }
 
-pub fn has_unescaped(slice: &str, pat: &str) -> bool {
+pub fn has_unescaped(slice: &[u8], pat: &[u8]) -> bool {
   split_at_unescaped(slice, pat).is_some()
 }
 
-pub fn scan_parens(chars: &mut Peekable<Chars>, pos: &mut usize, depth: usize) -> bool {
-  scan_delims('(', chars, pos, depth).unwrap()
+/// A forward, byte-at-a-time cursor over some source text.
+///
+/// Implemented by the lexer (advancing its own `cursor`) and by [`SliceCursor`]
+/// for standalone scans over a plain byte slice (arithmetic, tests, etc). This
+/// is what lets the delimiter scanners below crawl bytes without caring whether
+/// they're driving the live lexer or a throwaway buffer.
+pub trait ByteCursor {
+  /// The byte at the current position, without advancing.
+  fn peek_byte(&self) -> Option<u8>;
+  /// Consume and return the byte at the current position, advancing by one.
+  fn next_byte(&mut self) -> Option<u8>;
+  /// The byte at the current position + `n`, without advancing.
+  fn peek_nth(&self, n: usize) -> Option<u8>;
+  /// Consume the byte at the current position, advancing by one. Equivalent to `next_byte()`, but doesn't return the byte.
+  fn bump(&mut self) {
+    self.next_byte();
+  }
+  /// Consume and return the byte at the current position if it satisfies the predicate `f`.
+  /// Returns `None` if the byte does not satisfy `f` or if there is no byte to consume.
+  fn next_byte_if(&mut self, f: impl FnOnce(u8) -> bool) -> Option<u8> {
+    let b = self.peek_byte()?;
+    if f(b) { self.next_byte() } else { None }
+  }
+  /// Consume the byte at the current position if it satisfies the predicate `f`.
+  /// Returns `true` if a byte was consumed, `false` otherwise.
+  fn bump_if(&mut self, f: impl Fn(u8) -> bool) -> bool {
+    let Some(b) = self.peek_byte() else {
+      return false;
+    };
+    if f(b) {
+      self.next_byte();
+      true
+    } else {
+      false
+    }
+  }
+  /// Consume the byte at the current position if it is equal to `b`.
+  /// Returns `true` if a byte was consumed, `false` otherwise.
+  fn bump_if_eq(&mut self, b: u8) -> bool {
+    self.bump_if(|x| x == b)
+  }
+  /// Consume bytes at the current position while they satisfy the predicate `f`.
+  /// Stops when a byte does not satisfy `f` or when there are no more bytes to consume.
+  fn bump_while(&mut self, f: impl Fn(u8) -> bool) {
+    while self.bump_if(&f) {}
+  }
+  /// Returns `true` if there are no more bytes to consume, `false` otherwise.
+  fn is_empty(&self) -> bool {
+    self.peek_byte().is_none()
+  }
 }
 
-pub fn scan_param_exp(chars: &mut Peekable<Chars>, pos: &mut usize, mut depth: usize) -> bool {
+/// A [`ByteCursor`] over a borrowed byte slice, tracking its own position.
+/// For callers that need to scan an in-memory buffer rather than the lexer.
+pub(crate) struct SliceCursor<'a> {
+  bytes: &'a [u8],
+  pos: usize,
+}
+
+impl<'a> SliceCursor<'a> {
+  pub fn new(bytes: &'a [u8]) -> Self {
+    Self { bytes, pos: 0 }
+  }
+  /// Number of bytes consumed so far.
+  pub fn pos(&self) -> usize {
+    self.pos
+  }
+
+  pub fn into_slice(self) -> &'a [u8] {
+    &self.bytes[self.pos..]
+  }
+}
+
+impl ByteCursor for SliceCursor<'_> {
+  fn peek_byte(&self) -> Option<u8> {
+    self.bytes.get(self.pos).copied()
+  }
+  fn peek_nth(&self, n: usize) -> Option<u8> {
+    self.bytes.get(self.pos + n).copied()
+  }
+  fn next_byte(&mut self) -> Option<u8> {
+    let b = self.peek_byte()?;
+    self.pos += 1;
+    Some(b)
+  }
+}
+
+/// Scan a balanced `(...)`, consuming through the closing paren. `depth` is the
+/// nesting already entered — pass `1` when the opening `(` was just consumed.
+/// Returns `true` if the group closed, `false` if input ran out first.
+pub fn scan_parens<C: ByteCursor>(c: &mut C, depth: usize) -> bool {
+  scan_delims(b'(', c, depth)
+}
+
+/// Scan a balanced `${...}`, following nested `${...}` / `$(...)`. See
+/// [`scan_parens`] for the `depth` convention and return value.
+pub fn scan_param_exp<C: ByteCursor>(c: &mut C, mut depth: usize) -> bool {
   let mut qt = QuoteState::default();
-  match_loop!(chars.next() => ch, {
-    '\\' => {
-      *pos += 1;
-      if let Some(next_ch) = chars.next() {
-        *pos += next_ch.len_utf8();
-      }
-    }
-    '\'' => { *pos += 1; qt.toggle_single(); }
-    '"' if !qt.in_single() => { *pos += 1; qt.toggle_double(); }
-    _ if qt.in_quote() => *pos += ch.len_utf8(),
-    '$' if chars.peek() == Some(&'{') => {
-      chars.next();
-      *pos += 2;
+  match_loop!(c.next_byte() => b, {
+    b'\\' => { c.next_byte(); }
+    b'\'' => qt.toggle_single(),
+    b'"' if !qt.in_single() => qt.toggle_double(),
+    _ if qt.in_quote() => {}
+    b'$' if c.peek_byte() == Some(b'{') => {
+      c.next_byte();
       depth += 1;
     }
-    '$' if chars.peek() == Some(&'(') => {
-      chars.next();
-      *pos += 2;
+    b'$' if c.peek_byte() == Some(b'(') => {
+      c.next_byte();
       // Reuse the paren-matcher so an inner `$(... } ...)` doesn't trip the
       // param-expansion closer scan.
-      if !scan_parens(chars, pos, 1) {
+      if !scan_parens(c, 1) {
         return false;
       }
     }
-    '}' => {
-      *pos += 1;
+    b'}' => {
       depth -= 1;
       if depth == 0 { break; }
     }
-    _ => *pos += ch.len_utf8(),
+    _ => {}
   });
   depth == 0
 }
 
-fn scan_delims(
-  opener: char,
-  chars: &mut Peekable<Chars>,
-  pos: &mut usize,
-  mut depth: usize,
-) -> ShResult<bool> {
+fn scan_delims<C: ByteCursor>(opener: u8, c: &mut C, mut depth: usize) -> bool {
   let closer = match opener {
-    '(' => ')',
-    '{' => '}',
-    '[' => ']',
-    '<' => '>',
-    _ => {
-      return Err(sherr!(
-          ParseErr @ Span::new(*pos..*pos, "".into()),
-          "Invalid opener '{opener}'",
-      ));
-    }
+    b'(' => b')',
+    b'{' => b'}',
+    b'[' => b']',
+    b'<' => b'>',
+    // Only ever called with the literals above; a new opener is a caller bug.
+    _ => unreachable!("scan_delims: invalid opener {opener:#x}"),
   };
   let mut qt = QuoteState::default();
-  match_loop!(chars.next() => ch, {
-    '\\' => {
-      *pos += 1;
-      if let Some(next_ch) = chars.next() {
-        *pos += next_ch.len_utf8();
-      }
-    }
-    '\'' => { *pos += 1; qt.toggle_single(); }
-    '"' if !qt.in_single() => { *pos += 1; qt.toggle_double(); }
-    _ if qt.in_quote() => *pos += ch.len_utf8(),
-    _ if ch == opener => { *pos += 1; depth += 1; }
-    _ if ch == closer => {
-      *pos += 1;
+  match_loop!(c.next_byte() => b, {
+    b'\\' => { c.next_byte(); }
+    b'\'' => qt.toggle_single(),
+    b'"' if !qt.in_single() => qt.toggle_double(),
+    _ if qt.in_quote() => {}
+    _ if b == opener => depth += 1,
+    _ if b == closer => {
       depth -= 1;
       if depth == 0 { break; }
     }
-    _ => *pos += ch.len_utf8(),
+    _ => {}
   });
-  Ok(depth == 0)
+  depth == 0
 }
 
 #[expect(clippy::too_many_lines)]

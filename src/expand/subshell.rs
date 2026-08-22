@@ -154,7 +154,7 @@ pub fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
 /// Get the command output of a given command input as a String
 pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
   if raw.starts_with('(') && raw.ends_with(')') {
-    return expand_arithmetic_wrapped(raw);
+    return expand_arithmetic_wrapped(raw.as_bytes());
   }
   // command subs add an xtrace layer
   let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);

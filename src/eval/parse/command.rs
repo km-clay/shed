@@ -1,6 +1,6 @@
 use crate::{
   eval::parse::node::{LabelCtx, NodeId},
-  util::{self, error::get_context},
+  util::{self, ByteCursor, SliceCursor, error::get_context},
 };
 
 use super::{
@@ -53,7 +53,7 @@ impl ParseStream {
       RedirTarget::FdExpr(next_tk)
     } else if class == RedirType::HereString {
       RedirTarget::HereDoc {
-        body: next_tk.span.as_str().to_string(),
+        body: next_tk.word(),
         flags: next_tk.flags | TkFlags::HERESTRING,
       }
     } else {
@@ -229,7 +229,7 @@ impl ParseStream {
           break;
         }
       }
-      let in_dbracket = argv.first().map(|t: &Tk| t.as_str()) == Some("[[");
+      let in_dbracket = argv.first().map(|t: &Tk| t.as_bytes()) == Some(b"[[");
       if in_dbracket {
         // add this flag so we don't split words on test members
         flags |= NdFlags::NO_SPLIT;
@@ -290,7 +290,7 @@ impl ParseStream {
             break;
           }
           TkRule::Str => {
-            let is_dbracket_close = in_dbracket && tk.as_str() == "]]";
+            let is_dbracket_close = in_dbracket && tk.as_bytes() == b"]]";
             extend_span!(span, tk.span);
             tk_counter += 1;
             argv.push(tk.clone());
@@ -360,90 +360,80 @@ impl ParseStream {
       }
     }
   }
-  #[expect(clippy::too_many_lines)]
   fn parse_assignment(&self, token: &Tk) -> Option<Node> {
-    let mut chars = token.span.as_str().chars();
+    let base = token.span.range().start;
+    let mut cur = SliceCursor::new(token.span.as_bytes());
     let mut var_name = util::scratch_buf();
-    let mut name_range = token.span.range().start..token.span.range().start;
+    let mut name_range = base..base;
     let mut var_val = util::scratch_buf();
     let mut val_range = token.span.range().end..token.span.range().end;
     let mut assign_kind = None;
-    let mut pos = token.span.range().start;
     let mut bracket_depth = 0usize;
 
-    while let Some(ch) = chars.next() {
+    // Delimiters are all ASCII, so byte scanning is UTF-8-safe; `cur.pos()`
+    // (bytes consumed) yields the absolute source offset as `base + cur.pos()`.
+    while let Some(ch) = cur.next_byte() {
       if assign_kind.is_some() {
-        if ch == '\\' {
-          pos += ch.len_utf8();
-          var_val.push(ch);
-          if let Some(esc_ch) = chars.next() {
-            pos += esc_ch.len_utf8();
-            var_val.push(esc_ch);
-          }
-        } else {
-          pos += ch.len_utf8();
-          var_val.push(ch);
+        var_val.push(ch);
+        if ch == b'\\'
+          && let Some(esc_ch) = cur.next_byte()
+        {
+          var_val.push(esc_ch);
         }
       } else {
         match ch {
-          '[' => {
+          b'[' => {
             bracket_depth += 1;
-            pos += ch.len_utf8();
             var_name.push(ch);
           }
-          ']' if bracket_depth > 0 => {
+          b']' if bracket_depth > 0 => {
             bracket_depth -= 1;
-            pos += ch.len_utf8();
             var_name.push(ch);
           }
-          '=' if bracket_depth == 0 => {
-            name_range.end = pos;
-            pos += ch.len_utf8();
-            val_range.start = pos;
+          b'=' if bracket_depth == 0 => {
+            name_range.end = base + cur.pos() - 1;
+            val_range.start = base + cur.pos();
             assign_kind = Some(AssignKind::Eq);
           }
-          '-' if bracket_depth == 0 => {
-            name_range.end = pos;
-            pos += ch.len_utf8();
-            let Some('=') = chars.next() else { return None };
-            pos += 1;
-            val_range.start = pos;
+          b'-' if bracket_depth == 0 => {
+            name_range.end = base + cur.pos() - 1;
+            if !cur.bump_if_eq(b'=') {
+              return None;
+            }
+            val_range.start = base + cur.pos();
             assign_kind = Some(AssignKind::MinusEq);
           }
-          '+' if bracket_depth == 0 => {
-            name_range.end = pos;
-            pos += ch.len_utf8();
-            let Some('=') = chars.next() else { return None };
-            pos += 1;
-            val_range.start = pos;
+          b'+' if bracket_depth == 0 => {
+            name_range.end = base + cur.pos() - 1;
+            if !cur.bump_if_eq(b'=') {
+              return None;
+            }
+            val_range.start = base + cur.pos();
             assign_kind = Some(AssignKind::PlusEq);
           }
-          '/' if bracket_depth == 0 => {
-            name_range.end = pos;
-            pos += ch.len_utf8();
-            let Some('=') = chars.next() else { return None };
-            pos += 1;
-            val_range.start = pos;
+          b'/' if bracket_depth == 0 => {
+            name_range.end = base + cur.pos() - 1;
+            if !cur.bump_if_eq(b'=') {
+              return None;
+            }
+            val_range.start = base + cur.pos();
             assign_kind = Some(AssignKind::DivEq);
           }
-          '*' if bracket_depth == 0 => {
-            name_range.end = pos;
-            pos += ch.len_utf8();
-            let Some('=') = chars.next() else { return None };
-            pos += 1;
-            val_range.start = pos;
+          b'*' if bracket_depth == 0 => {
+            name_range.end = base + cur.pos() - 1;
+            if !cur.bump_if_eq(b'=') {
+              return None;
+            }
+            val_range.start = base + cur.pos();
             assign_kind = Some(AssignKind::MultEq);
           }
-          '\\' => {
-            pos += ch.len_utf8();
+          b'\\' => {
             var_name.push(ch);
-            if let Some(esc_ch) = chars.next() {
-              pos += esc_ch.len_utf8();
+            if let Some(esc_ch) = cur.next_byte() {
               var_name.push(esc_ch);
             }
           }
           _ => {
-            pos += ch.len_utf8();
             var_name.push(ch);
           }
         }
@@ -456,7 +446,7 @@ impl ParseStream {
 
     let var = Tk::new(TkRule::Str, Span::new(name_range, token.source()));
     let val = Tk::new(TkRule::Str, Span::new(val_range, token.source()));
-    let flags = if var_val.starts_with('(') && var_val.ends_with(')') {
+    let flags = if var_val.first() == Some(&b'(') && var_val.last() == Some(&b')') {
       NdFlags::ARR_ASSIGN
     } else {
       NdFlags::empty()

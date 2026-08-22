@@ -213,7 +213,7 @@ pub fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> ShResult<
 
       return Ok(val.into());
     }
-    Unit::Byte(b) if is_hard_sep(b as char) || !((b as char).is_alphanumeric() || b == b'_') => {
+    Unit::Byte(b) if is_hard_sep(b) || !(b.is_ascii_alphanumeric() || b == b'_') => {
       return lookup_var(&var_name);
     }
     Unit::Mark(_) => {
@@ -300,7 +300,7 @@ mod tests {
     Shed::vars_mut(|v| v.set_var("MYVAR", VarKind::Str("hello".into()), VarFlags::empty()))
       .unwrap();
 
-    let raw = unescape_str("$MYVAR");
+    let raw = unescape_str(b"$MYVAR");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "hello");
   }
@@ -310,7 +310,7 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| v.set_var("FOO", VarKind::Str("bar".into()), VarFlags::empty())).unwrap();
 
-    let raw = unescape_str("${FOO}");
+    let raw = unescape_str(b"${FOO}");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "bar");
   }
@@ -319,7 +319,7 @@ mod tests {
   fn var_expansion_unset_empty() {
     let _guard = TestGuard::new();
 
-    let raw = unescape_str("$NONEXISTENT");
+    let raw = unescape_str(b"$NONEXISTENT");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "");
   }
@@ -330,7 +330,7 @@ mod tests {
     Shed::vars_mut(|v| v.set_var("A", VarKind::Str("hello".into()), VarFlags::empty())).unwrap();
     Shed::vars_mut(|v| v.set_var("B", VarKind::Str("world".into()), VarFlags::empty())).unwrap();
 
-    let raw = unescape_str("${A}_${B}");
+    let raw = unescape_str(b"${A}_${B}");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "hello_world");
   }
@@ -342,7 +342,7 @@ mod tests {
     let _guard = TestGuard::new();
     let home = var!("HOME");
 
-    let raw = unescape_str("~/foo");
+    let raw = unescape_str(b"~/foo");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(
       result,
@@ -355,7 +355,7 @@ mod tests {
     let _guard = TestGuard::new();
     let home = var!("HOME");
 
-    let raw = unescape_str("~");
+    let raw = unescape_str(b"~");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(
       result,
@@ -395,7 +395,7 @@ mod tests {
 
     // After unescape_str, `my\ *` becomes `my{ESCAPE} *`; convert to a glob
     // pattern the way `expand()` does before matching.
-    let unescaped = unescape_str("my\\ *");
+    let unescaped = unescape_str(b"my\\ *");
     let pattern = crate::expand::escape::markers_to_glob_escapes(&unescaped);
     let result = expand_glob(&pattern, false)
       .into_iter()
@@ -478,7 +478,9 @@ mod tests {
 
     let saved = std::env::current_dir().ok();
     std::env::set_current_dir(dir).unwrap();
-    let result = Expander::from_raw(raw, TkFlags::empty()).expand().unwrap();
+    let result = Expander::from_raw(raw.as_bytes(), TkFlags::empty())
+      .expand()
+      .unwrap();
     if let Some(prev) = saved {
       let _ = std::env::set_current_dir(prev);
     }

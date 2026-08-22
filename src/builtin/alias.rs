@@ -1,3 +1,5 @@
+use bstr::ByteSlice;
+
 use crate::opt;
 
 use super::{
@@ -22,21 +24,23 @@ impl super::Builtin for Alias {
 
     for (arg, span) in args.arguments() {
       let (name, value) = split_assignment_raw(arg);
-      if name == "command" || name == "builtin" {
+      if name == b"command" || name == b"builtin" {
         return Err(sherr!(
           ExecFail @ span.clone(),
-          "Cannot assign alias to reserved name '{name}'"
+          "Cannot assign alias to reserved name '{}'",
+          name.to_str_lossy()
         ));
       }
 
       if let Some(value) = value {
-        Shed::logic_mut(|l| l.insert_alias(name, &value.into(), span.clone()));
-      } else if let Some(alias) = Shed::logic(|l| l.get_alias(name)) {
+        Shed::logic_mut(|l| l.insert_alias(&name.to_str_lossy(), &value.into(), span.clone()));
+      } else if let Some(alias) = Shed::logic(|l| l.get_alias(&name.to_str_lossy())) {
         outln_bytes(&display_as_var(name, alias.body()));
       } else {
         return Err(sherr!(
           SyntaxErr @ span.clone(),
-          "Unknown alias '{name}'",
+          "Unknown alias '{}'",
+          name.to_str_lossy()
         ));
       }
     }
@@ -72,7 +76,7 @@ impl super::Builtin for Unalias {
 pub(super) struct ExCmd;
 impl super::Builtin for ExCmd {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![opt!("remove" | 'r')]
+    vec![opt!("remove" | b'r')]
   }
   fn strict_opts(&self) -> bool {
     true
@@ -95,6 +99,7 @@ impl super::Builtin for ExCmd {
 
     for (arg, span) in args.arguments() {
       let (name, value) = split_assignment_raw(arg);
+      let name = &name.to_str_lossy();
 
       if !remove && let Some(value) = value {
         Shed::logic_mut(|l| l.insert_ex_alias(name, &value.into(), span.clone()));
@@ -102,7 +107,7 @@ impl super::Builtin for ExCmd {
         if remove {
           Shed::logic_mut(|l| l.remove_ex_alias(name));
         } else {
-          outln_bytes(&display_as_var(name, alias.body()));
+          outln_bytes(&display_as_var(name.as_bytes(), alias.body()));
         }
       } else {
         return Err(sherr!(

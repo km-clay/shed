@@ -75,7 +75,7 @@ impl Palette {
     let class = tk.class();
     match class {
       CtxTkRule::ValidCommand(kind) => {
-        if ["break", "continue", "return"].contains(&tk.span().as_str()) {
+        if ["break", "continue", "return"].contains(&tk.span().to_str_lossy().as_ref()) {
           self.control_flow_keyword
         } else {
           match kind {
@@ -193,6 +193,7 @@ fn paint<W: std::fmt::Write>(
 ) {
   let span = node.span().range();
   let src = node.span().get_source();
+  let src = src.to_str_lossy();
 
   // leading bytes inherit the parent style
   if *cursor < span.start {

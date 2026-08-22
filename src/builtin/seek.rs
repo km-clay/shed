@@ -12,8 +12,8 @@ pub(super) struct Seek;
 impl super::Builtin for Seek {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("cursor-rel", 'c'),
-      OptSpec::new_short("end-rel", 'e'),
+      OptSpec::new_short("cursor-rel", b'c'),
+      OptSpec::new_short("end-rel", b'e'),
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {

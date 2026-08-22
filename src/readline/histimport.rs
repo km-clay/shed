@@ -149,7 +149,7 @@ fn collect_continuation<'a>(first: &'a str, lines: &mut impl Iterator<Item = &'a
   let mut parts = vec![];
   let mut line = first;
   loop {
-    let cont = ends_with_unescaped(line, "\\");
+    let cont = ends_with_unescaped(line.as_bytes(), b"\\");
     parts.push(if cont {
       line.strip_suffix('\\').unwrap()
     } else {

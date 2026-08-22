@@ -1,10 +1,13 @@
 use std::collections::VecDeque;
 
+use bstr::ByteSlice;
+
 use crate::procio::outln_bytes;
 use crate::state::{
   logic::{AutoloadKind, ShFunc},
   vars::VarStr,
 };
+use crate::util::ends_with_unescaped;
 
 use super::{
   Span, Tk,
@@ -43,8 +46,8 @@ trait VarCmd: super::Builtin {
       .iter()
       .map(|w| match w {
         Word::Arg(value, _) => value.clone(),
-        Word::Opt(opt) => opt.span().as_str().into(),
-        Word::Sep(span) => span.as_str().into(),
+        Word::Opt(opt) => opt.span().as_bytes().into(),
+        Word::Sep(span) => span.as_bytes().into(),
       })
       .collect();
 
@@ -52,10 +55,10 @@ trait VarCmd: super::Builtin {
   }
 }
 
-pub fn is_array_literal_assignment(raw: &str) -> bool {
-  split_at_unescaped(raw, "=")
+pub fn is_array_literal_assignment(raw: &[u8]) -> bool {
+  split_at_unescaped(raw, b"=")
     .map(|(eq, len)| &raw[eq + len..])
-    .is_some_and(|rhs| rhs.starts_with('(') && rhs.ends_with(')'))
+    .is_some_and(|rhs| rhs.starts_with(b"(") && ends_with_unescaped(rhs, b")"))
 }
 
 /// Like `prepare_argv` but preserves raw token text for `name=(...)` array
@@ -66,8 +69,8 @@ pub fn is_array_literal_assignment(raw: &str) -> bool {
 pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
   let mut out = vec![];
   for tk in argv {
-    let raw = tk.span.as_str();
-    let eq_pos = split_at_unescaped(raw, "=").map(|(pos, _)| pos);
+    let raw = tk.span.as_bytes();
+    let eq_pos = split_at_unescaped(raw, b"=").map(|(pos, _)| pos);
 
     if is_array_literal_assignment(raw) {
       out.push((raw.into(), tk.span.clone()));
@@ -80,10 +83,9 @@ pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
       let name = &raw[..eq];
       let is_valid_name = !name.is_empty()
         && name
-          .chars()
-          .next()
-          .is_some_and(|c| c.is_alphabetic() || c == '_')
-        && name.chars().all(|c| c.is_alphanumeric() || c == '_');
+          .first()
+          .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_')
+        && name.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'_');
       if is_valid_name {
         let expanded = tk.expand_no_split()?;
         out.push((expanded, span));
@@ -100,7 +102,7 @@ pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
 }
 
 /// Turn the variable value into a `VarKind`
-fn assignment_value(val: &str, src: &str) -> VarKind {
+fn assignment_value(val: &[u8], src: &[u8]) -> VarKind {
   if is_array_literal_assignment(src) {
     VarKind::parse(val)
   } else {
@@ -109,9 +111,8 @@ fn assignment_value(val: &str, src: &str) -> VarKind {
 }
 
 /// Split `name=value`, building the value's `VarKind` from the raw source token
-pub fn split_assignment<'a>(arg: &'a VarStr, src: &str) -> (&'a str, Option<VarKind>) {
-  let arg = arg.to_str().unwrap_or_default();
-  let Some((e, l)) = split_at_unescaped(arg, "=") else {
+pub fn split_assignment<'a>(arg: &'a [u8], src: &[u8]) -> (&'a [u8], Option<VarKind>) {
+  let Some((e, l)) = split_at_unescaped(arg.as_bytes(), b"=") else {
     return (arg, None);
   };
   let var = arg[..e].trim();
@@ -119,9 +120,8 @@ pub fn split_assignment<'a>(arg: &'a VarStr, src: &str) -> (&'a str, Option<VarK
   (var, Some(assignment_value(val, src)))
 }
 
-pub fn split_assignment_raw(arg: &VarStr) -> (&str, Option<&str>) {
-  let arg = arg.to_str().unwrap_or_default();
-  let Some((e, l)) = split_at_unescaped(arg, "=") else {
+pub fn split_assignment_raw(arg: &[u8]) -> (&[u8], Option<&[u8]>) {
+  let Some((e, l)) = split_at_unescaped(arg.as_bytes(), b"=") else {
     return (arg, None);
   };
   let var = arg[..e].trim();
@@ -168,18 +168,20 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
 
   for (arg, span) in argv {
     let (name, raw_val) = split_assignment_raw(&arg);
+    let name = &name.to_str_lossy();
+
     if matches!(kind, DeclareKind::Str | DeclareKind::Int) && raw_val.is_none() {
       Shed::vars_mut(|v| v.declare_var_novalue(name, flags)).promote_err(span)?;
       continue;
     }
     let val = match (kind, raw_val) {
-      (DeclareKind::Str, Some(v)) => assignment_value(v, span.as_str()),
+      (DeclareKind::Str, Some(v)) => assignment_value(v, span.as_bytes()),
       (DeclareKind::Int, Some(v)) => {
         let evaluated = expand_arithmetic(v).promote_err(span.clone())?;
         let n = evaluated
           .to_str_lossy()
           .parse::<i32>()
-          .map_err(|_| sherr!(ExecFail @ span.clone(), "declare -i: invalid arithmetic '{v}'"))?;
+          .map_err(|_| sherr!(ExecFail @ span.clone(), "declare -i: invalid arithmetic '{}'", v.to_str_lossy()))?;
         VarKind::Int(n)
       }
       (DeclareKind::Arr, Some(v)) => VarKind::arr_from_raw(v).promote_err(span.clone())?,
@@ -200,14 +202,14 @@ impl VarCmd for Declare {}
 impl super::Builtin for Declare {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("integer", 'i'),
-      OptSpec::new_short("readonly", 'r'),
-      OptSpec::new_short("export", 'x'),
-      OptSpec::new_short("array", 'a'),
-      OptSpec::new_short("assoc", 'A'),
-      OptSpec::new_short("print", 'p'),
-      OptSpec::new_short("functions", 'f'),
-      OptSpec::new_short("function-names", 'F'),
+      OptSpec::new_short("integer", b'i'),
+      OptSpec::new_short("readonly", b'r'),
+      OptSpec::new_short("export", b'x'),
+      OptSpec::new_short("array", b'a'),
+      OptSpec::new_short("assoc", b'A'),
+      OptSpec::new_short("print", b'p'),
+      OptSpec::new_short("functions", b'f'),
+      OptSpec::new_short("function-names", b'F'),
     ]
   }
   fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
@@ -292,7 +294,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
       }
 
       let dump = Shed::logic(|l| {
-        let mut out = String::new();
+        let mut out: Vec<u8> = Vec::new();
         let mut entries: Vec<_> = l
           .funcs()
           .iter()
@@ -306,13 +308,15 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
           if !names.is_empty() && !names.contains(&name.as_str()) {
             continue;
           }
-          out.push_str(source.as_str());
-          out.push('\n');
+          // Function source is shell text, which may contain non-UTF-8 bytes;
+          // emit it verbatim rather than lossily through `str`.
+          out.extend_from_slice(source.as_bytes());
+          out.push(b'\n');
         }
         out
       });
       if !dump.is_empty() {
-        outln!("{}", dump.trim_end());
+        outln_bytes(dump.trim_end());
       }
     }
     IntrospectMode::FunctionNames => {
@@ -346,7 +350,7 @@ impl super::Builtin for Readonly {
   }
 
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::new_short("print", 'p')]
+    vec![OptSpec::new_short("print", b'p')]
   }
 
   fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
@@ -365,7 +369,8 @@ impl super::Builtin for Readonly {
     }
 
     for (arg, span) in arg_vec {
-      let (var, val) = split_assignment(&arg, span.as_str());
+      let (var, val) = split_assignment(&arg, span.as_bytes());
+      let var = &var.to_str_lossy();
       Shed::vars_mut(|v| match val {
         Some(val) => v.set_var(var, val, VarFlags::READONLY),
         None => v.declare_var_novalue(var, VarFlags::READONLY),
@@ -384,7 +389,7 @@ impl super::Builtin for Unset {
   }
 
   fn opts(&self) -> Vec<OptSpec> {
-    vec![OptSpec::new_short("functions", 'f')]
+    vec![OptSpec::new_short("functions", b'f')]
   }
 
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
@@ -431,8 +436,8 @@ impl super::Builtin for Export {
 
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("unexport", 'n'),
-      OptSpec::new_short("print", 'p'),
+      OptSpec::new_short("unexport", b'n'),
+      OptSpec::new_short("print", b'p'),
     ]
   }
 
@@ -454,7 +459,8 @@ impl super::Builtin for Export {
     }
 
     for (arg, span) in arg_vec {
-      let (var, val) = split_assignment(&arg, span.as_str());
+      let (var, val) = split_assignment(&arg, span.as_bytes());
+      let var = &var.to_str_lossy();
       if unexport {
         if let Some(val) = val {
           Shed::vars_mut(|v| v.set_var(var, val, VarFlags::empty())).promote_err(span)?;
@@ -477,11 +483,11 @@ impl VarCmd for Local {}
 impl super::Builtin for Local {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("integer", 'i'),
-      OptSpec::new_short("readonly", 'r'),
-      OptSpec::new_short("export", 'x'),
-      OptSpec::new_short("array", 'a'),
-      OptSpec::new_short("assoc", 'A'),
+      OptSpec::new_short("integer", b'i'),
+      OptSpec::new_short("readonly", b'r'),
+      OptSpec::new_short("export", b'x'),
+      OptSpec::new_short("array", b'a'),
+      OptSpec::new_short("assoc", b'A'),
     ]
   }
 

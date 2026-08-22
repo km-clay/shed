@@ -1,6 +1,12 @@
-use crate::{HashMap, eval::execute, opt, state::logic::TrapTarget, util};
+use crate::{
+  HashMap,
+  eval::execute,
+  opt,
+  state::logic::TrapTarget,
+  util::{self, ByteCursor, SliceCursor},
+  varstr,
+};
 use bstr::ByteSlice;
-use std::fmt::Write;
 
 use yansi::Paint;
 
@@ -170,9 +176,9 @@ impl super::Builtin for Raise {
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("code" | 'c', 1),
-      opt!("kind" | 'k', 1),
-      opt!("note" | 'n', 1),
+      opt!("code" | b'c', 1),
+      opt!("kind" | b'k', 1),
+      opt!("note" | b'n', 1),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -217,32 +223,30 @@ impl super::Builtin for Raise {
     let mut arg_iter = args.arguments();
 
     while let Some((arg, span)) = arg_iter.next() {
-      let mut chars = arg.chars().peekable();
-      match_loop!(chars.next() => ch, {
-        '%' => {
-          let Some(n_ch) = chars.next() else {
-            part.push('%');
+      let mut bytes = SliceCursor::new(arg.as_bytes());
+      match_loop!(bytes.next_byte() => b, {
+        b'%' => {
+          let Some(n_b) = bytes.next_byte() else {
+            part.push(b'%');
             break;
           };
           let mut color_id = util::scratch_buf();
-          match n_ch {
-            '%' => part.push('%'),
-            _ if n_ch.is_ascii_digit() => {
-              color_id.push(n_ch);
+          match n_b {
+            b'%' => part.push(b'%'),
+            _ if n_b.is_ascii_digit() => {
+              color_id.push(n_b);
 
-              while let Some(&next_ch) = chars.peek()
-                && next_ch.is_ascii_digit()
-              {
-                chars.next();
-                color_id.push(next_ch);
+              while let Some(n_b) = bytes.next_byte_if(|n| n.is_ascii_digit()) {
+                color_id.push(n_b);
               }
 
-              let color_id = color_id.parse::<u32>().map_err(|_| {
-                sherr!(
+              let Some(color_id) = util::parse_bytes(&color_id) else {
+                return Err(sherr!(
                   SyntaxErr @ span.clone(),
-                  "Invalid color code: expected a number, got '{color_id}'",
-                )
-              })?;
+                  "Invalid color code: expected a number, got '{}'",
+                  color_id.to_str_lossy()
+                ))
+              };
               color_map.entry(color_id).or_insert_with(crate::util::error::next_color);
 
               let Some((arg,_)) = arg_iter.next() else {
@@ -253,24 +257,33 @@ impl super::Builtin for Raise {
               };
 
               let color = color_map.get(&color_id).unwrap();
+              let arg = arg.to_str_lossy();
               let painted = arg.paint(*color);
 
-              write!(&mut part, "{painted}").ok();
+              part.extend_from_slice(varstr!("{painted}").as_bytes());
             }
             _ => {
               return Err(sherr!(
                 SyntaxErr @ span.clone(),
-                "Invalid format specifier: '%{n_ch}'",
+                "Invalid format specifier: '%{}'",
+                n_b as char
               ).with_note("'raise' only takes digits or '%' after '%'".into()).with_note("to include a literal '%', use '%%'".into()));
             }
           }
         }
-        _ => part.push(ch),
+        _ => part.push(b),
       });
       message_parts.push(std::mem::take(&mut part));
     }
 
-    let message = message_parts.join(" ");
+    let message = message_parts.into_iter().fold(vec![], |mut acc, s| {
+      // join by ' '
+      if !acc.is_empty() {
+        acc.push(b' ');
+      }
+      acc.extend_from_slice(&s);
+      acc
+    });
     let mut error = ShErr::at(ShErrKind::Raised(kind, code), span, message.into());
 
     for note in notes {

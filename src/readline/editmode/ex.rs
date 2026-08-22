@@ -1,7 +1,6 @@
 use std::iter::Peekable;
 use std::ops::Range;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::str::CharIndices;
 use std::vec::IntoIter;
 
@@ -202,7 +201,7 @@ fn expand_ex_aliases(input: &str) -> String {
     else {
       break;
     };
-    let name = cmd_tk.span.as_str().to_string();
+    let name = cmd_tk.span.to_str_lossy().to_string();
     if active.contains(&name) {
       break; // already expanding this name — treat it as a literal command
     }
@@ -368,7 +367,7 @@ impl From<PatternEnd> for usize {
 }
 
 pub struct ExLexer<'a> {
-  input: Rc<str>,
+  input: VarStr,
   chars: Peekable<CharIndices<'a>>,
   tokens: Vec<ExTk>,
 
@@ -608,7 +607,7 @@ impl<'a> ExLexer<'a> {
         let is_write = matches!(cmd, ExCommand::Write);
         let rest = self.chars.by_ref().map(|(_, ch)| ch).collect::<String>();
         let outer = Span::new(0..self.input.len(), self.input.clone());
-        let stream = LexStream::new(rest.into(), LexFlags::LEX_UNFINISHED)
+        let stream = LexStream::new(rest.as_bytes(), LexFlags::LEX_UNFINISHED)
           .filter_map(Result::ok)
           .filter_map(|tk| tk.filter_meta().then_some(tk))
           .map(|tk| tk.rebase_into(&outer, start_pos));
@@ -631,7 +630,7 @@ impl<'a> ExLexer<'a> {
             class: ExTkRule::ShellTk(shell_tk),
             span: outer_span,
           };
-          if !pushed && is_write && tk.span.as_str() == ">>" {
+          if !pushed && is_write && tk.span.to_str_lossy() == ">>" {
             tk.class = ExTkRule::Append;
           }
           self.tokens.push(tk);
@@ -640,7 +639,7 @@ impl<'a> ExLexer<'a> {
       }
     }
   }
-  fn classify_cmd(name: &str) -> Option<ExCommand> {
+  fn classify_cmd(name: &[u8]) -> Option<ExCommand> {
     if name.is_empty() {
       return None;
     }
@@ -648,7 +647,7 @@ impl<'a> ExLexer<'a> {
     // Ex aliases are expanded textually before parsing (see `expand_ex_aliases`),
     // so by the time we classify, `name` is a real command word.
     for (full, rule) in COMMANDS {
-      if full.starts_with(name) {
+      if full.as_bytes().starts_with(name) {
         return Some(rule.clone());
       }
     }
@@ -709,7 +708,7 @@ impl<'a> ExLexer<'a> {
     }
 
     let outer = Span::new(0..self.input.len(), self.input.clone());
-    let stream = LexStream::new(rest.into(), LexFlags::LEX_UNFINISHED)
+    let stream = LexStream::new(rest.as_bytes(), LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .filter_map(|tk| tk.filter_meta().then_some(tk))
       .map(|tk| tk.rebase_into(&outer, start_pos));
@@ -971,33 +970,30 @@ impl ExParser {
 
     match addr {
       ExLineAddr::Number => {
-        let addr = tk.span.as_str().parse::<usize>().unwrap_or(1);
+        let addr = tk.span.to_str_lossy().parse::<usize>().unwrap_or(1);
         ExPR::Partial(LineAddr::Number(addr))
       }
       ExLineAddr::Dot => ExPR::Partial(LineAddr::Current),
       ExLineAddr::Dollar => ExPR::Partial(LineAddr::Last),
       ExLineAddr::Percent => ExPR::Full(AddressRange::all_lines()),
       ExLineAddr::Offset => {
-        let s = tk
-          .span
-          .as_str()
-          .strip_prefix("+")
-          .unwrap_or(tk.span.as_str());
+        let raw = tk.span.to_str_lossy();
+        let s = raw.strip_prefix('+').unwrap_or(&raw);
 
         let offset = s.parse::<isize>().unwrap_or(1);
         ExPR::Partial(LineAddr::Offset(offset))
       }
       ExLineAddr::Mark => {
-        let mark_name = tk.span.as_str().chars().nth(1).unwrap();
+        let mark_name = tk.span.to_str_lossy().chars().nth(1).unwrap();
 
         ExPR::Partial(LineAddr::Mark(mark_name))
       }
       ExLineAddr::Pattern => {
-        let pat = VarStr::from(tk.span.as_str());
+        let pat = VarStr::from(tk.span.as_bytes());
         ExPR::Partial(LineAddr::Pattern(pat))
       }
       ExLineAddr::PatternRev => {
-        let pat = VarStr::from(tk.span.as_str());
+        let pat = VarStr::from(tk.span.as_bytes());
         ExPR::Partial(LineAddr::PatternRev(pat))
       }
       ExLineAddr::Comma => unreachable!(),
@@ -1043,7 +1039,9 @@ impl ExParser {
       ExCommand::Quit => ExR::success(ExNdRule::Quit),
       ExCommand::WriteQuit => ExR::success(ExNdRule::WriteQuit),
       ExCommand::Expand => ExR::success(ExNdRule::Expand),
-      ExCommand::Unknown => ExR::error(format!("not an editor command: {}", tk.span.as_str())),
+      ExCommand::Unknown => {
+        ExR::error(format!("not an editor command: {}", tk.span.to_str_lossy()))
+      }
     }
   }
   fn parse_addr_rule(
@@ -1081,7 +1079,7 @@ impl ExParser {
     }
     let args_raw = args
       .get_span() // extract total span of arg tokens
-      .map(|s| s.as_str().to_string())
+      .map(|s| s.to_str_lossy().to_string())
       .unwrap_or_default();
 
     ExR::success(ExNdRule::Shell(args_raw))
@@ -1093,10 +1091,10 @@ impl ExParser {
     }
     let args_raw = args
       .get_span() // extract total span of arg tokens
-      .map(|s| s.as_str().to_string());
+      .map(|s| s.to_str_lossy().to_string());
 
     let cmd = if let Some(args) = args_raw {
-      ["help", &args].join(" ")
+      ["help", args.as_str()].join(" ")
     } else {
       "help".to_string()
     };
@@ -1111,12 +1109,15 @@ impl ExParser {
       return ExR::error("expected normal command sequence after 'normal'".into());
     };
 
-    let seq = tk.span.as_str().to_string();
+    let seq = tk.span.to_str_lossy().to_string();
     ExR::success(ExNdRule::Normal { seq, bang })
   }
   fn parse_stash(&mut self) -> ExR<ExNdRule> {
     let arg_names = ["pop", "drop", "apply", "insert", "swap", "list"];
-    let arg = self.tokens.next().map(|tk| VarStr::from(tk.span.as_str()));
+    let arg = self
+      .tokens
+      .next()
+      .map(|tk| VarStr::from(tk.span.as_bytes()));
     if arg.is_none() {
       return ExR::success(ExNdRule::Stash(StashArgs::Push(None)));
     } else if !arg_names
@@ -1126,7 +1127,10 @@ impl ExParser {
       return ExR::success(ExNdRule::Stash(StashArgs::Push(arg)));
     }
 
-    let name = self.tokens.next().map(|tk| VarStr::from(tk.span.as_str()));
+    let name = self
+      .tokens
+      .next()
+      .map(|tk| VarStr::from(tk.span.as_bytes()));
     let arg = arg.unwrap();
     // Inner matches use the same prefix direction as the outer gate:
     // `<name>.starts_with(arg)` — so abbreviations like `:stash p` or
@@ -1183,12 +1187,12 @@ impl ExParser {
     let flags_tk = self
       .tokens
       .peeking_next(|tk| matches!(tk.class, ExTkRule::Argument));
-    let pat = pat.span.as_str().to_string();
-    let repl = repl.span.as_str().to_string();
+    let pat = pat.span.to_str_lossy().to_string();
+    let repl = repl.span.to_str_lossy().to_string();
 
     let mut flags = SubFlags::empty();
     if let Some(flags_tk) = flags_tk {
-      let flags_str = flags_tk.span.as_str();
+      let flags_str = flags_tk.span.to_str_lossy();
       for ch in flags_str.chars() {
         match ch {
           'g' => flags |= SubFlags::GLOBAL,
@@ -1228,14 +1232,14 @@ impl ExParser {
     };
 
     ExR::success(ExNdRule::Global {
-      pat: pat.span.as_str().to_string(),
+      pat: pat.span.to_str_lossy().to_string(),
       nested: Box::new(sub_node),
     })
   }
   fn parse_edit(&mut self) -> ExR<ExNdRule> {
     let mut args = vec![];
     while let Some(arg) = self.tokens.next() {
-      args.push(expand_path_arg(arg.span.as_str()));
+      args.push(expand_path_arg(&arg.span.to_str_lossy()));
     }
     let args = args.into_boxed_slice();
 
@@ -1252,7 +1256,7 @@ impl ExParser {
       }
       let args_raw = args
         .get_span() // extract total span of arg tokens
-        .map(|s| s.as_str().into())
+        .map(|s| s.to_str_lossy().into())
         .unwrap_or_default();
 
       if is_read {
@@ -1275,7 +1279,7 @@ impl ExParser {
         arg = Some(next);
       }
 
-      let path = arg.map(|a| expand_path_arg(a.span.as_str()));
+      let path = arg.map(|a| expand_path_arg(&a.span.to_str_lossy()));
 
       if is_read {
         let Some(path) = path else {
@@ -1296,7 +1300,7 @@ impl ExParser {
 
 /// Run an ex-command path argument through the shell's word-expansion
 fn expand_path_arg(arg: &str) -> PathBuf {
-  let expanded = crate::expand::Expander::from_raw(arg, TkFlags::empty())
+  let expanded = crate::expand::Expander::from_raw(arg.as_bytes(), TkFlags::empty())
     .no_glob()
     .no_split()
     .expand_no_split()
@@ -1593,7 +1597,7 @@ mod parse_one_addr_tests {
       .into_iter()
       .next()
       .unwrap_or_else(|| panic!("no tokens produced for {input:?}"));
-    let text = tk.span.as_str().to_string();
+    let text = tk.span.to_str_lossy().to_string();
     (tk.class, text)
   }
 

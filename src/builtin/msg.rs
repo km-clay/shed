@@ -11,9 +11,9 @@ pub(super) struct Msg;
 impl super::Builtin for Msg {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("status" | 's'),
-      opt!("system" | 'S'),
-      opt!("broadcast" | 'b'),
+      opt!("status" | b's'),
+      opt!("system" | b'S'),
+      opt!("broadcast" | b'b'),
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {

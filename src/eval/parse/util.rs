@@ -71,7 +71,7 @@ impl ParseStream {
   pub(super) fn catch_linebreak(&mut self, span: &mut Option<Span>) {
     while self
       .peek_tk()
-      .is_some_and(|tk| tk.class == TkRule::Sep && !tk.span.as_str().contains(';'))
+      .is_some_and(|tk| tk.class == TkRule::Sep && !tk.as_bytes().contains(&b';'))
     {
       let next = self.next_tk().unwrap();
       extend_span!(*span, next.span);
@@ -105,12 +105,12 @@ impl ParseStream {
   pub(super) fn check_flags(&self, flags: TkFlags) -> bool {
     self.peek_tk().is_some_and(|tk| tk.flags.contains(flags))
   }
-  pub(super) fn check_keyword(&self, kw: &str) -> bool {
+  pub(super) fn check_keyword(&self, kw: &[u8]) -> bool {
     self.peek_tk().is_some_and(|tk| {
-      if kw == "in" {
-        tk.span.as_str() == "in"
+      if kw == b"in" {
+        tk.span.as_bytes() == b"in"
       } else {
-        tk.flags.contains(TkFlags::KEYWORD) && tk.span.as_str() == kw
+        tk.flags.contains(TkFlags::KEYWORD) && tk.as_bytes() == kw
       }
     })
   }
@@ -126,7 +126,7 @@ pub(super) fn split_for_arith_tk(
   tk: &Tk,
 ) -> ShResult<Option<(NodeId, NodeId, NodeId)>> {
   let span = tk.span.clone();
-  let mut tks = split_tk(&tk.strip_arith_header()?, ";").into_iter();
+  let mut tks = split_tk(&tk.strip_arith_header()?, b";").into_iter();
 
   let Some(init_tk) = tks.next() else {
     return Err(sherr!(ParseErr @ span, "Missing init statement"));

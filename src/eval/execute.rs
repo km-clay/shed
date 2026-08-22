@@ -13,7 +13,7 @@ use crate::{
     shopt,
     vars::{VarStr, VarStrSliceExt},
   },
-  util, varstr,
+  util,
 };
 use bstr::ByteSlice;
 use std::{
@@ -246,10 +246,9 @@ pub fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
   });
 
   let expanded = expand_aliases(input);
-  let source_name: Rc<str> = name.into();
   let mut parser = ParsedSrc::new(expanded.into())
     .with_lex_flags(super::lex::LexFlags::empty())
-    .with_name(source_name.clone());
+    .with_name(name.clone());
 
   if let Err(errors) = parser.parse_src() {
     for error in errors {
@@ -261,7 +260,7 @@ pub fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
 
   let mut ast = parser.into_ast();
 
-  let mut dispatcher = Dispatcher::new(source_name);
+  let mut dispatcher = Dispatcher::new(name);
   // exec_cmd expects a job on the stack (normally set up by exec_pipeline).
   // For the NO_FORK exec-in-place path, create one so it doesn't panic.
   dispatcher.job_stack.new_job();
@@ -287,13 +286,13 @@ pub fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
 ///
 /// Used in the main loop and other places that are guaranteed to be interacting with a tty somehow.
 /// This controls whether or not the shell passes terminal control to child processes.
-pub fn exec_int(input: VarStr, source_name: Option<Rc<str>>) -> ShResult<()> {
+pub fn exec_int(input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
   let _guard = Shed::term_mut(|t| t.interactive_guard(true));
   exec_input(input, source_name)
 }
 
 /// Execute non-interactively
-pub fn exec_nonint(input: VarStr, source_name: Option<Rc<str>>) -> ShResult<()> {
+pub fn exec_nonint(input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
   let _guard = Shed::term_mut(|t| t.interactive_guard(false));
   exec_input(input, source_name)
 }
@@ -302,7 +301,7 @@ pub fn exec_nonint(input: VarStr, source_name: Option<Rc<str>>) -> ShResult<()> 
 ///
 /// This should only be called directly if you wish to inherit
 /// the caller's interactive status.
-pub fn exec_input(mut input: VarStr, source_name: Option<Rc<str>>) -> ShResult<()> {
+pub fn exec_input(mut input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
   let interactive = Shed::term(Terminal::interactive);
 
   if !interactive || !Shed::shopts(|o| o.prompt.expand_aliases) {
@@ -314,7 +313,7 @@ pub fn exec_input(mut input: VarStr, source_name: Option<Rc<str>>) -> ShResult<(
     super::lex::LexFlags::empty()
   };
   let source_name = source_name.unwrap_or("<unknown>".into());
-  let mut parser = ParsedSrc::new(input.into())
+  let mut parser = ParsedSrc::new(input)
     .with_lex_flags(lex_flags)
     .with_name(source_name.clone());
   if let Err(errors) = parser.parse_src() {
@@ -330,7 +329,7 @@ pub fn exec_input(mut input: VarStr, source_name: Option<Rc<str>>) -> ShResult<(
 }
 
 pub struct Dispatcher {
-  source_name: Rc<str>,
+  source_name: VarStr,
   pub job_stack: JobStack,
   timer_stack: Vec<Option<CmdTimer>>,
   fg_job: bool,
@@ -341,7 +340,7 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
-  pub fn new(source_name: Rc<str>) -> Self {
+  pub fn new(source_name: VarStr) -> Self {
     Self {
       source_name,
       job_stack: JobStack::new(),
@@ -451,15 +450,13 @@ impl Dispatcher {
 
     if allow_func && is_func(&cmd_word.to_str_lossy()) {
       self.exec_func(tree, node)
-    } else if cmd.flags.contains(TkFlags::BUILTIN)
-      || BUILTIN_NAMES.contains(&cmd_word.to_str_lossy().as_ref())
-    {
-      self.exec_builtin(tree, node, &cmd_word.to_str_lossy())
+    } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTIN_NAMES.contains(&cmd_word.as_bytes()) {
+      self.exec_builtin(tree, node, cmd_word.as_bytes())
     } else if is_arith(*cmd_tk) {
       Self::exec_arith(tree, node)
     } else if can_autocd(cmd) {
-      let dir = cmd.span.as_str().to_string();
-      exec_input(varstr!("cd {dir}"), Some(self.source_name.clone()))
+      let cd_call = [b"cd ", cmd.span.as_bytes()].concat();
+      exec_input(cd_call.into(), Some(self.source_name.clone()))
     } else {
       self.exec_cmd(tree, node)
     }
@@ -572,7 +569,7 @@ impl Dispatcher {
     };
 
     if Shed::shopts(|o| o.set.verbose) {
-      let command = span.as_str().to_string();
+      let command = span.to_str_lossy();
       errln!("{command}");
     }
 
@@ -597,7 +594,7 @@ impl Dispatcher {
     let NdRule::Arithmetic { body } = &tree[arith].class else {
       unreachable!()
     };
-    let result = expand_arithmetic_wrapped(body.as_str())?;
+    let result = expand_arithmetic_wrapped(body.as_bytes())?;
     let val: f64 = result.to_str_lossy().parse().unwrap_or(0.0);
     Shed::set_status_from_bool(val != 0.0);
     Ok(())
@@ -616,21 +613,19 @@ impl Dispatcher {
       body[root].context.push_back(label.clone());
     }
 
-    let func_name = name
-      .span
-      .as_str()
-      .strip_suffix("()")
-      .unwrap_or(name.span.as_str());
+    let func_name = name.span.as_bytes();
+    let func_name = func_name.strip_suffix(b"()").unwrap_or(func_name);
 
-    if KEYWORDS.contains(&func_name) || matches!(func_name, "builtin" | "command") {
+    if KEYWORDS.contains(&func_name) || matches!(func_name, b"builtin" | b"command") {
       return Err(sherr!(
         SyntaxErr @ name.span.clone(),
-        "function: Forbidden function name `{func_name}`",
+        "function: Forbidden function name `{}`",
+        func_name.to_str_lossy()
       ));
     }
 
     let func = ShFunc::defined(body, blame);
-    Shed::logic_mut(|l| l.insert_func(func_name, func)); // Store the AST
+    Shed::logic_mut(|l| l.insert_func(&func_name.to_str_lossy(), func)); // Store the AST
     if Shed::term(Terminal::interactive) {
       Shed::meta_mut(|m| {
         m.set_last_was_func_def(true);
@@ -654,10 +649,10 @@ impl Dispatcher {
 
       let name = func_body[root]
         .get_command()
-        .map(ToString::to_string)
+        .map(Tk::to_str_lossy)
         .unwrap_or_default();
 
-      return self.run_fork(&name, |s| {
+      return self.run_fork(name.as_bytes(), |s| {
         catch_exit(|| s.exec_func(&func_body, root), exit_with);
       });
     }
@@ -680,13 +675,12 @@ impl Dispatcher {
         .clone()
         .expand()?
         .get_first_word()
-        .map(Into::<Rc<str>>::into)
         .unwrap_or_default();
 
       (name, func_name.span.clone())
     };
 
-    let Some(ref mut sh_func) = Shed::logic(|l| l.get_func(&func_name)) else {
+    let Some(ref mut sh_func) = Shed::logic(|l| l.get_func(&func_name.to_str_lossy())) else {
       return Err(sherr!(
         InternalErr @ blame,
         "Failed to find function '{func_name}'"
@@ -696,7 +690,7 @@ impl Dispatcher {
     let func_body = match sh_func {
       ShFunc::Defined { logic, .. } => logic,
       ShFunc::Autoload(src) => {
-        Shed::logic_mut(|l| l.remove_func(&func_name)); // remove autoload from the table
+        Shed::logic_mut(|l| l.remove_func(&func_name.to_str_lossy())); // remove autoload from the table
         src.source(AutoloadKind::Function)?;
 
         // retry, passing func by value
@@ -832,7 +826,7 @@ impl Dispatcher {
 
     if fork_builtins {
       log::trace!("Forking compound command: {name}");
-      self.run_fork(name, |s| {
+      self.run_fork(name.as_bytes(), |s| {
         catch_exit(|| logic(s, tree), exit_with);
       })?;
       Ok(())
@@ -881,11 +875,11 @@ impl Dispatcher {
       RedirResult::Error(e) => return Err(e),
     };
 
-    let body_raw = span.as_str();
+    let body_raw = span.to_str_lossy();
     let body_display = body_raw.graphemes(true).take(70).collect::<String>();
     let name = format!("( {body_display} )");
 
-    self.run_fork(&name, |s| {
+    self.run_fork(name.as_bytes(), |s| {
       catch_exit(|| s.dispatch_node(tree, *body), exit_with);
     })?;
 
@@ -915,7 +909,7 @@ impl Dispatcher {
         let CaseNode { patterns, body } = block;
 
         for pattern in patterns {
-          let pattern_exp = expand_case_pattern(pattern.span.as_str())?;
+          let pattern_exp = expand_case_pattern(pattern.span.as_bytes())?;
           if pattern_exp.is_empty() {
             if pattern_raw.is_empty() {
               let _guard = util::shared_scope_guard();
@@ -923,7 +917,7 @@ impl Dispatcher {
               break 'outer;
             }
           } else {
-            let pattern = Shed::meta_mut(|m| m.get_glob(&pattern_exp));
+            let pattern = Shed::meta_mut(|m| m.get_glob(pattern_exp.as_bytes()));
             if pattern.is_match(pattern_raw.as_bytes()) {
               let _guard = util::shared_scope_guard();
               s.dispatch_node(tree, *body)?;
@@ -1249,12 +1243,9 @@ impl Dispatcher {
     // this avoids the stdio setup that follows this
     self.job_stack.new_job();
     let res = if should_fork(cmd) {
-      let name = cmd
-        .get_command()
-        .map(ToString::to_string)
-        .unwrap_or_default();
+      let name = cmd.get_command().map(Tk::to_str_lossy).unwrap_or_default();
 
-      self.run_fork(&name, |s| {
+      self.run_fork(name.as_bytes(), |s| {
         if let Err(e) = s.dispatch_node(tree, cmd_id) {
           e.print_error();
         }
@@ -1378,9 +1369,9 @@ impl Dispatcher {
           let name = tail
             .first()
             .and_then(|id| tree[*id].get_command())
-            .map(ToString::to_string)
+            .map(Tk::to_str_lossy)
             .unwrap_or_default();
-          result = self.run_fork(&name, move |s| {
+          result = self.run_fork(name.as_bytes(), move |s| {
             catch_exit(
               || s.exec_internal_pipeline(tree, &tail).map(|_| ()),
               exit_with,
@@ -1417,10 +1408,10 @@ impl Dispatcher {
       result = if should_fork_segment(cmd_node) {
         let name = cmd_node
           .get_command()
-          .map(ToString::to_string)
+          .map(Tk::to_str_lossy)
           .unwrap_or_default();
 
-        self.run_fork(&name, |s| {
+        self.run_fork(name.as_bytes(), |s| {
           catch_exit(|| s.dispatch_node(tree, *cmd), exit_with);
         })
       } else {
@@ -1549,17 +1540,17 @@ impl Dispatcher {
     Ok(statuses)
   }
 
-  fn exec_builtin(&mut self, tree: &Ast, cmd_id: NodeId, cmd_name: &str) -> ShResult<()> {
+  fn exec_builtin(&mut self, tree: &Ast, cmd_id: NodeId, cmd_name: &[u8]) -> ShResult<()> {
     let cmd = &tree[cmd_id];
     let fork_builtins = Shed::meta_mut(MetaTab::take_fork);
 
     let Some(builtin) = lookup_builtin(cmd_name) else {
-      sherr!(NotFound @ cmd.get_span(), "builtin not found: {cmd_name}").print_error();
+      sherr!(NotFound @ cmd.get_span(), "builtin not found: {}", cmd_name.to_str_lossy())
+        .print_error();
       return with_status(127);
     };
 
     if fork_builtins {
-      log::trace!("Forking builtin: {cmd_name}");
       self.run_fork(cmd_name, |s| {
         catch_exit(|| builtin.setup_builtin(tree, cmd_id, s), exit_with);
       })?;
@@ -1602,7 +1593,7 @@ impl Dispatcher {
         let Some(root) = child.get_root() else {
           unreachable!()
         };
-        return self.run_fork("", move |s| {
+        return self.run_fork(b"", move |s| {
           catch_exit(|| s.exec_cmd(&child, root), exit_with);
         });
       }
@@ -1632,14 +1623,14 @@ impl Dispatcher {
     }
     // argv is not empty. let's set this stuff here.
     let cmd_tk = argv[0].clone();
-    let cmd_name = cmd_tk.as_str();
+    let cmd_name = &cmd_tk.to_str_lossy();
     let exec_path = state::util::lookup_cmd(cmd_name);
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
 
     // POSIX 2.8.1: a redirection failure on an ordinary command is non-fatal
     let fatal = !Shed::term(Terminal::interactive)
-      && lookup_builtin(cmd_name).is_some_and(builtin::Builtin::is_special);
+      && lookup_builtin(cmd_name.as_bytes()).is_some_and(builtin::Builtin::is_special);
     let _guard = match RedirSet::from(&cmd.redirs).try_apply(fatal) {
       RedirResult::Applied(guard) => Some(guard),
       RedirResult::NoRedirs => None,
@@ -1667,21 +1658,16 @@ impl Dispatcher {
         e.print_error();
         return Ok(());
       }
-      let mut names: HashSet<Rc<str>> = HashSet::new();
+      let mut names: HashSet<VarStr> = HashSet::new();
       for id in assignments {
         let a = &tree[*id];
         if let NdRule::Assignment { var, .. } = &a.class {
-          let raw = var.span.as_str();
-          let name: Rc<str> = state::util::parse_arr_bracket(raw)
-            .map_or_else(
-              || raw.to_string(),
-              |(base, _)| base.to_str_lossy().into_owned(),
-            )
-            .as_str()
-            .into();
+          let raw = var.span.as_bytes();
+          let name: VarStr =
+            state::util::parse_arr_bracket(raw).map_or_else(|| raw.into(), |(base, _)| base);
 
-          if names.insert(Rc::clone(&name)) {
-            let Some(var) = Shed::vars(|v| v.try_get_var_meta(&name)) else {
+          if names.insert(name.clone()) {
+            let Some(var) = Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy())) else {
               continue;
             };
             resolved_env.push((name, var));
@@ -1703,7 +1689,8 @@ impl Dispatcher {
       // Apply the values resolved in the parent above (already `EXPORT`-flagged),
       // so `get_envp` picks them up for `execve`. No expansion happens here.
       for (name, var) in &resolved_env {
-        let _ = Shed::vars_mut(|v| v.set_var(name, var.kind().clone(), var.flags()));
+        let _ =
+          Shed::vars_mut(|v| v.set_var(&name.to_str_lossy(), var.kind().clone(), var.flags()));
       }
       let exec_args = ExecArgs::from_expanded(expanded.clone());
 
@@ -1731,8 +1718,8 @@ impl Dispatcher {
       // execvpe only returns on error
       let print_error = |err: ShErr| {
         // try to write the error message back to the parent's socket
-        let token = &*socket::PRIVATE_TOKEN;
-        let response = socket::send_to_socket(&format!("PRIVATE {token} post-error {err}"));
+        let request = socket::authorize(format_args!("post-error {err}"));
+        let response = socket::send_to_socket(&request);
         if response.is_err() {
           // if that failed, just print the error ourselves
           err.print_error();
@@ -1793,14 +1780,14 @@ impl Dispatcher {
           job.set_pgid(pgrp);
           pgrp
         };
-        let child_proc = ChildProc::new(child, Some(cmd_name), Some(child_pgid), timer);
+        let child_proc = ChildProc::new(child, Some(cmd_name.as_bytes()), Some(child_pgid), timer);
         job.push_child(child_proc);
       }
     }
 
     Ok(())
   }
-  fn run_fork(&mut self, name: &str, f: impl FnOnce(&mut Self)) -> ShResult<()> {
+  fn run_fork(&mut self, name: &[u8], f: impl FnOnce(&mut Self)) -> ShResult<()> {
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
     let interactive = Shed::term(Terminal::interactive);
     match unsafe { fork()? } {
@@ -1873,14 +1860,14 @@ impl Dispatcher {
         unreachable!()
       };
       let old_status = Shed::get_status();
-      let var_name = var.span.as_str();
+      let var_name = &var.span.to_str_lossy();
       let is_integer = !is_arr
         && Shed::vars(|v| v.get_var_flags(var_name)).is_some_and(|f| f.contains(VarFlags::INTEGER));
       let val = if is_arr {
         VarKind::arr_from_tk(val)?
       } else if is_integer {
         let raw = val.expand_no_split()?;
-        let n = expand_arithmetic(&raw.to_str_lossy())
+        let n = expand_arithmetic(raw.as_bytes())
           .ok()
           .and_then(|s| s.to_str_lossy().parse::<i32>().ok())
           .unwrap_or(0);
@@ -1890,9 +1877,9 @@ impl Dispatcher {
       };
 
       // Parse and expand array index BEFORE entering write_vars borrow
-      let indexed = state::util::parse_arr_bracket(var_name)
+      let indexed = state::util::parse_arr_bracket(var_name.as_bytes())
         .map(|(name, idx_raw)| {
-          state::util::expand_arr_index(&idx_raw.to_str_lossy(), true).map(|idx| (name, idx))
+          state::util::expand_arr_index(idx_raw.as_bytes(), true).map(|idx| (name, idx))
         })
         .transpose()?;
 
@@ -2143,7 +2130,7 @@ impl Dispatcher {
       Shed::set_status(status);
 
       if matches!(behavior, AssignBehavior::Export) {
-        new_env_vars.push(var_name.into());
+        new_env_vars.push(var_name.as_bytes().into());
       }
     }
 
@@ -2165,12 +2152,8 @@ pub fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(VarStr, S
   for arg in argv {
     let span = arg.span.clone();
     if no_split {
-      // `=~` is the bash regex-match operator inside `[[ ]]`. The general
-      // expander treats `~` immediately after a word-break `=` as a tilde
-      // prefix (which is correct for things like `--arg=~` outside `[[ ]]`),
-      // but here it would turn the operator into `=/home/$USER`. Skip
-      // expansion for the bare operator token.
-      if arg.span.as_str() == "=~" {
+      // this is the bash regex thing, not a tilde expansion
+      if arg.span.as_bytes() == b"=~" {
         out.push(("=~".into(), span));
         continue;
       }
@@ -2191,7 +2174,7 @@ pub fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(VarStr, S
 pub fn is_func_node(cmd: &Node) -> bool {
   cmd
     .get_command()
-    .is_some_and(|cmd_word| is_func(cmd_word.as_str()))
+    .is_some_and(|cmd_word| is_func(&cmd_word.to_str_lossy()))
 }
 
 pub fn is_func(name: &str) -> bool {
@@ -2208,8 +2191,8 @@ pub fn can_autocd(cmd: &Tk) -> bool {
 
 pub(crate) fn is_builtin(cmd: &Node) -> bool {
   cmd.get_command().is_none_or(|cmd_word| {
-    !is_func(cmd_word.as_str())
-      && lookup_builtin(cmd_word.as_str()).is_some_and(|b| !b.always_forks())
+    !is_func(&cmd_word.to_str_lossy())
+      && lookup_builtin(cmd_word.as_bytes()).is_some_and(|b| !b.always_forks())
       && cmd_word.flags.contains(TkFlags::BUILTIN)
   }) // empty argv: assignment-only command
 }
@@ -2223,7 +2206,7 @@ pub fn runs_inline(cmd: &Node) -> bool {
         return true;
       }
       let cmd_word = cmd.get_command().unwrap();
-      is_func(cmd_word.as_str()) || cmd_word.flags.contains(TkFlags::BUILTIN)
+      is_func(&cmd_word.to_str_lossy()) || cmd_word.flags.contains(TkFlags::BUILTIN)
     }
     NdRule::List { .. }
     | NdRule::Conjunction { .. }
@@ -2248,7 +2231,7 @@ pub fn will_fork(cmd: &Node) -> bool {
     NdRule::Subshell { .. } => true,
     NdRule::Command { argv, .. } if !argv.is_empty() => {
       let cmd_word = cmd.get_command().unwrap();
-      !(is_func(cmd_word.as_str()) || cmd_word.flags.contains(TkFlags::BUILTIN))
+      !(is_func(&cmd_word.to_str_lossy()) || cmd_word.flags.contains(TkFlags::BUILTIN))
     }
     _ => false,
   }
@@ -3372,7 +3355,7 @@ mod tests {
 
     fn tk(s: &str) -> Tk {
       let src: Rc<str> = s.into();
-      let span = Span::new(0..s.len(), src);
+      let span = Span::new(0..s.len(), src.as_bytes().into());
       Tk::new(TkRule::Str, span)
     }
 

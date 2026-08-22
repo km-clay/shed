@@ -74,7 +74,7 @@ fn cached_tags<F: FnOnce() -> Vec<ScoredTag>>(build: F) -> Vec<ScoredTag> {
 pub(super) struct Help;
 impl super::Builtin for Help {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![opt!("list-tags" | 'l')]
+    vec![opt!("list-tags" | b'l')]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let _guard = scopeguard::guard((), |()| {

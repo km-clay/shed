@@ -25,10 +25,10 @@ impl Builtin for Echo {
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("no_newline", 'n'),
-      OptSpec::new_short("no_escape", 'E'),
-      OptSpec::new_short("escape", 'e'),
-      OptSpec::new_short("prompt", 'p'),
+      OptSpec::new_short("no_newline", b'n'),
+      OptSpec::new_short("no_escape", b'E'),
+      OptSpec::new_short("escape", b'e'),
+      OptSpec::new_short("prompt", b'p'),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -56,7 +56,7 @@ impl Builtin for Echo {
           Ok(expand::expand_ansi_c(st.as_bytes()).into())
         } else if use_prompt {
           Ok(
-            expand::expand_prompt(&st.to_str_lossy())
+            expand::expand_prompt(st.as_bytes())
               .promote_err(sp.clone())?
               .into(),
           )

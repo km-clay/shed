@@ -42,7 +42,7 @@ impl AliasExpander {
       let Some(tk) = tokens.get(ti) else { break };
       let span = tk.span.range();
       let (start, end) = (span.start, span.end);
-      let word = tk.as_str().to_string();
+      let word = tk.to_str_lossy().to_string();
 
       let alias = if active.contains(&word) {
         None // guarded: re-expanding would recurse
@@ -72,7 +72,7 @@ impl AliasExpander {
   /// snapshot of the source, so the returned tokens stay valid across a later
   /// `input` mutation (they simply become stale and are dropped on re-lex).
   fn lex_tokens(&self) -> Vec<Tk> {
-    LexStream::new(self.input.clone().into(), LexFlags::empty())
+    LexStream::new(self.input.as_bytes(), LexFlags::empty())
       .filter_map(Result::ok)
       .collect()
   }
@@ -101,7 +101,7 @@ pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
         }
       }
       '<' => {
-        let mut alias = util::scratch_buf();
+        let mut alias = util::scratch_str();
         while let Some(a_ch) = chars.pop_front() {
           match a_ch {
             '\\' => {

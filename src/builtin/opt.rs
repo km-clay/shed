@@ -1,5 +1,7 @@
 use std::{fmt::Display, iter::Peekable};
 
+use bstr::ByteSlice;
+
 use crate::{
   ShResult,
   eval::lex::{Span, Tk},
@@ -82,13 +84,13 @@ impl Display for Opt {
       span.merge_inplace(arg_span);
     }
 
-    write!(f, "{}", span.as_str())
+    write!(f, "{}", span.to_str_lossy())
   }
 }
 
 #[derive(Default, Debug)]
 pub struct OptSpec {
-  short: Option<char>,  // form like '-a'
+  short: Option<u8>,    // form like '-a'
   long: Option<VarStr>, // form like '--arg'
   key: VarStr,          // internal name used for matching
   argc: usize,          // number of arguments the option takes
@@ -108,14 +110,14 @@ impl OptSpec {
       ..Default::default()
     }
   }
-  pub fn new_short(key: &str, short: char) -> Self {
+  pub fn new_short(key: &str, short: u8) -> Self {
     Self {
       key: key.into(),
       short: Some(short),
       ..Default::default()
     }
   }
-  pub fn short(mut self, short: char) -> Self {
+  pub fn short(mut self, short: u8) -> Self {
     self.short = Some(short);
     self
   }
@@ -134,7 +136,7 @@ impl OptSpec {
       .is_some_and(|name| self.long.as_deref() == Some(name.as_bytes()))
   }
 
-  pub fn is_short_match(&self, other: char) -> bool {
+  pub fn is_short_match(&self, other: u8) -> bool {
     if let Some(short) = self.short
       && short == other
     {
@@ -255,16 +257,16 @@ fn parse_opts_inner(
       }
     } else if let Some(cluster) = word.to_str_lossy().strip_prefix('-') {
       if cluster
-        .chars()
+        .bytes()
         .all(|ch| specs.iter().any(|s| s.is_short_match(ch)))
       {
-        for ch in cluster.chars() {
-          let spec = specs.iter().find(|s| s.is_short_match(ch)).unwrap();
+        for byte in cluster.bytes() {
+          let spec = specs.iter().find(|s| s.is_short_match(byte)).unwrap();
           let args = take_args(
             &mut words_iter,
             spec.argc,
             span.clone(),
-            &varstr!("-{ch}").to_str_lossy(),
+            &varstr!("-{}", byte as char).to_str_lossy(),
           )?;
           words.push(Word::Opt(Opt {
             key: spec.key.clone(),
@@ -274,7 +276,7 @@ fn parse_opts_inner(
         }
       } else if strict {
         let unknown = cluster
-          .chars()
+          .bytes()
           .find(|ch| !specs.iter().any(|s| s.is_short_match(*ch)))
           .unwrap();
         return Err(sherr!(ParseErr @ span, "Unknown option '-{unknown}'"));
@@ -294,9 +296,9 @@ pub fn parse_opts_raw(tokens: &[Tk], specs: &[OptSpec]) -> (Vec<Opt>, Vec<Tk>) {
   let mut end_of_opts = false;
 
   for tk in tokens {
-    let raw = tk.span.as_str();
+    let raw = tk.span.as_bytes();
 
-    if !end_of_opts && raw == "--" {
+    if !end_of_opts && raw == b"--" {
       end_of_opts = true;
       continue;
     }
@@ -304,18 +306,18 @@ pub fn parse_opts_raw(tokens: &[Tk], specs: &[OptSpec]) -> (Vec<Opt>, Vec<Tk>) {
     // A short-flag cluster is a single `-` followed by chars that are ALL
     // recognized flags.
     let cluster = (!end_of_opts)
-      .then(|| raw.strip_prefix('-'))
+      .then(|| raw.strip_prefix(b"-"))
       .flatten()
-      .filter(|c| !c.is_empty() && !c.starts_with('-'));
+      .filter(|c| !c.is_empty() && !c.starts_with(b"-"));
 
     match cluster {
       Some(c)
         if c
-          .chars()
+          .bytes()
           .all(|ch| specs.iter().any(|s| s.is_short_match(ch))) =>
       {
-        for ch in c.chars() {
-          let spec = specs.iter().find(|s| s.is_short_match(ch)).unwrap();
+        for byte in c.bytes() {
+          let spec = specs.iter().find(|s| s.is_short_match(byte)).unwrap();
           opts.push(Opt {
             key: spec.key.clone(),
             span: tk.span.clone(),

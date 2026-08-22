@@ -6,10 +6,12 @@ use super::{
   var::expand_raw,
 };
 
+use crate::state::vars::VarStr;
+
 /// Expand a case pattern: performs variable/command expansion while preserving
 /// glob metacharacters that were inside quotes as literals (by backslash-escaping them).
 /// Unquoted glob chars (*, ?, [) pass through for `glob_to_regex` to interpret.
-pub fn expand_case_pattern(raw: &str) -> ShResult<String> {
+pub fn expand_case_pattern(raw: &[u8]) -> ShResult<VarStr> {
   let unescaped = unescape_str(raw);
   let expanded = expand_raw(&mut unescaped.cursor())?;
 
@@ -39,7 +41,7 @@ pub fn expand_case_pattern(raw: &str) -> ShResult<String> {
     Unit::Mark(_) => {}
   });
 
-  Ok(String::from_utf8_lossy(&result).into_owned())
+  Ok(result.into())
 }
 
 pub fn is_var_name_ch(ch: char) -> bool {

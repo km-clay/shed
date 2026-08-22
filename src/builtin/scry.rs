@@ -8,11 +8,11 @@ pub(super) struct Scry;
 impl super::Builtin for Scry {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("read0" | '0'),
-      opt!("quote-in" | 'q'),
-      opt!("quote-out" | 'Q'),
-      opt!("prompt" | 'p', 1),
-      OptSpec::new_short("no-newline", 'n'),
+      opt!("read0" | b'0'),
+      opt!("quote-in" | b'q'),
+      opt!("quote-out" | b'Q'),
+      opt!("prompt" | b'p', 1),
+      OptSpec::new_short("no-newline", b'n'),
     ]
   }
   fn strict_opts(&self) -> bool {

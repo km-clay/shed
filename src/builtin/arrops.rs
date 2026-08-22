@@ -15,9 +15,9 @@ use super::{
 trait ArrOp {
   fn arr_opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new("count").short('c').argc(1),
-      OptSpec::new("variable").short('v').argc(1),
-      OptSpec::new("reverse").short('r'),
+      OptSpec::new("count").short(b'c').argc(1),
+      OptSpec::new("variable").short(b'v').argc(1),
+      OptSpec::new("reverse").short(b'r'),
     ]
   }
   fn action(&self) -> Action;
@@ -205,8 +205,8 @@ pub(super) struct Rotate;
 impl super::Builtin for Rotate {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new("reverse").short('r'),
-      OptSpec::new("count").short('c').argc(1),
+      OptSpec::new("reverse").short(b'r'),
+      OptSpec::new("count").short(b'c').argc(1),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {

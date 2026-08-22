@@ -321,15 +321,15 @@ impl Vice {
 impl super::Builtin for Vice {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("sep" | 's', 1),
-      opt!("cut" | 'c', 1),
-      opt!("move" | 'm', 1),
-      opt!("repeat" | 'r', 1),
+      opt!("sep" | b's', 1),
+      opt!("cut" | b'c', 1),
+      opt!("move" | b'm', 1),
+      opt!("repeat" | b'r', 1),
       opt!("backup-ext", 1),
-      opt!("delim" | 'd', 1),
-      opt!("quoted" | 'q'),
-      opt!("lines" | 'l'),
-      opt!("in-place" | 'i'),
+      opt!("delim" | b'd', 1),
+      opt!("quoted" | b'q'),
+      opt!("lines" | b'l'),
+      opt!("in-place" | b'i'),
       opt!("backup"),
       opt!("keep-mode"),
     ]

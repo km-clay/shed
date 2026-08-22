@@ -5,6 +5,7 @@ use bitflags::bitflags;
 use crate::{
   eval::lex,
   expand::stream::{ProcSubKind, SegCursor, StreamSeg},
+  util::{ByteCursor, SliceCursor},
 };
 
 use super::{
@@ -220,8 +221,8 @@ fn unescape_with(stream: SegStream, flags: ExpandFlags) -> SegStream {
 
 /// Full word-context unescape: all substitutions, quote sub-machines, tildes,
 /// process subs, escapes. Used by the main expansion pipeline.
-pub fn unescape_str(raw: &str) -> SegStream {
-  unescape_with(SegStream::from_bytes(raw.as_bytes()), ExpandFlags::WORD)
+pub fn unescape_str(raw: &[u8]) -> SegStream {
+  unescape_with(SegStream::from_bytes(raw), ExpandFlags::WORD)
 }
 
 /// Like `unescape_str` but for the pattern/replacement operand of a parameter
@@ -263,9 +264,7 @@ fn read_subsh(stream: &mut SegCursor, out: &mut SegStream) {
     rest.push(b);
   }
 
-  if let Ok(rest_str) = std::str::from_utf8(&rest)
-    && let Some(close) = lex::scan_cmd_sub_body(rest_str)
-  {
+  if let Some(close) = lex::scan_cmd_sub_body(&rest) {
     out.push_bytes(&rest[..close]);
     out.push_marker(Marker::Subshell);
     for _ in 0..=close {
@@ -637,8 +636,8 @@ fn read_backtick(stream: &mut SegCursor, out: &mut SegStream, in_dquote: bool) {
 
 /// Heredoc body: $var / ${var} / $(cmd) / backticks only. Quotes, tildes,
 /// globs, process subs, and bare subshells all pass through as literal text.
-pub fn unescape_heredoc(raw: &str) -> SegStream {
-  unescape_with(SegStream::from_bytes(raw.as_bytes()), ExpandFlags::HEREDOC)
+pub fn unescape_heredoc(raw: &[u8]) -> SegStream {
+  unescape_with(SegStream::from_bytes(raw), ExpandFlags::HEREDOC)
 }
 
 pub fn escape_str(raw: &str) -> String {
@@ -682,15 +681,15 @@ pub fn escape_str_bounded(raw: &str, bound: Option<&Range<usize>>) -> String {
   result
 }
 
-pub fn unescape_math(raw: &str) -> ShResult<SegStream> {
-  let mut chars = raw.bytes().peekable();
+pub fn unescape_math(raw: &[u8]) -> ShResult<SegStream> {
+  let mut cur = SliceCursor::new(raw);
   let mut out = SegStream::new();
   let mut qt_state = QuoteState::default();
 
-  match_loop!(chars.next() => ch, {
+  match_loop!(cur.next_byte() => ch, {
     b'\\' => {
-      if (!qt_state.in_single() || chars.peek() == Some(&b'\''))
-      && let Some(next_ch) = chars.next() {
+      if (!qt_state.in_single() || cur.peek_byte() == Some(b'\''))
+      && let Some(next_ch) = cur.next_byte() {
         out.push_byte(next_ch);
       }
     }
@@ -699,14 +698,14 @@ pub fn unescape_math(raw: &str) -> ShResult<SegStream> {
     _ if qt_state.in_single() => out.push_byte(ch),
     b'$' => {
       out.push_marker(Marker::VarSub);
-      if chars.peek() == Some(&b'(') {
+      if cur.peek_byte() == Some(b'(') {
         out.push_marker(Marker::Subshell);
-        chars.next();
+        cur.next_byte();
         let mut paren_count = 1;
-        match_loop!(chars.next() => subsh_ch, {
+        match_loop!(cur.next_byte() => subsh_ch, {
           b'\\' => {
             out.push_byte(subsh_ch);
-            if let Some(next_ch) = chars.next() {
+            if let Some(next_ch) = cur.next_byte() {
               out.push_byte(next_ch);
             }
           }
@@ -871,7 +870,7 @@ mod tests {
   fn unescape_str(s: &str) -> String {
     use crate::expand::stream::StreamSeg;
     let mut out = String::new();
-    for seg in super::unescape_str(s).stream() {
+    for seg in super::unescape_str(s.as_bytes()).stream() {
       match seg {
         StreamSeg::Bytes(b) => out.push_str(&String::from_utf8_lossy(b)),
         StreamSeg::Mark(m) => out.push(marker_char(*m)),

@@ -557,8 +557,8 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
         // Caller is about to execute this anyway (cmd sub, pipeline, etc),
         // so source the autoload now while we have the chance.
         let autoload_src = Shed::logic_mut(|l| {
-          if let Some(ShFunc::Autoload(_)) = l.get_func_ref(name.as_str()) {
-            let func = l.remove_func(name.as_str())?;
+          if let Some(ShFunc::Autoload(_)) = l.get_func_ref(&name.to_str_lossy()) {
+            let func = l.remove_func(&name.to_str_lossy())?;
             if let ShFunc::Autoload(src) = func {
               return Some(src);
             }
@@ -574,7 +574,7 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
         }
 
         let short_circuit = Shed::logic(|l| {
-          let Some(func) = l.get_func_ref(name.as_str()) else {
+          let Some(func) = l.get_func_ref(&name.to_str_lossy()) else {
             return Some(false);
           };
 
@@ -595,7 +595,7 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
 
         // Cache miss: function exists, is Defined, is_internal is None.
         // Mark Checking and clone the body in a single borrow.
-        let Some(logic) = Shed::logic_mut(|l| match l.get_func_mut(name.as_str()) {
+        let Some(logic) = Shed::logic_mut(|l| match l.get_func_mut(&name.to_str_lossy()) {
           Some(ShFunc::Defined {
             logic, is_internal, ..
           }) => {
@@ -612,10 +612,10 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
         };
 
         let body_src = logic[root].get_span();
-        let is = subshell::is_internal(body_src.as_str());
+        let is = subshell::is_internal(&body_src.to_str_lossy());
         let verdict = if is { IsInternal::Yes } else { IsInternal::No };
         Shed::logic_mut(|l| {
-          if let Some(func) = l.get_func_mut(name.as_str()) {
+          if let Some(func) = l.get_func_mut(&name.to_str_lossy()) {
             func.set_is_internal(verdict).ok();
           }
         });

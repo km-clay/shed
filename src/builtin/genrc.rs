@@ -17,12 +17,12 @@ pub struct GenRc;
 impl super::Builtin for GenRc {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("shopts", 's'),
-      OptSpec::new_short("alias", 'a'),
-      OptSpec::new_short("keymaps", 'k'),
-      OptSpec::new_short("autocmds", 'A'),
-      OptSpec::new_short("functions", 'f'),
-      OptSpec::new_short("completions", 'c'),
+      OptSpec::new_short("shopts", b's'),
+      OptSpec::new_short("alias", b'a'),
+      OptSpec::new_short("keymaps", b'k'),
+      OptSpec::new_short("autocmds", b'A'),
+      OptSpec::new_short("functions", b'f'),
+      OptSpec::new_short("completions", b'c'),
       OptSpec::new_long("default"),
       OptSpec::new_long("no-comments"),
     ]

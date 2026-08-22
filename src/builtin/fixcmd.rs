@@ -357,7 +357,7 @@ mod tests {
 
   /// Lex an `fc <args>` invocation into the Tk vec that `parse_fc_args` expects.
   fn lex_fc(input: &str) -> Vec<Tk> {
-    LexStream::new(input.into(), LexFlags::empty())
+    LexStream::new(input.as_bytes(), LexFlags::empty())
       .filter_map(Result::ok)
       .filter(|t| {
         !matches!(

@@ -61,9 +61,9 @@ pub(super) struct StashBuiltin;
 impl super::Builtin for StashBuiltin {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("save" | 's', 3),
-      opt!("delete" | 'd', 1),
-      opt!("list" | 'l'),
+      opt!("save" | b's', 3),
+      opt!("delete" | b'd', 1),
+      opt!("list" | b'l'),
       opt!("stack"),
       opt!("named"),
     ]

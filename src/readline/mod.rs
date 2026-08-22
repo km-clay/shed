@@ -195,9 +195,9 @@ impl StatusLine {
 
     let (left, middle, right) = util::with_saved_status(|| {
       (
-        expand_prompt(&left_raw).unwrap_or(left_raw.clone()),
-        expand_prompt(&middle_raw).unwrap_or(middle_raw.clone()),
-        expand_prompt(&right_raw).unwrap_or(right_raw.clone()),
+        expand_prompt(left_raw.as_bytes()).unwrap_or(left_raw.clone()),
+        expand_prompt(middle_raw.as_bytes()).unwrap_or(middle_raw.clone()),
+        expand_prompt(right_raw.as_bytes()).unwrap_or(right_raw.clone()),
       )
     });
 
@@ -276,14 +276,13 @@ impl Prompt {
       return Self::default();
     };
     // PS1 expansion may involve running commands (e.g., for \h or \W), which can modify shell state
-    let Ok(ps1_expanded) = util::with_saved_status(|| expand_prompt(&ps1_raw.to_str_lossy()))
-    else {
+    let Ok(ps1_expanded) = util::with_saved_status(|| expand_prompt(ps1_raw.as_bytes())) else {
       return Self::default();
     };
     let psr_raw = try_var!("PSR");
     let psr_expanded = psr_raw
       .clone()
-      .map(|r| util::with_saved_status(|| expand_prompt(&r.to_str_lossy())))
+      .map(|r| util::with_saved_status(|| expand_prompt(r.as_bytes())))
       .transpose()
       .ok()
       .flatten();
@@ -315,7 +314,8 @@ impl Prompt {
 impl Default for Prompt {
   fn default() -> Self {
     Self {
-      ps1_expanded: expand_prompt(DEFAULT_PS1).unwrap_or_else(|_| DEFAULT_PS1.to_string()),
+      ps1_expanded: expand_prompt(DEFAULT_PS1.as_bytes())
+        .unwrap_or_else(|_| DEFAULT_PS1.to_string()),
       psr_expanded: None,
       dirty: false,
     }
@@ -432,7 +432,6 @@ impl HintWorker {
   }
   fn main(receiver: &mpsc::Receiver<CompHintRequest>) {
     let mut completer = SimpleCompleter::default();
-    let token = &*socket::PRIVATE_TOKEN;
     while let Ok(mut req) = receiver.recv() {
       while let Ok(newer) = receiver.try_recv() {
         // drain until newest
@@ -457,7 +456,7 @@ impl HintWorker {
         | CompMatch::CommonPrefix { line }
         | CompMatch::Cycled { line } => {
           let token_start = completer.token_span().0;
-          let msg = format!("PRIVATE {token} set-comp-hint {req_gen} {token_start} {line}");
+          let msg = socket::authorize(format_args!("set-comp-hint {req_gen} {token_start} {line}"));
           socket::send_to_socket(&msg).ok();
         }
       }

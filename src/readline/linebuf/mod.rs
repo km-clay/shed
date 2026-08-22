@@ -317,7 +317,7 @@ impl LineBuf {
   pub fn attempt_alias_expansion(&mut self) -> bool {
     let (to_cursor, mut after_cursor) = self.lines.clone().split_lines(self.cursor.pos);
     let raw = to_cursor.join();
-    let mut tokens = LexStream::new(raw.clone().into(), LexFlags::empty())
+    let mut tokens = LexStream::new(raw.as_bytes(), LexFlags::empty())
       .filter_map(Result::ok)
       .filter(|tk| !matches!(tk.class, TkRule::Soi | TkRule::Eoi | TkRule::Null))
       .collect::<Vec<_>>();
@@ -335,7 +335,8 @@ impl LineBuf {
       return false;
     }
     let tk_start = last.span.start();
-    let word = last.as_str();
+    let word = last.to_str_lossy();
+    let word = word.as_ref();
 
     if let Some(alias) = Shed::logic(|l| l.aliases().get(word).cloned())
       && let alias = alias.to_string()
@@ -374,12 +375,12 @@ impl LineBuf {
         continue;
       };
       end = end.col_sub(1); // exclusive range
-      let change = if let Some(s) = history.resolve_hist_token(exp.span().as_str()) {
+      let change = if let Some(s) = history.resolve_hist_token(&exp.span().to_str_lossy()) {
         any_changes = true;
         s.clone()
       } else {
         any_changes = true;
-        let raw = exp.span().as_str();
+        let raw = exp.span().to_str_lossy();
         raw
           .strip_prefix('!')
           .map_or_else(|| raw.to_string(), ToString::to_string)

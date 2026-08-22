@@ -5,10 +5,9 @@ use std::{
   io::{self, Cursor, Read, Write},
   os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
   path::Path,
-  rc::Rc,
-  str::FromStr,
 };
 
+use bstr::ByteSlice;
 use nix::{
   errno::Errno,
   fcntl::{FcntlArg, OFlag, fcntl, open},
@@ -24,8 +23,8 @@ use crate::{
   Shed,
   eval::execute,
   lifecycle, signal,
-  state::{shopt::ReadLimit, terminal::Terminal},
-  util,
+  state::{shopt::ReadLimit, terminal::Terminal, vars::VarStr},
+  util::{self, ByteCursor, SliceCursor, parse_bytes},
 };
 
 use super::{
@@ -222,27 +221,27 @@ impl RedirBldr {
       RedirTarget::HereDoc { body, flags } => {
         log::debug!("heredoc body: {body:?}");
         // Strip leading tabs per line BEFORE expansion (POSIX order).
-        let buf = if flags.contains(TkFlags::HERESTRING) {
+        let buf: VarStr = if flags.contains(TkFlags::HERESTRING) {
           // Raw word; expanded and newline-terminated at redirection time.
           body
         } else if flags.contains(TkFlags::TAB_HEREDOC) {
           if body.is_empty() {
-            String::new()
+            body
           } else {
-            let stripped: Vec<&str> = body
-              .lines()
-              .map(|line| line.trim_start_matches('\t'))
-              .collect();
-            let mut s = stripped.join("\n");
-            s.push('\n');
-            s
+            let mut out = Vec::new();
+            for line in body.lines() {
+              let tabs = line.iter().take_while(|&&b| b == b'\t').count();
+              out.extend_from_slice(&line[tabs..]);
+              out.push(b'\n');
+            }
+            out.into()
           }
+        } else if !body.is_empty() && !body.ends_with(b"\n") {
+          let mut bytes: Vec<u8> = body.into();
+          bytes.push(b'\n');
+          bytes.into()
         } else {
-          let mut s = body;
-          if !s.is_empty() && !s.ends_with('\n') {
-            s.push('\n');
-          }
-          s
+          body
         };
 
         Ok(RedirSpec::buffer(fd, buf, flags))
@@ -255,35 +254,30 @@ impl RedirBldr {
   }
 }
 
-impl FromStr for RedirBldr {
-  type Err = ShErr;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    let mut chars = s.chars().peekable();
+impl RedirBldr {
+  pub fn parse(bytes: &[u8]) -> ShResult<Self> {
+    let mut cur = SliceCursor::new(bytes);
     let mut src_fd = util::scratch_buf();
     let mut tgt_fd = util::scratch_buf();
     let mut redir = RedirBldr::new();
 
-    match_loop!(chars.next() => ch, {
-      '>' => {
+    match_loop!(cur.next_byte() => ch, {
+      b'>' => {
         redir = redir.with_class(RedirType::Output);
-        if let Some('>') = chars.peek() {
-          chars.next();
+        if cur.bump_if_eq(b'>') {
           redir = redir.with_class(RedirType::Append);
-        } else if let Some('|') = chars.peek() {
-          chars.next();
+        } else if cur.bump_if_eq(b'|') {
           redir = redir.with_class(RedirType::OutputForce);
         }
       }
-      '<' => {
+      b'<' => {
         redir = redir.with_class(RedirType::Input);
         let mut count = 0;
 
-        if chars.peek() == Some(&'>') {
-          chars.next(); // consume the '>'
+        if cur.bump_if_eq(b'>') {
           redir = redir.with_class(RedirType::ReadWrite);
         } else {
-          while count < 2 && matches!(chars.peek(), Some('<')) {
-            chars.next();
+          while count < 2 && cur.bump_if_eq(b'<') {
             count += 1;
           }
         }
@@ -294,19 +288,14 @@ impl FromStr for RedirBldr {
           _ => redir, // Default case remains RedirType::Input
         };
       }
-      '&' => {
-        if chars.peek() == Some(&'>') {
+      b'&' => {
+        if cur.peek_byte() == Some(b'>') {
           continue
-        } else if chars.peek() == Some(&'-') {
-          chars.next();
-          src_fd.push('-');
+        } else if cur.bump_if_eq(b'-') {
+          src_fd.push(b'-');
         } else {
-          while let Some(next_ch) = chars.next() {
-            if next_ch.is_ascii_digit() {
-              src_fd.push(next_ch);
-            } else {
-              break;
-            }
+          while let Some(next_ch) = cur.next_byte_if(|b| b.is_ascii_digit()) {
+            src_fd.push(next_ch);
           }
         }
         if src_fd.is_empty() {
@@ -317,34 +306,27 @@ impl FromStr for RedirBldr {
       }
       _ if ch.is_ascii_digit() && tgt_fd.is_empty() => {
         tgt_fd.push(ch);
-        while let Some(next_ch) = chars.peek() {
-          if next_ch.is_ascii_digit() {
-            let next_ch = chars.next().unwrap();
-            tgt_fd.push(next_ch);
-          } else {
-            break;
-          }
+        while let Some(next_ch) = cur.next_byte_if(|b| b.is_ascii_digit()) {
+          tgt_fd.push(next_ch);
         }
       }
       _ => {
         return Err(sherr!(
             ParseErr,
             "Invalid character '{}' in redirection operator",
-            ch,
+            ch as char,
         ));
       }
     });
 
-    let tgt_fd = tgt_fd
-      .parse::<i32>()
-      .unwrap_or_else(|_| match redir.class.unwrap() {
-        RedirType::Input | RedirType::ReadWrite | RedirType::HereDoc | RedirType::HereString => 0,
-        _ => 1,
-      });
+    let tgt_fd = parse_bytes::<i32>(&tgt_fd).unwrap_or_else(|| match redir.class.unwrap() {
+      RedirType::Input | RedirType::ReadWrite | RedirType::HereDoc | RedirType::HereString => 0,
+      _ => 1,
+    });
     redir = redir.with_fd(tgt_fd);
-    if src_fd.as_str() == "-" {
+    if *src_fd == *b"-" {
       redir = redir.with_target(RedirTarget::Close);
-    } else if let Ok(src_fd) = src_fd.parse::<i32>() {
+    } else if let Some(src_fd) = parse_bytes::<i32>(&src_fd) {
       redir = redir.with_target(RedirTarget::Fd(src_fd));
     }
     Ok(redir)
@@ -362,14 +344,14 @@ impl TryFrom<Tk> for RedirBldr {
         fd: Some(0),
         class: Some(RedirType::HereDoc),
         target: Some(RedirTarget::HereDoc {
-          body: tk.to_string(),
+          body: tk.word(),
           flags,
         }),
         span: Some(span),
         dup_from_word: false,
       })
     } else {
-      match Self::from_str(tk.as_str()) {
+      match Self::parse(tk.as_bytes()) {
         Ok(bldr) => Ok(bldr.with_span(span)),
         Err(e) => Err(e.promote(span)),
       }
@@ -423,7 +405,7 @@ pub(super) enum RedirTarget {
   Fd(RawFd),
   FdExpr(Tk),
   Close,
-  HereDoc { body: String, flags: TkFlags },
+  HereDoc { body: VarStr, flags: TkFlags },
 }
 
 #[derive(Debug, Clone)]
@@ -450,7 +432,7 @@ pub(super) enum RedirSpec {
   },
   Buffer {
     fd: RawFd,
-    buf: String,
+    buf: VarStr,
     flags: TkFlags,
   },
 }
@@ -491,7 +473,7 @@ impl RedirSpec {
       RedirSpec::Buffer { .. } => None,
     }
   }
-  pub fn buffer(fd: RawFd, buf: String, flags: TkFlags) -> Self {
+  pub fn buffer(fd: RawFd, buf: VarStr, flags: TkFlags) -> Self {
     Self::Buffer { fd, buf, flags }
   }
   pub fn target_fd(&self) -> RawFd {
@@ -576,7 +558,7 @@ impl RedirSpec {
         Ok(Redir::new(to, owned))
       }
       RedirSpec::Close { fd, .. } => Ok(Redir::close(fd)),
-      RedirSpec::Buffer { fd, mut buf, flags } => {
+      RedirSpec::Buffer { fd, buf, flags } => {
         use io::{Seek, SeekFrom, Write};
 
         let file = tempfile::tempfile()
@@ -584,24 +566,27 @@ impl RedirSpec {
         let owned: OwnedFd = file.into();
         let owned = move_high(owned)?;
 
-        if flags.contains(TkFlags::HERESTRING) {
-          buf = Expander::from_raw(&buf, flags)
+        let bytes: Vec<u8> = if flags.contains(TkFlags::HERESTRING) {
+          let mut expanded: Vec<u8> = Expander::from_raw(buf.as_bytes(), flags)
             .no_glob()
             .no_split()
             .expand_no_split()?
-            .to_string();
-          buf.push('\n');
+            .into();
+          expanded.push(b'\n');
+          expanded
         } else if flags.contains(TkFlags::IS_HEREDOC) && !flags.contains(TkFlags::LIT_HEREDOC) {
-          buf = Expander::from_raw(&buf, flags)
+          Expander::from_raw(buf.as_bytes(), flags)
             .no_glob()
             .no_split()
             .expand_no_split()?
-            .to_string();
-        }
+            .into()
+        } else {
+          buf.into()
+        };
 
         let mut file = std::fs::File::from(owned);
         file
-          .write_all(buf.as_bytes())
+          .write_all(&bytes)
           .map_err(|e| sherr!(InternalErr, "heredoc write failed: {e}"))?;
         file
           .seek(SeekFrom::Start(0))
@@ -1184,9 +1169,9 @@ pub(crate) fn feed_fd_async(fd: OwnedFd, bytes: Vec<u8>) -> std::thread::JoinHan
 }
 
 pub(super) fn capture_command(
-  cmd: &str,
-  stdin: Option<&str>,
-  name: Option<&Rc<str>>,
+  cmd: &[u8],
+  stdin: Option<&[u8]>,
+  name: Option<&VarStr>,
 ) -> ShResult<String> {
   let (rpipe, wpipe) = pipes_high()?;
   let stdin_pipe = if stdin.is_some() {
@@ -1521,21 +1506,21 @@ pub mod tests {
   #[test]
   fn capture_simple_echo() {
     let _g = TestGuard::new();
-    let out = capture_command("echo hello", None, None).unwrap();
+    let out = capture_command(b"echo hello", None, None).unwrap();
     assert_eq!(out, "hello\n");
   }
 
   #[test]
   fn capture_preserves_internal_newlines() {
     let _g = TestGuard::new();
-    let out = capture_command("printf 'one\\ntwo\\nthree'", None, None).unwrap();
+    let out = capture_command(b"printf 'one\\ntwo\\nthree'", None, None).unwrap();
     assert_eq!(out, "one\ntwo\nthree");
   }
 
   #[test]
   fn capture_empty_output() {
     let _g = TestGuard::new();
-    let out = capture_command("true", None, None).unwrap();
+    let out = capture_command(b"true", None, None).unwrap();
     assert_eq!(out, "");
   }
 
@@ -1544,7 +1529,7 @@ pub mod tests {
     let _g = TestGuard::new();
     // `false` exits 1; capture_command should propagate that into
     // Shed::get_status while still returning captured output (empty).
-    let out = capture_command("false", None, None).unwrap();
+    let out = capture_command(b"false", None, None).unwrap();
     assert_eq!(out, "");
     assert_ne!(state::Shed::get_status(), 0);
   }
@@ -1553,7 +1538,7 @@ pub mod tests {
   fn capture_nonzero_status_still_captures_output() {
     let _g = TestGuard::new();
     // Multi-statement: prints output then fails.
-    let out = capture_command("echo before-fail; false", None, None).unwrap();
+    let out = capture_command(b"echo before-fail; false", None, None).unwrap();
     assert_eq!(out, "before-fail\n");
     assert_ne!(state::Shed::get_status(), 0);
   }
@@ -1566,7 +1551,7 @@ pub mod tests {
     if !has_cmd("cat") {
       return;
     }
-    let out = capture_command("cat", Some("piped input"), None).unwrap();
+    let out = capture_command(b"cat", Some(b"piped input"), None).unwrap();
     assert_eq!(out, "piped input");
   }
 
@@ -1576,7 +1561,7 @@ pub mod tests {
     if !has_cmd("cat") {
       return;
     }
-    let out = capture_command("cat", Some("line1\nline2\nline3\n"), None).unwrap();
+    let out = capture_command(b"cat", Some(b"line1\nline2\nline3\n"), None).unwrap();
     assert_eq!(out, "line1\nline2\nline3\n");
   }
 
@@ -1585,7 +1570,7 @@ pub mod tests {
     let _g = TestGuard::new();
     // The child's `read` builtin should successfully consume the
     // stdin we feed.
-    let out = capture_command("read x; echo \"got=$x\"", Some("hello world\n"), None).unwrap();
+    let out = capture_command(b"read x; echo \"got=$x\"", Some(b"hello world\n"), None).unwrap();
     assert_eq!(out, "got=hello world\n");
   }
 

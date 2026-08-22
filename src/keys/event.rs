@@ -1,10 +1,7 @@
-use std::fmt::Write;
 use std::sync::Arc;
 
-use smol_str::format_smolstr;
-
 use crate::state::vars::VarStr;
-use crate::util;
+use crate::{util, varstr};
 
 // Credit to Rustyline for the design ideas in this module
 // https://github.com/kkawakam/rustyline
@@ -19,88 +16,88 @@ impl KeyEvent {
     let mut needs_angle_bracket = false;
 
     if mods.contains(ModKeys::CTRL) {
-      seq.push_str("C-");
+      seq.extend_from_slice(b"C-");
       needs_angle_bracket = true;
     }
     if mods.contains(ModKeys::ALT) {
-      seq.push_str("A-");
+      seq.extend_from_slice(b"A-");
       needs_angle_bracket = true;
     }
     if mods.contains(ModKeys::SHIFT) {
-      seq.push_str("S-");
+      seq.extend_from_slice(b"S-");
       needs_angle_bracket = true;
     }
 
     match event {
       KeyCode::ExMode => {
-        seq.push_str("CMD");
+        seq.extend_from_slice(b"CMD");
         needs_angle_bracket = true;
       }
       KeyCode::Backspace => {
-        seq.push_str("BS");
+        seq.extend_from_slice(b"BS");
         needs_angle_bracket = true;
       }
       KeyCode::Delete => {
-        seq.push_str("Del");
+        seq.extend_from_slice(b"Del");
         needs_angle_bracket = true;
       }
       KeyCode::Down => {
-        seq.push_str("Down");
+        seq.extend_from_slice(b"Down");
         needs_angle_bracket = true;
       }
       KeyCode::End => {
-        seq.push_str("End");
+        seq.extend_from_slice(b"End");
         needs_angle_bracket = true;
       }
       KeyCode::Enter => {
-        seq.push_str("Enter");
+        seq.extend_from_slice(b"Enter");
         needs_angle_bracket = true;
       }
       KeyCode::Esc => {
-        seq.push_str("Esc");
+        seq.extend_from_slice(b"Esc");
         needs_angle_bracket = true;
       }
 
       KeyCode::F(f) => {
-        let _ = write!(seq, "F{f}");
+        seq.extend_from_slice(varstr!("F{f}").as_bytes());
         needs_angle_bracket = true;
       }
       KeyCode::Home => {
-        seq.push_str("Home");
+        seq.extend_from_slice(b"Home");
         needs_angle_bracket = true;
       }
       KeyCode::Insert => {
-        seq.push_str("Insert");
+        seq.extend_from_slice(b"Insert");
         needs_angle_bracket = true;
       }
       KeyCode::Left => {
-        seq.push_str("Left");
+        seq.extend_from_slice(b"Left");
         needs_angle_bracket = true;
       }
       KeyCode::PageDown => {
-        seq.push_str("PgDn");
+        seq.extend_from_slice(b"PgDn");
         needs_angle_bracket = true;
       }
       KeyCode::PageUp => {
-        seq.push_str("PgUp");
+        seq.extend_from_slice(b"PgUp");
         needs_angle_bracket = true;
       }
       KeyCode::Right => {
-        seq.push_str("Right");
+        seq.extend_from_slice(b"Right");
         needs_angle_bracket = true;
       }
       KeyCode::Tab => {
-        seq.push_str("Tab");
+        seq.extend_from_slice(b"Tab");
         needs_angle_bracket = true;
       }
       KeyCode::Up => {
-        seq.push_str("Up");
+        seq.extend_from_slice(b"Up");
         needs_angle_bracket = true;
       }
       KeyCode::Char(ch) => {
-        seq.push(*ch);
+        seq.push((*ch) as u8);
       }
-      KeyCode::Verbatim(s) => seq.push_str(s),
+      KeyCode::Verbatim(s) => seq.extend_from_slice(s.as_bytes()),
       clk @ (KeyCode::MiddleClick(x, y) | KeyCode::RightClick(x, y) | KeyCode::LeftClick(x, y)) => {
         let name = match clk {
           KeyCode::MiddleClick(_, _) => "MiddleClick",
@@ -108,33 +105,35 @@ impl KeyEvent {
           KeyCode::LeftClick(_, _) => "LeftClick",
           _ => unreachable!(),
         };
-        let _ = write!(seq, "{name}({x},{y})");
+        let click_display = varstr!("{name}({x},{y})");
+        seq.extend_from_slice(click_display.as_bytes());
         needs_angle_bracket = true;
       }
       KeyCode::ScrollUp => {
-        seq.push_str("ScrollUp");
+        seq.extend_from_slice(b"ScrollUp");
         needs_angle_bracket = true;
       }
       KeyCode::ScrollDown => {
-        seq.push_str("ScrollDown");
+        seq.extend_from_slice(b"ScrollDown");
         needs_angle_bracket = true;
       }
       KeyCode::Back => {
-        seq.push_str("Back");
+        seq.extend_from_slice(b"Back");
         needs_angle_bracket = true;
       }
       KeyCode::Forward => {
-        seq.push_str("Forward");
+        seq.extend_from_slice(b"Forward");
         needs_angle_bracket = true;
       }
       KeyCode::MousePos(x, y) => {
-        let _ = write!(seq, "MousePos({x},{y})");
+        let pos_display = varstr!("MousePos({x},{y})");
+        seq.extend_from_slice(pos_display.as_bytes());
         needs_angle_bracket = true;
       }
     }
 
     if needs_angle_bracket {
-      format_smolstr!("<{seq}>").into()
+      [b"<", seq.as_slice(), b">"].concat().into()
     } else {
       seq.into()
     }

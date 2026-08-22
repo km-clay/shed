@@ -48,6 +48,9 @@ fn guard_drop(_: ()) {
 ///
 /// Additionally, stuff like 'umask', 'PWD', and shell options are restored to
 /// their previous values on return
+///
+/// ## Safety
+/// This calls `Shed::meta_mut` internally. If this is called inside of another `meta()`/`meta_mut()` call, that is a `RefCell` panic.
 pub fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let ceiling_guard = scope_ceiling_guard(args);
   let cwd_guard = cwd_guard();
@@ -142,18 +145,17 @@ pub fn prefix_assign_guard(tree: &Ast, assignments: &[NodeId]) -> impl Drop {
     .iter()
     .filter_map(|a| match &tree[*a].class {
       NdRule::Assignment { var, .. } => {
-        let raw = var.span.as_str();
         // An indexed assignment (`arr[i]=v`) touches the whole array variable,
         // so snapshot/restore under the base name.
-        let name = util::parse_arr_bracket(raw)
-          .map_or_else(|| raw.to_string(), |(base, _)| base.to_string());
+        let name = util::parse_arr_bracket(var.span.as_bytes())
+          .map_or_else(|| var.span.as_var_str(), |(base, _)| base);
         Some(name)
       }
       _ => None,
     })
     .map(|name| {
-      let prior = Shed::vars(|v| v.try_get_var_meta(&name));
-      (name, prior)
+      let prior = Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy()));
+      (name.to_str_lossy().to_string(), prior)
     })
     .collect();
 

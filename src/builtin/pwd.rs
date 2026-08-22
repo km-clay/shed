@@ -10,8 +10,8 @@ pub(super) struct Pwd;
 impl super::Builtin for Pwd {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("logical", 'L'),
-      OptSpec::new_short("physical", 'P'),
+      OptSpec::new_short("logical", b'L'),
+      OptSpec::new_short("physical", b'P'),
     ]
   }
 

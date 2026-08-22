@@ -1,3 +1,4 @@
+use bstr::ByteSlice;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
@@ -340,7 +341,8 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
     let start = tk.span().range().start;
     match tk.class() {
       CtxTkRule::Keyword => {
-        let kw = tk.span().as_str();
+        let kw = tk.span().to_str_lossy();
+        let kw = kw.as_ref();
         if let Some(opener) = keyword_opener(kw) {
           stack.push(opener);
           events.push((start, 1));
@@ -364,7 +366,7 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
       }
       // command-level braces/subshells arrive as flat operators carrying the
       // delimiter text; pair them by text against the stack.
-      CtxTkRule::Operator => match tk.span().as_str() {
+      CtxTkRule::Operator => match tk.span().to_str_lossy().as_ref() {
         "{" => {
           stack.push(Opener::Brace);
           events.push((start, 1));
@@ -396,7 +398,7 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
       // (which sits at the end of the previous row).
       CtxTkRule::Separator
         if stack.last() == Some(&Opener::CaseArm)
-          && let Some(off) = tk.span().as_str().find(";;") =>
+          && let Some(off) = tk.span().as_bytes().find(b";;") =>
       {
         stack.pop();
         events.push((start + off, -1));
@@ -427,7 +429,7 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
         for _ in 0..inner.len() {
           events.push((end, -1));
         }
-        if tk.span().as_str().ends_with(')') {
+        if tk.span().as_bytes().ends_with(b")") {
           events.push((end - 1, -1));
         }
       }

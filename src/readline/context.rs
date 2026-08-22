@@ -8,7 +8,7 @@ use std::{
 
 use bitflags::bitflags;
 
-use crate::{Shed, state::vars::VarStr, util, varstr};
+use crate::{Shed, state::vars::VarStr, util};
 
 use super::{
   builtin::BUILTIN_NAMES,
@@ -45,7 +45,7 @@ use super::{
 
 /// Turn raw shell input into `CtxTks`
 pub fn get_context_tokens(input: &str) -> Vec<CtxTk> {
-  let out: Vec<CtxTk> = LexStream::new(input.into(), LexFlags::LEX_UNFINISHED)
+  let out: Vec<CtxTk> = LexStream::new(input.as_bytes(), LexFlags::LEX_UNFINISHED)
     .filter_map(Result::ok)
     .filter(Tk::filter_meta)
     .flat_map(|value: Tk| CtxTk::from_tk(&value))
@@ -80,21 +80,21 @@ pub(crate) fn nested_subs(input: &str) -> Vec<NestedSub> {
         return;
       }
       CtxTkRule::CmdSub => {
-        let s = tk.span().as_str();
+        let s = tk.span().as_bytes();
         let body = s
-          .strip_prefix("$(")
-          .and_then(|s| s.strip_suffix(')'))
+          .strip_prefix(b"$(".as_slice())
+          .and_then(|s| s.strip_suffix(b")".as_slice()))
           .unwrap_or(s);
-        out.push(NestedSub::Cmd(varstr!("{body}")));
+        out.push(NestedSub::Cmd(body.into()));
         return;
       }
       CtxTkRule::BacktickSub => {
-        let s = tk.span().as_str();
+        let s = tk.span().as_bytes();
         let body = s
-          .strip_prefix('`')
-          .and_then(|s| s.strip_suffix('`'))
+          .strip_prefix(b"`".as_slice())
+          .and_then(|s| s.strip_suffix(b"`".as_slice()))
           .unwrap_or(s);
-        out.push(NestedSub::Cmd(varstr!("{body}")));
+        out.push(NestedSub::Cmd(body.into()));
         return;
       }
       _ => {}
@@ -126,7 +126,7 @@ fn process_ctx_tokens(mut out: Vec<CtxTk>) -> Vec<CtxTk> {
 fn is_exec_wrapper(tk: &CtxTk) -> bool {
   get_exec_wrappers()
     .into_iter()
-    .any(|wr| wr.to_str_lossy() == tk.span().as_str())
+    .any(|wr| wr.as_bytes() == tk.span().as_bytes())
     && is_valid_cmd(&tk.as_tk()).is_some()
 }
 
@@ -154,12 +154,13 @@ fn promote_exec_wrappers(tokens: &mut [CtxTk]) {
     while let Some(target) = tokens.peek() {
       match target.class {
         CtxTkRule::Argument | CtxTkRule::ArgumentFile => {
-          if target.span.as_str().starts_with('-') || has_unescaped(target.span.as_str(), "=") {
+          if target.span.as_bytes().starts_with(b"-") || has_unescaped(target.span.as_bytes(), b"=")
+          {
             // looks like an option or an assignment
             tokens.next();
             continue;
           }
-          if get_exec_wrappers().contains(&target.span.as_str().into()) {
+          if get_exec_wrappers().contains(&target.span.as_bytes().into()) {
             // chaining exec wrappers is a thing people do, e.g. `sudo strace cmd`
             // continue the outer loop and let it get picked up by the next iteration
             // we don't use is_exec_wrapper() for this since it doesnt have the ValidCommand rule
@@ -240,7 +241,7 @@ fn is_valid_cmd(command: &Tk) -> Option<CmdKind> {
     let meta = cmd_path.metadata().ok()?;
 
     (!meta.is_dir() && meta.permissions().mode() & 0o111 != 0).then_some(CmdKind::External)
-  } else if BUILTIN_NAMES.contains(&name.to_str_lossy().as_ref()) {
+  } else if BUILTIN_NAMES.contains(&name.as_bytes()) {
     Some(CmdKind::Builtin)
   } else {
     let util = state::util::which_util(&name.to_str_lossy())?;
@@ -496,7 +497,7 @@ impl CtxTk {
     };
 
     let sub_src = &span.get_source()[body_start..body_end];
-    let inner_tokens = LexStream::new(sub_src.into(), LexFlags::LEX_UNFINISHED)
+    let inner_tokens = LexStream::new(sub_src, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .map(|tk| tk.rebase_into(span, body_start)) // map to outer span
       .flat_map(|value: Tk| CtxTk::from_tk(&value))
@@ -579,13 +580,13 @@ impl CtxTk {
     Some(at - self.span.range().start)
   }
 
-  pub fn split_str_at(&self, at: usize) -> Option<(&str, &str)> {
+  pub fn split_str_at(&self, at: usize) -> Option<(&[u8], &[u8])> {
     let cursor_pos = self.relative_cursor_pos(at)?;
 
-    self.span().as_str().split_at_checked(cursor_pos)
+    self.span().as_bytes().split_at_checked(cursor_pos)
   }
 
-  pub fn prefix_from(&self, at: usize) -> Option<&str> {
+  pub fn prefix_from(&self, at: usize) -> Option<&[u8]> {
     self.split_str_at(at).map(|(prefix, _)| prefix)
   }
 
@@ -662,7 +663,7 @@ impl CtxTk {
       },
       ExTkRule::Command(cmd) => {
         if let ExCommand::Unknown = cmd {
-          if Shed::logic(|l| l.get_ex_alias(span.as_str())).is_some() {
+          if Shed::logic(|l| l.get_ex_alias(&span.to_str_lossy())).is_some() {
             vec![Self::leaf(span, CtxTkRule::ValidExCommand)]
           } else {
             vec![Self::leaf(span, CtxTkRule::InvalidExCommand)]
@@ -689,7 +690,8 @@ impl CtxTk {
       }];
     }
 
-    let mut chars = span.as_str().char_indices().peekable();
+    let raw = span.to_str_lossy();
+    let mut chars = raw.char_indices().peekable();
 
     let new_class = if flags.contains(TkFlags::IS_ARITH) {
       CtxTkRule::Arithmetic
@@ -718,9 +720,9 @@ impl CtxTk {
         class: CtxTkRule::Keyword,
         sub_tokens: vec![],
       }];
-    } else if flags.contains(TkFlags::ASSIGN) && !value.as_str().starts_with('=') {
+    } else if flags.contains(TkFlags::ASSIGN) && !value.as_bytes().starts_with(b"=") {
       return parse_assignment(span, *flags);
-    } else if check_path_exists(value.as_str()) {
+    } else if check_path_exists(&value.to_str_lossy()) {
       CtxTkRule::ArgumentFile
     } else {
       // regular argument. lets subdivide it further on COMP_WORDBREAKS members
@@ -811,7 +813,7 @@ fn check_path_exists(path: &str) -> bool {
     return true;
   }
 
-  let unescaped = unescape_str(path);
+  let unescaped = unescape_str(path.as_bytes());
   let Ok(expanded) = expand_raw_inner(&mut unescaped.cursor(), false, false) else {
     return false;
   };
@@ -838,14 +840,14 @@ fn subdivide_argument(mut tk: CtxTk) -> Vec<CtxTk> {
   let mut tokens = vec![];
 
   let push_token = |tks: &mut Vec<CtxTk>, mut tk: CtxTk| {
-    if check_path_exists(tk.span.as_str()) {
+    if check_path_exists(&tk.span.to_str_lossy()) {
       tk.class = CtxTkRule::ArgumentFile;
     }
     tks.push(tk);
   };
 
   loop {
-    let raw = tk.span().as_str();
+    let raw = tk.span().to_str_lossy();
     let span_start = tk.span().range().start;
     let span_end = tk.span().range().end;
 
@@ -880,11 +882,11 @@ fn subdivide_argument(mut tk: CtxTk) -> Vec<CtxTk> {
 /// `subdivide_argument` and gets shredded on `=` / `[` / `(` from
 /// `COMP_WORDBREAKS` with no awareness of the underlying structure.
 fn parse_assignment(span: &Span, flags: TkFlags) -> Vec<CtxTk> {
-  let raw = span.as_str();
+  let raw = span.to_str_lossy();
   let span_start = span.range().start;
 
   // Find the `=` operator. ASSIGN was set, so this should always succeed.
-  let Some((eq_off, eq_len)) = split_at_unescaped(raw, "=") else {
+  let Some((eq_off, eq_len)) = split_at_unescaped(raw.as_bytes(), b"=") else {
     return vec![CtxTk {
       span: span.clone(),
       class: CtxTkRule::Argument,
@@ -1258,7 +1260,7 @@ fn scan_subspans(
             }
             let delta = *consumed - orig_consumed;
             let span = Span::new(span_start..(span_start + 1 + delta), span.get_source());
-            log::debug!("Found history expansion token: '{}'", span.as_str());
+            log::debug!("Found history expansion token: '{}'", span.to_str_lossy());
             sub_tokens.push(CtxTk {
               span,
               class: CtxTkRule::HistExp,
@@ -1842,12 +1844,10 @@ fn lex_delim(chars: &mut Peekable<CharIndices>, opener: char) -> (bool, usize) {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::rc::Rc;
 
   /// Lex `src` and convert the first non-trivial token to a `CtxTk`.
   fn parse_first(src: &str) -> CtxTk {
-    let rc: Rc<str> = src.into();
-    let tk = LexStream::new(rc, LexFlags::LEX_UNFINISHED)
+    let tk = LexStream::new(src.as_bytes(), LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .find(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi | TkRule::Sep))
       .expect("expected at least one token");
@@ -1877,8 +1877,7 @@ mod tests {
     // expand_no_side_effects must strip in-band expansion markers, otherwise
     // is_valid_cmd sees a path with PUA chars in it and Path::is_absolute
     // returns false, misclassifying valid commands as InvalidCommand.
-    let rc: std::rc::Rc<str> = "~/bin/foo".into();
-    let tk = LexStream::new(rc, LexFlags::LEX_UNFINISHED)
+    let tk = LexStream::new(b"~/bin/foo", LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .find(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi | TkRule::Sep))
       .expect("token");
@@ -1900,7 +1899,12 @@ mod tests {
   #[test]
   fn dbracket_classification() {
     let toks = get_context_tokens("[[ -f foo ]]");
-    let find_class = |s: &str| toks.iter().find(|t| t.span.as_str() == s).map(|t| t.class);
+    let find_class = |s: &str| {
+      toks
+        .iter()
+        .find(|t| t.span.to_str_lossy() == s)
+        .map(|t| t.class)
+    };
     assert_eq!(
       find_class("[["),
       Some(CtxTkRule::ValidCommand(CmdKind::Builtin))
@@ -1931,9 +1935,9 @@ mod tests {
     let toks = get_context_tokens("echo $");
     let last = toks.last().expect("trailing token");
     let v = find(last, CtxTkRule::VarSub).expect("VarSub for bare $");
-    assert_eq!(v.span().as_str(), "$");
+    assert_eq!(v.span().to_str_lossy(), "$");
     let n = find(v, CtxTkRule::ParamName).expect("zero-width ParamName under VarSub");
-    assert_eq!(n.span().as_str(), "");
+    assert_eq!(n.span().to_str_lossy(), "");
     // range_inclusive on the inner ParamName must catch the cursor at
     // the position immediately after the `$`, so resolve() can dispatch
     // to CompStrat::Var { prefix: "" }.
@@ -1946,9 +1950,9 @@ mod tests {
       .iter()
       .find_map(|t| find(t, CtxTkRule::VarSub))
       .expect("VarSub for `$` before `.`");
-    assert_eq!(v.span().as_str(), "$");
+    assert_eq!(v.span().to_str_lossy(), "$");
     let n = find(v, CtxTkRule::ParamName).expect("ParamName for `$` before `.`");
-    assert_eq!(n.span().as_str(), "");
+    assert_eq!(n.span().to_str_lossy(), "");
   }
 
   #[test]

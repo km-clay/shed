@@ -437,6 +437,9 @@ macro_rules! _write_inner {
   }};
 }
 
+/// Create a [`crate::state::vars::VarStr`] using format args
+///
+/// Small stuff never allocates, so feel free to use this for stuff like zero-alloc number-to-string conversions
 #[macro_export]
 macro_rules! varstr {
   ($($arg:tt)*) => {
@@ -544,8 +547,8 @@ macro_rules! assert_sorted {
     const _: () = {
       let mut i = 1;
       while i < $arr.len() {
-        let prev = $arr[i - 1].as_bytes();
-        let curr = $arr[i].as_bytes();
+        let prev = $arr[i - 1];
+        let curr = $arr[i];
         let len = if prev.len() < curr.len() {
           prev.len()
         } else {

@@ -59,14 +59,14 @@ pub(super) struct Read;
 impl super::Builtin for Read {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("no-escape", 'r'),
-      OptSpec::new_short("no-echo", 's'),
-      OptSpec::new_long("quoted").short('q'),
-      OptSpec::new_short("array", 'a').argc(1),
-      OptSpec::new_short("n-chars", 'n').argc(1),
-      OptSpec::new_short("timeout", 't').argc(1),
-      OptSpec::new_short("prompt", 'p').argc(1),
-      OptSpec::new_short("delim", 'd').argc(1),
+      OptSpec::new_short("no-escape", b'r'),
+      OptSpec::new_short("no-echo", b's'),
+      OptSpec::new_long("quoted").short(b'q'),
+      OptSpec::new_short("array", b'a').argc(1),
+      OptSpec::new_short("n-chars", b'n').argc(1),
+      OptSpec::new_short("timeout", b't').argc(1),
+      OptSpec::new_short("prompt", b'p').argc(1),
+      OptSpec::new_short("delim", b'd').argc(1),
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
@@ -605,9 +605,9 @@ pub(super) struct ReadKey;
 impl super::Builtin for ReadKey {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("var", 'v').argc(1),
-      OptSpec::new_short("whitelist", 'w').argc(1),
-      OptSpec::new_short("blacklist", 'b').argc(1),
+      OptSpec::new_short("var", b'v').argc(1),
+      OptSpec::new_short("whitelist", b'w').argc(1),
+      OptSpec::new_short("blacklist", b'b').argc(1),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {

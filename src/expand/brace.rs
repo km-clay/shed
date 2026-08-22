@@ -1,21 +1,21 @@
+use bstr::ByteSlice;
+
 use crate::expand::expand_raw;
+use crate::expand::stream::SegStream;
 use crate::state::vars::VarStr;
-use crate::util::QuoteState;
-use crate::{match_loop, util};
+use crate::util::{ByteCursor, QuoteState, SliceCursor, parse_bytes};
+use crate::{match_loop, util, varstr};
 
 /// Check if a string contains valid brace expansion patterns.
 /// Returns true if there's a valid {a,b} or {1..5} pattern at the outermost
 /// level.
-fn has_braces(s: &str) -> bool {
-  if !s.contains('{') {
+fn has_braces(s: &[u8]) -> bool {
+  if !s.contains(&b'{') {
     return false;
   }
-  let s = expand_raw(&mut crate::expand::stream::SegStream::from_bytes(s.as_bytes()).cursor())
-    .map_or_else(
-      |_| s.to_string(),
-      |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
-    );
-  let mut chars = s.chars().peekable();
+  let s = expand_raw(&mut SegStream::from_bytes(s).cursor())
+    .map_or_else(|_| VarStr::from(s), |sg| VarStr::from(sg.into_bytes()));
+  let mut bytes = SliceCursor::new(&s);
   let mut depth = 0;
   let mut found_open = false;
   let mut has_comma = false;
@@ -23,16 +23,14 @@ fn has_braces(s: &str) -> bool {
   let mut qt_state = QuoteState::default();
   let mut last_was_dollar = false;
 
-  match_loop!(chars.next() => ch, {
-    '\\' => {
-      chars.next();
-    } // skip escaped char
-    '\'' => qt_state.toggle_single(),
-    '"' => qt_state.toggle_double(),
-    '$' if qt_state.outside() => {
+  match_loop!(bytes.next_byte() => b, {
+    b'\\' => bytes.bump(),
+    b'\'' => qt_state.toggle_single(),
+    b'"' => qt_state.toggle_double(),
+    b'$' if qt_state.outside() => {
       last_was_dollar = true;
     }
-    '{' if qt_state.outside() && !last_was_dollar => {
+    b'{' if qt_state.outside() && !last_was_dollar => {
       if depth == 0 {
         found_open = true;
         has_comma = false;
@@ -40,17 +38,16 @@ fn has_braces(s: &str) -> bool {
       }
       depth += 1;
     }
-    '}' if qt_state.outside() && depth > 0 => {
+    b'}' if qt_state.outside() && depth > 0 => {
       depth -= 1;
       if depth == 0 && found_open && (has_comma || has_range) {
         return true;
       }
     }
-    ',' if qt_state.outside() && depth == 1 => {
+    b',' if qt_state.outside() && depth == 1 => {
       has_comma = true;
     }
-    '.' if qt_state.outside() && depth == 1 && chars.peek() == Some(&'.') => {
-      chars.next();
+    b'.' if qt_state.outside() && depth == 1 && bytes.bump_if_eq(b'.') => {
       has_range = true;
     }
     _ => {}
@@ -60,11 +57,11 @@ fn has_braces(s: &str) -> bool {
 
 /// Expand braces in a string, zsh-style: one level per call, loop until  done.
 /// Returns a Vec of expanded strings.
-pub(super) fn expand_braces_full(input: &str) -> Vec<String> {
-  if !input.contains('{') {
-    return vec![input.to_string()];
+pub(super) fn expand_braces_full(input: &[u8]) -> Vec<VarStr> {
+  if !input.contains(&b'{') {
+    return vec![input.into()];
   }
-  let mut results = vec![input.to_string()];
+  let mut results = vec![VarStr::from(input)];
 
   // Keep expanding until no results contain braces
   loop {
@@ -92,13 +89,21 @@ pub(super) fn expand_braces_full(input: &str) -> Vec<String> {
   results
 }
 
+fn concat_parts(prefix: &VarStr, part: &VarStr, suffix: &VarStr) -> VarStr {
+  let mut result = Vec::with_capacity(prefix.len() + part.len() + suffix.len());
+  result.extend_from_slice(prefix.as_bytes());
+  result.extend_from_slice(part.as_bytes());
+  result.extend_from_slice(suffix.as_bytes());
+  VarStr::from(result)
+}
+
 #[expect(clippy::doc_link_with_quotes)]
 /// Expand the first (outermost) brace expression in a word.
 /// "pre{a,b}post" -> ["preapost", "prebpost"]
 /// "pre{1..3}post" -> ["pre1post", "pre2post", "pre3post"]
-fn expand_one_brace(word: &str) -> Vec<String> {
+fn expand_one_brace(word: &[u8]) -> Vec<VarStr> {
   let Some((prefix, inner, suffix)) = get_brace_parts(word) else {
-    return vec![word.to_string()]; // No valid braces
+    return vec![word.into()]; // No valid braces
   };
 
   // Split the inner content on top-level commas, or expand as range
@@ -107,46 +112,46 @@ fn expand_one_brace(word: &str) -> Vec<String> {
   // If we got back a single part with no expansion, treat as literal
   if parts.len() == 1 && inner == parts[0] {
     // Check if it's a range
-    if let Some(range_parts) = try_expand_range(&inner.to_str_lossy()) {
+    if let Some(range_parts) = try_expand_range(inner.as_bytes()) {
       return range_parts
         .into_iter()
-        .map(|p| format!("{prefix}{p}{suffix}"))
+        .map(|p| concat_parts(&prefix, &p, &suffix))
         .collect();
     }
     // Not a valid brace expression, return as-is with literal braces
-    return vec![format!("{prefix}{{{inner}}}{suffix}")];
+    return vec![concat_parts(&prefix, &inner, &suffix)];
   }
 
   parts
     .into_iter()
-    .map(|p| format!("{prefix}{p}{suffix}"))
+    .map(|p| concat_parts(&prefix, &p.into(), &suffix))
     .collect()
 }
 
 /// Extract prefix, inner, and suffix from a brace expression.
 /// "pre{a,b}post" -> Some(("pre", "a,b", "post"))
-fn get_brace_parts(word: &str) -> Option<(VarStr, VarStr, VarStr)> {
-  let mut chars = word.chars().peekable();
+fn get_brace_parts(word: &[u8]) -> Option<(VarStr, VarStr, VarStr)> {
+  let mut bytes = word.iter().copied().peekable();
   let mut prefix = util::scratch_buf();
   let mut qt_state = QuoteState::default();
 
   // Find the opening brace
-  match_loop!(chars.next() => ch, {
-    '\\' => {
+  match_loop!(bytes.next() => ch, {
+    b'\\' => {
       prefix.push(ch);
-      if let Some(next) = chars.next() {
+      if let Some(next) = bytes.next() {
         prefix.push(next);
       }
     }
-    '\'' => {
+    b'\'' => {
       qt_state.toggle_single();
       prefix.push(ch);
     }
-    '"' => {
+    b'"' => {
       qt_state.toggle_double();
       prefix.push(ch);
     }
-    '{' if qt_state.outside() => {
+    b'{' if qt_state.outside() => {
       break;
     }
     _ => prefix.push(ch),
@@ -157,26 +162,26 @@ fn get_brace_parts(word: &str) -> Option<(VarStr, VarStr, VarStr)> {
   let mut inner = util::scratch_buf();
   qt_state = QuoteState::default();
 
-  match_loop!(chars.next() => ch, {
-    '\\' => {
+  match_loop!(bytes.next() => ch, {
+    b'\\' => {
       inner.push(ch);
-      if let Some(next) = chars.next() {
+      if let Some(next) = bytes.next() {
         inner.push(next);
       }
     }
-    '\'' => {
+    b'\'' => {
       qt_state.toggle_single();
       inner.push(ch);
     }
-    '"' => {
+    b'"' => {
       qt_state.toggle_double();
       inner.push(ch);
     }
-    '{' if qt_state.outside() => {
+    b'{' if qt_state.outside() => {
       depth += 1;
       inner.push(ch);
     }
-    '}' if qt_state.outside() => {
+    b'}' if qt_state.outside() => {
       depth -= 1;
       if depth == 0 {
         break;
@@ -191,9 +196,9 @@ fn get_brace_parts(word: &str) -> Option<(VarStr, VarStr, VarStr)> {
   }
 
   // Collect suffix
-  let suffix: VarStr = chars.collect();
+  let suffix: VarStr = bytes.collect::<Vec<_>>().into();
 
-  Some((prefix.into(), inner.into(), suffix))
+  Some((prefix.as_slice().into(), inner.as_slice().into(), suffix))
 }
 
 #[expect(clippy::doc_link_with_quotes)]
@@ -241,9 +246,9 @@ fn split_brace_inner(inner: &str) -> Vec<String> {
 }
 
 /// Try to expand a range like "1..5" or "a..z" or "1..10..2"
-fn try_expand_range(inner: &str) -> Option<Vec<String>> {
+fn try_expand_range(inner: &[u8]) -> Option<Vec<VarStr>> {
   // Look for ".." pattern
-  let parts: Vec<&str> = inner.split("..").collect();
+  let parts: Vec<&[u8]> = inner.split_str("..").collect();
 
   match parts.len() {
     2 => {
@@ -254,7 +259,7 @@ fn try_expand_range(inner: &str) -> Option<Vec<String>> {
     3 => {
       let start = parts[0];
       let end = parts[1];
-      let step: i32 = parts[2].parse().ok()?;
+      let step: i32 = parse_bytes(parts[2])?;
       if step == 0 {
         return None;
       }
@@ -264,7 +269,7 @@ fn try_expand_range(inner: &str) -> Option<Vec<String>> {
   }
 }
 
-fn expand_range(start: &str, end: &str, step: usize) -> Option<Vec<String>> {
+fn expand_range(start: &[u8], end: &[u8], step: usize) -> Option<Vec<VarStr>> {
   // Try character range first
   if is_alpha_range_bound(start) && is_alpha_range_bound(end) {
     let start_char = start.chars().next()? as u8;
@@ -277,9 +282,9 @@ fn expand_range(start: &str, end: &str, step: usize) -> Option<Vec<String>> {
       (start_char, end_char)
     };
 
-    let chars: Vec<String> = (lo..=hi)
+    let chars: Vec<VarStr> = (lo..=hi)
       .step_by(step)
-      .map(|c| (c as char).to_string())
+      .map(|c| ([c].as_slice()).into())
       .collect();
 
     return Some(if reverse {
@@ -291,13 +296,13 @@ fn expand_range(start: &str, end: &str, step: usize) -> Option<Vec<String>> {
 
   // Try numeric range
   if is_numeric_range_bound(start) && is_numeric_range_bound(end) {
-    let start_num: i32 = start.parse().ok()?;
-    let end_num: i32 = end.parse().ok()?;
+    let start_num: i32 = parse_bytes(start)?;
+    let end_num: i32 = parse_bytes(end)?;
     let reverse = end_num < start_num;
 
     // Handle zero-padding
     let pad_width = start.len().max(end.len());
-    let needs_padding = start.starts_with('0') || end.starts_with('0');
+    let needs_padding = start.starts_with(b"0") || end.starts_with(b"0");
 
     let (lo, hi) = if reverse {
       (end_num, start_num)
@@ -305,13 +310,13 @@ fn expand_range(start: &str, end: &str, step: usize) -> Option<Vec<String>> {
       (start_num, end_num)
     };
 
-    let nums: Vec<String> = (lo..=hi)
+    let nums: Vec<VarStr> = (lo..=hi)
       .step_by(step)
       .map(|n| {
         if needs_padding {
-          format!("{n:0>pad_width$}")
+          varstr!("{n:0>pad_width$}")
         } else {
-          n.to_string()
+          varstr!("{n}")
         }
       })
       .collect();
@@ -326,12 +331,12 @@ fn expand_range(start: &str, end: &str, step: usize) -> Option<Vec<String>> {
   None
 }
 
-fn is_alpha_range_bound(word: &str) -> bool {
-  word.len() == 1 && word.chars().all(|c| c.is_ascii_alphabetic())
+fn is_alpha_range_bound(word: &[u8]) -> bool {
+  word.len() == 1 && word.iter().all(u8::is_ascii_alphabetic)
 }
 
-fn is_numeric_range_bound(word: &str) -> bool {
-  !word.is_empty() && word.chars().all(|c| c.is_ascii_digit())
+fn is_numeric_range_bound(word: &[u8]) -> bool {
+  !word.is_empty() && word.iter().all(u8::is_ascii_digit)
 }
 
 #[cfg(test)]
@@ -339,6 +344,9 @@ mod tests {
   use super::*;
 
   // ===================== has_braces =====================
+  fn has_braces(s: &str) -> bool {
+    super::has_braces(s.as_bytes())
+  }
 
   #[test]
   fn has_braces_simple_comma() {
@@ -409,6 +417,9 @@ mod tests {
 
   // ===================== try_expand_range / expand_range =====================
 
+  fn try_expand_range(s: &str) -> Option<Vec<VarStr>> {
+    super::try_expand_range(s.as_bytes())
+  }
   #[test]
   fn range_numeric() {
     assert_eq!(
@@ -469,38 +480,38 @@ mod tests {
 
   #[test]
   fn range_single_char() {
-    assert_eq!(expand_range("a", "a", 1).unwrap(), vec!["a"]);
+    assert_eq!(expand_range(b"a", b"a", 1).unwrap(), vec!["a"]);
   }
 
   // ===================== expand_braces_full =====================
 
   #[test]
   fn braces_simple_list() {
-    assert_eq!(expand_braces_full("{a,b,c}"), vec!["a", "b", "c"]);
+    assert_eq!(expand_braces_full(b"{a,b,c}"), vec!["a", "b", "c"]);
   }
 
   #[test]
   fn braces_with_prefix_suffix() {
     assert_eq!(
-      expand_braces_full("pre{a,b}post"),
+      expand_braces_full(b"pre{a,b}post"),
       vec!["preapost", "prebpost"]
     );
   }
 
   #[test]
   fn braces_nested() {
-    assert_eq!(expand_braces_full("{a,{b,c}}"), vec!["a", "b", "c"]);
+    assert_eq!(expand_braces_full(b"{a,{b,c}}"), vec!["a", "b", "c"]);
   }
 
   #[test]
   fn braces_numeric_range() {
-    assert_eq!(expand_braces_full("{1..5}"), vec!["1", "2", "3", "4", "5"]);
+    assert_eq!(expand_braces_full(b"{1..5}"), vec!["1", "2", "3", "4", "5"]);
   }
 
   #[test]
   fn braces_range_with_step() {
     assert_eq!(
-      expand_braces_full("{1..10..2}"),
+      expand_braces_full(b"{1..10..2}"),
       vec!["1", "3", "5", "7", "9"]
     );
   }
@@ -508,51 +519,51 @@ mod tests {
   #[test]
   fn braces_alpha_range() {
     assert_eq!(
-      expand_braces_full("{a..f}"),
+      expand_braces_full(b"{a..f}"),
       vec!["a", "b", "c", "d", "e", "f"]
     );
   }
 
   #[test]
   fn braces_reverse_range() {
-    assert_eq!(expand_braces_full("{5..1}"), vec!["5", "4", "3", "2", "1"]);
+    assert_eq!(expand_braces_full(b"{5..1}"), vec!["5", "4", "3", "2", "1"]);
   }
 
   #[test]
   fn braces_reverse_alpha() {
-    assert_eq!(expand_braces_full("{z..v}"), vec!["z", "y", "x", "w", "v"]);
+    assert_eq!(expand_braces_full(b"{z..v}"), vec!["z", "y", "x", "w", "v"]);
   }
 
   #[test]
   fn braces_zero_padded() {
     assert_eq!(
-      expand_braces_full("{01..05}"),
+      expand_braces_full(b"{01..05}"),
       vec!["01", "02", "03", "04", "05"]
     );
   }
 
   #[test]
   fn braces_no_expansion() {
-    assert_eq!(expand_braces_full("hello"), vec!["hello"]);
+    assert_eq!(expand_braces_full(b"hello"), vec!["hello"]);
   }
 
   #[test]
   fn braces_multiple_groups() {
     assert_eq!(
-      expand_braces_full("{a,b}{1,2}"),
+      expand_braces_full(b"{a,b}{1,2}"),
       vec!["a1", "a2", "b1", "b2"]
     );
   }
 
   #[test]
   fn braces_empty_element() {
-    let result = expand_braces_full("pre{,a}post");
+    let result = expand_braces_full(b"pre{,a}post");
     assert_eq!(result, vec!["prepost", "preapost"]);
   }
 
   #[test]
   fn braces_cursed() {
-    let result = expand_braces_full("foo{a,{1,2,3,{1..4},5},c}{5..1}bar");
+    let result = expand_braces_full(b"foo{a,{1,2,3,{1..4},5},c}{5..1}bar");
     assert_eq!(
       result,
       vec![

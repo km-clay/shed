@@ -59,7 +59,7 @@ impl ViVisual {
     }
   }
   pub fn parse_count(chars: &mut Peekable<Chars<'_>>) -> Option<usize> {
-    let mut count = util::scratch_buf();
+    let mut count = util::scratch_str();
     let Some(_digit @ '1'..='9') = chars.peek() else {
       return None;
     };

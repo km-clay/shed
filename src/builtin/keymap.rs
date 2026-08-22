@@ -6,13 +6,13 @@ pub(super) struct KeyMapBuiltin;
 impl super::Builtin for KeyMapBuiltin {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("normal", 'n'),
-      OptSpec::new_short("emacs", 'e'),
-      OptSpec::new_short("insert", 'i'),
-      OptSpec::new_short("visual", 'v'),
-      OptSpec::new_short("ex", 'x'),
-      OptSpec::new_short("op-pending", 'o'),
-      OptSpec::new_short("replace", 'r'),
+      OptSpec::new_short("normal", b'n'),
+      OptSpec::new_short("emacs", b'e'),
+      OptSpec::new_short("insert", b'i'),
+      OptSpec::new_short("visual", b'v'),
+      OptSpec::new_short("ex", b'x'),
+      OptSpec::new_short("op-pending", b'o'),
+      OptSpec::new_short("replace", b'r'),
       OptSpec::new_long("remove").argc(1),
     ]
   }

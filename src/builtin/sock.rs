@@ -352,7 +352,7 @@ pub(super) struct Accept;
 impl super::Builtin for Accept {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("var", 'v').argc(1), // variable to store auto-allocated FD in (`$SHED_ACCEPT` by default)
+      OptSpec::new_short("var", b'v').argc(1), // variable to store auto-allocated FD in (`$SHED_ACCEPT` by default)
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
@@ -458,10 +458,10 @@ impl super::Builtin for Listen {
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("unix", 'U').argc(1), // filesystem Unix socket
-      OptSpec::new_long("tcp").short('t').argc(1), // TCP host
-      OptSpec::new_long("port").short('p').argc(1), // port number
-      OptSpec::new_short("var", 'v').argc(1), // variable to store auto-allocated FD in (`$SHED_LISTEN` by default)
+      OptSpec::new_short("unix", b'U').argc(1), // filesystem Unix socket
+      OptSpec::new_long("tcp").short(b't').argc(1), // TCP host
+      OptSpec::new_long("port").short(b'p').argc(1), // port number
+      OptSpec::new_short("var", b'v').argc(1), // variable to store auto-allocated FD in (`$SHED_LISTEN` by default)
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
@@ -520,10 +520,10 @@ impl super::Builtin for Sock {
 
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("unix", 'U').argc(1), // filesystem Unix socket
-      OptSpec::new_long("tcp").short('t').argc(1), // TCP host
-      OptSpec::new_long("port").short('p').argc(1), // port number
-      OptSpec::new_short("var", 'v').argc(1), // variable to store auto-allocated FD in (`$SHED_CONN` by default)
+      OptSpec::new_short("unix", b'U').argc(1), // filesystem Unix socket
+      OptSpec::new_long("tcp").short(b't').argc(1), // TCP host
+      OptSpec::new_long("port").short(b'p').argc(1), // port number
+      OptSpec::new_short("var", b'v').argc(1), // variable to store auto-allocated FD in (`$SHED_CONN` by default)
     ]
   }
 

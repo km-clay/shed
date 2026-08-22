@@ -1,9 +1,9 @@
 use crate::{
-  HashMap,
+  HashMap, builtin,
   eval::lex::TkFlags,
   expand::Expander,
   state::{logic::ShFunc, terminal::Terminal, vars::VarStr},
-  util::{self, ShErrKind, VarStrDisplay},
+  util::{self, ByteCursor, ShErrKind, SliceCursor, VarStrDisplay},
   varstr,
 };
 
@@ -44,26 +44,26 @@ use super::{
 };
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
-pub fn parse_arr_bracket(var_name: &str) -> Option<(VarStr, VarStr)> {
-  if !var_name.contains('[') {
+pub fn parse_arr_bracket(var_name: &[u8]) -> Option<(VarStr, VarStr)> {
+  if !var_name.contains(&b'[') {
     return None;
   }
-  let mut chars = var_name.chars();
+  let mut cur = SliceCursor::new(var_name);
   let mut name = util::scratch_buf();
   let mut idx_raw = util::scratch_buf();
   let mut bracket_depth = 0;
 
-  match_loop!(chars.next() => ch, {
-    '\\' => {
-      chars.next();
+  match_loop!(cur.next_byte() => ch, {
+    b'\\' => {
+      cur.next_byte();
     }
-    '[' => {
+    b'[' => {
       bracket_depth += 1;
       if bracket_depth > 1 {
         idx_raw.push(ch);
       }
     }
-    ']' => {
+    b']' => {
       if bracket_depth > 0 {
         bracket_depth -= 1;
         if bracket_depth == 0 {
@@ -87,8 +87,8 @@ pub fn parse_arr_bracket(var_name: &str) -> Option<(VarStr, VarStr)> {
 }
 
 /// Expand the raw index expression and parse it into an `ArrIndex`.
-pub fn expand_arr_index(idx_raw: &str, allow_side_effects: bool) -> ShResult<ArrIndex> {
-  let expanded = LexStream::new(idx_raw.into(), LexFlags::empty())
+pub fn expand_arr_index(idx_raw: &[u8], allow_side_effects: bool) -> ShResult<ArrIndex> {
+  let expanded = LexStream::new(idx_raw, LexFlags::empty())
     .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
     .try_fold(vec![], |mut acc, wrds| {
       match wrds {
@@ -293,7 +293,7 @@ pub fn get_separators() -> VarStr {
 pub fn get_ps4() -> VarStr {
   try_var!("PS4")
     .and_then(|ps4| {
-      Expander::from_raw(&ps4.to_str_lossy(), TkFlags::empty())
+      Expander::from_raw(&ps4, TkFlags::empty())
         .expand_no_split()
         .ok()
     })
@@ -332,7 +332,7 @@ pub fn which_util(name: &str) -> Option<Rc<Utility>> {
   if Shed::logic(|l| l.has_command_func(name)) {
     return Some(Rc::new(Utility::function(name.into())));
   }
-  if crate::builtin::lookup_builtin(name).is_some() {
+  if builtin::lookup_builtin(name.as_bytes()).is_some() {
     return Some(Rc::new(Utility::builtin(name.into())));
   }
   if let Some(p) = lookup_cmd(name) {
@@ -439,7 +439,7 @@ fn live_funcs() -> Vec<VarStr> {
     l.funcs()
       .iter()
       .filter_map(|(name, f)| match f {
-        ShFunc::Defined { source, .. } => Some((name.into(), source.as_str().into())),
+        ShFunc::Defined { source, .. } => Some((name.into(), source.as_var_str())),
         ShFunc::Autoload(_) => None,
       })
       .collect()

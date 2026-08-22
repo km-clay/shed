@@ -11,8 +11,6 @@ use std::{
   time::SystemTime,
 };
 
-use crate::procio::bytes_to_string;
-
 use super::{
   WtStat, autocmd, builtin, errln, eval, expand, keys, match_loop, procio, readline, sherr,
   shopt as shopt_macro, signal, socket,
@@ -380,7 +378,6 @@ impl Shed {
       errno::Errno,
       unistd::{read, write},
     };
-    use std::str::FromStr;
     const MAX_IDLE_ITERS: u32 = 50;
 
     // Nonblocking read; the request ends at EOF on the client's write half
@@ -414,8 +411,7 @@ impl Shed {
       bytes.pop();
     }
 
-    let input = bytes_to_string(bytes);
-    let request = match socket::SocketRequest::from_str(&input) {
+    let request = match socket::SocketRequest::parse_request(&bytes) {
       Ok(req) => req,
       Err(e) => {
         write(

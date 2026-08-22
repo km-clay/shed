@@ -22,8 +22,8 @@ pub(super) struct Cd;
 impl super::Builtin for Cd {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new("physical").short('P'),
-      OptSpec::new("logical").short('L'),
+      OptSpec::new("physical").short(b'P'),
+      OptSpec::new("logical").short(b'L'),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -135,9 +135,9 @@ pub(super) struct Zd;
 impl super::Builtin for Zd {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("recursive" | 'r'),
-      opt!("depth" | 'd', 1),
-      opt!("print" | 'p'),
+      opt!("recursive" | b'r'),
+      opt!("depth" | b'd', 1),
+      opt!("print" | b'p'),
       opt!("json"),
       opt!("quoted"),
       opt!("reverse"),

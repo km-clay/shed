@@ -143,14 +143,14 @@ impl super::LineBuf {
     let expanded = if bang {
       // got ':expand!'
       // perform full expansion on the content
-      expand::Expander::from_raw(&content_raw, TkFlags::empty())
+      expand::Expander::from_raw(content_raw.as_bytes(), TkFlags::empty())
         .expand()?
         .join_with(" ")
     } else {
       // got ':expand'
       // perform partial expansion on the content
       // preserves quotes and stuff so command structure stays the same
-      expand::Expander::from_raw(&content_raw, TkFlags::empty()).expand_keep_quotes()?
+      expand::Expander::from_raw(content_raw.as_bytes(), TkFlags::empty()).expand_keep_quotes()?
     };
 
     // if we are here, expanding did not produce an error
@@ -500,7 +500,7 @@ impl super::LineBuf {
         let rendered: VarStr = keys
           .iter()
           .fold(util::scratch_buf(), |mut buf, key| {
-            buf.push_str(&key.as_vim_seq().to_str_lossy());
+            buf.extend_from_slice(key.as_vim_seq().as_bytes());
             buf
           })
           .into();

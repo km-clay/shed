@@ -133,12 +133,12 @@ pub(super) struct Jobs;
 impl super::Builtin for Jobs {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("long", 'l'),
-      OptSpec::new_short("pids", 'p'),
-      OptSpec::new_short("new-only", 'n'),
-      OptSpec::new_short("running", 'r'),
-      OptSpec::new_short("stopped", 's'),
-      OptSpec::new_short("verbose", 'v'),
+      OptSpec::new_short("long", b'l'),
+      OptSpec::new_short("pids", b'p'),
+      OptSpec::new_short("new-only", b'n'),
+      OptSpec::new_short("running", b'r'),
+      OptSpec::new_short("stopped", b's'),
+      OptSpec::new_short("verbose", b'v'),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
@@ -206,8 +206,8 @@ pub(super) struct Disown;
 impl super::Builtin for Disown {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("nohup", 'h'),
-      OptSpec::new_short("all", 'a'),
+      OptSpec::new_short("nohup", b'h'),
+      OptSpec::new_short("all", b'a'),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
@@ -398,9 +398,9 @@ pub(super) struct Kill;
 impl super::Builtin for Kill {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("list", 'l'),
-      OptSpec::new_short("verbose", 'v'),
-      OptSpec::new_short("signal", 's').argc(1),
+      OptSpec::new_short("list", b'l'),
+      OptSpec::new_short("verbose", b'v'),
+      OptSpec::new_short("signal", b's').argc(1),
     ]
   }
 
@@ -732,7 +732,7 @@ mod disown_tests {
   /// (the liveness probe fails), and `is_done()` jobs get pruned on
   /// the next `insert_job` call — which would silently drop earlier
   /// jobs as we set up multi-job tests.
-  fn insert_fake_job(pid: i32, cmd: &str) -> usize {
+  pub(super) fn insert_fake_job(pid: i32, cmd: &[u8]) -> usize {
     use nix::sys::wait::WaitStatus;
     let pid = Pid::from_raw(pid);
     let mut child = ChildProc::new(pid, Some(cmd), Some(pid), None);
@@ -766,7 +766,7 @@ mod disown_tests {
   #[test]
   fn disown_removes_current_job_from_table() {
     let _g = TestGuard::new();
-    let tabid = insert_fake_job(99001, "fake_cmd");
+    let tabid = insert_fake_job(99001, b"fake_cmd");
     assert!(job_exists(tabid));
     test_input("disown").unwrap();
     assert!(!job_exists(tabid), "job should have been removed");
@@ -777,7 +777,7 @@ mod disown_tests {
   #[test]
   fn disown_dash_h_marks_nohup_and_keeps_job() {
     let _g = TestGuard::new();
-    let tabid = insert_fake_job(99002, "fake_cmd");
+    let tabid = insert_fake_job(99002, b"fake_cmd");
     assert_eq!(job_send_hup(tabid), Some(true));
     test_input("disown -h").unwrap();
     assert!(job_exists(tabid), "job should remain in table");
@@ -793,9 +793,9 @@ mod disown_tests {
   #[test]
   fn disown_dash_a_removes_all_jobs() {
     let _g = TestGuard::new();
-    let id1 = insert_fake_job(99010, "cmd_a");
-    let id2 = insert_fake_job(99011, "cmd_b");
-    let id3 = insert_fake_job(99012, "cmd_c");
+    let id1 = insert_fake_job(99010, b"cmd_a");
+    let id2 = insert_fake_job(99011, b"cmd_b");
+    let id3 = insert_fake_job(99012, b"cmd_c");
     test_input("disown -a").unwrap();
     assert!(!job_exists(id1));
     assert!(!job_exists(id2));
@@ -805,8 +805,8 @@ mod disown_tests {
   #[test]
   fn disown_dash_a_dash_h_keeps_all_jobs_marks_nohup() {
     let _g = TestGuard::new();
-    let id1 = insert_fake_job(99020, "cmd_a");
-    let id2 = insert_fake_job(99021, "cmd_b");
+    let id1 = insert_fake_job(99020, b"cmd_a");
+    let id2 = insert_fake_job(99021, b"cmd_b");
     test_input("disown -a -h").unwrap();
     assert!(job_exists(id1));
     assert!(job_exists(id2));
@@ -823,8 +823,8 @@ mod disown_tests {
     // would also remove the current job. Now the current-job fallback
     // only applies when argv is empty.
     let _g = TestGuard::new();
-    let id1 = insert_fake_job(99030, "cmd_a");
-    let id2 = insert_fake_job(99031, "cmd_b");
+    let id1 = insert_fake_job(99030, b"cmd_a");
+    let id2 = insert_fake_job(99031, b"cmd_b");
     test_input(format!("disown %{}", id1 + 1)).unwrap();
     assert!(!job_exists(id1), "named job should be removed");
     assert!(job_exists(id2), "unnamed current job should remain");
@@ -833,9 +833,9 @@ mod disown_tests {
   #[test]
   fn disown_with_multiple_explicit_ids_removes_only_named() {
     let _g = TestGuard::new();
-    let id1 = insert_fake_job(99050, "cmd_a");
-    let id2 = insert_fake_job(99051, "cmd_b");
-    let id3 = insert_fake_job(99052, "cmd_c");
+    let id1 = insert_fake_job(99050, b"cmd_a");
+    let id2 = insert_fake_job(99051, b"cmd_b");
+    let id3 = insert_fake_job(99052, b"cmd_c");
     test_input(format!("disown %{} %{}", id1 + 1, id2 + 1)).unwrap();
     assert!(!job_exists(id1));
     assert!(!job_exists(id2));
@@ -847,7 +847,7 @@ mod disown_tests {
   #[test]
   fn disown_invalid_jobid_errors() {
     let _g = TestGuard::new();
-    let _id = insert_fake_job(99040, "fake_cmd");
+    let _id = insert_fake_job(99040, b"fake_cmd");
     test_input("disown %not_a_number").ok();
     assert_ne!(state::Shed::get_status(), 0);
   }
@@ -855,22 +855,10 @@ mod disown_tests {
 
 #[cfg(test)]
 mod jobs_builtin_tests {
-  use crate::state::jobs::{ChildProc, JobBldr, JobID};
+  use super::disown_tests::insert_fake_job as insert_job;
+  use crate::state::jobs::JobID;
   use crate::state::{self, Shed};
   use crate::tests::testutil::{TestGuard, test_input};
-  use nix::sys::wait::WaitStatus;
-  use nix::unistd::Pid;
-
-  fn insert_job(pid: i32, cmd: &str) -> usize {
-    let pid = Pid::from_raw(pid);
-    let mut child = ChildProc::new(pid, Some(cmd), Some(pid), None);
-    child.set_stat(WaitStatus::StillAlive);
-    let mut bldr = JobBldr::new();
-    bldr.push_child(child);
-    bldr.set_pgid(pid);
-    let job = bldr.build();
-    Shed::jobs_mut(|j| j.insert_job(job, true))
-  }
 
   fn drain_jobs() {
     Shed::jobs_mut(|j| {
@@ -901,7 +889,7 @@ mod jobs_builtin_tests {
   fn jobs_lists_inserted_jobs() {
     let g = TestGuard::new();
     drain_jobs();
-    insert_job(60001, "uniq_jobs_cmd");
+    insert_job(60001, b"uniq_jobs_cmd");
     test_input("jobs").unwrap();
     let out = g.read_output();
     assert!(out.contains("uniq_jobs_cmd"), "got: {out:?}");
@@ -913,7 +901,7 @@ mod jobs_builtin_tests {
   fn jobs_dash_l_includes_pid() {
     let g = TestGuard::new();
     drain_jobs();
-    insert_job(60010, "long_cmd");
+    insert_job(60010, b"long_cmd");
     test_input("jobs -l").unwrap();
     let out = g.read_output();
     assert!(out.contains("60010"), "got: {out:?}");
@@ -925,7 +913,7 @@ mod jobs_builtin_tests {
   fn jobs_dash_p_includes_pid() {
     let g = TestGuard::new();
     drain_jobs();
-    insert_job(60020, "pid_cmd");
+    insert_job(60020, b"pid_cmd");
     test_input("jobs -p").unwrap();
     let out = g.read_output();
     assert!(out.contains("60020"), "got: {out:?}");
@@ -937,7 +925,7 @@ mod jobs_builtin_tests {
   fn jobs_dash_r_shows_only_running() {
     let g = TestGuard::new();
     drain_jobs();
-    insert_job(60030, "running_one");
+    insert_job(60030, b"running_one");
     test_input("jobs -r").unwrap();
     let out = g.read_output();
     assert!(out.contains("running_one"), "got: {out:?}");
@@ -949,7 +937,7 @@ mod jobs_builtin_tests {
   fn jobs_dash_s_excludes_running_jobs() {
     let g = TestGuard::new();
     drain_jobs();
-    insert_job(60040, "running_two");
+    insert_job(60040, b"running_two");
     test_input("jobs -s").unwrap();
     let out = g.read_output();
     assert!(!out.contains("running_two"), "got: {out:?}");
@@ -961,7 +949,7 @@ mod jobs_builtin_tests {
   fn jobs_dash_n_doesnt_crash() {
     let _g = TestGuard::new();
     drain_jobs();
-    insert_job(60050, "any_cmd");
+    insert_job(60050, b"any_cmd");
     test_input("jobs -n").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
   }
@@ -988,7 +976,7 @@ mod jobs_builtin_tests {
     let _g = TestGuard::new();
     drain_jobs();
     // Need a job in the table so the up-front "No jobs" check passes.
-    insert_job(60100, "stub_for_wait");
+    insert_job(60100, b"stub_for_wait");
     // pid 1 is alive but not our child → waitpid → ECHILD → wait_bg Ok.
     test_input("wait 1").unwrap();
   }
@@ -997,7 +985,7 @@ mod jobs_builtin_tests {
   fn wait_with_unknown_job_spec_errors() {
     let _g = TestGuard::new();
     drain_jobs();
-    insert_job(60101, "stub_for_wait_spec");
+    insert_job(60101, b"stub_for_wait_spec");
     // %99 — no such job → parse_job_id errors → nonzero status.
     test_input("wait %99").unwrap();
     assert_ne!(state::Shed::get_status(), 0);
