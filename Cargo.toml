@@ -31,7 +31,6 @@ dirs = "6.0.0"
 itertools = "0.14.0"
 log = "0.4.29"
 nix = { version = "0.31.2", features = ["uio", "term", "user", "resource", "hostname", "fs", "default", "signal", "process", "event", "ioctl", "poll", "net", "socket"] }
-rand = "0.10.1"
 regex = "1.12.3"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 scopeguard = "1.2.0"
@@ -40,7 +39,6 @@ smallvec = { version = "1.15.1", features = ["serde", "write"] }
 tempfile = "3.27.0"
 unicode-segmentation = "1.13.2"
 unicode-width = "0.2.2"
-uuid = { version = "1.23.1", features = ["v4"] }
 vte = "0.15"
 yansi = "1.0.1"
 rust-embed = { version = "8.11.0", features = ["include-exclude"] }

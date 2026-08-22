@@ -5,6 +5,7 @@ mod macros;
 mod path;
 mod pos;
 pub mod posix_extension;
+pub mod random;
 mod strops;
 mod ui;
 

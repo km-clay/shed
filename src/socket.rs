@@ -26,7 +26,7 @@ use nix::{
 use crate::{
   state::vars::{VarStr, VarStrSliceExt},
   try_var,
-  util::{self, ByteCursor, SliceCursor},
+  util::{self, ByteCursor, SliceCursor, random},
   varstr,
 };
 
@@ -63,7 +63,7 @@ pub(crate) fn authorize(request: impl Display) -> String {
 struct PrivateToken(String);
 impl PrivateToken {
   fn new() -> Self {
-    Self(uuid::Uuid::new_v4().to_string())
+    Self(random::Uuid::new_v4().to_string())
   }
   fn check(&self, other: &str) -> bool {
     self.0 == other

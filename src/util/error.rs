@@ -2,13 +2,13 @@
 use ariadne::{Color, Label};
 use ariadne::{Report, ReportKind};
 use nix::errno::Errno;
-use rand::TryRng;
 use std::cell::RefCell;
 use std::fmt::{self, Display};
 use std::io::Write;
 
 use crate::procio::bytes_to_string;
 use crate::state::vars::VarStr;
+use crate::util::random::random;
 use crate::{HashMap, shopt, varstr};
 
 use super::{
@@ -64,7 +64,7 @@ impl Iterator for ColorRng {
   type Item = Color;
   fn next(&mut self) -> Option<Self::Item> {
     let colors = Self::get_colors();
-    let idx = rand::rngs::SysRng.try_next_u32().ok()? as usize % colors.len();
+    let idx = random::<usize>() % colors.len();
 
     Some(colors[idx])
   }

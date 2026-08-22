@@ -612,7 +612,7 @@ impl super::Builtin for Hist {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::tests::testutil::TestGuard;
+  use crate::{tests::testutil::TestGuard, util};
 
   fn parse(opts: &[Opt]) -> HistQuery {
     HistQuery::from_opts(opts).expect("from_opts should succeed")
@@ -890,7 +890,6 @@ mod tests {
 
   use crate::readline::HistEntry;
   use std::time::{Duration as StdDuration, UNIX_EPOCH};
-  use uuid::Uuid;
 
   /// Build a `HistEntry` with the given command and the rest filled in
   /// from defaults. Timestamp is fixed (NOT `now()`) so cross-runs are
@@ -902,7 +901,7 @@ mod tests {
       command: cmd.into(),
       cwd: "/tmp".into(),
       status: 0,
-      token: Uuid::new_v4(),
+      token: util::random::Uuid::new_v4(),
     }
   }
 
@@ -919,7 +918,7 @@ mod tests {
       command: cmd.into(),
       cwd: cwd.into(),
       status,
-      token: Uuid::new_v4(),
+      token: util::random::Uuid::new_v4(),
     }
   }
 

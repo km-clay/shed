@@ -40,7 +40,7 @@ use nix::{
 
 use crate::{
   status_msg,
-  util::{base64_encode, format_size},
+  util::{base64_encode, format_size, random},
 };
 
 use super::{
@@ -787,10 +787,10 @@ impl Terminal {
 
       // surprisingly, a fixed cooldown like '100' is actually more annoying than 1 million bells.
       // I've found this range of 50-150 to be the best balance
-      let cooldown = rand::random_range(50..150);
+      let cooldown = random::random_range::<u8>(50..150);
       let should_send = match self.last_bell {
         None => true,
-        Some(time) => now.duration_since(time).as_millis() > cooldown,
+        Some(time) => now.duration_since(time).as_millis() > u128::from(cooldown),
       };
       if should_send {
         self.write_direct("\x07")?;

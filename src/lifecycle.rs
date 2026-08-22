@@ -303,6 +303,8 @@ fn setup_panic_handler() {
     // Best-effort job hangup.
     Shed::try_hang_up();
 
+    let time = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+
     // Best-effort panic log.
     let log_file = dirs::data_dir()
       .or_else(|| {
@@ -316,7 +318,7 @@ fn setup_panic_handler() {
 
     if let Some(mut log_file) = log_file {
       let backtrace = std::backtrace::Backtrace::force_capture();
-      let _ = write!(log_file, "{info}\n\n\nBacktrace:\n{backtrace:#?}");
+      let _ = write!(log_file, "{time} - {info}\n\n\nBacktrace:\n{backtrace:#?}");
     }
 
     // call the default panic hook

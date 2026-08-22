@@ -3,7 +3,8 @@ use crate::{
   eval::{lex::TkFlags, parse::Ast},
   expand::{Expander, expand_raw_inner, stream::SegStream},
   match_loop,
-  util::{self, ByteCursor, QuoteState, SliceCursor},
+  util::{self, ByteCursor, QuoteState, SliceCursor, random},
+  varstr,
 };
 
 use super::{meta::MetaTab, scopes::ScopeStack};
@@ -1580,6 +1581,91 @@ impl VarTab {
   }
 }
 
+// magic variable functions
+
+fn get_status_str() -> Option<VarStr> {
+  let status = Shed::get_status();
+  Some(varstr!("{status}"))
+}
+fn get_seconds() -> Option<VarStr> {
+  let shell_time = Shed::meta(MetaTab::shell_time);
+  let secs = Instant::now().duration_since(shell_time).as_secs();
+  Some(varstr!("{secs}"))
+}
+fn get_epoch_realtime() -> Option<VarStr> {
+  let epoch = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap_or(Duration::from_secs(0))
+    .as_secs_f64();
+  Some(varstr!("{epoch:.6}"))
+}
+
+fn get_epoch_seconds() -> Option<VarStr> {
+  let epoch = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap_or(Duration::from_secs(0))
+    .as_secs();
+  Some(varstr!("{epoch}"))
+}
+
+fn get_random() -> Option<VarStr> {
+  let random = random::random_range(0..32768);
+  Some(varstr!("{random}"))
+}
+
+fn get_lines() -> Option<VarStr> {
+  let rows = Shed::term(Terminal::t_rows);
+  Some(varstr!("{rows}"))
+}
+
+fn get_columns() -> Option<VarStr> {
+  let cols = Shed::term(Terminal::t_cols);
+  Some(varstr!("{cols}"))
+}
+
+fn get_set_flags() -> Option<VarStr> {
+  let mut set_opts = util::scratch_buf();
+  Shed::shopts(|o| {
+    if o.set.allexport {
+      set_opts.push(b'a');
+    }
+    if o.set.notify {
+      set_opts.push(b'b');
+    }
+    if o.set.noclobber {
+      set_opts.push(b'C');
+    }
+    if o.set.errexit {
+      set_opts.push(b'e');
+    }
+    if o.set.noglob {
+      set_opts.push(b'f');
+    }
+    if o.set.hashall {
+      set_opts.push(b'h');
+    }
+    if Shed::term(Terminal::interactive) {
+      set_opts.push(b'i');
+    }
+    if o.set.monitor {
+      set_opts.push(b'm');
+    }
+    if o.set.noexec {
+      set_opts.push(b'n');
+    }
+    if o.set.nounset {
+      set_opts.push(b'u');
+    }
+    if o.set.verbose {
+      set_opts.push(b'v');
+    }
+    if o.set.xtrace {
+      set_opts.push(b'x');
+    }
+  });
+  (!set_opts.is_empty()).then(|| set_opts.into())
+}
+
 #[cfg(test)]
 mod top_level_colon_tests {
   use super::top_level_colon;
@@ -1706,90 +1792,6 @@ mod shell_param_fmt_tests {
       assert_eq!(parsed, v, "round-trip mismatch for {v:?} via {s:?}");
     }
   }
-}
-
-// magic variable functions
-
-fn get_status_str() -> Option<VarStr> {
-  Some(Shed::get_status().to_string().into())
-}
-fn get_seconds() -> Option<VarStr> {
-  let shell_time = Shed::meta(MetaTab::shell_time);
-  let secs = Instant::now().duration_since(shell_time).as_secs();
-  Some(secs.to_string().into())
-}
-fn get_epoch_realtime() -> Option<VarStr> {
-  let epoch = std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .unwrap_or(Duration::from_secs(0))
-    .as_secs_f64();
-  Some(epoch.to_string().into())
-}
-
-fn get_epoch_seconds() -> Option<VarStr> {
-  let epoch = std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .unwrap_or(Duration::from_secs(0))
-    .as_secs();
-  Some(epoch.to_string().into())
-}
-
-fn get_random() -> Option<VarStr> {
-  let random = rand::random_range(0..32768);
-  Some(random.to_string().into())
-}
-
-fn get_lines() -> Option<VarStr> {
-  let rows = Shed::term(Terminal::t_rows);
-  Some(rows.to_string().into())
-}
-
-fn get_columns() -> Option<VarStr> {
-  let cols = Shed::term(Terminal::t_cols);
-  Some(cols.to_string().into())
-}
-
-fn get_set_flags() -> Option<VarStr> {
-  let mut set_string = String::new();
-  Shed::shopts(|o| {
-    if o.set.allexport {
-      set_string.push('a');
-    }
-    if o.set.notify {
-      set_string.push('b');
-    }
-    if o.set.noclobber {
-      set_string.push('C');
-    }
-    if o.set.errexit {
-      set_string.push('e');
-    }
-    if o.set.noglob {
-      set_string.push('f');
-    }
-    if o.set.hashall {
-      set_string.push('h');
-    }
-    if Shed::term(Terminal::interactive) {
-      set_string.push('i');
-    }
-    if o.set.monitor {
-      set_string.push('m');
-    }
-    if o.set.noexec {
-      set_string.push('n');
-    }
-    if o.set.nounset {
-      set_string.push('u');
-    }
-    if o.set.verbose {
-      set_string.push('v');
-    }
-    if o.set.xtrace {
-      set_string.push('x');
-    }
-  });
-  (!set_string.is_empty()).then(|| set_string.into())
 }
 
 #[cfg(test)]

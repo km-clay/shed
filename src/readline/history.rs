@@ -1,12 +1,12 @@
 use std::{
   cmp::Ordering,
   env,
+  str::FromStr,
   sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock},
   time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use rusqlite::Connection;
-use uuid::Uuid;
 
 use super::{
   complete::{Candidate, FuzzySelector},
@@ -16,7 +16,7 @@ use super::{
   sherr, shopt, state,
   util::ShResult,
 };
-use crate::{HashMap, state::vars::VarStr};
+use crate::{HashMap, state::vars::VarStr, util::random::Uuid};
 
 #[derive(Debug, Clone)]
 pub struct HistEntry {
@@ -887,7 +887,7 @@ impl History {
       runtime: Duration::from_micros(row.get::<_, i64>(2)? as u64),
       cwd: row.get(3).unwrap_or_default(),
       status: row.get(4).unwrap_or(0),
-      token: Uuid::parse_str(row.get::<_, String>(5)?.as_str()).unwrap_or_default(),
+      token: Uuid::from_str(row.get::<_, String>(5)?.as_str()).unwrap_or_default(),
     })
   }
 

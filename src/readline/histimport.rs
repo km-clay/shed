@@ -5,9 +5,8 @@ use std::{
 
 use regex::Regex;
 use serde_json::Value;
-use uuid::Uuid;
 
-use crate::{procio::bytes_to_string, state::vars::VarStr};
+use crate::{procio::bytes_to_string, state::vars::VarStr, util::random};
 
 use super::{
   history::HistEntry,
@@ -89,7 +88,7 @@ fn import_json(content: &Value) -> ShResult<Vec<HistEntry>> {
     let token = val_obj
       .get("token")
       .and_then(|v| v.as_str())
-      .and_then(|v| Uuid::parse_str(v).ok())
+      .and_then(|v| v.parse::<random::Uuid>().ok())
       .ok_or_else(|| {
         sherr!(
           ParseErr,
