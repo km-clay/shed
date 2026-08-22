@@ -963,7 +963,6 @@ dependencies = [
  "dirs",
  "hipstr",
  "itertools",
- "itoa",
  "log",
  "nix",
  "pretty_assertions",

@@ -55,8 +55,8 @@ fn quote_var(name: &str) -> Option<Vec<u8>> {
   match var.kind() {
     VarKind::Str(var_str) => Some(expand::shell_quote_bytes(var_str.as_bytes())),
     VarKind::Int(int) => {
-      let mut buf = itoa::Buffer::new();
-      Some(expand::shell_quote_bytes(buf.format(*int).as_bytes()))
+      let int_str = varstr!("{int}");
+      Some(expand::shell_quote_bytes(&int_str))
     }
     VarKind::Arr(var_strs) => Some(join_bytes(
       &var_strs

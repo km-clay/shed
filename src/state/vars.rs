@@ -664,8 +664,7 @@ macro_rules! impl_varstr_from {
   ($($t:ty),*) => {
     $(impl From<$t> for VarStr {
       fn from(value: $t) -> VarStr {
-        let mut buf = itoa::Buffer::new();
-        VarStr(HipByt::from(buf.format(value).as_bytes()))
+        $crate::varstr!("{value}")
       }
     })*
   };
