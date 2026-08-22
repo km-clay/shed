@@ -1176,7 +1176,9 @@ impl super::LineBuf {
       .enumerate()
       .filter_map(|(c, g)| (g.as_char() == Some(q_ch)).then_some(c))
       .collect::<Vec<_>>()
-      .chunks_exact(2)
+      .as_chunks::<2>()
+      .0
+      .iter()
       .map(|pair| (pair[0], pair[1]))
       .find(|&(_, close)| close >= cur_col)?;
 

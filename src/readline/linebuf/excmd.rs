@@ -575,7 +575,9 @@ impl super::LineBuf {
 
         let bytes = joined.as_bytes();
 
-        let lines = bytecount::count(bytes, b'\n');
+        #[expect(clippy::naive_bytecount)] // cold path, don't need an entire dependency for this
+        let lines = bytes.iter().filter(|&&b| b == b'\n').count();
+
         let len = bytes.len() as u64;
         let mut size = String::new();
 

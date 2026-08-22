@@ -968,7 +968,7 @@ fn parse_assignment(span: &Span, flags: TkFlags) -> Vec<CtxTk> {
 
   let rhs_tk = if rhs_text.starts_with('(') {
     let close_off = rhs_text.rfind(')').filter(|&c| c > 0);
-    let inner_end = close_off.map_or(rhs_text.len(), |c| c);
+    let inner_end = close_off.unwrap_or(rhs_text.len());
     let inner_text = &rhs_text[1..inner_end];
     let inner_span = Span::new((rhs_start + 1)..(rhs_start + inner_end), span.get_source());
     let mut inner_chars = inner_text.char_indices().peekable();
