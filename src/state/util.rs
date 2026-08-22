@@ -21,12 +21,12 @@ use std::{
   time::SystemTime,
 };
 
+use crate::defer;
 use nix::{
   libc,
   unistd::{User, getuid},
 };
 use rusqlite::Connection;
-use scopeguard::defer;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
@@ -163,7 +163,7 @@ where
     });
   }
 
-  let _guard = scopeguard::guard(restores, |restores| {
+  let _guard = crate::util::guard(restores, |restores| {
     Shed::vars_mut(|v| {
       for (name, prev) in restores {
         match prev {

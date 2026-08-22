@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use scopeguard::defer;
+use crate::defer;
 
 use super::editcmd::{Cmd, CmdFlags, EditCmd, Motion, Verb, invert_char_motion};
 use super::editmode::{

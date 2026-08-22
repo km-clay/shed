@@ -5,9 +5,9 @@ use std::{
   sync::atomic::{AtomicUsize, Ordering},
 };
 
+use crate::defer;
 use itertools::Itertools;
 use nix::libc::STDIN_FILENO;
-use scopeguard::defer;
 
 use super::{
   Line, Lines, MotionKind, Pos, ShResult, autocmd,

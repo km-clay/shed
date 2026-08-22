@@ -16,7 +16,8 @@ use super::{Shed, eval, match_loop, procio, sherr, state, system_msg, var};
 use bstr::ByteSlice;
 use compact_str::CompactString;
 pub(super) use guards::{
-  function_scope_guard, isolation_guard, prefix_assign_guard, shared_scope_guard, var_ctx_guard,
+  function_scope_guard, guard, isolation_guard, prefix_assign_guard, shared_scope_guard,
+  var_ctx_guard,
 };
 pub(super) use path::{
   PathCache, is_executable_file, path_entries, path_from_bytes, path_list_entries, resolve_in_path,

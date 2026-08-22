@@ -1190,7 +1190,7 @@ impl ShedLine {
         })
         .ok()?;
 
-        scopeguard::defer! {
+        crate::defer! {
           Shed::vars_mut(|v| {
             v.unset_var("MATCHES").ok();
             v.unset_var("NUM_MATCHES").ok();

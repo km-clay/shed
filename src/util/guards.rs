@@ -1,5 +1,4 @@
 use nix::sys::stat;
-use scopeguard::guard;
 
 use crate::{
   HashSet,
@@ -19,6 +18,56 @@ use super::{
   Shed,
   eval::{execute::Dispatcher, lex::Span},
 };
+
+// ============================================================================
+// ScopeGuard - run a closure on drop (local replacement for the scopeguard crate)
+// ============================================================================
+
+/// Wraps a value with a closure that runs when the guard is dropped, receiving
+/// the value. Derefs to the value so it stays usable until then. The `Option`s
+/// let `drop` (which only has `&mut self`) move both out to call the `FnOnce`.
+pub(crate) struct ScopeGuard<T, F: FnOnce(T)> {
+  value: Option<T>,
+  dropfn: Option<F>,
+}
+
+impl<T, F: FnOnce(T)> std::ops::Deref for ScopeGuard<T, F> {
+  type Target = T;
+  fn deref(&self) -> &T {
+    self.value.as_ref().unwrap()
+  }
+}
+
+impl<T, F: FnOnce(T)> std::ops::DerefMut for ScopeGuard<T, F> {
+  fn deref_mut(&mut self) -> &mut T {
+    self.value.as_mut().unwrap()
+  }
+}
+
+impl<T, F: FnOnce(T)> Drop for ScopeGuard<T, F> {
+  fn drop(&mut self) {
+    if let (Some(value), Some(dropfn)) = (self.value.take(), self.dropfn.take()) {
+      dropfn(value);
+    }
+  }
+}
+
+/// Run `dropfn(value)` when the returned guard drops.
+pub(crate) fn guard<T, F: FnOnce(T)>(value: T, dropfn: F) -> ScopeGuard<T, F> {
+  ScopeGuard {
+    value: Some(value),
+    dropfn: Some(dropfn),
+  }
+}
+
+/// Run the given statements when the enclosing scope exits (in reverse order of
+/// declaration, like RAII). Replacement for `scopeguard::defer!`.
+#[macro_export]
+macro_rules! defer {
+  ($($body:tt)*) => {
+    let _guard = $crate::util::guard((), move |()| { $($body)* });
+  };
+}
 
 // ============================================================================
 // ScopeGuard - RAII variable scope management
@@ -50,14 +99,15 @@ fn guard_drop(_: ()) {
 /// their previous values on return
 ///
 /// ## Safety
-/// This calls `Shed::meta_mut` internally. If this is called inside of another `meta()`/`meta_mut()` call, that is a `RefCell` panic.
+/// This calls `Shed::meta_mut` internally.
+/// If this is called inside of another `meta()`/`meta_mut()` call, that is a `RefCell` panic.
 pub fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let ceiling_guard = scope_ceiling_guard(args);
   let cwd_guard = cwd_guard();
   let umask_guard = umask_guard();
   let shopt_guard = shopt_guard();
   let fork = Shed::meta_mut(|m| m.enter_fork(false));
-  scopeguard::guard((), move |()| {
+  guard((), move |()| {
     drop(shopt_guard);
     drop(cwd_guard);
     drop(umask_guard);
@@ -129,7 +179,7 @@ pub fn shared_scope_guard() -> impl Drop {
 
 pub fn var_ctx_guard(
   vars: HashSet<VarStr>,
-) -> scopeguard::ScopeGuard<HashSet<VarStr>, impl FnOnce(HashSet<VarStr>)> {
+) -> ScopeGuard<HashSet<VarStr>, impl FnOnce(HashSet<VarStr>)> {
   guard(vars, |vars| {
     Shed::vars_mut(|v| {
       for var in &vars {

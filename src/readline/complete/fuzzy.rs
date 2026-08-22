@@ -474,7 +474,7 @@ impl FuzzyBuilder {
     // The beam is set with a raw escape that bypasses `execute_control`, so the
     // terminal's tracked style stays at the pre-picker value; restore to it on exit.
     let restore_style = Shed::term(Terminal::cursor_style);
-    scopeguard::defer! {
+    crate::defer! {
       flush_term!("{restore_style}").ok();
     };
 

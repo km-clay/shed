@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::defer;
 use ariadne::Fmt;
 use bitflags::bitflags;
 use itertools::izip;
@@ -11,7 +12,6 @@ use nix::{
   },
   unistd::{Pid, getpgrp, getpid, setpgid, write},
 };
-use scopeguard::defer;
 use yansi::Color;
 
 use crate::{

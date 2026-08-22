@@ -1,7 +1,7 @@
+use crate::defer;
 use ariadne::Span as ASpan;
 use itertools::Itertools;
 use nix::unistd::Pid;
-use scopeguard::defer;
 use std::{
   fs,
   io::{self, Read},

@@ -597,7 +597,7 @@ mod tests {
     disable_reaping();
     // The defer here ensures we re-enable for other tests in the same
     // run-thread.
-    scopeguard::defer! { enable_reaping(); }
+    crate::defer! { enable_reaping(); }
     set_signal(Signal::SIGCHLD);
     assert!(
       check_signals().is_ok(),

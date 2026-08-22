@@ -28,12 +28,12 @@ use std::{
 use crate::state::util::with_vars;
 use crate::util::posix_extension::execvpe;
 
+use crate::defer;
 use itertools::Itertools;
 use nix::{
   errno::Errno,
   unistd::{ForkResult, Pid, execve, fork, getpgrp, isatty, setpgid},
 };
-use scopeguard::defer;
 use shed_macros::styled_format;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -172,7 +172,7 @@ fn commit_underscore() {
 /// prior state on drop so nested pipelines compose.
 fn suppress_underscore_guard() -> impl Drop {
   let prev = SUPPRESS_UNDERSCORE.with(|s| s.replace(true));
-  scopeguard::guard((), move |()| SUPPRESS_UNDERSCORE.with(|s| s.set(prev)))
+  crate::util::guard((), move |()| SUPPRESS_UNDERSCORE.with(|s| s.set(prev)))
 }
 
 /// Arguments to the execvpe function

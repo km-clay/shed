@@ -77,7 +77,7 @@ impl super::Builtin for Help {
     vec![opt!("list-tags" | b'l')]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let _guard = scopeguard::guard((), |()| {
+    let _guard = crate::util::guard((), |()| {
       if !Shed::term(Terminal::test_mode) {
         Shed::meta_mut(|_| MetaTab::disable_welcome_message()).unwrap();
       }
