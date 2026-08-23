@@ -1,3 +1,7 @@
+//! This module contains our IO redirection primitives.
+//! Everything we use is basically just a thin wrapper around the std Fd types,
+//! or nix system call wrappers.
+
 use std::{
   collections::{BTreeMap, BTreeSet},
   fmt::Debug,
@@ -25,6 +29,7 @@ use crate::{
   lifecycle, signal,
   state::{shopt::ReadLimit, terminal::Terminal, vars::VarStr},
   util::{self, ByteCursor, SliceCursor, parse_bytes},
+  varstr,
 };
 
 use super::{
@@ -36,12 +41,6 @@ use super::{
   match_loop, sherr, shopt, state,
   util::{ShErr, ShResult},
 };
-
-/*
- * This module contains our IO redirection primitives.
- * Everything we use is basically just a thin wrapper around the std Fd types,
- * or nix system call wrappers.
- */
 
 /// Minimum fd number for shell-internal file descriptors.
 /// User-visible fds (0-9) are kept clear so `exec 3>&-` etc. work as expected.
@@ -58,6 +57,8 @@ pub fn dup_high(fd: BorrowedFd) -> nix::Result<OwnedFd> {
   unsafe { Ok(OwnedFd::from_raw_fd(fd)) }
 }
 
+/// Same as `dup_high`, but does not set the `CLOEXEC` flag on the new fd.
+/// Good for fds that should be inherited across fork/exec
 fn dup_high_no_cloexec(fd: BorrowedFd) -> nix::Result<OwnedFd> {
   let fd = fcntl(fd, FcntlArg::F_DUPFD(MIN_INTERNAL_FD))?;
   Ok(unsafe { OwnedFd::from_raw_fd(fd) })
@@ -134,6 +135,8 @@ impl Redir {
   pub fn close(fd: RawFd) -> Self {
     Self { fd, from: None }
   }
+  /// Trigger the redirection by calling [`nix::libc::dup2`] or closing the target fd.
+  /// Returns an error if the redirection fails.
   pub fn apply(&mut self) -> ShResult<()> {
     if let Some(from) = &self.from {
       let ret = unsafe { nix::libc::dup2(from.as_raw_fd(), self.fd) };
@@ -219,7 +222,6 @@ impl RedirBldr {
       }
       RedirTarget::FdExpr(word) if class.is_dup_op() => Ok(RedirSpec::dup_expr(word, fd, class)),
       RedirTarget::HereDoc { body, flags } => {
-        log::debug!("heredoc body: {body:?}");
         // Strip leading tabs per line BEFORE expansion (POSIX order).
         let buf: VarStr = if flags.contains(TkFlags::HERESTRING) {
           // Raw word; expanded and newline-terminated at redirection time.
@@ -228,6 +230,7 @@ impl RedirBldr {
           if body.is_empty() {
             body
           } else {
+            // strip the tabs
             let mut out = Vec::new();
             for line in body.lines() {
               let tabs = line.iter().take_while(|&&b| b == b'\t').count();
@@ -237,9 +240,7 @@ impl RedirBldr {
             out.into()
           }
         } else if !body.is_empty() && !body.ends_with(b"\n") {
-          let mut bytes: Vec<u8> = body.into();
-          bytes.push(b'\n');
-          bytes.into()
+          varstr!("{body}\n")
         } else {
           body
         };
@@ -255,6 +256,8 @@ impl RedirBldr {
 }
 
 impl RedirBldr {
+  /// Attempt parsing a redirection operator from a byte slice.
+  /// Returns a `RedirBldr` with the parsed components, or an error if the input is invalid.
   pub fn parse(bytes: &[u8]) -> ShResult<Self> {
     let mut cur = SliceCursor::new(bytes);
     let mut src_fd = util::scratch_buf();
@@ -384,6 +387,7 @@ impl RedirType {
       RedirType::Output | RedirType::OutputForce | RedirType::Append | RedirType::ReadWrite
     )
   }
+  /// Returns true if this redirection type is a file operation (i.e. not a dup or close).
   pub fn is_file_op(self) -> bool {
     matches!(
       self,
@@ -399,6 +403,8 @@ impl RedirType {
   }
 }
 
+/// The target of a redirection, as parsed from the command line.
+/// This is an intermediate representation that is later converted into a [`RedirSpec`] for execution.
 #[derive(Clone, Debug)]
 pub(super) enum RedirTarget {
   Path(Tk),
@@ -408,6 +414,9 @@ pub(super) enum RedirTarget {
   HereDoc { body: VarStr, flags: TkFlags },
 }
 
+/// The final representation of a redirection.
+///
+/// Will eventually be consumed and turned into a [`Redir`] for execution.
 #[derive(Debug, Clone)]
 pub(super) enum RedirSpec {
   File {
@@ -598,6 +607,7 @@ impl RedirSpec {
   }
 }
 
+/// The result of attempting to apply a [`RedirSet`].
 pub(super) enum RedirResult {
   Applied(RedirGuard),
   NoRedirs,
@@ -619,6 +629,7 @@ impl RedirResult {
   }
 }
 
+/// A set of redirections to be applied together.
 #[derive(Default, Debug)]
 pub(super) struct RedirSet(pub Vec<RedirSpec>);
 
@@ -645,6 +656,7 @@ impl RedirSet {
       res => res,
     }
   }
+  /// Apply the redirections, returning a guard that will restore the original fds when dropped.
   pub fn apply(self) -> RedirResult {
     if self.0.is_empty() {
       return RedirResult::NoRedirs;
@@ -655,6 +667,8 @@ impl RedirSet {
       Ok(g) => g,
       Err(e) => return RedirResult::Error(e),
     };
+
+    // apply each redir
     for spec in self.0 {
       let span = spec.span();
 
@@ -673,6 +687,9 @@ impl RedirSet {
     }
     RedirResult::Applied(guard)
   }
+  /// Separate input redirs and output redirs into two separate `RedirSet`s
+  ///
+  /// Returns (`in_redirs`, `out_redirs`)
   pub fn split_by_channel(self) -> (RedirSet, RedirSet) {
     let mut in_redirs = vec![];
     let mut out_redirs = vec![];
@@ -710,6 +727,7 @@ impl From<RedirSpec> for RedirSet {
   }
 }
 
+/// A guard that restores the original file descriptors when dropped.
 #[derive(Debug)]
 pub(super) struct RedirGuard {
   saved: Option<IoGroup>,
@@ -720,10 +738,12 @@ impl RedirGuard {
     let saved = Some(IoGroup::capture_targets(targets)?);
     Ok(Self { saved })
   }
+  /// Create a `RedirGuard` that captures the current state of stdin, stdout, and stderr (fd 0, 1, 2).
   pub fn stdio() -> ShResult<Self> {
     let stdio_fds = [0, 1, 2].iter().copied().collect();
     Self::new(&stdio_fds)
   }
+  /// Persist the redirections, preventing the guard from restoring the original fds when dropped.
   pub fn persist(mut self) {
     use std::mem::{drop, take};
     drop(take(&mut self.saved));
@@ -732,16 +752,19 @@ impl RedirGuard {
 
 impl Drop for RedirGuard {
   fn drop(&mut self) {
-    if let Some(saved) = self.saved.as_ref() {
+    if let Some(saved) = self.saved.take() {
       saved.restore().ok();
     }
   }
 }
 
+/// A group of file descriptors that can be captured and restored.
+/// Stores them as (`RawFd`, `Option<OwnedFd>`) pairs, where the `Option` is `None` if the fd is to be closed.
 #[derive(Debug)]
 pub(super) struct IoGroup(BTreeMap<RawFd, Option<OwnedFd>>);
 
 impl IoGroup {
+  /// Capture the current state of the given file descriptors, saving them for later restoration.
   pub fn capture_targets(targets: &BTreeSet<RawFd>) -> ShResult<Self> {
     let mut saved = BTreeMap::new();
 
@@ -779,7 +802,7 @@ impl IoGroup {
 
 /// An iterator that lazily creates a specific number of pipes.
 pub(super) struct PipeGenerator {
-  num_cmds: usize,
+  num_cmds: usize, // The number of pipes to create
   cursor: usize,
   last_rpipe: Option<Redir>,
 }
@@ -796,6 +819,7 @@ impl PipeGenerator {
 
 impl Iterator for PipeGenerator {
   type Item = (Option<Redir>, Option<Redir>, Option<RawFd>);
+  /// Returns a tuple of (read end of previous pipe, write end of current pipe, read end of current pipe).
   fn next(&mut self) -> Option<Self::Item> {
     if self.cursor >= self.num_cmds {
       return None;
@@ -821,6 +845,10 @@ impl Iterator for PipeGenerator {
   }
 }
 
+/// A sink used for internal IO transfers.
+/// `shed` is capable of running builtin-only pipelines
+/// where the output of one builtin is fed into the input of another builtin
+/// and no intermediate system calls are necessary.
 #[derive(Debug, Clone)]
 pub(crate) struct OutputSink {
   limit: ReadLimit,
@@ -879,6 +907,8 @@ impl io::Write for OutputSink {
   }
 }
 
+/// A sink used for internal IO transfers.
+/// Is readable in the same way as a regular file descriptor, but reads from an internal buffer.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct InputSink {
   buf: Cursor<Vec<u8>>,
@@ -898,6 +928,7 @@ impl io::Read for InputSink {
   }
 }
 
+/// A collection of input and output sinks for internal IO transfers.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Sinks {
   output_sinks: Vec<OutputSink>,
@@ -1024,6 +1055,7 @@ impl Drop for SinkScope {
   }
 }
 
+/// A guard struct that pushes an input sink onto the `Shed` stack and pops it when dropped.
 pub(crate) struct StdinScope;
 impl StdinScope {
   pub fn push(sink: OutputSink) -> Self {
@@ -1050,6 +1082,9 @@ pub(super) fn stderr_fileno() -> BorrowedFd<'static> {
   unsafe { BorrowedFd::borrow_raw(STDERR_FILENO) }
 }
 
+/// Read all bytes from the given file descriptor into an `OutputSink`, respecting the `core.max_read_limit` shell option.
+/// Used for boundaries between builtins and external commands
+/// Returns an error if the read fails.
 pub(super) fn read_to_sink(fd: BorrowedFd) -> ShResult<OutputSink> {
   let limit = shopt!(core.max_read_limit);
 
@@ -1087,6 +1122,7 @@ pub(super) fn read_to_sink(fd: BorrowedFd) -> ShResult<OutputSink> {
   })
 }
 
+/// Convert a vector of bytes to a string, replacing invalid UTF-8 sequences with the replacement character.
 pub(super) fn bytes_to_string(buf: Vec<u8>) -> String {
   match String::from_utf8(buf) {
     Ok(s) => s,
@@ -1094,6 +1130,7 @@ pub(super) fn bytes_to_string(buf: Vec<u8>) -> String {
   }
 }
 
+/// Write raw bytes to the current output sink, byte-native counterpart to `out!`.
 pub(super) fn out_bytes(buf: &[u8]) {
   let _ = Shed::sinks(|s| s.write_all(buf));
 }
@@ -1168,6 +1205,8 @@ pub(crate) fn feed_fd_async(fd: OwnedFd, bytes: Vec<u8>) -> std::thread::JoinHan
   })
 }
 
+/// Run a command in a child process, feeding it `stdin` if provided, and capturing its stdout into a string.
+/// Returns the captured output or an error if the command failed to execute or was terminated abnormally.
 pub(super) fn capture_command(
   cmd: &[u8],
   stdin: Option<&[u8]>,
@@ -1245,6 +1284,7 @@ pub(super) fn capture_command(
   }
 }
 
+/// Open a file for redirection, respecting the `noclobber` shell option for output redirections.
 pub(super) fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShResult<File> {
   let path = path.as_ref();
   let result = match class {
@@ -1280,6 +1320,8 @@ pub(super) fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShRes
   Ok(result?)
 }
 
+/// Read all bytes from stdin into a vector, returning an error if the read fails.
+/// If a SIGINT is pending, set the status to 130 and return an empty vector.
 pub(super) fn read_input() -> ShResult<Vec<u8>> {
   let _guard = isatty(stdin_fileno())
     .unwrap_or(false)

@@ -171,6 +171,7 @@ fn get_poll_timeout(readline: &mut ShedLine) -> ShedPollTimeout {
   }
 }
 
+/// Perform the initial setup for an interactive shell session.
 fn interactive_setup(args: &lifecycle::ShedArgs) -> ShResult<TermGuard> {
   let raw_mode = Shed::term_mut(Terminal::setup_terminal)?;
 
@@ -213,6 +214,7 @@ fn interactive_setup(args: &lifecycle::ShedArgs) -> ShResult<TermGuard> {
   Ok(raw_mode)
 }
 
+/// Run the main interactive loop of the shell.
 pub(super) fn shed_interactive(
   args: &lifecycle::ShedArgs,
   script_keys: Option<Vec<KeyEvent>>,
@@ -281,6 +283,7 @@ pub(crate) enum LoopAction {
   Break,
 }
 
+/// Run a single iteration of the main interactive loop.
 #[expect(clippy::too_many_lines)]
 fn shed_loop_iter(
   readline: &mut ShedLine,
@@ -337,7 +340,7 @@ fn shed_loop_iter(
     readline.fix_editing_mode();
 
     *vi_mode = !(*vi_mode); // and toggle this
-  } else if Shed::num_subscribers() == 0 && readline.in_insert_mode() {
+  } else if Shed::num_subscribers() == 0 && readline.in_remote_mode() {
     // we are in remote mode with no consumers for our broadcasted input.
     // That effectively soft locks the shell, so let's fix that
     readline.fix_editing_mode();
@@ -350,6 +353,7 @@ fn shed_loop_iter(
   let timeout = get_poll_timeout(readline);
   Shed::term_mut(std::io::Write::flush)?;
 
+  // Poll for input on stdin and the socket, with the appropriate timeout
   match poll(poll_fds, &timeout) {
     Ok(0) => {
       // We timed out. Dispatch based on what kind of timeout fired.
@@ -388,7 +392,8 @@ fn shed_loop_iter(
           readline.mark_dirty();
           return res;
         }
-        ShedPollTimeout::Null | ShedPollTimeout::Zero | ShedPollTimeout::PendingKeymap => { /* do nothing */
+        ShedPollTimeout::Null | ShedPollTimeout::Zero | ShedPollTimeout::PendingKeymap => {
+          /* do nothing */
         }
       }
     }
@@ -474,7 +479,7 @@ fn shed_loop_iter(
   if curr_socket_mode != *socket_mode
     && let Some(sock) = Shed::get_socket()
   {
-    // the mode changed, chmod the live socket (no-op if there is none)
+    // the mode changed, chmod the live socket
     fchmodat(
       nix::fcntl::AT_FDCWD,
       sock.path(),
@@ -554,12 +559,10 @@ fn handle_readline_event(
       log::trace!("PostCmd autocmds done in {autocmd_start:.2?}");
 
       let no_hist_save = Shed::meta_mut(MetaTab::no_hist_save);
-
       let was_func_def = Shed::meta_mut(MetaTab::take_last_was_func_def);
       let nolog = was_func_def && shopt!(set.nolog);
 
       let should_write = shopt!(history.auto_save) && !nolog && !no_hist_save && !input.is_empty();
-
       let hist_update_start = Instant::now();
 
       if let Some(token) = token
@@ -630,6 +633,7 @@ pub(crate) enum Redraw {
   Partial,
 }
 
+/// Run a command from the prompt, handling terminal control sequences and cursor position restoration.
 pub(crate) fn run_prompt_command(
   input: String,
   clear_prompt: Option<Redraw>,
@@ -683,14 +687,17 @@ pub(crate) fn run_prompt_command(
   Ok(LoopAction::Continue)
 }
 
+/// Resolve any pending keymap ambiguity.
+/// If there's an exact match, fire it; otherwise flush as normal keys.
 fn resolve_keymap(readline: &mut ShedLine) -> ShResult<()> {
   let keymap_flags = readline.curr_keymap_flags();
   let matches = Shed::logic(|l| l.keymaps_filtered(keymap_flags, readline.pending_keymap()));
-  // If there's an exact match, fire it; otherwise flush as normal keys
   let exact = matches
     .iter()
     .find(|km| km.compare(readline.pending_keymap()) == KeyMapMatch::IsExact);
+
   if let Some(km) = exact {
+    // exact match, run it
     let action = km.action_expanded();
     readline.pending_keymap_mut().clear();
     for key in action {
@@ -700,6 +707,7 @@ fn resolve_keymap(readline: &mut ShedLine) -> ShResult<()> {
       }
     }
   } else {
+    // flush keys
     let buffered = std::mem::take(readline.pending_keymap_mut());
     for key in buffered {
       let event = readline.handle_key(&key).transpose();

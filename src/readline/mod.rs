@@ -1339,6 +1339,10 @@ impl ShedLine {
     matches!(self.core.mode.report_mode(), ModeReport::Insert)
   }
 
+  pub(crate) fn in_remote_mode(&self) -> bool {
+    matches!(self.core.mode.report_mode(), ModeReport::Remote)
+  }
+
   fn extract_line_nums(&self, cmd: &EditCmd) -> ShResult<Vec<usize>> {
     if let Some(Cmd(_, Verb::ExCmd(node))) = cmd.verb() {
       return self.core.editor.lines_for_ex_node(node);
