@@ -1,3 +1,7 @@
+//! Signal handling for the shell.
+//! This module provides functions to install signal handlers, check for pending signals, and handle them appropriately.
+//! It also provides functions to manage the job table and child processes in response to signals.
+
 use std::{
   collections::VecDeque,
   sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering},
@@ -30,6 +34,8 @@ use super::{
 
 use crate::{HashMap, state::vars::VarStr, varstr};
 
+/// A bitset representing all signals that have been received but not yet handled by `check_signals`.
+/// "indexed" by bit shifting the signal number (e.g. `1 << SIGINT` for SIGINT).
 static SIGNALS: AtomicU64 = AtomicU64::new(0);
 
 /// Signals that don't warrant interrupting a blocking builtin (`read`/`wait`):
@@ -39,9 +45,15 @@ const BENIGN_SIGNALS: u64 = (1 << Signal::SIGCHLD as u64)
   | (1 << Signal::SIGURG as u64)
   | (1 << Signal::SIGCONT as u64);
 
+/// Whether the SIGCHLD handler is enabled. If disabled, SIGCHLD is ignored and the shell will not reap child processes.
+/// This is used in `exec_nonint` to avoid reaping children that are being waited on by the caller.
 pub static REAPING_ENABLED: AtomicBool = AtomicBool::new(true);
+/// Whether the shell should exit cleanly. Set by `hang_up`, `check_signals`, and other signal handlers.
 pub static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
+/// Whether a job has finished and needs to be reaped.
+/// Set by `child_exited` and cleared by the main loop after reaping.
 pub static JOB_DONE: AtomicBool = AtomicBool::new(false);
+/// The exit code to use when quitting cleanly. Set by `hang_up`, `check_signals`, and other signal handlers.
 pub static QUIT_CODE: AtomicI32 = AtomicI32::new(0);
 
 /// Window size change signal
@@ -55,6 +67,9 @@ pub static GOT_SIGUSR1: AtomicBool = AtomicBool::new(false);
 /// We refresh the prompt now
 pub static FOCUS_GAINED: AtomicBool = AtomicBool::new(false);
 
+/// Signals that are not handled specially in `check_signals` and thus are
+/// handled generically by checking for a trap and, if none, terminating the shell
+/// in a non-interactive shell.
 const MISC_SIGNALS: &[Signal] = &[
   Signal::SIGINT,
   Signal::SIGHUP,
@@ -157,6 +172,14 @@ fn default_terminates(sig: Signal) -> bool {
   )
 }
 
+/// Check for any pending signals and handle them.
+///
+/// Returns an error if the shell should exit or if a signal handler requested an interrupt.
+///
+/// NOTE: the "errors" returned here do not represent failures in the signal handling itself,
+/// but rather control flow signals to the shell's main loop.
+/// We basically abuse Rust's error propagation to abort execution and travel upward
+/// to a place that catches and handles it.
 pub fn check_signals() -> ShResult<()> {
   let pending = SIGNALS.swap(0, Ordering::SeqCst);
 
@@ -241,6 +264,10 @@ pub fn install_signal_handlers() {
   }
 }
 
+/// Set up signal dispositions for the shell process. Called once at startup.
+///
+/// SIGTTIN and SIGTTOU are ignored so that the shell can read/write to the terminal,
+/// even if it's in the background.
 pub fn sig_setup() {
   install_signal_handlers();
 
@@ -287,6 +314,9 @@ pub fn hang_up(_: libc::c_int) {
   });
 }
 
+/// Send SIGTSTP to the foreground job, if any, to stop it and return control of the terminal to the shell.
+///
+/// This is called when the user presses Ctrl-Z, or when a SIGTSTP signal is received.
 pub fn terminal_stop() -> ShResult<()> {
   Shed::jobs_mut(|j| {
     if let Some(job) = j.get_fg_mut() {
@@ -295,7 +325,7 @@ pub fn terminal_stop() -> ShResult<()> {
       Ok(())
     }
   })
-  // TODO: It seems like there is supposed to be a take_term() call here
+  // TODO: It seems like there is supposed to be a take_term() call here, needs testing
 }
 
 pub fn interrupt() -> ShResult<()> {
@@ -308,6 +338,7 @@ pub fn interrupt() -> ShResult<()> {
   })
 }
 
+/// Wait for any child processes to change state (exit, stop, continue) and update the job table accordingly.
 pub fn wait_child() -> ShResult<()> {
   let flags = WtFlag::WNOHANG | WtFlag::WUNTRACED;
   while let Ok(status) = waitpid(None, Some(flags)) {
@@ -334,6 +365,7 @@ pub fn wait_child() -> ShResult<()> {
   Ok(())
 }
 
+/// Child process received a signal (e.g. SIGINT, SIGTERM, etc).
 pub fn child_signaled(pid: Pid, sig: Signal) {
   Shed::jobs_mut(|j| {
     if let Some(job) = j.query_mut(JobID::Pid(pid))
@@ -347,6 +379,7 @@ pub fn child_signaled(pid: Pid, sig: Signal) {
   }
 }
 
+/// Child process stopped (received SIGTSTP).
 pub fn child_stopped(pid: Pid, sig: Signal) -> ShResult<()> {
   let child_pgid = getpgid(Some(pid)).unwrap_or(pid);
   Shed::jobs_mut(|j| {
@@ -362,6 +395,8 @@ pub fn child_stopped(pid: Pid, sig: Signal) -> ShResult<()> {
   Ok(())
 }
 
+/// Child process continued (received SIGCONT).
+/// Resume the job in the job table if it exists.
 pub fn child_continued(pid: Pid) {
   let child_pgid = getpgid(Some(pid)).unwrap_or(pid);
   Shed::jobs_mut(|j| {
@@ -371,18 +406,21 @@ pub fn child_continued(pid: Pid) {
   });
 }
 
+/// Child process exited normally.
 pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   /*
    * Here we are going to get metadata on the exited process by querying the
    * job table with the pid. Then if the discovered job is the fg task,
-   * return terminal control to shed If it is not the fg task, print the
-   * display info for the job in the job table We can reasonably assume that
-   * if it is not a foreground job, then it exists in the job table
+   * return terminal control to shed. If it is not the fg task, print the
+   * display info for the job in the job table. We can reasonably assume that
+   * if it is not a foreground job, then it exists in the job table.
    * If this assumption is incorrect, the code has gone wrong somewhere.
    */
 
   let child_data = Shed::jobs_mut(|j| {
     let fg_pgid = j.get_fg().map(Job::pgid);
+
+    // update the job table with the new status for the child process
     j.query_mut(JobID::Pid(pid)).map(|job| {
       let child_pgid = job.pgid();
       let is_fg = fg_pgid.is_some_and(|fg| fg == child_pgid);
@@ -408,6 +446,7 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
     return take_term();
   }
 
+  // If it was a background job, we need to notify the main loop
   JOB_DONE.store(true, Ordering::SeqCst);
   let job_data = Shed::jobs_mut(|j| {
     let order = j.marker_order();
@@ -434,6 +473,7 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
     }
   }
 
+  // Set PIPESTATUS
   if let Some(pipe_status) = Job::pipe_status(&stats) {
     let pipe_status = pipe_status
       .into_iter()
@@ -459,6 +499,8 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   let last_status = children.last().map(|c| c.1.clone()).unwrap_or_default();
   let cmd_count = children.len();
 
+  // now run our post job autocmds
+  // with these variables set
   let post_job_vars: HashMap<VarStr, Var> = [
     (
       "CHILDREN".into(),
@@ -485,6 +527,7 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
 
   with_vars(post_job_vars, || autocmd!(OnJobFinish));
 
+  // post the job status notification
   if notify {
     system_msg!("{display}");
   }
