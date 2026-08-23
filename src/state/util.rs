@@ -354,7 +354,7 @@ pub fn rc_file_path() -> Option<PathBuf> {
   if let Some(p) = try_var!("SHED_RC") {
     return Some(PathBuf::from(p));
   }
-  let xdg = xdg_config_home().map(|c| c.join("shed").join("shedrc"));
+  let xdg = config_dir().map(|c| c.join("shed").join("shedrc"));
   let home = get_home().map(|h| h.join(".shedrc"));
 
   xdg
@@ -665,7 +665,7 @@ pub fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShResult<(
   {
     Some(PathBuf::from(p))
   } else {
-    xdg_config_home()
+    config_dir()
       .map(|c| c.join("shed").join(name))
       .filter(|p| p.is_file())
       .or_else(|| {
@@ -951,12 +951,12 @@ pub fn init_test_db_conn() {
 /// (`~/.local/state/shed/shed_hist.db`). `None` only if `dirs` cannot resolve a
 /// state dir (non-Linux platforms), in which case the `$HOME` fallback is used.
 fn default_state_db_path() -> Option<PathBuf> {
-  dirs::state_dir().map(|p| p.join("shed").join("shed_hist.db"))
+  state_dir().map(|p| p.join("shed").join("shed_hist.db"))
 }
 
 /// The "old" path to the history database
 fn legacy_data_db_path() -> Option<PathBuf> {
-  dirs::data_dir().map(|p| p.join("shed").join("shed_hist.db"))
+  data_dir().map(|p| p.join("shed").join("shed_hist.db"))
 }
 
 /// The on-disk path of the history database.
@@ -1086,7 +1086,23 @@ pub fn get_default_path() -> Option<String> {
   }
 }
 
-pub fn xdg_runtime_dir() -> PathBuf {
+fn xdg_dir(env: &str, fallback: &str) -> Option<PathBuf> {
+  try_var!(env)
+    .map(PathBuf::from)
+    .filter(|p| p.is_absolute())
+    .or_else(|| get_home().map(|h| h.join(fallback)))
+}
+
+pub(crate) fn data_dir() -> Option<PathBuf> {
+  xdg_dir("XDG_DATA_HOME", ".local/share")
+}
+pub(crate) fn state_dir() -> Option<PathBuf> {
+  xdg_dir("XDG_STATE_HOME", ".local/state")
+}
+pub(crate) fn config_dir() -> Option<PathBuf> {
+  xdg_dir("XDG_CONFIG_HOME", ".config")
+}
+pub(crate) fn runtime_dir() -> PathBuf {
   if let Some(p) = try_var!("XDG_RUNTIME_DIR") {
     return PathBuf::from(p);
   }
@@ -1094,12 +1110,6 @@ pub fn xdg_runtime_dir() -> PathBuf {
     return PathBuf::from(p);
   }
   PathBuf::from(format!("/tmp/shed-{}", getuid()))
-}
-
-pub fn xdg_config_home() -> Option<PathBuf> {
-  try_var!("XDG_CONFIG_HOME")
-    .map(PathBuf::from)
-    .or_else(|| get_home().map(|home| home.join(".config")))
 }
 
 pub fn get_home() -> Option<PathBuf> {
@@ -1181,10 +1191,7 @@ mod xdg_resolver_tests {
   fn xdg_config_home_uses_env_var_when_set() {
     let _g = TestGuard::new();
     set_var("XDG_CONFIG_HOME", "/explicit/xdg/config");
-    assert_eq!(
-      xdg_config_home(),
-      Some(PathBuf::from("/explicit/xdg/config"))
-    );
+    assert_eq!(config_dir(), Some(PathBuf::from("/explicit/xdg/config")));
   }
 
   #[test]
@@ -1192,7 +1199,7 @@ mod xdg_resolver_tests {
     let _g = TestGuard::new();
     unset_var("XDG_CONFIG_HOME");
     set_var("HOME", "/some/home");
-    assert_eq!(xdg_config_home(), Some(PathBuf::from("/some/home/.config")));
+    assert_eq!(config_dir(), Some(PathBuf::from("/some/home/.config")));
   }
 
   // ─── history DB migration (share -> state) ────────────────────────
@@ -1230,7 +1237,7 @@ mod xdg_resolver_tests {
   fn xdg_runtime_dir_prefers_env_var() {
     let _g = TestGuard::new();
     set_var("XDG_RUNTIME_DIR", "/run/user/1000");
-    assert_eq!(xdg_runtime_dir(), PathBuf::from("/run/user/1000"));
+    assert_eq!(runtime_dir(), PathBuf::from("/run/user/1000"));
   }
 
   #[test]
@@ -1238,7 +1245,7 @@ mod xdg_resolver_tests {
     let _g = TestGuard::new();
     unset_var("XDG_RUNTIME_DIR");
     set_var("TMPDIR", "/custom/tmp");
-    assert_eq!(xdg_runtime_dir(), PathBuf::from("/custom/tmp"));
+    assert_eq!(runtime_dir(), PathBuf::from("/custom/tmp"));
   }
 
   #[test]
@@ -1247,7 +1254,7 @@ mod xdg_resolver_tests {
     unset_var("XDG_RUNTIME_DIR");
     unset_var("TMPDIR");
     let expected = PathBuf::from(format!("/tmp/shed-{}", getuid()));
-    assert_eq!(xdg_runtime_dir(), expected);
+    assert_eq!(runtime_dir(), expected);
   }
 
   // ─── rc_file_path ─────────────────────────────────────────────────

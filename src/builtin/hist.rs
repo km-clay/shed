@@ -10,7 +10,12 @@ use chrono::Utc;
 use chrono_english::{Dialect, Interval, parse_date_string};
 
 use crate::{
-  HashSet, builtin::opt::Opt, expand::shell_quote_bytes, opt, state::vars::VarStr, status_msg,
+  HashSet,
+  builtin::opt::Opt,
+  expand::shell_quote_bytes,
+  opt,
+  state::{util, vars::VarStr},
+  status_msg,
 };
 
 use super::{
@@ -353,7 +358,7 @@ impl HistQuery {
                   "Cannot use {opt} without a valid home directory"
                 ));
               };
-              let data_dir = dirs::data_dir()
+              let data_dir = util::data_dir()
                 .unwrap_or_else(|| PathBuf::from(format!("{}/.local/share", home.display())));
               data_dir.join("fish").join("fish_history")
             }

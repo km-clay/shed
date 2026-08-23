@@ -14,7 +14,6 @@ use std::{os::fd::BorrowedFd, str::FromStr};
 use super::{Shed, eval, match_loop, procio, sherr, state, system_msg, var};
 
 use bstr::ByteSlice;
-use compact_str::CompactString;
 pub(super) use guards::{
   function_scope_guard, guard, isolation_guard, prefix_assign_guard, shared_scope_guard,
   var_ctx_guard,
@@ -56,15 +55,9 @@ impl std::io::Write for FdWriter<'_> {
   }
 }
 
-/// Returns a default `CompactString` with capacity 24
+/// Returns a smallvec that can be used as a scratch buffer for temporary data.
 ///
-/// Used for temporary strings that are ideally put together via `push` or `push_str`
-/// like variable names and stuff for instance.
-/// Buffers under 24 bytes in length remain on the stack.
-pub(super) fn scratch_str() -> CompactString {
-  CompactString::with_capacity(24)
-}
-
+/// Trivially convertible to [`crate::state::vars::VarStr`] since it implements `AsRef<[u8]>`.
 pub(super) fn scratch_buf() -> SmallVec<[u8; 24]> {
   SmallVec::new()
 }

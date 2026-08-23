@@ -306,7 +306,7 @@ fn setup_panic_handler() {
     let time = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
 
     // Best-effort panic log.
-    let log_file = dirs::data_dir()
+    let log_file = util::data_dir()
       .or_else(|| {
         std::env::var("HOME")
           .ok()

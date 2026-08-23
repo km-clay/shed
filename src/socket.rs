@@ -445,7 +445,7 @@ pub(crate) struct ShedSocket {
 impl ShedSocket {
   pub fn path() -> String {
     let pid = Pid::this();
-    state::util::xdg_runtime_dir()
+    state::util::runtime_dir()
       .join("shed")
       .join(format!("{pid}.sock"))
       .display()
@@ -460,7 +460,7 @@ impl ShedSocket {
       .unwrap_or(Mode::S_IRUSR | Mode::S_IWUSR)
   }
   pub fn new() -> ShResult<Self> {
-    let sock_dir = state::util::xdg_runtime_dir().join("shed");
+    let sock_dir = state::util::runtime_dir().join("shed");
 
     std::fs::DirBuilder::new()
       .recursive(true)

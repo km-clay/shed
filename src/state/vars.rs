@@ -627,12 +627,6 @@ impl FromIterator<char> for VarStr {
   }
 }
 
-impl From<compact_str::CompactString> for VarStr {
-  fn from(value: compact_str::CompactString) -> Self {
-    Self(HipByt::from(value.as_bytes()))
-  }
-}
-
 impl From<Var> for VarStr {
   fn from(value: Var) -> Self {
     Self::from(&value)
