@@ -364,15 +364,12 @@ impl Default for TkRule {
 }
 
 /// A single input token. Wraps three things:
-/// * A `TkRule` which identifies what kind of token it is
-/// * A `Span` which represents the slice of the original input the token refers to
-/// * `TkFlags` which is a bitfield containing simple metadata
+/// * A [`TkRule`] which identifies what kind of token it is
+/// * A [`Span`] which represents the slice of the original input the token refers to
+/// * [`TkFlags`] which is a bitfield containing simple metadata
 ///
-/// Generally speaking, these are very cheap to clone. The only time cloning a `Tk` is a heavy operation
-/// is if the wrapped `TkRule` is `TkRule::Expanded`, which contains a `Vec<String>` that needs to be cloned.
-/// However, `TkRule::Expanded` is never created through lexing. You can assume that if you are cloning a `Tk`,
-/// it will not have this `TkRule`.
-/// Therefore, you can generally consider cloning a token to be effectively as cheap as cloning an Rc<T>.
+/// Generally speaking, these are very cheap to clone. All of the data held in a `Tk` is either
+/// trivially `Copy` (like `TkFlags`), or shared-ownership (like `Span` and `TkRule::Expanded`).
 ///
 /// `TkRule::Expanded` is only created during token expansion, which generally happens much later in an execution cycle.
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -390,11 +387,13 @@ impl Tk {
       flags: TkFlags::empty(),
     }
   }
+  /// Returns a new string with the token's span replaced by the given string.
   pub fn replaced(&self, other: &str) -> String {
     let mut content = self.span.source.content().to_string();
     content.replace_range(self.span.range(), other);
     content
   }
+  /// Returns true if the token is a literal string, i.e. it does not contain any special characters that would require quoting or escaping.
   pub fn is_literal(&self) -> bool {
     self.filter_meta()
       && self
@@ -411,6 +410,8 @@ impl Tk {
   /// The token's effective text as a `VarStr`: the joined expansion for an
   /// expanded token, or the raw span otherwise. Mirrors `Display` without
   /// routing through the formatter.
+  ///
+  /// Cheap for small tokens, but may allocate for large expanded tokens.
   pub fn word(&self) -> VarStr {
     match &self.class {
       TkRule::Expanded { exp } => exp.join_with(" "),
@@ -431,6 +432,7 @@ impl Tk {
     self.span.as_bytes().trim() == b";;"
   }
 
+  /// Returns false for tokens that are not part of the actual input, like `TkRule::Soi`, `TkRule::Eoi`, and `TkRule::Null`.
   pub fn filter_meta(&self) -> bool {
     !matches!(self.class, TkRule::Soi | TkRule::Eoi | TkRule::Null)
   }
@@ -465,6 +467,8 @@ impl Tk {
 }
 
 bitflags! {
+  /// A bitfield of flags that can be set on a token.
+  /// These are used to disambiguate string tokens, which can be keywords, command names, subshells, etc.
   #[derive(Debug,Clone,Copy,PartialEq,Default)]
   pub struct TkFlags: u32 {
     const KEYWORD      = 0b0000_0000_0000_0001;
@@ -487,6 +491,7 @@ bitflags! {
 }
 
 bitflags! {
+  /// A bitfield of flags that can be set on the lexer itself.
   #[derive(Debug, Clone, Default, PartialEq, Copy)]
   pub struct LexFlags: u32 {
     /// The lexer is operating in interactive mode
@@ -514,7 +519,12 @@ bitflags! {
   }
 }
 
+/// Cleans the input string by removing line continuations.
+///
+/// Honestly kind of a hack, but it works.
 pub fn clean_input(input: &[u8]) -> VarStr {
+  // PERF: Profile this function to see if it has any
+  // meaningful impact on lex speed.
   let mut bytes = SliceCursor::new(input);
   let mut output = vec![];
   let mut quotes = QuoteState::default();

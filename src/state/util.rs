@@ -1086,6 +1086,7 @@ pub fn get_default_path() -> Option<String> {
   }
 }
 
+#[derive(Debug, Clone, Copy)]
 enum Fallback {
   Dir(&'static str),
   Var(&'static str),
