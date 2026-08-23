@@ -203,7 +203,16 @@ impl TestGuard {
             mu.lock().unwrap().extend_from_slice(&buf[..n]);
             cv.notify_all();
           }
-          Ordering::Less | Ordering::Equal => break,
+          Ordering::Equal => {
+            // EOF: the pty slave's write ends have all closed
+            break;
+          }
+          Ordering::Less => {
+            if std::io::Error::last_os_error().raw_os_error() == Some(nix::libc::EINTR) {
+              continue;
+            }
+            break;
+          }
         }
       }
     });
