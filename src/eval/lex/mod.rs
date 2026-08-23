@@ -93,8 +93,7 @@ impl TkVecUtils<Tk> for Vec<Tk> {
 ///
 /// In cases where the error occurs at the very end of input, `LexFlags::STALE` is used instead.
 macro_rules! lex_err {
-	($lexer:expr, $pos:expr, $range: expr, $($arg:tt)*) => {{
-		$lexer.cursor = $pos;
+	($lexer:expr, $range: expr, $($arg:tt)*) => {{
 		sherr!(ParseErr @ $lexer.get_span($range), $($arg)*)
 	}}
 }
@@ -475,7 +474,6 @@ bitflags! {
     const OPENER       = 0b0000_0000_0000_0010;
     const IS_CMD       = 0b0000_0000_0000_0100;
     const IS_SUBSH     = 0b0000_0000_0000_1000;
-    const IS_CMDSUB    = 0b0000_0000_0001_0000;
     const IS_OP        = 0b0000_0000_0010_0000;
     const ASSIGN       = 0b0000_0000_0100_0000;
     const BUILTIN      = 0b0000_0000_1000_0000;
@@ -502,7 +500,6 @@ bitflags! {
     /// The next string-type token is a command name
     const NEXT_IS_CMD    = 1 << 3;
     /// Only lex strings; used in expansions
-    const RAW            = 1 << 4;
     /// The lexer has not produced any tokens yet
     const FRESH          = 1 << 5;
     /// The lexer has no more tokens to produce
@@ -764,6 +761,10 @@ impl LexStream {
   fn load_state(&mut self, state: LexState) {
     state.load_into(self);
   }
+  /// Attempt a speculative parse.
+  ///
+  /// If the closure returns `Some`, the parse is committed and the result is returned.
+  /// If the closure returns `None`, the parse is rolled back and `None` is returned.
   pub fn attempt<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
     let saved = self.save_state();
     if let Some(thing) = f(self) {
@@ -787,6 +788,7 @@ impl LexStream {
   pub fn in_subsh(&self) -> bool {
     self.subsh_depth > 0
   }
+  /// Update the internal `Pos` that tracks the current line and column of the cursor.
   pub fn update_pos(&mut self) {
     if self.cursor < self.pos_offset {
       // cursor moved backwards? recompute I guess?
@@ -850,6 +852,10 @@ impl LexStream {
       self.flags &= !LexFlags::NEXT_IS_CMD;
     }
   }
+  /// Attempt to parse a redirection token.
+  ///
+  /// This is a speculative operation; if it fails, the lexer will roll back to
+  /// its previous state.
   fn read_redir(&mut self) -> Option<ShResult<Tk>> {
     self.attempt(|this| {
       let start = this.cursor;
@@ -953,17 +959,27 @@ impl LexStream {
     })
   }
 
+  /// Read a heredoc
+  ///
+  /// Heredocs are very strange. They seem intuitive to parse *(just go to the next line!)*
+  /// but when you get several on one line it quickly becomes a mess.
+  ///
+  /// `self.heredoc_skip` is used to track the end of the last heredoc body,
+  /// so that the next heredoc can start reading from there.
   fn read_heredoc(&mut self) -> ShResult<Tk> {
     let start = self.cursor;
     let mut flags = TkFlags::empty();
     let mut delim = util::scratch_buf();
     let mut qt_state = QuoteState::default();
 
+    // lets read the delimiter.
     match_loop!(self.peek_byte() => b, {
       b'-' if start == self.cursor => {
+        // the first char is a dash, so its one of those tab-stripping heredocs.
         self.bump();
         flags |= TkFlags::TAB_HEREDOC;
 
+        // eat whitespace
         self.bump_while(is_field_sep);
       }
       b'"' => {
@@ -1002,12 +1018,11 @@ impl LexStream {
       self.inc_cursor(skip_offset);
       skip
     } else {
-      self.bump_while(|b| b != b'\n');
+      self.bump_while(|b| b != b'\n'); // proceed to the end of the line
       if !self.bump_if_eq(b'\n') {
         // bump_while did not end at a newline, it hit EOF.
         return Err(lex_err!(
           self,
-          self.cursor,
           start..self.cursor,
           "Heredoc delimiter not found",
         ));
@@ -1019,6 +1034,8 @@ impl LexStream {
     let mut line_start = body_start;
 
     // throw-away macro for creating and returning the heredoc token
+    // has one body for a well-formed heredoc (has a closing delimiter)
+    // and one body for an unfinished heredoc
     macro_rules! ret_heredoc {
       ($delim_start:expr) => {{
         // well formed, found both delimiters
@@ -1050,6 +1067,8 @@ impl LexStream {
     }
 
     // Read lines until we find one that matches the delimiter exactly
+    // We don't care about the actual content of these lines nor do we store them anywhere.
+    // We just check to see if it matches the delimiter.
     let mut line = util::scratch_buf();
     let mut leading_tabs = true;
     let strip_tabs = flags.contains(TkFlags::TAB_HEREDOC);
@@ -1082,11 +1101,10 @@ impl LexStream {
     }
 
     if self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
-      ret_heredoc!()
+      ret_heredoc!() // that macro from earlier
     } else {
       Err(lex_err!(
         self,
-        self.cursor,
         start..self.cursor,
         "Heredoc delimiter '{}' not found",
         delim.to_str_lossy()
@@ -1094,41 +1112,43 @@ impl LexStream {
     }
   }
 
+  /// Read a regular word
+  ///
+  /// This is responsible for most of the tokens that get created
   fn read_string(&mut self) -> ShResult<Tk> {
     let start = self.cursor;
     let can_be_subshell = self.peek_byte() == Some(b'(');
 
     match_loop!(self.peek_byte() => b, {
-      _ if self.flags.contains(LexFlags::RAW) => {
-        if b.is_ascii_whitespace() {
-          break;
-        }
-        self.bump();
-      }
       b'\\' if !self.quote_state.in_single() => {
+        // something is getting escaped
         self.bump(); // '\'
         if let Some(nb) = self.next_byte() && matches!(nb, b'\n' | b'\r') {
+          // line continuation
           self.bump_while(|b| matches!(b, b' ' | b'\t'));
         }
       }
       b'$' if !self.quote_state.in_single() && self.peek_nth(1) == Some(b'\'') => {
-        self.bump();         // '$'
-        self.next_byte();    // consume opening '
-                             // this needs its own branch
-                             // because escaping a single quote in $'...' is valid
+        // ANSI-C quoting
+        self.inc_cursor(2); // $'
+
         while let Some(b) = self.next_byte() {
-          if b == b'\\' && let Some(_) = self.peek_byte() {
+          if b == b'\\' {
             self.bump();
           } else if b == b'\'' {
             break;
           }
         }
       }
+      // single quote handling
       b'\'' => {
         self.quote_state.toggle_single();
         self.bump();
       }
-      b'`' if !self.quote_state.in_single() => {
+      // if we are in single quotes, nothing under this branch can match
+      _ if self.quote_state.in_single() => { self.bump(); }
+      b'`' => {
+        // backtick command substitution
         self.bump(); // opening `
         match_loop!(self.next_byte() => b, {
           b'\\' => self.bump(),
@@ -1138,7 +1158,6 @@ impl LexStream {
             if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
               return Err(lex_err!(
                   self,
-                  self.cursor,
                   paren_pos..paren_pos + 1,
                   "Unclosed subshell",
               ));
@@ -1148,15 +1167,16 @@ impl LexStream {
           _ => { /* do nothing */ }
         });
       }
-      _ if self.quote_state.in_single() => { self.bump(); }
       b'$' if self.peek_nth(1) == Some(b'(') && self.peek_nth(2) == Some(b'(') => {
+        // arithmetic substitution
         self.inc_cursor(2); // '$('
         let paren_pos = self.cursor;
         if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
-          return Err(lex_err!(self, self.cursor, paren_pos..paren_pos + 1, "Unclosed subshell"));
+          return Err(lex_err!(self, paren_pos..paren_pos + 1, "Unclosed subshell"));
         }
       }
       b'$' if self.peek_nth(1) == Some(b'(') => {
+        // command substitution
         self.inc_cursor(2); // '$('
         let paren_pos = self.cursor;
         // Delimit `$(...)` with the case-aware subshell scanner rather than a
@@ -1169,7 +1189,6 @@ impl LexStream {
           None if !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) => {
             return Err(lex_err!(
                 self,
-                self.cursor,
                 paren_pos..paren_pos + 1,
                 "Unclosed subshell",
             ));
@@ -1182,23 +1201,26 @@ impl LexStream {
         }
       }
       b'$' if self.peek_nth(1) == Some(b'{') => {
+        // parameter expansion
         self.inc_cursor(2); // '${'
         let open_pos = self.cursor - 2;
         if !scan_param_exp(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
               self,
-              self.cursor,
               open_pos..open_pos + 2,
               "Unclosed parameter expansion",
           ));
         }
       }
+      // double quote handling
       b'"' => {
         self.quote_state.toggle_double();
         self.bump();
       }
+      // if we are in double quotes, nothing under this branch can match
       _ if self.quote_state.in_double() => { self.bump(); }
       b'<' | b'>' => {
+        // maybe process substitution?
         if self.peek_nth(1) != Some(b'(') {
           // not a process sub; leave the operator for read_redir
           break
@@ -1209,24 +1231,25 @@ impl LexStream {
         if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
               self,
-              self.cursor,
               paren_pos..paren_pos + 1,
               "Unclosed subshell",
           ));
         }
       }
       b'(' if self.next_is_cmd() && self.peek_nth(1) == Some(b')') && self.cursor != start => {
-        // standalone "()" - function definition marker
+        // standalone "()", function definition marker thing
         // this will be handled below by self.func_paren_lookahead();
         // leave the '(' unconsumed for the next lex pass
         break;
       }
       b'(' if self.flags.contains(LexFlags::CASE_PAT_EXPECTED) && can_be_subshell => {
+        // case pattern that has a leading open paren
         self.bump(); // '('
         let tk = self.get_token(start..self.cursor, TkRule::SubshStart);
         return Ok(tk);
       }
       b'(' if (self.next_is_cmd() || self.peek_nth(1) == Some(b'(')) && can_be_subshell => {
+        // arithmetic or subshell
         self.bump(); // first '('
         let mut paren_count = 1;
         let paren_pos = self.cursor;
@@ -1237,6 +1260,7 @@ impl LexStream {
           self.bump();
           flags |= TkFlags::IS_ARITH;
         } else {
+          // subshell
           let mut tk = self.get_token(start..self.cursor, TkRule::SubshStart);
           tk.flags |= TkFlags::IS_CMD;
           self.enter_subsh();
@@ -1244,10 +1268,10 @@ impl LexStream {
 
           return Ok(tk);
         }
+        // find our closing paren
         if !scan_parens(self, paren_count) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
               self,
-              self.cursor,
               paren_pos..paren_pos + 1,
               "Unclosed subshell",
           ));
@@ -1258,6 +1282,7 @@ impl LexStream {
         return Ok(tk);
       }
       b'{' if self.cursor == start && self.next_is_cmd() => {
+        // brace group
         self.bump(); // '{'
         let mut tk = self.get_token(start..self.cursor, TkRule::BraceGrpStart);
         tk.flags |= TkFlags::IS_CMD;
@@ -1267,6 +1292,7 @@ impl LexStream {
         return Ok(tk);
       }
       b'}' if start == self.cursor && self.in_brc_grp() && self.next_is_cmd() => {
+        // brace group closer
         self.bump(); // '}'
         let tk = self.get_token(start..self.cursor, TkRule::BraceGrpEnd);
         self.leave_brc_grp();
@@ -1276,38 +1302,41 @@ impl LexStream {
       b')' if start == self.cursor
         && (self.in_subsh() || self.flags.contains(LexFlags::CASE_PAT_EXPECTED)) =>
       {
+        // subshell closer? case pattern closer?
         self.bump(); // ')'
         let tk = self.get_token(start..self.cursor, TkRule::SubshEnd);
         if self.flags.contains(LexFlags::CASE_PAT_EXPECTED) {
           // this paren closes a case pattern. consume it and continue
           self.flags &= !LexFlags::CASE_PAT_EXPECTED;
         } else {
+          // subshell closer
           self.leave_subsh();
         }
         self.set_next_is_cmd(true);
         return Ok(tk);
       }
       b'=' if self.peek_nth(1) == Some(b'(') => {
+        // looks like an array literal
         self.inc_cursor(2); // '=('
-                            // looks like an array
         if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
               self,
-              self.cursor,
               self.cursor..self.cursor + 1,
               "Unclosed array assignment",
           ));
         }
       }
       b')' => {
+        // we hit a random closing paren?
+        // that's not allowed
         if !self.in_subsh() && !self.flags.contains(LexFlags::CASE_PAT_EXPECTED) {
           let bad = self.cursor;
           self.bump(); // ')'
-          return Err(lex_err!(self, self.cursor, bad..self.cursor, "Unexpected ')'"));
+          return Err(lex_err!(self, bad..self.cursor, "Unexpected ')'"));
         }
         break
       }
-      b'|' => break, // pipe operator outside of quotes
+      b'|' => break, // pipe operator outside of quotes, leave it
       _ if is_hard_sep(b) => break,
       _ => { self.bump(); }
     });
@@ -1333,35 +1362,45 @@ impl LexStream {
       && !self.flags.contains(LexFlags::CASE_PAT_EXPECTED);
     if is_cmd {
       match text {
+        // keyword handling
+        // here we set flags for the lexer to use when reading the next token
         b"function" => {
           new_tk.mark(TkFlags::KEYWORD);
           self.flags |= LexFlags::NEXT_IS_FUNC;
+          // we are now expecting a function name
         }
         _ if self.attempt(Self::func_paren_lookahead).is_some() => {
+          // found it
           new_tk.mark(TkFlags::FUNCNAME);
           self.set_next_is_cmd(true);
         }
         b"case" => {
+          // next token should be a case pattern, followed by 'in'
           new_tk.mark(TkFlags::KEYWORD);
           self.flags |= LexFlags::EXPECTING_IN | LexFlags::EXPECTING_CASE_IN;
           self.case_depth += 1;
           self.set_next_is_cmd(false);
         }
         b"select" | b"for" => {
+          // expecting something, and then 'in'
+          // NOTE: we don't actually do anything with the word 'select' currently
           new_tk.mark(TkFlags::KEYWORD);
           self.flags |= LexFlags::EXPECTING_IN;
           self.set_next_is_cmd(false);
         }
         b"in" if self.flags.contains(LexFlags::EXPECTING_IN) => {
+          // found 'in' when we are expecting it
           new_tk.mark(TkFlags::KEYWORD);
           self.flags &= !LexFlags::EXPECTING_IN;
           if self.flags.contains(LexFlags::EXPECTING_CASE_IN) {
+            // now we start looking for case patterns
             self.flags &= !LexFlags::EXPECTING_CASE_IN;
             self.flags |= LexFlags::CASE_PAT_EXPECTED;
           }
         }
         _ if is_keyword(text) => {
           if text == b"esac" && self.case_depth > 0 {
+            // close a case statement
             self.case_depth -= 1;
             self.flags &= !LexFlags::CASE_PAT_EXPECTED;
           }
@@ -1371,25 +1410,28 @@ impl LexStream {
           new_tk.mark(TkFlags::ASSIGN);
         }
         _ if is_cmd_sub(text) => {
-          new_tk.mark(TkFlags::IS_CMDSUB);
           if self.next_is_cmd() {
             new_tk.mark(TkFlags::IS_CMD);
           }
           self.set_next_is_cmd(false);
         }
         _ if self.flags.contains(LexFlags::NEXT_IS_FUNC) => {
+          // found a function name, next token is a command
           new_tk.mark(TkFlags::FUNCNAME);
           self.set_next_is_cmd(true);
         }
         _ => {
+          // if we are here, we have a regular command.
           new_tk.flags |= TkFlags::IS_CMD;
           if BUILTIN_NAMES.binary_search(&text).is_ok() {
+            // a builtin command, even
             new_tk.mark(TkFlags::BUILTIN);
           }
           self.set_next_is_cmd(false);
         }
       }
     } else if self.flags.contains(LexFlags::EXPECTING_IN) && text == b"in" {
+      // NOTE: isn't this duplicated from the branch above?
       new_tk.mark(TkFlags::KEYWORD);
       self.flags &= !LexFlags::EXPECTING_IN;
       if self.flags.contains(LexFlags::EXPECTING_CASE_IN) {
@@ -1400,6 +1442,7 @@ impl LexStream {
       && !self.flags.contains(LexFlags::EXPECTING_CASE_IN)
       && text == b"do"
     {
+      // we got something like "for var; do ..."
       // "do" directly after the variable means that we implicitly
       // use the shell's positional parameters instead of an explicit array
       new_tk.mark(TkFlags::KEYWORD);
@@ -1417,8 +1460,6 @@ impl LexStream {
       new_tk.mark(TkFlags::KEYWORD);
       self.case_depth -= 1;
       self.flags &= !LexFlags::CASE_PAT_EXPECTED;
-    } else if is_cmd_sub(text) {
-      new_tk.mark(TkFlags::IS_CMDSUB);
     }
     Ok(new_tk)
   }
@@ -1448,6 +1489,7 @@ impl LexStream {
     self.update_pos();
     Span::with_source(range, self.source.clone()).at(self.pos)
   }
+  /// Slice a token out of the original source input, based on the given range.
   pub fn get_token(&mut self, range: Range<usize>, class: TkRule) -> Tk {
     let span = self.get_span(range);
     Tk::new(class, span)
@@ -1468,6 +1510,8 @@ impl ByteCursor for LexStream {
   }
 }
 
+// LexStream implements Iterator, so lexing as an operation is actually lazy.
+// The lexer essentially acts as a streaming cursor over the original input.
 impl Iterator for LexStream {
   type Item = ShResult<Tk>;
   #[expect(clippy::too_many_lines)]
@@ -1479,7 +1523,8 @@ impl Iterator for LexStream {
     }
 
     if self.cursor == self.source.len() {
-      // Return the Eoi token
+      // we have hit the end of the source input
+      // check for unclosed structures
       if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
         let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
         self.flags |= LexFlags::STALE;
@@ -1498,6 +1543,7 @@ impl Iterator for LexStream {
         ))
         .into();
       }
+      // Return the Eoi token
       let token = self.get_token(self.cursor..self.cursor, TkRule::Eoi);
       self.flags |= LexFlags::STALE;
       return Some(Ok(token));
@@ -1510,12 +1556,7 @@ impl Iterator for LexStream {
       return Some(Ok(token));
     }
 
-    // If we are just reading raw words, short circuit here
-    // Used for word splitting variable values
-    if self.flags.contains(LexFlags::RAW) {
-      return Some(self.read_string());
-    }
-
+    // more line continuation handling
     loop {
       let pos = self.cursor;
       if self.slice(pos..pos + 2) == Some(b"\\\n".as_slice())
@@ -1529,6 +1570,7 @@ impl Iterator for LexStream {
       }
     }
 
+    // FIXME: didn't we literally perform this exact check like 50 lines ago?
     if self.cursor == self.source.len() {
       if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
         let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
@@ -1542,8 +1584,10 @@ impl Iterator for LexStream {
       return None;
     }
 
+    // now we can finally do some lexing.
     let token = match self.byte_at(self.cursor).unwrap() {
       b'\r' | b'\n' | b';' => {
+        // this ends a statement
         let ch = self.byte_at(self.cursor).unwrap();
         let ch_idx = self.cursor;
         self.inc_cursor(1);
@@ -1569,6 +1613,7 @@ impl Iterator for LexStream {
             if (ch == b'\n' || ch == b'\r')
               && let Some(skip) = self.heredoc_skip.take()
             {
+              // FIXME: we literally just did this?
               heredoc_skipped = true;
               self.update_cursor(skip);
             }
@@ -1599,6 +1644,9 @@ impl Iterator for LexStream {
         if !self.flags.contains(LexFlags::INTERACTIVE)
           || Shed::shopts(|s| s.core.interactive_comments) =>
       {
+        // this is a comment.
+        // we still lex these and emit as tokens so that
+        // stuff like the syntax highlighter can see them
         let ch_idx = self.cursor;
         self.inc_cursor(1);
 
@@ -1621,6 +1669,7 @@ impl Iterator for LexStream {
             .byte_at(self.cursor + 1)
             .is_none_or(|c| c.is_ascii_whitespace() || matches!(c, b';' | b'|' | b'&')) =>
       {
+        // negation keyword
         self.inc_cursor(1);
         let tk_type = TkRule::Bang;
 
@@ -1629,23 +1678,28 @@ impl Iterator for LexStream {
         tk
       }
       b'|' => {
+        // pipe operator? logical or?
         let ch_idx = self.cursor;
         self.inc_cursor(1);
         self.set_next_is_cmd(true);
 
         let tk_type = if let Some(b'|') = self.byte_at(self.cursor) {
+          // logical or
           self.inc_cursor(1);
           TkRule::Or
         } else if let Some(b'&') = self.byte_at(self.cursor) {
+          // error pipe
           self.inc_cursor(1);
           TkRule::ErrPipe
         } else {
+          // pipe operator
           TkRule::Pipe
         };
 
         self.get_token(ch_idx..self.cursor, tk_type)
       }
       b'&' => {
+        // background operator? logical and? redirection?
         let ch_idx = self.cursor;
         self.inc_cursor(1);
         self.set_next_is_cmd(true);
@@ -1653,14 +1707,17 @@ impl Iterator for LexStream {
 
         let tk_type = match self.byte_at(self.cursor) {
           Some(b'&') => {
+            // logical and
             self.inc_cursor(1);
             TkRule::And
           }
           Some(b'|') => {
+            // error pipe
             self.inc_cursor(1);
             TkRule::ErrPipe
           }
           Some(b'>') => {
+            // redirection
             self.inc_cursor(1);
             let append = matches!(self.byte_at(self.cursor), Some(b'>'));
             if append {
@@ -1671,7 +1728,7 @@ impl Iterator for LexStream {
             self.flags |= LexFlags::NEXT_IS_REDIR;
             TkRule::Redir
           }
-          _ => TkRule::Bg,
+          _ => TkRule::Bg, // background
         };
 
         let mut tk = self.get_token(ch_idx..self.cursor, tk_type);
@@ -1679,6 +1736,7 @@ impl Iterator for LexStream {
         tk
       }
       _ => {
+        // ok nothing else matched, so it's probably a word
         if let Some(tk_result) = self.read_redir() {
           let tk = match tk_result {
             Ok(t) => t,
@@ -1712,9 +1770,13 @@ impl Iterator for LexStream {
         }
       }
     };
+
+    // hooray we did it
     Some(Ok(token))
   }
 }
+
+// misc helper functions
 
 pub fn is_assignment(text: &[u8]) -> bool {
   let mut bytes = text.bytes();
