@@ -14,6 +14,7 @@ const HEX: &[u8; 16] = b"0123456789abcdef";
 /// Fills the given buffer with random bytes from the OS's random number generator.
 ///
 /// Uses a syscall internally, should be used only if we need cryptographic safety.
+#[cfg(linux_like)]
 pub(crate) fn os_fill(buf: &mut [u8]) -> ShResult<()> {
   let mut filled = 0;
   while filled < buf.len() {
@@ -28,6 +29,16 @@ pub(crate) fn os_fill(buf: &mut [u8]) -> ShResult<()> {
     }
     filled += res as usize;
   }
+  Ok(())
+}
+
+/// Fills the given buffer with random bytes from the OS's random number generator.
+///
+/// Uses a syscall internally, should be used only if we need cryptographic safety.
+#[cfg(not(linux_like))]
+#[expect(clippy::unnecessary_wraps)] // signature matches the Linux variant
+pub(crate) fn os_fill(buf: &mut [u8]) -> ShResult<()> {
+  unsafe { nix::libc::arc4random_buf(buf.as_mut_ptr().cast(), buf.len()) };
   Ok(())
 }
 
