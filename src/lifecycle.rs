@@ -294,6 +294,7 @@ pub(super) fn first_run_setup() -> ShResult<()> {
 /// We need to make sure that even if we panic, our child processes get sighup
 ///
 /// This basically just wraps the default panic handler with our job control stuff
+/// Also logs the panic to a file in the shed data directory
 fn setup_panic_handler() {
   // take the default hook
   let default_panic_hook = std::panic::take_hook();
