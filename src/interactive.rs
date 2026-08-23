@@ -5,7 +5,6 @@
 use std::{
   collections::VecDeque,
   os::fd::{AsRawFd, BorrowedFd},
-  path::Path,
   sync::{
     OnceLock,
     atomic::{AtomicUsize, Ordering},
@@ -25,7 +24,7 @@ use crate::{
   exec_term,
   signal::FOCUS_GAINED,
   state::{logic::AutoCmdKind, terminal::CursorCtl, util::with_vars, vars::VarStr},
-  varstr,
+  status_msg, varstr,
 };
 
 use super::{
@@ -178,7 +177,9 @@ fn interactive_setup(args: &lifecycle::ShedArgs) -> ShResult<TermGuard> {
   sig_setup();
 
   MetaTab::ensure_meta_table()?;
-  Shed::create_socket()?;
+  if let Err(e) = Shed::create_socket() {
+    status_msg!("failed to create socket: {e}");
+  }
 
   if let Some(msg) = MetaTab::welcome_message(args.welcome) {
     outln!("\n{msg}\n\n");
@@ -470,12 +471,13 @@ fn shed_loop_iter(
   // check the socket mode
   let curr_socket_mode = ShedSocket::mode();
 
-  if curr_socket_mode != *socket_mode {
-    // the mode changed, call chmod
-    let path = ShedSocket::path();
+  if curr_socket_mode != *socket_mode
+    && let Some(sock) = Shed::get_socket()
+  {
+    // the mode changed, chmod the live socket (no-op if there is none)
     fchmodat(
       nix::fcntl::AT_FDCWD,
-      Path::new(&path),
+      sock.path(),
       curr_socket_mode,
       FchmodatFlags::FollowSymlink,
     )

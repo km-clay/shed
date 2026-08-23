@@ -4,7 +4,7 @@ use std::{
   os::{
     fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, RawFd},
     unix::{
-      fs::DirBuilderExt,
+      fs::{DirBuilderExt, MetadataExt},
       net::{UnixListener, UnixStream},
     },
   },
@@ -20,7 +20,7 @@ use nix::{
     signal::{Signal, kill},
     stat::{self, FchmodatFlags, Mode, fchmodat},
   },
-  unistd::{Pid, write},
+  unistd::{Pid, getuid, write},
 };
 
 use crate::{
@@ -443,13 +443,8 @@ pub(crate) struct ShedSocket {
 }
 
 impl ShedSocket {
-  pub fn path() -> String {
-    let pid = Pid::this();
-    state::util::runtime_dir()
-      .join("shed")
-      .join(format!("{pid}.sock"))
-      .display()
-      .to_string()
+  pub fn path(&self) -> &Path {
+    &self.path
   }
   pub fn mode() -> Mode {
     var!("SHED_SOCK_MODE")
@@ -460,12 +455,27 @@ impl ShedSocket {
       .unwrap_or(Mode::S_IRUSR | Mode::S_IWUSR)
   }
   pub fn new() -> ShResult<Self> {
-    let sock_dir = state::util::runtime_dir().join("shed");
+    let Some(runtime) = state::util::runtime_dir() else {
+      return Err(sherr!(
+        ExecFail,
+        "runtime directory not found; is $XDG_RUNTIME_DIR set?"
+      ));
+    };
+    let sock_dir = runtime.join("shed");
 
     std::fs::DirBuilder::new()
       .recursive(true)
       .mode(0o700)
       .create(&sock_dir)?;
+
+    let meta = std::fs::symlink_metadata(&sock_dir)?;
+    if !meta.file_type().is_dir() || meta.uid() != getuid().as_raw() || meta.mode() & 0o077 != 0 {
+      return Err(sherr!(
+        ExecFail,
+        "refusing to use unsafe socket directory: {}",
+        sock_dir.display()
+      ));
+    }
 
     let pid = Pid::this();
     let sock_path = sock_dir.join(format!("{pid}.sock"));

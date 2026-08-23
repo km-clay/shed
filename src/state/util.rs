@@ -1086,30 +1086,33 @@ pub fn get_default_path() -> Option<String> {
   }
 }
 
-fn xdg_dir(env: &str, fallback: &str) -> Option<PathBuf> {
-  try_var!(env)
-    .map(PathBuf::from)
-    .filter(|p| p.is_absolute())
-    .or_else(|| get_home().map(|h| h.join(fallback)))
+enum Fallback {
+  Dir(&'static str),
+  Var(&'static str),
+}
+
+fn get_dir(env: &str) -> Option<PathBuf> {
+  try_var!(env).map(PathBuf::from).filter(|p| p.is_absolute())
+}
+
+fn xdg_dir(env: &str, fallback: Fallback) -> Option<PathBuf> {
+  get_dir(env).or_else(|| match fallback {
+    Fallback::Dir(d) => get_home().map(|h| h.join(d)),
+    Fallback::Var(v) => get_dir(v),
+  })
 }
 
 pub(crate) fn data_dir() -> Option<PathBuf> {
-  xdg_dir("XDG_DATA_HOME", ".local/share")
+  xdg_dir("XDG_DATA_HOME", Fallback::Dir(".local/share"))
 }
 pub(crate) fn state_dir() -> Option<PathBuf> {
-  xdg_dir("XDG_STATE_HOME", ".local/state")
+  xdg_dir("XDG_STATE_HOME", Fallback::Dir(".local/state"))
 }
 pub(crate) fn config_dir() -> Option<PathBuf> {
-  xdg_dir("XDG_CONFIG_HOME", ".config")
+  xdg_dir("XDG_CONFIG_HOME", Fallback::Dir(".config"))
 }
-pub(crate) fn runtime_dir() -> PathBuf {
-  if let Some(p) = try_var!("XDG_RUNTIME_DIR") {
-    return PathBuf::from(p);
-  }
-  if let Some(p) = try_var!("TMPDIR") {
-    return PathBuf::from(p);
-  }
-  PathBuf::from(format!("/tmp/shed-{}", getuid()))
+pub(crate) fn runtime_dir() -> Option<PathBuf> {
+  xdg_dir("XDG_RUNTIME_DIR", Fallback::Var("TMPDIR"))
 }
 
 pub fn get_home() -> Option<PathBuf> {
@@ -1237,7 +1240,7 @@ mod xdg_resolver_tests {
   fn xdg_runtime_dir_prefers_env_var() {
     let _g = TestGuard::new();
     set_var("XDG_RUNTIME_DIR", "/run/user/1000");
-    assert_eq!(runtime_dir(), PathBuf::from("/run/user/1000"));
+    assert_eq!(runtime_dir(), Some(PathBuf::from("/run/user/1000")));
   }
 
   #[test]
@@ -1245,16 +1248,16 @@ mod xdg_resolver_tests {
     let _g = TestGuard::new();
     unset_var("XDG_RUNTIME_DIR");
     set_var("TMPDIR", "/custom/tmp");
-    assert_eq!(runtime_dir(), PathBuf::from("/custom/tmp"));
+    assert_eq!(runtime_dir(), Some(PathBuf::from("/custom/tmp")));
   }
 
   #[test]
-  fn xdg_runtime_dir_falls_back_to_tmp_uid_when_none_set() {
+  fn xdg_runtime_dir_none_when_no_runtime_dir_set() {
     let _g = TestGuard::new();
     unset_var("XDG_RUNTIME_DIR");
     unset_var("TMPDIR");
-    let expected = PathBuf::from(format!("/tmp/shed-{}", getuid()));
-    assert_eq!(runtime_dir(), expected);
+    // No invented /tmp fallback: the socket simply becomes unavailable.
+    assert_eq!(runtime_dir(), None);
   }
 
   // ─── rc_file_path ─────────────────────────────────────────────────
