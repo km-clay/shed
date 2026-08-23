@@ -1389,14 +1389,8 @@ impl LexStream {
           self.set_next_is_cmd(false);
         }
         b"in" if self.flags.contains(LexFlags::EXPECTING_IN) => {
-          // found 'in' when we are expecting it
-          new_tk.mark(TkFlags::KEYWORD);
-          self.flags &= !LexFlags::EXPECTING_IN;
-          if self.flags.contains(LexFlags::EXPECTING_CASE_IN) {
-            // now we start looking for case patterns
-            self.flags &= !LexFlags::EXPECTING_CASE_IN;
-            self.flags |= LexFlags::CASE_PAT_EXPECTED;
-          }
+          // `in` in command position (rare) while we're expecting it
+          self.consume_in_keyword(&mut new_tk);
         }
         _ if is_keyword(text) => {
           if text == b"esac" && self.case_depth > 0 {
@@ -1431,13 +1425,7 @@ impl LexStream {
         }
       }
     } else if self.flags.contains(LexFlags::EXPECTING_IN) && text == b"in" {
-      // NOTE: isn't this duplicated from the branch above?
-      new_tk.mark(TkFlags::KEYWORD);
-      self.flags &= !LexFlags::EXPECTING_IN;
-      if self.flags.contains(LexFlags::EXPECTING_CASE_IN) {
-        self.flags &= !LexFlags::EXPECTING_CASE_IN;
-        self.flags |= LexFlags::CASE_PAT_EXPECTED;
-      }
+      self.consume_in_keyword(&mut new_tk);
     } else if self.flags.contains(LexFlags::EXPECTING_IN)
       && !self.flags.contains(LexFlags::EXPECTING_CASE_IN)
       && text == b"do"
@@ -1463,10 +1451,61 @@ impl LexStream {
     }
     Ok(new_tk)
   }
+  /// Recognize the `in` keyword when the lexer is expecting it
+  fn consume_in_keyword(&mut self, tk: &mut Tk) {
+    tk.mark(TkFlags::KEYWORD);
+    self.flags &= !LexFlags::EXPECTING_IN;
+    if self.flags.contains(LexFlags::EXPECTING_CASE_IN) {
+      // if we're in a case statement, a case pattern follows
+      self.flags &= !LexFlags::EXPECTING_CASE_IN;
+      self.flags |= LexFlags::CASE_PAT_EXPECTED;
+    }
+  }
+
+  /// If the just-consumed separator `ch` is a line break and a heredoc body is
+  /// pending on it, advance the cursor past that body.
+  ///
+  /// Returns true if the cursor was advanced, false otherwise.
+  fn skip_pending_heredoc(&mut self, ch: u8) -> bool {
+    if (ch == b'\n' || ch == b'\r')
+      && let Some(skip) = self.heredoc_skip.take()
+    {
+      self.update_cursor(skip);
+      true
+    } else {
+      false
+    }
+  }
+
+  /// At EOF, detect an unclosed brace group or subshell.
+  /// Returns the terminal error item if one is still open.
+  fn unclosed_structure_error(&mut self) -> Option<ShResult<Tk>> {
+    if self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+      return None;
+    }
+    if self.in_brc_grp() {
+      self.flags |= LexFlags::STALE;
+      let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
+      return Some(Err(sherr!(
+        ParseErr @ self.get_span(start..self.cursor),
+        "Unclosed brace group",
+      )));
+    }
+    if self.in_subsh() {
+      self.flags |= LexFlags::STALE;
+      let start = self.subsh_start.unwrap_or(self.cursor.saturating_sub(1));
+      return Some(Err(sherr!(
+        ParseErr @ self.get_span(start..self.cursor),
+        "Unclosed subshell",
+      )));
+    }
+    None
+  }
+
   pub fn func_paren_lookahead(&mut self) -> Option<()> {
     // this returns Some(()) if it finds the parens.
     // kind of weird but it makes the function
-    // usable as an argument to Self::attempt()
+    // directly usable as an argument to Self::attempt()
 
     match_loop!(self.next_byte() => b, {
       b' ' | b'\t' => {
@@ -1523,25 +1562,9 @@ impl Iterator for LexStream {
     }
 
     if self.cursor == self.source.len() {
-      // we have hit the end of the source input
-      // check for unclosed structures
-      if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
-        let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
-        self.flags |= LexFlags::STALE;
-        return Err(sherr!(
-            ParseErr @ self.get_span(start..self.cursor),
-            "Unclosed brace group",
-        ))
-        .into();
-      }
-      if self.in_subsh() && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
-        let start = self.subsh_start.unwrap_or(self.cursor.saturating_sub(1));
-        self.flags |= LexFlags::STALE;
-        return Err(sherr!(
-            ParseErr @ self.get_span(start..self.cursor),
-            "Unclosed subshell",
-        ))
-        .into();
+      // we have hit the end of the source input; check for unclosed structures
+      if let Some(err) = self.unclosed_structure_error() {
+        return Some(err);
       }
       // Return the Eoi token
       let token = self.get_token(self.cursor..self.cursor, TkRule::Eoi);
@@ -1570,16 +1593,9 @@ impl Iterator for LexStream {
       }
     }
 
-    // FIXME: didn't we literally perform this exact check like 50 lines ago?
     if self.cursor == self.source.len() {
-      if self.in_brc_grp() && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
-        let start = self.brc_grp_start.unwrap_or(self.cursor.saturating_sub(1));
-        self.flags |= LexFlags::STALE;
-        return Err(sherr!(
-          ParseErr @ self.get_span(start..self.cursor),
-          "Unclosed brace group",
-        ))
-        .into();
+      if let Some(err) = self.unclosed_structure_error() {
+        return Some(err);
       }
       return None;
     }
@@ -1594,14 +1610,8 @@ impl Iterator for LexStream {
         let mut heredoc_skipped = false;
         self.set_next_is_cmd(true);
 
-        // If a heredoc was parsed on this line, skip past the body
-        // Only on newline - ';' is a command separator within the same line
-        if (ch == b'\n' || ch == b'\r')
-          && let Some(skip) = self.heredoc_skip.take()
-        {
-          heredoc_skipped = true;
-          self.update_cursor(skip);
-        }
+        // If a heredoc was parsed on this line, skip past its body.
+        heredoc_skipped |= self.skip_pending_heredoc(ch);
 
         match_loop!(self.byte_at(self.cursor) => ch, {
           b'\\' if self.byte_at(self.cursor + 1) == Some(b'\n') => {
@@ -1609,14 +1619,8 @@ impl Iterator for LexStream {
           }
           _ if is_hard_sep(ch) => {
             self.inc_cursor(1);
-            // If we just consumed a newline and there's a pending heredoc, skip past the body
-            if (ch == b'\n' || ch == b'\r')
-              && let Some(skip) = self.heredoc_skip.take()
-            {
-              // FIXME: we literally just did this?
-              heredoc_skipped = true;
-              self.update_cursor(skip);
-            }
+            // A later separator in this run may itself carry a pending heredoc.
+            heredoc_skipped |= self.skip_pending_heredoc(ch);
           }
           _ => break,
         });
@@ -1847,6 +1851,94 @@ mod tests {
       .find(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi | TkRule::Sep))
       .map(|t| t.span.to_str_lossy().into_owned())
       .unwrap_or_default()
+  }
+
+  fn lex_toks(src: &str) -> Vec<Tk> {
+    LexStream::new(src.as_bytes(), LexFlags::LEX_UNFINISHED)
+      .filter_map(Result::ok)
+      .filter(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi))
+      .collect()
+  }
+
+  // ===================== dedup regression pins =====================
+  // Behaviors locked in before extracting shared helpers: `consume_in_keyword`
+  // (the `in`-keyword body, duplicated across the is_cmd match arm and the
+  // else-if) and `skip_pending_heredoc` (the heredoc-body skip, duplicated in
+  // the separator loop). These pin observable behavior so the extractions can
+  // be proven behavior-preserving.
+
+  #[test]
+  fn for_in_marks_in_keyword() {
+    let toks = lex_toks("for x in a b");
+    let in_tok = toks
+      .iter()
+      .find(|t| t.span.to_str_lossy() == "in")
+      .expect("expected an `in` token");
+    assert!(
+      in_tok.flags.contains(TkFlags::KEYWORD),
+      "`in` in a for-loop should be marked KEYWORD; flags = {:?}",
+      in_tok.flags
+    );
+  }
+
+  #[test]
+  fn case_in_enables_pattern_terminator() {
+    // The `)` closing a case pattern only lexes as SubshEnd because the `in`
+    // handling sets CASE_PAT_EXPECTED. Pins that side effect.
+    let classes = lex_classes("case x in a) echo hi;; esac");
+    assert!(
+      classes.contains(&TkRule::SubshEnd),
+      "case pattern `)` should lex as SubshEnd; got {classes:?}"
+    );
+  }
+
+  #[test]
+  fn heredoc_body_skipped_before_trailing_command() {
+    let src = "cat <<EOF\nbody\nEOF\necho after";
+    let texts: Vec<String> = lex_toks(src)
+      .into_iter()
+      .filter(|t| t.class == TkRule::Str)
+      .map(|t| t.span.to_str_lossy().into_owned())
+      .collect();
+    assert!(
+      texts.iter().any(|t| t == "echo") && texts.iter().any(|t| t == "after"),
+      "command after heredoc should lex; got {texts:?}"
+    );
+    assert!(
+      !texts.iter().any(|t| t == "body"),
+      "heredoc body must be skipped, not lexed as a command; got {texts:?}"
+    );
+  }
+
+  #[test]
+  fn unclosed_subshell_with_trailing_ws_errors_at_lexer() {
+    // `(echo hi ` — the trailing space makes the pre-lex continuation loop
+    // advance to EOF, so the *second* EOF structure check must catch the
+    // unclosed subshell. Before unifying both EOF checks into one helper, that
+    // second check only looked at brace groups and let the parser report a
+    // different error later. Lexed with empty (non-tolerant) flags so the
+    // unclosed structure is an error rather than tolerated.
+    let err = LexStream::new(b"(echo hi ", LexFlags::empty())
+      .find_map(Result::err)
+      .expect("expected a lex error for the unclosed subshell");
+    let msg = err.to_string();
+    assert!(
+      msg.contains("Unclosed subshell"),
+      "expected 'Unclosed subshell' lex error; got {msg:?}"
+    );
+  }
+
+  #[test]
+  fn unclosed_subshell_no_trailing_ws_errors_at_lexer() {
+    // Control: the no-trailing-whitespace case was already caught by the first
+    // EOF check and must keep the same error after the unify.
+    let err = LexStream::new(b"(echo hi", LexFlags::empty())
+      .find_map(Result::err)
+      .expect("expected a lex error for the unclosed subshell");
+    assert!(
+      err.to_string().contains("Unclosed subshell"),
+      "expected 'Unclosed subshell' lex error"
+    );
   }
 
   // ===================== `!` lexer disambiguation =====================
