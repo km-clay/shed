@@ -52,20 +52,22 @@ use rustc_hash::FxHashSet as HashSet;
 use signal::QUIT_CODE;
 use util::{ShErrKind, ShResult};
 
+pub(crate) mod autoload;
 pub(crate) mod builtin;
 pub(crate) mod eval;
 pub(crate) mod expand;
 pub(crate) mod input;
 pub(crate) mod interactive;
+pub(crate) mod keys;
 pub(crate) mod lifecycle;
 pub(crate) mod procio;
 pub(crate) mod readline;
 pub(crate) mod signal;
 pub(crate) mod socket;
 pub(crate) mod state;
-
-pub(crate) mod keys;
 pub(crate) mod util;
+
+include!(concat!(env!("OUT_DIR"), "/embedded_assets.rs"));
 
 #[cfg(test)]
 pub mod tests;

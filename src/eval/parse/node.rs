@@ -11,7 +11,7 @@ use crate::{
     parse::Ast,
   },
   expand::subshell,
-  state::logic::{AutoloadKind, IsInternal, ShFunc},
+  state::logic::{IsInternal, ShFunc},
   util::error::LabelBuilder,
 };
 
@@ -567,7 +567,7 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
         });
 
         if let Some(src) = autoload_src
-          && src.source(AutoloadKind::Function).is_err()
+          && src.source().is_err()
         {
           res = Some(false);
           return;

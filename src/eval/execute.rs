@@ -8,9 +8,7 @@ use crate::{
   procio::{OutputSink, SinkScope, StdinScope},
   shopt_mut, signal, socket,
   state::{
-    Shed,
-    logic::AutoloadKind,
-    shopt,
+    Shed, shopt,
     vars::{VarStr, VarStrSliceExt},
   },
   util,
@@ -691,7 +689,7 @@ impl Dispatcher {
       ShFunc::Defined { logic, .. } => logic,
       ShFunc::Autoload(src) => {
         Shed::logic_mut(|l| l.remove_func(&func_name.to_str_lossy())); // remove autoload from the table
-        src.source(AutoloadKind::Function)?;
+        src.source()?;
 
         // retry, passing func by value
         // the scoped assignment and borrow above are done

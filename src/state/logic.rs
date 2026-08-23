@@ -1,16 +1,13 @@
 use nix::sys::signal::Signal;
 
-use std::{
-  fmt::{self, Display},
-  path::PathBuf,
-};
+use std::fmt::{self, Display};
 
 use crate::{
   HashMap, ShResult,
-  eval::{execute::exec_nonint, parse::Ast},
+  autoload::{self, AutoloadSrc, Autoloader},
+  eval::parse::Ast,
   sherr,
   state::vars::VarStr,
-  util,
 };
 
 use super::{
@@ -50,66 +47,6 @@ impl super::vars::ValueBytes for ShAlias {
   }
 }
 
-#[derive(rust_embed::RustEmbed)]
-#[folder = "include"]
-#[include = "functions/*"]
-struct AutoloadFuncs;
-
-#[derive(rust_embed::RustEmbed)]
-#[folder = "include"]
-#[include = "completions/*"]
-struct AutoloadComps;
-
-/// Shared body for `AutoloadFuncs::get_all` / `AutoloadComps::get_all`.
-///
-/// Walks the embedded asset paths and the on-disk entries under `env_var`,
-/// running each stub through `tag` so completion sources can flip the
-/// trigger from `OnCommand` to `OnCompletion`. On-disk entries shadow
-/// embedded ones with the same name; that's intentional so users can
-/// override bundled scripts.
-fn collect_autoload<I>(embedded: I, env_var: &str) -> HashMap<String, AutoloadSrc>
-where
-  I: Iterator<Item = std::borrow::Cow<'static, str>>,
-{
-  let mut out: HashMap<String, AutoloadSrc> = embedded
-    .filter_map(|path_str| {
-      let name = PathBuf::from(path_str.as_ref())
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .map(str::to_string)?;
-      if name.is_empty() {
-        return None;
-      }
-      Some((name, AutoloadSrc::Embedded(path_str.to_string())))
-    })
-    .collect();
-
-  let path_var = std::env::var(env_var).unwrap_or_default();
-  for entry in util::path_list_entries(&path_var) {
-    let path = entry.path();
-    if path.is_dir() {
-      continue;
-    }
-    if let Some(name) = path.file_stem().and_then(|n| n.to_str()) {
-      out.insert(name.to_string(), AutoloadSrc::Path(path));
-    }
-  }
-
-  out
-}
-
-impl AutoloadFuncs {
-  pub fn get_all() -> HashMap<String, AutoloadSrc> {
-    collect_autoload(Self::iter(), "SHED_FUNC_PATH")
-  }
-}
-
-impl AutoloadComps {
-  pub fn get_all() -> HashMap<String, AutoloadSrc> {
-    collect_autoload(Self::iter(), "SHED_COMPLETE_PATH")
-  }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IsInternal {
   Yes,
@@ -118,6 +55,10 @@ pub(crate) enum IsInternal {
 }
 
 /// A shell function
+///
+/// Comes in two flavors:
+/// * `Defined`, which holds the actual parsed AST and source
+/// * `Autoload`, which holds info for parsing and loading the function lazily
 #[derive(Clone, Debug)]
 pub enum ShFunc {
   Defined {
@@ -126,37 +67,6 @@ pub enum ShFunc {
     is_internal: Option<IsInternal>,
   },
   Autoload(AutoloadSrc),
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum AutoloadKind {
-  Function,
-  Completion,
-}
-
-#[derive(Clone, Debug)]
-pub enum AutoloadSrc {
-  Path(PathBuf),
-  Embedded(String),
-}
-
-impl AutoloadSrc {
-  pub fn source(&self, kind: AutoloadKind) -> ShResult<()> {
-    match self {
-      Self::Path(p) => super::util::source_file(p.clone()),
-      Self::Embedded(s) => {
-        let body = match kind {
-          AutoloadKind::Function => AutoloadFuncs::get(s)
-            .ok_or_else(|| sherr!(NotFound, "Failed to load embedded function: {s}"))?,
-          AutoloadKind::Completion => AutoloadComps::get(s)
-            .ok_or_else(|| sherr!(NotFound, "Failed to load embedded completion: {s}"))?,
-        }
-        .data;
-        let text = String::from_utf8_lossy(&body).into();
-        exec_nonint(text, Some(format!("<include>/{s}").into()))
-      }
-    }
-  }
 }
 
 impl ShFunc {
@@ -359,10 +269,10 @@ pub(crate) struct LogTab {
 impl LogTab {
   pub fn new() -> Self {
     let mut new = Self::default();
-    for (name, src) in AutoloadFuncs::get_all() {
+    for (name, src) in autoload::FuncLoader.collect_all() {
       new.functions.insert(name, ShFunc::Autoload(src));
     }
-    new.comp_autoloads = AutoloadComps::get_all();
+    new.comp_autoloads = autoload::CompLoader.collect_all();
     new
   }
   pub fn insert_autocmd(&mut self, cmd: AutoCmd) {

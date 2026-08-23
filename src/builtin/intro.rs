@@ -1,15 +1,12 @@
 use ariadne::Span;
 
+use crate::autoload::AutoloadSrc;
+
 use super::{
   eval::lex::KEYWORDS,
   opt::OptSpec,
   outln, sherr,
-  state::{
-    self, Shed,
-    logic::{AutoloadSrc, ShFunc},
-    meta::UtilKind,
-    vars::VarKind,
-  },
+  state::{self, Shed, logic::ShFunc, meta::UtilKind, vars::VarKind},
   util::{ShResult, with_status},
 };
 
@@ -70,7 +67,9 @@ impl super::Builtin for Type {
               ShFunc::Autoload(src) => {
                 let (origin, location) = match &src {
                   AutoloadSrc::Path(p) => ("external", p.display().to_string()),
-                  AutoloadSrc::Embedded(s) => ("internal", s.clone()),
+                  AutoloadSrc::Embedded { name, .. } => {
+                    ("embedded", name.to_str_lossy().to_string())
+                  }
                 };
                 if short {
                   outln!("{arg} ({origin}) -> {location}");

@@ -21,10 +21,7 @@ pub(crate) use fuzzy::{FuzzyCompleter, FuzzySelector, ScoredCandidate, SelectorR
 
 pub(crate) use grid::GridCompleter;
 
-use crate::{
-  readline::context::{CmdKind, get_ex_context_tokens},
-  state::logic::AutoloadKind,
-};
+use crate::readline::context::{CmdKind, get_ex_context_tokens};
 
 use super::{
   super::state::meta::MetaTab,
@@ -1580,7 +1577,7 @@ impl SimpleCompleter {
     }
 
     if let Some(src) = Shed::logic_mut(|l| l.take_comp_autoload(cmd)) {
-      src.source(AutoloadKind::Completion)?;
+      src.source()?;
       if let Some(spec) = Shed::meta(|m| m.get_comp_spec(cmd)) {
         return Self::run_comp_spec(ctx, &*spec);
       }

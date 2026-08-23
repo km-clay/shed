@@ -3,10 +3,7 @@ use std::collections::VecDeque;
 use bstr::ByteSlice;
 
 use crate::procio::outln_bytes;
-use crate::state::{
-  logic::{AutoloadKind, ShFunc},
-  vars::VarStr,
-};
+use crate::state::{logic::ShFunc, vars::VarStr};
 use crate::util::ends_with_unescaped;
 
 use super::{
@@ -289,7 +286,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
           }
         });
         if let Some(src) = autoload_src {
-          src.source(AutoloadKind::Function).ok();
+          src.source().ok();
         }
       }
 

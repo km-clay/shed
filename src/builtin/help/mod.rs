@@ -11,7 +11,12 @@ use std::{
   path::Path,
 };
 
-use crate::{HashSet, opt, state::meta::MetaTab};
+use crate::{
+  HashSet,
+  autoload::{self, Autoloader},
+  opt,
+  state::meta::MetaTab,
+};
 
 use super::{
   super::state::terminal::Terminal,
@@ -30,22 +35,16 @@ use nix::{
   poll::{PollFd, PollFlags, PollTimeout, poll},
 };
 
-#[derive(rust_embed::RustEmbed)]
-#[folder = "include"]
-#[include = "help/*"]
-struct AutoloadHelp;
-
-impl AutoloadHelp {
-  fn load(name: &str) -> Option<String> {
-    let raw = Self::get(name)?.data;
-    Some(String::from_utf8_lossy(&raw).into_owned())
-  }
-}
-
 pub const HELP_PAGE_INSTALL_DIR: Option<&str> = option_env!("SHED_HELP_DIR");
 
 thread_local! {
   static TAG_CACHE: RefCell<Option<(util::PathCache, Vec<ScoredTag>)>> = const { RefCell::new(None) };
+}
+
+fn load_help(name: &str) -> Option<String> {
+  autoload::HelpLoader
+    .get(name)
+    .map(|raw| String::from_utf8_lossy(raw).to_string())
 }
 
 fn cached_tags<F: FnOnce() -> Vec<ScoredTag>>(build: F) -> Vec<ScoredTag> {
@@ -121,6 +120,15 @@ fn check_hpath_names(hpath_names: &HashSet<String>, page: &str) -> bool {
   hpath_names.contains(basename)
 }
 
+/// Embedded help page names, minus any shadowed by an on-disk `SHED_HPATH`
+/// file of the same basename. Loading is left to the caller so prefix-match
+/// scans can read only the page they keep.
+fn embedded_pages(shadowed: &HashSet<String>) -> impl Iterator<Item = &'static str> + '_ {
+  autoload::HelpLoader
+    .names()
+    .filter(move |page| !check_hpath_names(shadowed, page))
+}
+
 pub fn get_all_tags() -> ShResult<Vec<ScoredTag>> {
   let mut tags = vec![];
 
@@ -139,14 +147,11 @@ pub fn get_all_tags() -> ShResult<Vec<ScoredTag>> {
     tags.append(&mut new_tags);
   }
 
-  for page in AutoloadHelp::iter() {
-    if check_hpath_names(&hpath_names, &page) {
-      continue;
-    }
-    let Some(content) = AutoloadHelp::load(&page) else {
+  for page in embedded_pages(&hpath_names) {
+    let Some(content) = load_help(page) else {
       continue;
     };
-    let mut new_tags = read_tags(&content, &page);
+    let mut new_tags = read_tags(&content, page);
     tags.append(&mut new_tags);
   }
 
@@ -154,7 +159,7 @@ pub fn get_all_tags() -> ShResult<Vec<ScoredTag>> {
 }
 
 pub fn open_help_index() -> ShResult<()> {
-  let Some(content) = AutoloadHelp::load("help/help.txt") else {
+  let Some(content) = load_help("help/help.txt") else {
     return Err(sherr!(NotFound, "Help index page not found"));
   };
 
@@ -194,12 +199,9 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
     }
   }
 
-  for page in AutoloadHelp::iter() {
-    if check_hpath_names(&hpath_names, &page) {
-      continue;
-    }
+  for page in embedded_pages(&hpath_names) {
     if page.starts_with(topic) {
-      let Some(content) = AutoloadHelp::load(&page) else {
+      let Some(content) = load_help(page) else {
         continue;
       };
       return Some((0, content, Some(page.to_string())));
@@ -216,14 +218,11 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
       }
       tags.extend(read_tags_from_file(&path).ok().unwrap_or_default());
     }
-    for page in AutoloadHelp::iter() {
-      if check_hpath_names(&hpath_names, &page) {
-        continue;
-      }
-      let Some(content) = AutoloadHelp::load(&page) else {
+    for page in embedded_pages(&hpath_names) {
+      let Some(content) = load_help(page) else {
         continue;
       };
-      tags.extend(read_tags(&content, &page));
+      tags.extend(read_tags(&content, page));
     }
     tags
   });
@@ -234,8 +233,11 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
   tags.last().and_then(|best| {
     let ScoredTag { tag: _, line, file } = best;
 
-    if let Some(path) = AutoloadHelp::iter().find(|path| path == file) {
-      let content = AutoloadHelp::load(&path)?;
+    if let Some(path) = autoload::HelpLoader
+      .names()
+      .find(|name| *name == file.as_str())
+    {
+      let content = load_help(path)?;
 
       return Some((line.saturating_sub(2), content, Some(file.clone())));
     }
