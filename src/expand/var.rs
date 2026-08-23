@@ -397,7 +397,7 @@ mod tests {
     // pattern the way `expand()` does before matching.
     let unescaped = unescape_str(b"my\\ *");
     let pattern = crate::expand::escape::markers_to_glob_escapes(&unescaped);
-    let result = expand_glob(&pattern, false)
+    let result = expand_glob(&pattern)
       .into_iter()
       .map(|word| word.to_str_lossy().to_string())
       .join(" ");
@@ -431,7 +431,7 @@ mod tests {
     std::env::set_current_dir(&tmp).unwrap();
 
     let glob = |p: &str| -> Vec<String> {
-      expand_glob(p.as_bytes(), false)
+      expand_glob(p.as_bytes())
         .into_iter()
         .map(|word| word.to_str_lossy().to_string())
         .map(|s| strip_markers(&s))

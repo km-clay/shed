@@ -8,7 +8,11 @@ use std::{
   time::{Duration, Instant},
 };
 
-use crate::{HashMap, expand::Pattern, state::vars::VarStr};
+use crate::{
+  HashMap,
+  expand::{GlobOpts, Pattern},
+  state::vars::VarStr,
+};
 
 use super::{
   ShResult, Shed, autocmd, crate_util as util,
@@ -505,7 +509,7 @@ impl RegexCache {
       return p.clone();
     }
     // `case`/`[[ == ]]` matching is case-sensitive (no `nocasematch` shopt).
-    let p = Rc::from(Pattern::compile(pat, false));
+    let p = Rc::from(Pattern::compile(pat, GlobOpts::new()));
     self.globs.insert(p.orig().clone(), p.clone());
     p
   }
@@ -1324,10 +1328,10 @@ mod cmd_timer_tests {
 
 #[cfg(test)]
 mod pattern_tests {
-  use crate::expand::Pattern;
+  use crate::expand::{GlobOpts, Pattern};
 
   fn matches(pat: &str, text: &str) -> bool {
-    Pattern::compile(pat.as_bytes(), false).is_match(text.as_bytes())
+    Pattern::compile(pat.as_bytes(), GlobOpts::new()).is_match(text.as_bytes())
   }
 
   #[test]

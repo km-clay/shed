@@ -19,7 +19,7 @@ pub(super) use escape::{
   escape_str, expand_ansi_c, shell_quote, shell_quote_bytes, shell_quote_fmt, unescape_heredoc,
   unescape_prompt, unescape_str, xtrace_quote,
 };
-pub(super) use glob::{Pattern, expand_glob, replace_posix_classes};
+pub(super) use glob::{GlobOpts, Pattern, expand_glob_with, replace_posix_classes};
 pub(super) use prompt::expand_prompt;
 pub(super) use util::expand_case_pattern;
 pub(super) use var::{expand_raw, expand_raw_inner};
@@ -205,7 +205,7 @@ impl Expander {
         continue;
       }
 
-      let expansions = glob::expand_glob(&pattern_bytes, false)
+      let expansions = glob::expand_glob(&pattern_bytes)
         .into_iter()
         .map(VarStr::from);
 

@@ -1,4 +1,9 @@
-use crate::{HashSet, expand, state::vars::VarStr, varstr};
+use crate::{
+  HashSet,
+  expand::{self, GlobOpts},
+  state::vars::VarStr,
+  varstr,
+};
 use std::{
   borrow::Cow,
   fmt::{Debug, Display},
@@ -808,9 +813,11 @@ fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
   };
 
   let pat = format!("{prefix}*{postfix}");
-  let ci = shopt!(prompt.completion_ignore_case);
+  let opts = GlobOpts::new()
+    .no_case(shopt!(prompt.completion_ignore_case))
+    .null_glob(true);
 
-  let candidates: Vec<Candidate> = expand::expand_glob(pat.as_bytes(), ci)
+  let candidates: Vec<Candidate> = expand::expand_glob_with(pat.as_bytes(), opts)
     .into_iter()
     .map(|it| util::path_from_bytes(&it).to_path_buf().into())
     .collect();

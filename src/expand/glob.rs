@@ -326,21 +326,47 @@ pub(crate) struct Pattern {
   orig: Rc<[u8]>, // used for caching
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct GlobOpts {
+  no_case: bool,
+
+  /// expands to nothing if no matches are found, instead of returning the original pattern
+  null_glob: bool,
+}
+
+impl GlobOpts {
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  /// If true, the glob will match case-insensitively.
+  pub fn no_case(mut self, ci: bool) -> Self {
+    self.no_case = ci;
+    self
+  }
+
+  /// If true, the glob will expand to nothing if no matches are found, instead of returning the original pattern.
+  pub fn null_glob(mut self, null_glob: bool) -> Self {
+    self.null_glob = null_glob;
+    self
+  }
+}
+
 #[derive(Debug, Clone)]
 struct Glob {
   atoms: Rc<[Atom]>,
-  ci: bool,
+  opts: GlobOpts,
 }
 impl Glob {
-  fn new(pattern: &[u8], ci: bool) -> Self {
+  fn new(pattern: &[u8], opts: GlobOpts) -> Self {
     Self {
       atoms: Atom::tokenize(pattern),
-      ci,
+      opts,
     }
   }
 
   fn is_match(&self, other: &[u8]) -> bool {
-    sweep(&self.atoms, other, true, self.ci) == Some(other.len())
+    sweep(&self.atoms, other, true, self.opts.no_case) == Some(other.len())
   }
 
   pub fn match_shortest_prefix(&self, text: &[u8]) -> Option<usize> {
@@ -352,7 +378,7 @@ impl Glob {
   }
 
   fn match_prefix(&self, text: &[u8], longest: bool) -> Option<usize> {
-    sweep(&self.atoms, text, longest, self.ci)
+    sweep(&self.atoms, text, longest, self.opts.no_case)
   }
 
   pub fn match_shortest_suffix(&self, text: &[u8]) -> Option<usize> {
@@ -364,12 +390,12 @@ impl Glob {
   }
 
   fn match_suffix(&self, text: &[u8], longest: bool) -> Option<usize> {
-    rsweep(&self.atoms, text, longest, self.ci)
+    rsweep(&self.atoms, text, longest, self.opts.no_case)
   }
 
   pub fn find(&self, text: &[u8], from: usize) -> Option<(usize, usize)> {
     (from..=text.len()).find_map(|start| {
-      sweep(&self.atoms, &text[start..], true, self.ci).map(|len| (start, start + len))
+      sweep(&self.atoms, &text[start..], true, self.opts.no_case).map(|len| (start, start + len))
     })
   }
 }
@@ -512,9 +538,9 @@ fn parse_class(p: &[u8]) -> Option<(bool, Vec<ClassItem>, usize)> {
 }
 
 impl Pattern {
-  pub fn compile(pattern: &[u8], ci: bool) -> Self {
+  pub fn compile(pattern: &[u8], opts: GlobOpts) -> Self {
     Self {
-      glob: Glob::new(pattern, ci),
+      glob: Glob::new(pattern, opts),
       orig: pattern.into(),
     }
   }
@@ -574,7 +600,7 @@ enum PathSeg {
 }
 
 impl PathSeg {
-  pub fn compile_segments(pattern: &[u8], ci: bool) -> Vec<Self> {
+  pub fn compile_segments(pattern: &[u8], opts: GlobOpts) -> Vec<Self> {
     pattern
       .split(|&b| b == b'/')
       .filter(|s| !s.is_empty())
@@ -584,7 +610,7 @@ impl PathSeg {
         } else if might_be_glob(seg) {
           let lit_dot = seg.starts_with(b".");
           PathSeg::Glob {
-            pat: Pattern::compile(seg, ci),
+            pat: Pattern::compile(seg, opts),
             lit_dot,
           }
         } else {
@@ -595,12 +621,16 @@ impl PathSeg {
   }
 }
 
-pub fn expand_glob(pattern: &[u8], case_insensitive: bool) -> Vec<Vec<u8>> {
+pub fn expand_glob(pattern: &[u8]) -> Vec<Vec<u8>> {
+  expand_glob_with(pattern, GlobOpts::default())
+}
+
+pub fn expand_glob_with(pattern: &[u8], opts: GlobOpts) -> Vec<Vec<u8>> {
   if !might_be_glob(pattern) || shopt!(set.noglob) {
     return vec![pattern.to_vec()];
   }
 
-  let segments = PathSeg::compile_segments(pattern, case_insensitive);
+  let segments = PathSeg::compile_segments(pattern, opts);
   let absolute = pattern.starts_with(b"/");
   let dirs_only = pattern.len() > 1 && pattern.ends_with(b"/");
   let dotglob = shopt!(core.dotglob);
@@ -674,7 +704,7 @@ pub fn expand_glob(pattern: &[u8], case_insensitive: bool) -> Vec<Vec<u8>> {
     }
   }
 
-  if out.is_empty() && !shopt!(core.nullglob) {
+  if out.is_empty() && !(shopt!(core.nullglob) || opts.null_glob) {
     out.push(pattern.to_vec());
   }
 

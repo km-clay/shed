@@ -1335,10 +1335,6 @@ impl ShedLine {
     }
   }
 
-  pub(crate) fn in_insert_mode(&self) -> bool {
-    matches!(self.core.mode.report_mode(), ModeReport::Insert)
-  }
-
   pub(crate) fn in_remote_mode(&self) -> bool {
     matches!(self.core.mode.report_mode(), ModeReport::Remote)
   }
