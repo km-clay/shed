@@ -401,7 +401,7 @@ impl HistQuery {
     let entries = self.dedupe(entries);
 
     if self.count {
-      write!(f, "{}", entries.len())
+      writeln!(f, "{}", entries.len())
     } else if self.json {
       self.format_json(&entries, f)
     } else if self.quoted {
