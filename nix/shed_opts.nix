@@ -16,6 +16,12 @@
       description = "Aliases to set when shed starts";
     };
 
+    exCommands = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {};
+      description = "Ex mode aliases to set when shed starts";
+    };
+
     functions = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = {};

@@ -157,12 +157,6 @@ pub(crate) struct TestGuard {
   saved_env: HashMap<String, String>,
 
   pty_slave: Option<OwnedFd>,
-  // Drop order matters: pty_slave MUST come before _pty_master in this
-  // struct. On macOS, `close(master)` blocks until any in-flight read on
-  // that fd completes. Our reader thread is doing a blocking read on the
-  // master. Closing the slave first sends EOF to that read, the thread
-  // exits, and then closing the master returns cleanly. Field declaration
-  // order is drop order, so this ordering is load-bearing.
   pty_master: Option<OwnedFd>,
   stdin_write_pipe: Option<OwnedFd>,
   output: Arc<(Mutex<Vec<u8>>, Condvar)>,
@@ -219,12 +213,12 @@ impl TestGuard {
             } else if n == 0 {
               break; // EOF: all slave write ends closed (the fast path)
             } else if std::io::Error::last_os_error().raw_os_error() == Some(nix::libc::EINTR) {
-              continue; // a signal interrupted the read; retry
+              // a signal interrupted the read; retry
             } else {
               break; // real read error
             }
           }
-          Err(Errno::EINTR) => continue, // a signal interrupted poll; retry
+          Err(Errno::EINTR) => (), // a signal interrupted poll; retry
           Err(_) => break,
         }
       }
