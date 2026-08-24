@@ -1,13 +1,17 @@
 use std::{
-  cmp::Ordering,
   env,
-  os::fd::{AsFd, AsRawFd, OwnedFd},
+  os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
   path::PathBuf,
-  sync::{Arc, Condvar, Mutex},
+  sync::{
+    Arc, Condvar, Mutex,
+    atomic::{AtomicBool, Ordering},
+  },
   thread::JoinHandle,
 };
 
 use nix::{
+  errno::Errno,
+  poll::{PollFd, PollFlags, PollTimeout, poll},
   pty::openpty,
   sys::termios::{OutputFlags, SetArg, tcgetattr, tcsetattr},
   unistd::pipe,
@@ -148,21 +152,22 @@ impl Drop for FuncScope {
 }
 
 pub(crate) struct TestGuard {
-  _redir_guard: RedirGuard,
+  redir_guard: Option<RedirGuard>,
   old_cwd: PathBuf,
   saved_env: HashMap<String, String>,
 
+  pty_slave: Option<OwnedFd>,
   // Drop order matters: pty_slave MUST come before _pty_master in this
   // struct. On macOS, `close(master)` blocks until any in-flight read on
   // that fd completes. Our reader thread is doing a blocking read on the
   // master. Closing the slave first sends EOF to that read, the thread
   // exits, and then closing the master returns cleanly. Field declaration
   // order is drop order, so this ordering is load-bearing.
-  pty_slave: OwnedFd,
   pty_master: Option<OwnedFd>,
   stdin_write_pipe: Option<OwnedFd>,
   output: Arc<(Mutex<Vec<u8>>, Condvar)>,
-  _read_handle: JoinHandle<()>,
+  reader_done: Arc<AtomicBool>,
+  read_handle: Option<JoinHandle<()>>,
 
   cleanups: Vec<Box<dyn FnOnce()>>,
 }
@@ -186,33 +191,41 @@ impl TestGuard {
     // we can't read if we're blocked on writing to a full pty buffer.
     let output = Arc::new((Mutex::new(vec![]), Condvar::new()));
     let output_clone = Arc::clone(&output);
+    let reader_done = Arc::new(AtomicBool::new(false));
+    let done_clone = Arc::clone(&reader_done);
     let read_handle = std::thread::spawn(move || {
       let mut buf = [0u8; 4096];
+      let master = unsafe { BorrowedFd::borrow_raw(master_raw) };
       loop {
-        let n = unsafe {
-          nix::libc::read(
-            master_raw,
-            buf.as_mut_ptr().cast::<nix::libc::c_void>(),
-            buf.len(),
-          )
-        };
-        match n.cmp(&0) {
-          Ordering::Greater => {
-            let n = n as usize;
-            let (mu, cv) = &*output_clone;
-            mu.lock().unwrap().extend_from_slice(&buf[..n]);
-            cv.notify_all();
-          }
-          Ordering::Equal => {
-            // EOF: the pty slave's write ends have all closed
-            break;
-          }
-          Ordering::Less => {
-            if std::io::Error::last_os_error().raw_os_error() == Some(nix::libc::EINTR) {
-              continue;
+        let mut fds = [PollFd::new(master, PollFlags::POLLIN)];
+        match poll(&mut fds, PollTimeout::from(250u16)) {
+          Ok(0) => {
+            if done_clone.load(Ordering::Relaxed) {
+              break; // teardown asked us to stop and EOF isn't coming
             }
-            break;
           }
+          Ok(_) => {
+            let n = unsafe {
+              nix::libc::read(
+                master_raw,
+                buf.as_mut_ptr().cast::<nix::libc::c_void>(),
+                buf.len(),
+              )
+            };
+            if n > 0 {
+              let (mu, cv) = &*output_clone;
+              mu.lock().unwrap().extend_from_slice(&buf[..n as usize]);
+              cv.notify_all();
+            } else if n == 0 {
+              break; // EOF: all slave write ends closed (the fast path)
+            } else if std::io::Error::last_os_error().raw_os_error() == Some(nix::libc::EINTR) {
+              continue; // a signal interrupted the read; retry
+            } else {
+              break; // real read error
+            }
+          }
+          Err(Errno::EINTR) => continue, // a signal interrupted poll; retry
+          Err(_) => break,
         }
       }
     });
@@ -264,15 +277,16 @@ impl TestGuard {
         .execute_batch("DROP TABLE IF EXISTS stash");
     }
     Self {
-      _redir_guard: redir_guard,
+      redir_guard: Some(redir_guard),
       old_cwd,
       saved_env,
       pty_master: Some(pty_master),
-      pty_slave,
+      pty_slave: Some(pty_slave),
       stdin_write_pipe: Some(stdin_write),
 
       output,
-      _read_handle: read_handle,
+      reader_done,
+      read_handle: Some(read_handle),
 
       cleanups: vec![],
     }
@@ -335,7 +349,9 @@ impl TestGuard {
   pub fn read_output_bytes(&self) -> Vec<u8> {
     // if we are here, then that means we have probably finished executing
     // our test. we now write this to the pty
-    let _ = nix::unistd::write(self.pty_slave.as_fd(), TEST_OUTPUT_SENTINEL);
+    if let Some(slave) = self.pty_slave.as_ref() {
+      let _ = nix::unistd::write(slave.as_fd(), TEST_OUTPUT_SENTINEL);
+    }
 
     let (mu, cv) = &*self.output;
     let mut buf = mu.lock().unwrap();
@@ -391,6 +407,13 @@ impl Drop for TestGuard {
     state::Shed::restore_state();
     state::Shed::sinks(|s| *s = crate::procio::Sinks::new());
     restore_registers();
+
+    self.reader_done.store(true, Ordering::Relaxed);
+    self.redir_guard.take();
+    self.pty_slave.take();
+    if let Some(h) = self.read_handle.take() {
+      let _ = h.join();
+    }
   }
 }
 
