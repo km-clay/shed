@@ -18,7 +18,7 @@ use nix::{
 };
 
 use crate::{
-  HashMap,
+  HashMap, signal,
   state::{scopes::ScopeStack, util},
 };
 
@@ -401,6 +401,7 @@ impl Drop for TestGuard {
     state::Shed::restore_state();
     state::Shed::sinks(|s| *s = crate::procio::Sinks::new());
     restore_registers();
+    signal::clear_quit_latch();
 
     self.reader_done.store(true, Ordering::Relaxed);
     self.redir_guard.take();

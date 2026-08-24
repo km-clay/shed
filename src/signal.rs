@@ -55,6 +55,8 @@ pub static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
 pub static JOB_DONE: AtomicBool = AtomicBool::new(false);
 /// The exit code to use when quitting cleanly. Set by `hang_up`, `check_signals`, and other signal handlers.
 pub static QUIT_CODE: AtomicI32 = AtomicI32::new(0);
+/// When exiting by signal, signal number is stored here.
+pub static QUIT_SIGNAL: AtomicI32 = AtomicI32::new(-1);
 
 /// Window size change signal
 pub static GOT_SIGWINCH: AtomicBool = AtomicBool::new(false);
@@ -94,6 +96,15 @@ const MISC_SIGNALS: &[Signal] = &[
   #[cfg(linux_like)]
   Signal::SIGPWR,
 ];
+
+pub fn quit_signal() -> Option<Signal> {
+  let sig = QUIT_SIGNAL.swap(-1, Ordering::SeqCst);
+  if sig > 0 {
+    Signal::try_from(sig).ok()
+  } else {
+    None
+  }
+}
 
 pub fn parse_signal(s: &str) -> ShResult<Signal> {
   // Try as signal name (e.g. "TERM", "SIGTERM", "term")
@@ -146,6 +157,7 @@ pub fn first_actionable_signal() -> Option<i32> {
 fn request_quit(sig: Signal) {
   SHOULD_QUIT.store(true, Ordering::SeqCst);
   QUIT_CODE.store(SIG_EXIT_OFFSET + sig as i32, Ordering::SeqCst);
+  QUIT_SIGNAL.store(sig as i32, Ordering::SeqCst);
 }
 
 /// Signals that get bespoke handling in `check_signals` before the generic
@@ -300,6 +312,7 @@ pub fn reset_signals(is_fg: bool) {
 pub fn clear_quit_latch() {
   SHOULD_QUIT.store(false, Ordering::SeqCst);
   SIGNALS.store(0, Ordering::SeqCst);
+  QUIT_SIGNAL.store(-1, Ordering::SeqCst);
 }
 
 extern "C" fn handle_signal(sig: libc::c_int) {

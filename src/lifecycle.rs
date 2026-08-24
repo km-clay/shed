@@ -9,6 +9,10 @@ use std::{
   sync::atomic::Ordering,
 };
 
+use nix::sys::signal::{
+  SaFlags, SigAction, SigHandler, SigSet, SigmaskHow, Signal, raise, sigaction, sigprocmask,
+};
+
 use crate::eval::execute;
 
 use super::{
@@ -359,6 +363,7 @@ pub(super) fn tear_down() -> ExitCode {
 }
 
 pub(super) fn exit_shed(run_trap: bool, code: i32) -> ! {
+  let quit_sig = signal::quit_signal();
   signal::clear_quit_latch();
 
   let mut code = code;
@@ -375,7 +380,24 @@ pub(super) fn exit_shed(run_trap: bool, code: i32) -> ! {
     execute::dispatch_deferred_cmd(&cmd);
   }
 
+  if let Some(sig) = quit_sig {
+    exit_signaled(sig);
+  }
+
   std::process::exit(code)
+}
+
+pub fn exit_signaled(sig: Signal) {
+  let dfl = SigAction::new(SigHandler::SigDfl, SaFlags::empty(), SigSet::empty());
+  unsafe {
+    sigaction(sig, &dfl).ok();
+  }
+
+  let mut set = SigSet::empty();
+  set.add(sig);
+  sigprocmask(SigmaskHow::SIG_UNBLOCK, Some(&set), None).ok();
+
+  let _ = raise(sig);
 }
 
 /// Code for forked children to execute
