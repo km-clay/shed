@@ -173,6 +173,37 @@ fn suppress_underscore_guard() -> impl Drop {
   crate::util::guard((), move |()| SUPPRESS_UNDERSCORE.with(|s| s.set(prev)))
 }
 
+/// Run a command that was registered using the `defer` builtin
+///
+/// Error handling happens inside the function, so this is infallible.
+pub(crate) fn dispatch_deferred_cmd(cmd: &Ast) {
+  let mut dispatcher = Dispatcher::new("defer".into());
+  if let Err(e) = dispatcher.begin_dispatch(cmd) {
+    let maybe_flowctl = match e.kind() {
+      ShErrKind::ErrInterrupt => {
+        // set -e aborted the execution
+        // so the error has already technically been handled
+        return;
+      }
+
+      ShErrKind::FuncReturn(_) => Some("return"),
+      ShErrKind::LoopBreak(_) => Some("break"),
+      ShErrKind::LoopContinue(_) => Some("continue"),
+      _ => None,
+    };
+
+    if let Some(flowctl) = maybe_flowctl {
+      sherr!(
+        SyntaxErr,
+        "'{flowctl}' cannot be used inside a deferred command"
+      )
+      .print_error();
+    } else {
+      e.print_error();
+    }
+  }
+}
+
 /// Arguments to the execvpe function
 pub struct ExecArgs {
   pub cmd: (CString, Span),
@@ -1715,13 +1746,17 @@ impl Dispatcher {
 
       // execvpe only returns on error
       let print_error = |err: ShErr| {
-        // try to write the error message back to the parent's socket
-        let request = socket::authorize(format_args!("post-error {err}"));
-        let response = socket::send_to_socket(&request);
-        if response.is_err() {
-          // if that failed, just print the error ourselves
-          err.print_error();
+        if interactive {
+          // try reporting the error to the parent shell
+          // if we are interactive, there should be a socket to post this to
+          let request = socket::authorize(format_args!("post-error {err}"));
+          if socket::send_to_socket(&request).is_ok() {
+            return;
+          }
         }
+
+        // if that fails, or we are not in an interactive shell, just print it here
+        err.print_error();
       };
       match e {
         Errno::ENOENT => {

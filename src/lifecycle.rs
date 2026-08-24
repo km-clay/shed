@@ -14,10 +14,7 @@ use crate::eval::execute;
 use super::{
   ShResult, Shed, autocmd,
   builtin::set::{Role, SetFlags, scan_options},
-  eval::{
-    execute::{Dispatcher, exec_nonint},
-    lex::Span,
-  },
+  eval::{execute::exec_nonint, lex::Span},
   outln,
   procio::{self, RedirType},
   sherr, signal,
@@ -347,10 +344,7 @@ pub(super) fn tear_down() -> ExitCode {
   let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
 
   while let Some(cmd) = deferred.pop() {
-    let mut dispatcher = Dispatcher::new("defer".into());
-    if let Err(e) = dispatcher.begin_dispatch(&cmd) {
-      e.print_error();
-    }
+    execute::dispatch_deferred_cmd(&cmd);
   }
 
   if Shed::meta(MetaTab::interactive_shell) {
@@ -378,10 +372,7 @@ pub(super) fn exit_shed(run_trap: bool, code: i32) -> ! {
   let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
 
   while let Some(cmd) = deferred.pop() {
-    let mut dispatcher = Dispatcher::new("defer".into());
-    if let Err(e) = dispatcher.begin_dispatch(&cmd) {
-      e.print_error();
-    }
+    execute::dispatch_deferred_cmd(&cmd);
   }
 
   std::process::exit(code)

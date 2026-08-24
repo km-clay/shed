@@ -3,7 +3,7 @@ use nix::sys::stat;
 use crate::{
   HashSet,
   eval::{
-    NdRule,
+    NdRule, execute,
     parse::{Ast, node::NodeId},
   },
   state::{
@@ -13,11 +13,7 @@ use crate::{
   try_var, util as crate_util, var,
 };
 
-use super::{
-  super::state::scopes::ScopeStack,
-  Shed,
-  eval::{execute::Dispatcher, lex::Span},
-};
+use super::{super::state::scopes::ScopeStack, Shed, eval::lex::Span};
 
 // ============================================================================
 // ScopeGuard - run a closure on drop (local replacement for the scopeguard crate)
@@ -80,10 +76,7 @@ fn guard_drop(_: ()) {
 
   crate_util::with_saved_status(|| {
     while let Some(cmd) = deferred.pop() {
-      let mut dispatcher = Dispatcher::new("defer".into());
-      if let Err(e) = dispatcher.begin_dispatch(&cmd) {
-        e.print_error();
-      }
+      execute::dispatch_deferred_cmd(&cmd);
     }
   });
 

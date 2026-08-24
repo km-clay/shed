@@ -107,6 +107,7 @@ fn group_labels(labels: Vec<LabelBuilder>) -> Vec<(Span, Label<Span>)> {
     .map(|label| (label.span(), label.into()))
     .collect();
 
+  // avert your eyes
   let mut chain_id: Vec<usize> = (0..n).collect();
   for i in 0..n {
     for j in i + 1..n {
@@ -146,13 +147,18 @@ fn group_labels(labels: Vec<LabelBuilder>) -> Vec<(Span, Label<Span>)> {
   annotated.into_iter().map(|(_, s, l)| (s, l)).collect()
 }
 
+/// Returns true if the two spans are related by containment, i.e. one is fully contained within the other.
 fn related_by_containment(a: &Span, b: &Span) -> bool {
   if a.span_source() != b.span_source() {
     return false;
   }
   let ra = a.range();
   let rb = b.range();
-  (ra.start <= rb.start && ra.end >= rb.end) || (rb.start <= ra.start && rb.end >= ra.end)
+
+  let a_contains_b = ra.start <= rb.start && ra.end >= rb.end;
+  let b_contains_a = rb.start <= ra.start && rb.end >= ra.end;
+
+  a_contains_b || b_contains_a
 }
 
 pub trait ShResultExt {
