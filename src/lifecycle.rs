@@ -386,6 +386,7 @@ pub(super) fn setup_child() {
     return;
   }
 
+  Shed::meta_mut(|m| m.set_interactive_shell(false));
   Shed::meta_mut(|m| m.restore_fork(false));
   Shed::logic_mut(LogTab::reset_caught_traps);
 }
