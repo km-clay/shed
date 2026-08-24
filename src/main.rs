@@ -67,6 +67,7 @@ pub(crate) mod socket;
 pub(crate) mod state;
 pub(crate) mod util;
 
+// include embedded functions/completions/help pages
 include!(concat!(env!("OUT_DIR"), "/embedded_assets.rs"));
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{collections::VecDeque, fmt::Display};
 
 use crate::{state::vars::VarStr, varstr};
 
@@ -583,6 +583,81 @@ pub fn format_mode(mode: u32) -> String {
   check_bit(0o001, 'x');
 
   out
+}
+
+pub(crate) fn levenshtein(left: &[u8], right: &[u8]) -> usize {
+  /*
+   * Levenshtein algorithm
+   * https://en.wikipedia.org/wiki/Levenshtein_distance
+   *
+   * Given two strings, find the minimum number of edits required for one string to be turned into the other.
+   * Useful for check typos, e.g. `gti` -> "Did you mean 'git'?"
+   */
+  const TRANSPOSE_COST: usize = 1;
+  const SUBST_COST: usize = 2;
+  let m = left.len();
+  let n = right.len();
+
+  // We are using the Damerau transposition checks, so we need
+  // bookkeeping for three rows.
+  let mut prev: Vec<usize> = (0..=n).collect();
+  let mut prev2: Vec<usize> = vec![0usize; n + 1]; // this is the row before prev, used for transposition
+  let mut curr: Vec<usize> = vec![0usize; n + 1];
+
+  // Since we are tracking three rows, we need an easy way to rotate them
+  // as we iterate through the strings. VecDeque will do nicely for this
+  let mut rows: VecDeque<&mut Vec<usize>> = [&mut prev2, &mut prev, &mut curr].into();
+
+  // minimum of three values macro thing
+  macro_rules! min3 {
+    ($a:expr, $b:expr, $c:expr) => {
+      ::std::cmp::min(::std::cmp::min($a, $b), $c)
+    };
+  }
+
+  // Damerau-Levenshtein: check for transposition
+  let check_transpose = |i: usize, j: usize| -> bool {
+    i >= 2 && j >= 2 && left[i - 1] == right[j - 2] && left[i - 2] == right[j - 1]
+  };
+
+  for i in 1..=m {
+    rows[2][0] = i; // base case: first column is the distance from the empty
+    // prefix of the other string
+    for j in 1..=n {
+      rows[2][j] = if left[i - 1] == right[j - 1] {
+        // both bytes match, free move
+        rows[1][j - 1]
+      } else {
+        let mut transposed = false;
+        let mut best = min3!(
+          rows[1][j - 1], // substitution
+          rows[1][j],     // deletion
+          rows[2][j - 1]  // insertion
+        );
+
+        if check_transpose(i, j) {
+          // transposition
+          best = best.min(rows[0][j - 2]);
+          transposed = true;
+        }
+
+        if transposed {
+          // we should make transposition cheaper
+          // so that typos like 'gti' -> 'git' match only on 'git'
+          best + TRANSPOSE_COST
+        } else {
+          // heavier weight
+          best + SUBST_COST
+        }
+      }
+    }
+
+    rows.rotate_left(1);
+  }
+
+  // return the bottom right value
+  // thank you Vladimir Levenshtein
+  rows[1][n]
 }
 
 #[cfg(test)]

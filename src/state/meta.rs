@@ -1052,7 +1052,6 @@ impl MetaTab {
   pub fn dirs_mut(&mut self) -> &mut VecDeque<PathBuf> {
     &mut self.dir_stack
   }
-  #[cfg(test)]
   pub fn get_cmds_in_path() -> Vec<Rc<Utility>> {
     let path = var!("PATH");
     let path = path.to_str_lossy();

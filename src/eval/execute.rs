@@ -11,7 +11,7 @@ use crate::{
     Shed, shopt,
     vars::{VarStr, VarStrSliceExt},
   },
-  util,
+  util, varstr,
 };
 use bstr::ByteSlice;
 use std::{
@@ -1760,7 +1760,22 @@ impl Dispatcher {
       };
       match e {
         Errno::ENOENT => {
-          let err = sherr!(NotFound @ span, "command not found").with_context(context.iter());
+          let suggestions = state::util::check_typo(cmd.as_bytes());
+          let note = match suggestions.as_slice() {
+            [] => None,
+            [one] => Some(varstr!("did you mean '{one}'?")),
+            many => {
+              let list = many.iter().map(|s| format!("'{s}'")).join(", ");
+
+              Some(varstr!("did you mean one of: {list}?"))
+            }
+          };
+
+          let mut err = sherr!(NotFound @ span, "command not found").with_context(context.iter());
+          if let Some(note) = note {
+            err = err.with_note(note);
+          }
+
           print_error(err);
 
           with_vars([("CMD".into(), cmd.to_str().unwrap_or_default())], || {

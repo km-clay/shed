@@ -1,5 +1,6 @@
 use crate::{
-  HashMap, builtin,
+  HashMap, HashSet,
+  builtin::{self, BUILTIN_NAMES},
   eval::lex::TkFlags,
   expand::Expander,
   state::{logic::ShFunc, terminal::Terminal, vars::VarStr},
@@ -1084,6 +1085,55 @@ pub fn get_default_path() -> Option<String> {
     }
     String::from_utf8(buf).ok()
   }
+}
+
+pub(crate) fn list_util_names() -> HashSet<VarStr> {
+  let mut cmd_names = HashSet::default();
+  let path_cmds = super::meta::MetaTab::get_cmds_in_path()
+    .into_iter()
+    .map(|u| u.name());
+  let builtin_names = BUILTIN_NAMES.iter().map(|n| VarStr::from(*n));
+  let func_names = Shed::logic(|l| l.funcs().keys().map(VarStr::from).collect::<Vec<_>>());
+  let aliases = Shed::logic(|l| l.aliases().keys().map(VarStr::from).collect::<Vec<_>>());
+
+  cmd_names.extend(path_cmds);
+  cmd_names.extend(builtin_names);
+  cmd_names.extend(func_names);
+  cmd_names.extend(aliases);
+
+  cmd_names
+}
+
+/// Check if a command name is a likely typo of a known hashed utility.
+///
+/// # Panics
+/// This calls [`list_util_names()`], which calls [`Shed::meta()`] internally.
+/// Calling this from inside of a [`Shed::meta()`] closure is a `RefCell` panic.
+pub(crate) fn check_typo(cmd: &[u8]) -> Vec<VarStr> {
+  // transposition and edits are scored differently
+  // edits = 2, transposition = 1
+  // we have to multiply the threshold by two to scale for this
+  let max_edits = (cmd.len() / 3).clamp(1, 2);
+  let max_dist = max_edits * 2;
+
+  let mut matches = list_util_names()
+    .into_iter()
+    .filter(|n| n.len().abs_diff(cmd.len()) <= max_dist) // cheap prune
+    .filter_map(|n| {
+      // compute all distances
+      let d = util::levenshtein(cmd, n.as_bytes());
+      (1..=max_dist).contains(&d).then_some((d, n))
+    })
+    .collect::<Vec<_>>();
+
+  matches.sort_by_key(|(d, n)| (*d, n.as_bytes().first() != cmd.first()));
+
+  if let Some(&(best, _)) = matches.first() {
+    matches.retain(|(d, _)| *d == best);
+  }
+  matches.truncate(3);
+
+  matches.into_iter().map(|(_, n)| n).collect()
 }
 
 #[derive(Debug, Clone, Copy)]

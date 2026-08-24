@@ -40,7 +40,7 @@ pub(super) use error::{ShErr, ShErrKind, ShResult, ShResultExt, get_context};
 
 pub(super) use strops::{
   ByteCursor, QuoteState, SliceCursor, VarStrDisplay, ends_with_unescaped, format_mode,
-  format_size, format_time, has_unescaped, parse_size, scan_param_exp, scan_parens,
+  format_size, format_time, has_unescaped, levenshtein, parse_size, scan_param_exp, scan_parens,
   split_at_unescaped, split_tk,
 };
 
