@@ -18,8 +18,13 @@ processes.
       Contains the path to the socket, typically:
         `$XDG_RUNTIME_DIR/shed/{pid}.sock`
 
-      If `$XDG_RUNTIME_DIR` is unset, falls back to:
-        `/tmp/shed-{uid}/shed/{pid}.sock`
+      If `$XDG_RUNTIME_DIR` is not set to an absolute path, `$TMPDIR`
+      is used instead:
+        `$TMPDIR/shed/{pid}.sock`
+
+      If neither is set to an absolute path, the socket is not
+      created and `$SHED_SOCK` is left unset. The shell still runs
+      normally, just without IPC.
 
   `$SHED_SOCK_MODE`                            *socket-mode*
 
@@ -67,17 +72,31 @@ processes.
 ==============================================================================
 3. Connecting                                  *socket-connect*
 
-  From another terminal or a background process:
+  The built-in `sock` (see |builtin-sock|) connects with no external
+  dependency. Its `--oneshot` mode sends a message, then streams the
+  peer's output to stdout - either a single request/response, or a
+  live `subscribe` event stream:
 
-      `echo "query::cwd" | socat - UNIX-CONNECT:$SHED_SOCK`
+      `sock -U "$SHED_SOCK" --oneshot 'query::cwd'`
+      `sock -U "$SHED_SOCK" --oneshot subscribe    # streams until closed`
 
-  From within the shell (must be backgrounded so the poll loop
-  can process the request):
+  The message may also come from stdin, so a pipeline works:
 
-      `echo "query::cwd" | socat - UNIX-CONNECT:$SHED_SOCK &`
+      `printf 'query::cwd' | sock -U "$SHED_SOCK" --oneshot`
 
-  Note: the shell cannot query its own socket synchronously because
-  it must return to the poll loop to process incoming requests.
+  Later examples use a `shedsock` shorthand for this:
+
+      `shedsock() { sock -U "$SHED_SOCK" --oneshot "$*"; }`
+
+  Any tool that speaks Unix sockets works just as well - for
+  instance, with socat:
+
+      `echo 'query::cwd' | socat - UNIX-CONNECT:$SHED_SOCK`
+
+  Note: a shell can't query its own socket synchronously - it has to
+  return to its poll loop to service the request - so background a
+  self-query (`... &`) when talking to the socket of the shell you're
+  typing in.
 
 ==============================================================================
 4. Messages                                    *socket-msg*

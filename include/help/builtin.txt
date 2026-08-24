@@ -2092,6 +2092,7 @@ SOCK                                             *builtin-sock* *sock*
   `sock -U @{name} [fd]`
   `sock -t {host} -p {port} [fd]`
   `sock {target} -v {var}`
+  `sock {target} --oneshot [message]`
 
   Open a client connection to a socket and bind it to a file descriptor
   in the current shell. Once bound, the connection is an ordinary file
@@ -2128,6 +2129,24 @@ SOCK                                             *builtin-sock* *sock*
   The bound descriptor is left open across `exec` and is inherited by
   child processes, so external commands can read and write it too.
 
+  Request/response and streaming:
+
+  `--oneshot`        send {message}, then stream the peer's output to
+                     stdout until the connection closes. `-o` is a
+                     synonym.
+
+  Rather than binding a descriptor, `--oneshot` performs a single
+  exchange: it sends {message} (or stdin, when no message argument is
+  given), closes its write half so the peer sees end-of-input, then
+  copies the peer's output to stdout until EOF. Because it streams
+  rather than buffers, it serves both a one-shot reply and a live
+  event feed (e.g. a `subscribe` stream on the shed control socket).
+  `-v` and an explicit {fd} do not apply in this mode.
+
+  Closing the write half is the part a bound descriptor can't express
+  from the shell, so a peer that waits for a complete request before
+  replying answers immediately instead of stalling until it times out.
+
   Examples:
 
       `sock -U /run/docker.sock 3`      connect, bind to fd 3
@@ -2137,6 +2156,11 @@ SOCK                                             *builtin-sock* *sock*
 
       `sock -t example.com -p 80 4`     connect over TCP
       `sock -U @shed.sock 5`            connect to an abstract socket
+
+      `sock -U "$SHED_SOCK" --oneshot 'query::cwd'`
+                                        one request, reply on stdout
+      `printf 'query::cwd' | sock -U "$SHED_SOCK" --oneshot`
+                                        same, message read from stdin
 
   Exit status:
 

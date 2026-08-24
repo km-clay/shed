@@ -1177,6 +1177,26 @@ impl StdinPipe {
   }
 }
 
+/// Read from the given file descriptor, then write the results to stdout
+/// This process loops until the read returns EOF or returns some error.
+pub(crate) fn stream_to_sink(fd: BorrowedFd) -> ShResult<()> {
+  let mut buf = [0u8; 8192]; // 8 KiB
+  loop {
+    match unistd::read(fd, &mut buf) {
+      Ok(0) => break,
+      Ok(n) => {
+        if Shed::sinks(|s| s.write_all(&buf[..n])).is_err() {
+          break; // downstream closed
+        }
+      }
+      Err(Errno::EINTR) => signal::check_signals()?,
+      Err(e) => return Err(e.into()),
+    }
+  }
+
+  Ok(())
+}
+
 /// Write all of `bytes` to `fd`, tolerating `EINTR` and a child that closes its
 /// end early (`EPIPE`, e.g. `head`). Does not close `fd`.
 pub(crate) fn write_all_to_fd(fd: BorrowedFd, bytes: &[u8]) {
@@ -1194,6 +1214,25 @@ pub(crate) fn write_all_to_fd(fd: BorrowedFd, bytes: &[u8]) {
       Err(_) => break,
     }
   }
+}
+
+/// Write all of `bytes` to `fd`, surfacing failures to the caller.
+///
+/// The checked counterpart to [`write_all_to_fd`]: instead of silently stopping,
+/// a hung-up peer (`EPIPE`), a zero-length write, or any other write error is
+/// returned as an `Err`. Retries on `EINTR`, propagating a pending signal
+/// through [`signal::check_signals`]. Does not close `fd`.
+pub(crate) fn write_all_to_fd_checked(fd: BorrowedFd, bytes: &[u8]) -> ShResult<()> {
+  let mut written = 0;
+  while written < bytes.len() {
+    match write(fd, &bytes[written..]) {
+      Ok(0) => return Err(sherr!(ExecFail, "write to fd returned zero bytes")),
+      Ok(n) => written += n,
+      Err(Errno::EINTR) => signal::check_signals()?,
+      Err(e) => return Err(e.into()),
+    }
+  }
+  Ok(())
 }
 
 /// Feed `bytes` to `fd` from a background thread, closing `fd` (signalling EOF)

@@ -1779,9 +1779,9 @@ mod check_typo_tests {
   //! `check_typo` suggests likely-typo corrections for an unknown command. It
   //! draws candidates from the live command set ($PATH walk + builtins + funcs
   //! + aliases via [`list_util_names`]), so these tests register their own
-  //! distinctively-named aliases and query with strings gibberish enough that
-  //! no real $PATH binary can plausibly fall within the edit threshold — that
-  //! keeps the assertions deterministic regardless of the host's $PATH.
+  //!   distinctively-named aliases and query with strings gibberish enough that
+  //!   no real $PATH binary can plausibly fall within the edit threshold — that
+  //!   keeps the assertions deterministic regardless of the host's $PATH.
   use super::*;
   use crate::eval::lex::Span;
   use crate::tests::testutil::TestGuard;
@@ -1793,7 +1793,7 @@ mod check_typo_tests {
   fn suggestions(cmd: &str) -> Vec<String> {
     check_typo(cmd.as_bytes())
       .iter()
-      .map(|n| n.to_string())
+      .map(ToString::to_string)
       .collect()
   }
 

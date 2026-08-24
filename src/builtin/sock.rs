@@ -2,7 +2,7 @@ use std::{
   io,
   net::{TcpListener, TcpStream},
   os::{
-    fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
+    fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
     unix::{
       fs::FileTypeExt,
       net::{UnixListener, UnixStream},
@@ -29,7 +29,10 @@ use nix::{
 
 use crate::{
   ShErrKind, ShResult, Shed,
-  builtin::opt::{Opt, OptSpec},
+  builtin::{
+    join_raw_args,
+    opt::{Opt, OptSpec},
+  },
   eval, lifecycle, procio, sherr, shopt, signal,
   state::vars::{VarFlags, VarKind, VarStr},
   util::{ShErr, ShResultExt, VarStrDisplay, with_status},
@@ -244,9 +247,23 @@ enum SockTarget {
   Tcp(TcpSocket),
 }
 
+impl SockTarget {
+  fn open(self) -> ShResult<OwnedFd> {
+    match self {
+      SockTarget::Unix(unix_addr) => unix_addr
+        .connect()
+        .map_err(|e| socket_error("failed to connect to Unix socket", &e)),
+      SockTarget::Tcp(tcp_socket) => tcp_socket
+        .connect()
+        .map_err(|e| socket_error("failed to connect to TCP socket", &e)),
+    }
+  }
+}
+
 struct SockOpts {
   target: SockTarget,
   fd_var: Option<VarStr>,
+  oneshot: bool,
 }
 
 impl SockOpts {
@@ -255,6 +272,7 @@ impl SockOpts {
     let mut tcp_addr = None;
     let mut tcp_port = None;
     let mut fd_var = None;
+    let mut oneshot = false;
 
     for opt in opts {
       match opt.key() {
@@ -287,6 +305,7 @@ impl SockOpts {
           let arg = opt.value()?;
           fd_var = Some(arg.to_var_str());
         }
+        "oneshot" => oneshot = true,
 
         _ => return Err(sherr!(ExecFail @ opt.span(), "Unexpected option '{opt}'")),
       }
@@ -314,7 +333,11 @@ impl SockOpts {
       SockTarget::Unix,
     );
 
-    Ok(Self { target, fd_var })
+    Ok(Self {
+      target,
+      fd_var,
+      oneshot,
+    })
   }
 }
 
@@ -466,7 +489,8 @@ impl super::Builtin for Listen {
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
-    let SockOpts { target, fd_var } = SockOpts::from_opts(&opts).promote_err(args.cmd_span())?;
+    let SockOpts { target, fd_var, .. } =
+      SockOpts::from_opts(&opts).promote_err(args.cmd_span())?;
 
     if arg_vec.len() > 1 {
       return Err(sherr!(
@@ -520,6 +544,7 @@ impl super::Builtin for Sock {
 
   fn opts(&self) -> Vec<OptSpec> {
     vec![
+      OptSpec::new_long("oneshot").short(b'o'),
       OptSpec::new_short("unix", b'U').argc(1), // filesystem Unix socket
       OptSpec::new_long("tcp").short(b't').argc(1), // TCP host
       OptSpec::new_long("port").short(b'p').argc(1), // port number
@@ -529,7 +554,35 @@ impl super::Builtin for Sock {
 
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
-    let SockOpts { target, fd_var } = SockOpts::from_opts(&opts).promote_err(args.cmd_span())?;
+    let SockOpts {
+      target,
+      fd_var,
+      oneshot,
+    } = SockOpts::from_opts(&opts).promote_err(args.cmd_span())?;
+
+    if oneshot {
+      let (mut message, _) = join_raw_args(arg_vec);
+      if message.is_empty()
+        && let Some(input) = self.get_input(&mut args)
+      {
+        message = input.into();
+      }
+
+      let stream = target.open().promote_err(args.cmd_span())?;
+
+      procio::write_all_to_fd_checked(stream.as_fd(), message.as_bytes())
+        .promote_err(args.cmd_span())?;
+
+      // tell the server we're done (EOF)
+      socket::shutdown(stream.as_raw_fd(), socket::Shutdown::Write)
+        .map_err(ShErr::from)
+        .promote_err(args.cmd_span())?;
+
+      // stream response to our stdout
+      procio::stream_to_sink(stream.as_fd()).promote_err(args.cmd_span())?;
+
+      return with_status(0);
+    }
 
     if arg_vec.len() > 1 {
       return Err(sherr!(
@@ -555,16 +608,7 @@ impl super::Builtin for Sock {
       None
     };
 
-    let stream = match target {
-      SockTarget::Tcp(tcp_socket) => tcp_socket
-        .connect()
-        .map_err(|e| socket_error("failed to connect to TCP socket", &e))
-        .promote_err(args.cmd_span())?,
-      SockTarget::Unix(unix_addr) => unix_addr
-        .connect()
-        .map_err(|e| socket_error("failed to connect to Unix socket", &e))
-        .promote_err(args.cmd_span())?,
-    };
+    let stream = target.open().promote_err(args.cmd_span())?;
 
     install_socket_fd(stream, target_fd.map(|fd| fd as RawFd), fd_var, "SHED_CONN")
   }
@@ -660,6 +704,88 @@ mod tests {
     assert_eq!(g.read_output().trim(), "got=fromserver");
 
     test_input("eval \"exec $conn>&-\"").ok();
+  }
+
+  // ─── oneshot mode (send message, half-close, stream reply) ────────
+  //
+  // These need no user-range fd: --oneshot binds nothing, it just relays the
+  // exchange. Each spawns a tiny server thread that reads the request to EOF
+  // (the client's shutdown-write signals it) and replies, then drops the
+  // connection so the relay sees EOF. The server's read timeout is a hang
+  // backstop in case the half-close ever regresses.
+
+  #[test]
+  fn sock_oneshot_round_trips() {
+    let mut g = TestGuard::new();
+    let (listener, path) = bind_listener(&mut g, "oneshot");
+
+    let server = std::thread::spawn(move || {
+      let (mut conn, _) = listener.accept().unwrap();
+      conn.set_read_timeout(Some(Duration::from_secs(2))).ok();
+      let mut req = Vec::new();
+      conn.read_to_end(&mut req).unwrap();
+      conn.write_all(b"reply-ok\n").unwrap();
+      req // conn drops here -> EOF for the relay
+    });
+
+    test_input(format!(
+      "sock -U {} --oneshot 'the-request'",
+      path.display()
+    ))
+    .unwrap();
+    assert_eq!(g.read_output().trim(), "reply-ok");
+    assert_eq!(state::Shed::get_status(), 0);
+    assert_eq!(server.join().unwrap(), b"the-request");
+  }
+
+  #[test]
+  fn sock_oneshot_reads_message_from_stdin() {
+    let mut g = TestGuard::new();
+    let (listener, path) = bind_listener(&mut g, "oneshot_stdin");
+
+    let server = std::thread::spawn(move || {
+      let (mut conn, _) = listener.accept().unwrap();
+      conn.set_read_timeout(Some(Duration::from_secs(2))).ok();
+      let mut req = Vec::new();
+      conn.read_to_end(&mut req).unwrap();
+      conn.write_all(b"ack\n").unwrap();
+      req
+    });
+
+    // No message argument -> the request is read from stdin.
+    g.feed_stdin(b"from-stdin");
+    test_input(format!("sock -U {} --oneshot", path.display())).unwrap();
+    assert_eq!(g.read_output().trim(), "ack");
+    assert_eq!(server.join().unwrap(), b"from-stdin");
+  }
+
+  #[test]
+  fn sock_oneshot_streams_full_response() {
+    let mut g = TestGuard::new();
+    let (listener, path) = bind_listener(&mut g, "oneshot_stream");
+
+    // A response larger than one read buffer, to prove the relay loops to EOF
+    // rather than emitting a single chunk (and never truncates).
+    let payload = "x".repeat(20_000);
+    let server = std::thread::spawn(move || {
+      let (mut conn, _) = listener.accept().unwrap();
+      conn.set_read_timeout(Some(Duration::from_secs(2))).ok();
+      let mut req = Vec::new();
+      conn.read_to_end(&mut req).unwrap();
+      conn.write_all(payload.as_bytes()).unwrap();
+    });
+
+    test_input(format!("sock -U {} --oneshot ping", path.display())).unwrap();
+    server.join().unwrap();
+
+    let out = g.read_output();
+    assert_eq!(
+      out.len(),
+      20_000,
+      "expected the whole payload, got {}",
+      out.len()
+    );
+    assert!(out.bytes().all(|b| b == b'x'));
   }
 
   // ─── explicit fd (needs a free fd in the user range 0-9) ──────────

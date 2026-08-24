@@ -84,6 +84,7 @@ fn next_u64() -> u64 {
   })
 }
 
+/// Fill a buffer with *reasonably unpredictable* bytes. The randomness created by this is deterministic, but should be good enough for most purposes. If you need cryptographic safety, use [`os_fill()`] instead.
 fn fill(buf: &mut [u8]) {
   for chunk in buf.chunks_mut(8) {
     let n = next_u64().to_ne_bytes();
