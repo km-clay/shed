@@ -1110,11 +1110,8 @@ pub(crate) fn list_util_names() -> HashSet<VarStr> {
 /// This calls [`list_util_names()`], which calls [`Shed::meta()`] internally.
 /// Calling this from inside of a [`Shed::meta()`] closure is a `RefCell` panic.
 pub(crate) fn check_typo(cmd: &[u8]) -> Vec<VarStr> {
-  // transposition and edits are scored differently
-  // edits = 2, transposition = 1
-  // we have to multiply the threshold by two to scale for this
   let max_edits = (cmd.len() / 3).clamp(1, 2);
-  let max_dist = max_edits * 2;
+  let max_dist = max_edits * util::EDIT_WEIGHT;
 
   let mut matches = list_util_names()
     .into_iter()
@@ -1774,5 +1771,93 @@ mod set_ver_info_tests {
     assert_eq!(get("major"), expected[0]);
     assert_eq!(get("minor"), expected[1]);
     assert_eq!(get("patch"), expected[2]);
+  }
+}
+
+#[cfg(test)]
+mod check_typo_tests {
+  //! `check_typo` suggests likely-typo corrections for an unknown command. It
+  //! draws candidates from the live command set ($PATH walk + builtins + funcs
+  //! + aliases via [`list_util_names`]), so these tests register their own
+  //! distinctively-named aliases and query with strings gibberish enough that
+  //! no real $PATH binary can plausibly fall within the edit threshold — that
+  //! keeps the assertions deterministic regardless of the host's $PATH.
+  use super::*;
+  use crate::eval::lex::Span;
+  use crate::tests::testutil::TestGuard;
+
+  fn alias(name: &str) {
+    Shed::logic_mut(|l| l.insert_alias(name, &"echo".into(), Span::default()));
+  }
+
+  fn suggestions(cmd: &str) -> Vec<String> {
+    check_typo(cmd.as_bytes())
+      .iter()
+      .map(|n| n.to_string())
+      .collect()
+  }
+
+  #[test]
+  fn suggests_a_close_command() {
+    let _g = TestGuard::new();
+    alias("qzxwvbn");
+    // one inserted byte from the alias → a single ordinary edit, well within
+    // the threshold for an 8-byte command.
+    let out = suggestions("qzxwvbnq");
+    assert!(
+      out.iter().any(|n| n == "qzxwvbn"),
+      "expected 'qzxwvbn' among suggestions, got {out:?}"
+    );
+  }
+
+  #[test]
+  fn exact_match_is_not_suggested() {
+    let _g = TestGuard::new();
+    alias("qzxwvbn");
+    // The command exists verbatim (distance 0); check_typo excludes distance 0,
+    // and nothing else is near this gibberish, so there is nothing to suggest.
+    assert!(
+      suggestions("qzxwvbn").is_empty(),
+      "an exact match must not be offered as a typo"
+    );
+  }
+
+  #[test]
+  fn distant_command_yields_nothing() {
+    let _g = TestGuard::new();
+    alias("qzxwvbn");
+    // Far outside the edit threshold from the alias (and from any real binary).
+    assert!(
+      suggestions("totally_unrelated_string").is_empty(),
+      "a far-off command should produce no suggestions"
+    );
+  }
+
+  #[test]
+  fn caps_suggestions_at_three() {
+    let _g = TestGuard::new();
+    // Four equidistant candidates (last byte substituted); the best-distance
+    // tier holds all four, but the result is capped at three.
+    for name in ["qzjxvbwa", "qzjxvbwb", "qzjxvbwc", "qzjxvbwd"] {
+      alias(name);
+    }
+    let out = suggestions("qzjxvbwe");
+    assert_eq!(out.len(), 3, "cap-at-3 violated, got {out:?}");
+    assert!(
+      out.iter().all(|n| n.starts_with("qzjxvbw")),
+      "unexpected non-registered suggestion in {out:?}"
+    );
+  }
+
+  #[test]
+  fn prefers_the_closest_over_a_farther_match() {
+    let _g = TestGuard::new();
+    // Both candidates are within the threshold for `qzjxvbw` (max distance 4):
+    // `qzjxvbq` is one substitution away (distance 2), `qzjxvpq` is two subs
+    // away (distance 4). Only the closer one survives the best-distance tier.
+    alias("qzjxvbq");
+    alias("qzjxvpq");
+    let out = suggestions("qzjxvbw");
+    assert_eq!(out, vec!["qzjxvbq".to_string()], "got {out:?}");
   }
 }
