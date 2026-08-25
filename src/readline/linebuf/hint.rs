@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use crate::readline::linebuf::Line;
+use crate::readline::{highlight, linebuf::Line};
 
 use super::{Lines, Pos, shopt};
 
@@ -40,7 +40,7 @@ impl Hint {
     if let Some(prefix) = prefix
       && let Some(rest) = text.strip_prefix(prefix)
     {
-      text = rest.to_string();
+      text = highlight::visualize_controls_str(rest);
     }
 
     format!("\x1b[90m{text}\x1b[0m").replace('\n', "\n\x1b[90m")

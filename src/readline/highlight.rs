@@ -228,6 +228,31 @@ fn paint<W: std::fmt::Write>(
   }
 }
 
+/// General control byte caret-notation helper for raw strings
+pub(crate) fn visualize_controls_str(text: &str) -> String {
+  if !text.bytes().any(is_visualized_control) {
+    return text.to_string();
+  }
+
+  let mut out = String::with_capacity(text.len());
+  for ch in text.chars() {
+    let b = ch as u32;
+    if !(b < 0x80 && is_visualized_control(b as u8)) {
+      out.push(ch);
+      continue;
+    }
+
+    match b as u8 {
+      0x7f => out.push_str("^?"),
+      b => {
+        out.push('^');
+        out.push((b ^ 0x40) as char);
+      }
+    }
+  }
+  out
+}
+
 /// Emit `src[range]` styled with `style`, slicing at selection boundaries so
 /// any portion overlapping any range in `selections` paints with an inverted
 /// variant of the same style. Multiple overlapping/adjacent selections are
