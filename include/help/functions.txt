@@ -79,56 +79,68 @@ Named streams ~                                          *named-streams*
   first record. Tools that are unaware of `-n` pass it through as data.
 
 ==============================================================================
-AUTOLOADING                                      *autoloading* *autoload*
+AUTOLOADING                                      *autoloading*
 
-  Functions and completions are resolved by name and loaded lazily, the
-  first time they are actually used, rather than all at once when the
-  shell starts. Each kind is drawn from two sources:
+  A function or completion is registered by name and loaded lazily; its
+  body is not read until the first time it is used. The functions and
+  completions bundled with shed are all autoloaded this way at startup, so
+  they cost nothing until they are called.
 
-    - the set bundled with shed, embedded in the binary
-    - a `:`-separated list of directories you control, named by an
-      environment variable — treat it like `PATH`, but for shell code
+  Your own functions and completions are registered the same way, on
+  demand, with the |autoload|(builtin-autoload) builtin. Startup only 
+  registers the bundled set; nothing scans your directories on its own.
 
-  In a user directory, a file's stem (its name with any extension removed)
-  is the name it registers under, e.g. `some_func.sh` registers a function
-  called `some_func`. A file whose stem matches a bundled name overrides
-  that bundled definition; any other file adds a new name alongside the
-  bundled set.
+  A file's stem (its name with any extension removed) is the name it
+  registers under, e.g. `some_func.sh` registers a function called
+  `some_func`. A user file whose stem matches a bundled name overrides
+  that bundled definition; any other file adds a new name alongside it.
 
-  Functions ~                                            *SHED_FUNC_PATH*
+  Registering by name ~                                  *SHED_FUNC_PATH*
 
-    `SHED_FUNC_PATH` lists directories of function files. Each file
-    becomes an autoloadable function named after its stem, but its body
-    is not read until the function is first called. Inspecting a function
-    with `declare -f` also forces the load, so it doubles as a way to
-    preview an autoloaded body:
+    `autoload {name}` marks a function to load on first call. The name is
+    resolved against the bundled set and the directories in
+    `SHED_FUNC_PATH`; a `:`-separated list, like `PATH` but for shell
+    functions. The path is read from the live variable when `autoload`
+    runs, so exporting it and autoloading from the same `shedrc` works:
+
+        `export SHED_FUNC_PATH=$HOME/.shed/func`
+        `autoload greet`       resolve greet in the path, load on first call
+
+    Inspecting a function with `declare -f` also forces the load, so it
+    doubles as a way to preview an autoloaded body:
 
         `declare -f split`     load `split` if needed, then show it
 
-    A file `~/.shed/func/greet.sh` containing
+  Registering a directory ~
 
-        `greet() { echo "hello, $1"; }`
+    `autoload -p {dir} ...` crawls each directory and registers every file
+    it finds, rather than naming them one by one. Each argument may be a
+    `:`-separated list, so a whole path registers at once:
 
-    makes `greet` available once its directory is on the path:
-
-        `export SHED_FUNC_PATH=$HOME/.shed/func`
-        `greet world`          sources greet.sh, then runs `greet`
+        `autoload -p $HOME/.shed/func`     register every function there
+        `autoload -p "$SHED_FUNC_PATH"`    register the whole path at once
 
   Completions ~                                      *SHED_COMPLETE_PATH*
 
-    `SHED_COMPLETE_PATH` lists directories of completion files. Here a
-    file's stem is a command name, and the file is sourced the first
-    time you request completion for that command. Typically it calls
-    |complete|(builtin-complete) to register a completion spec, which
-    then drives the results. Nothing is loaded for commands you never
-    complete.
+    `autoload --comp` operates on completions instead of functions. A
+    completion file's stem is a command name, and the file is sourced the
+    first time you complete that command; typically it calls
+    |complete|(builtin-complete) to register a spec. Named completions
+    resolve against `SHED_COMPLETE_PATH`:
 
-  Help pages follow the same pattern through `SHED_HPATH`; see
-  |help-hpath| for that side of it.
+        `autoload --comp deploy`                load deploy's completion
+        `autoload --comp -p $HOME/.shed/comp`   register a directory of them
 
-  New files placed in any of these directories are picked up by the
-  next shell that starts; a running shell keeps the set it loaded when
-  it started.
+  Loading eagerly ~
+
+    `autoload --now` (or `-n`) sources the resolved files immediately
+    instead of deferring to first use — handy to surface errors up front
+    or to force a definition into the current shell.
+
+  Help pages have a parallel name-and-path mechanism of their own through
+  `SHED_HPATH`; see |help-hpath|.
+
+  For the full option list, see |builtin-autoload|.
 
 ==============================================================================
 LOGOUT                                           *function-logout* *logout*

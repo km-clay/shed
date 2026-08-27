@@ -11,6 +11,7 @@ The following builtins are available:
   `alias`       define or list command aliases              |builtin-alias|
   `arrops`      array manipulation (push, pop, rotate)      |builtin-arrops|
   `autocmd`     register hooks for shell events             |builtin-autocmd|
+  `autoload`    load functions/completions lazily           |builtin-autoload|
   `bg`          resume a stopped job in the background      |builtin-bg|
   `cd`          change the working directory                |builtin-cd|
   `compadd`     register completion candidates              |builtin-compadd|
@@ -282,6 +283,49 @@ AUTOCMD                                          *builtin-autocmd* *autocmd*
       `autocmd post-cmd`              list autocmds for post-cmd
 
   For special variables available inside autocmd handlers, see |autocmd|.
+
+==============================================================================
+AUTOLOAD                                         *builtin-autoload* *autoload*
+
+  `autoload [-c] [-n] {name} ...`
+  `autoload [-c] [-n] -p {dir} ...`
+
+  Register functions or completions to be loaded lazily: their body is
+  read the first time they are used, not when `autoload` runs. This is how
+  shed exposes both its bundled library and your own shell code without
+  sourcing everything up front. See |autoloading| for more info on the
+  autoloading subsystem.
+
+  Given {name}s, each is resolved against the bundled set and the
+  directories in `SHED_FUNC_PATH` (a `:`-separated list, read from the live
+  variable) and then registered. A name that exists nowhere is an error.
+
+  `-p`     treat the arguments as directories to crawl instead of names.
+  `--path` Every file found is registered under its stem (its filename
+           without extension). Each argument may itself be a `:`-separated
+           list, so `autoload -p "$SHED_FUNC_PATH"` registers a whole path.
+
+  `-n`     load now: source the resolved files immediately instead of
+  `--now`  deferring to first use. Surfaces errors up front and forces the
+           definitions into the current shell.
+
+  `-c`     operate on completions rather than functions. A completion
+  `--comp` file's stem is a command name; names resolve against
+           `SHED_COMPLETE_PATH`, and the file is sourced the first time that
+           command is completed. See |builtin-complete|.
+
+  A registered but not-yet-loaded function is also forced to load by
+  `declare -f {name}`, which prints its body.
+
+  Examples:
+
+      `autoload greet`               load greet on first call
+      `autoload -p ~/.shed/func`     register every function in a directory
+      `autoload -n version`          load version now, do not defer
+      `autoload -c deploy`           lazily load deploy's completion
+      `autoload -c -p ~/.shed/comp`  register a directory of completions
+
+  See also: |autoloading|, |builtin-complete|, |builtin-declare|
 
 ==============================================================================
 BG                                               *builtin-bg* *bg*
