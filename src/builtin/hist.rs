@@ -3,11 +3,10 @@ use std::{
   convert::Into,
   path::PathBuf,
   sync::{Arc, Mutex},
-  time::{Duration, UNIX_EPOCH},
+  time::UNIX_EPOCH,
 };
 
-use chrono::Utc;
-use chrono_english::{Dialect, Interval, parse_date_string};
+use crate::util::TimeReader;
 
 use crate::{
   HashSet,
@@ -37,17 +36,6 @@ macro_rules! cond {
     $params.push(Box::new($param));
     $idx += 1;
   };
-}
-
-#[expect(clippy::cast_sign_loss)]
-fn interval_to_micros(interval: Interval) -> i64 {
-  let secs = match interval {
-    Interval::Seconds(n) => n as u64,
-    Interval::Days(n) => (n * 24 * 3600) as u64,
-    Interval::Months(n) => (n * 30 * 24 * 3600) as u64,
-  };
-
-  Duration::from_secs(secs).as_micros() as i64
 }
 
 #[expect(clippy::struct_excessive_bools)]
@@ -93,7 +81,7 @@ impl HistQuery {
     let mut idx = 1;
 
     if let (Some(after), not) = &self.after {
-      let ts = parse_date_string(&after.to_str_lossy(), Utc::now(), Dialect::Us)
+      let ts = TimeReader::interpret(&after.to_str_lossy())
         .map_err(|e| sherr!(ParseErr, "Failed to parse date for --after: {e}"))?;
       cond!(
         not,
@@ -105,7 +93,7 @@ impl HistQuery {
       );
     }
     if let (Some(before), not) = &self.before {
-      let ts = parse_date_string(&before.to_str_lossy(), Utc::now(), Dialect::Us)
+      let ts = TimeReader::interpret(&before.to_str_lossy())
         .map_err(|e| sherr!(ParseErr, "Failed to parse date for --before: {e}"))?;
       cond!(
         not,
@@ -197,7 +185,7 @@ impl HistQuery {
       );
     }
     if let (Some(duration), not) = &self.duration_gt {
-      let secs = chrono_english::parse_duration(&duration.to_str_lossy())
+      let micros = TimeReader::parse_dur(&duration.to_str_lossy())
         .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --longer-than: {e}"))?;
       cond!(
         not,
@@ -205,11 +193,11 @@ impl HistQuery {
         params,
         idx,
         format!("runtime >= ?{idx}"),
-        interval_to_micros(secs)
+        micros
       );
     }
     if let (Some(duration), not) = &self.duration_lt {
-      let secs = chrono_english::parse_duration(&duration.to_str_lossy())
+      let micros = TimeReader::parse_dur(&duration.to_str_lossy())
         .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --shorter-than: {e}"))?;
       cond!(
         not,
@@ -217,7 +205,7 @@ impl HistQuery {
         params,
         idx,
         format!("runtime <= ?{idx}"),
-        interval_to_micros(secs)
+        micros
       );
     }
     if !self.specific_ids.is_empty() {

@@ -26,7 +26,6 @@ shed_macros = { path = "./crates/shed_macros" }
 ariadne = "0.6.0"
 bitflags = { version = "2.11.1", features = ["serde"] }
 chrono = "0.4.44"
-chrono-english = "0.1.8"
 itertools = "0.14.0"
 log = "0.4.29"
 nix = { version = "0.31.2", features = ["uio", "term", "user", "resource", "hostname", "fs", "default", "signal", "process", "event", "ioctl", "poll", "net", "socket"] }

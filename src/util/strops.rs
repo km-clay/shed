@@ -1,6 +1,8 @@
 use std::{collections::VecDeque, fmt::Display};
 
-use crate::{state::vars::VarStr, varstr};
+use chrono::{DateTime, Datelike, Days, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
+
+use crate::{state::vars::VarStr, util::Direction, varstr};
 
 use super::{
   error::ShResult,
@@ -585,6 +587,258 @@ pub fn format_mode(mode: u32) -> String {
   out
 }
 
+fn local_to_utc(ndt: NaiveDateTime) -> ShResult<DateTime<Utc>> {
+  Local
+    .from_local_datetime(&ndt)
+    .earliest()
+    .map(|dt| dt.with_timezone(&Utc))
+    .ok_or_else(|| sherr!(ParseErr, "ambiguous local time: {ndt}"))
+}
+
+#[derive(Clone)]
+enum TimeTk {
+  Num(i64),
+  Word(VarStr),
+}
+
+pub(crate) struct TimeReader<'a> {
+  orig: &'a str,
+  tks: Vec<TimeTk>,
+  pos: usize,
+  anchor: Option<DateTime<Utc>>,
+  dir: Option<Direction>,
+  offset: Option<i64>,
+}
+
+impl<'a> TimeReader<'a> {
+  pub fn interpret(s: &'a str) -> ShResult<DateTime<Utc>> {
+    Self {
+      orig: s,
+      tks: vec![],
+      pos: 0,
+      anchor: None,
+      dir: None,
+      offset: None,
+    }
+    .parse()
+  }
+
+  fn next_tk(&mut self) -> Option<TimeTk> {
+    let tk = self.tks.get(self.pos)?.clone();
+    self.pos += 1;
+    Some(tk)
+  }
+
+  fn peek_tk(&self) -> Option<&TimeTk> {
+    self.tks.get(self.pos)
+  }
+
+  pub fn parse(&mut self) -> ShResult<DateTime<Utc>> {
+    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S"] {
+      if let Ok(time) = NaiveDateTime::parse_from_str(self.orig, fmt) {
+        return local_to_utc(time);
+      }
+    }
+    for sep in ["-", ".", "/"] {
+      if let Ok(date) = NaiveDate::parse_from_str(self.orig, &format!("%Y{sep}%m{sep}%d")) {
+        return local_to_utc(date.and_hms_opt(0, 0, 0).unwrap());
+      }
+    }
+    for parser in [DateTime::parse_from_rfc2822, DateTime::parse_from_rfc3339] {
+      if let Ok(time) = parser(self.orig) {
+        return Ok(time.with_timezone(&Utc));
+      }
+    }
+
+    self.tks = Self::tokenize(self.orig)?;
+    while let Some(tk) = self.next_tk() {
+      match tk {
+        TimeTk::Num(n) => self.read_offset(n)?,
+        TimeTk::Word(w) => self.read_word(&w)?,
+      }
+    }
+
+    let anchor = self.anchor.unwrap_or_else(Utc::now);
+    let Some(micros) = self.offset else {
+      return Ok(anchor);
+    };
+    let delta = Duration::microseconds(micros);
+    Ok(match self.dir.unwrap_or(Direction::Backward) {
+      Direction::Backward => anchor - delta,
+      Direction::Forward => anchor + delta,
+    })
+  }
+
+  fn read_offset(&mut self, n: i64) -> ShResult<()> {
+    let Some(TimeTk::Word(unit)) = self.next_tk() else {
+      return Err(sherr!(ParseErr, "expected a unit after '{n}'"));
+    };
+    let Some(per) = Self::unit_micros(&unit) else {
+      return Err(sherr!(ParseErr, "unknown unit '{unit}'"));
+    };
+    let add = n
+      .checked_mul(per)
+      .ok_or_else(|| sherr!(ParseErr, "time expression too large"))?;
+    self.offset = Some(self.offset.unwrap_or(0).saturating_add(add));
+    Ok(())
+  }
+
+  fn read_word(&mut self, word: &VarStr) -> ShResult<()> {
+    if let Some(month) = Self::month_num(word) {
+      return self.read_named_date(word, month);
+    }
+    if let Some(dir) = Self::direction(word) {
+      self.dir = Some(dir);
+    } else if let Some(anchor) = Self::keyword_anchor(word)? {
+      self.anchor = Some(anchor);
+    } else {
+      return Err(sherr!(ParseErr, "unknown time expression '{word}'"));
+    }
+    Ok(())
+  }
+
+  fn read_named_date(&mut self, word: &VarStr, month: u32) -> ShResult<()> {
+    let Some(TimeTk::Num(day)) = self.next_tk() else {
+      return Err(sherr!(ParseErr, "expected a day after '{word}'"));
+    };
+    let year = match self.peek_tk() {
+      Some(TimeTk::Num(y)) if *y >= 1000 => {
+        let y = *y as i32;
+        self.pos += 1;
+        y
+      }
+      _ => Local::now().year(),
+    };
+    let date = NaiveDate::from_ymd_opt(year, month, day as u32)
+      .ok_or_else(|| sherr!(ParseErr, "invalid date '{word} {day}'"))?;
+    self.anchor = Some(local_to_utc(date.and_hms_opt(0, 0, 0).unwrap())?);
+    Ok(())
+  }
+
+  fn keyword_anchor(word: &VarStr) -> ShResult<Option<DateTime<Utc>>> {
+    let today = Local::now().date_naive();
+    let midnight =
+      |d: NaiveDate| -> ShResult<DateTime<Utc>> { local_to_utc(d.and_hms_opt(0, 0, 0).unwrap()) };
+    Ok(match word.as_bytes() {
+      b"now" => Some(Utc::now()),
+      b"today" => Some(midnight(today)?),
+      b"yesterday" => Some(midnight(today - Days::new(1))?),
+      b"tomorrow" => Some(midnight(today + Days::new(1))?),
+      _ => None,
+    })
+  }
+
+  fn month_num(word: &VarStr) -> Option<u32> {
+    Some(match word.as_bytes() {
+      b"jan" | b"january" => 1,
+      b"feb" | b"february" => 2,
+      b"mar" | b"march" => 3,
+      b"apr" | b"april" => 4,
+      b"may" => 5,
+      b"jun" | b"june" => 6,
+      b"jul" | b"july" => 7,
+      b"aug" | b"august" => 8,
+      b"sep" | b"sept" | b"september" => 9,
+      b"oct" | b"october" => 10,
+      b"nov" | b"november" => 11,
+      b"dec" | b"december" => 12,
+      _ => return None,
+    })
+  }
+
+  fn direction(word: &VarStr) -> Option<Direction> {
+    match word.as_bytes() {
+      b"after" | b"since" | b"from" => Some(Direction::Forward),
+      b"ago" | b"before" | b"til" | b"until" => Some(Direction::Backward),
+      _ => None,
+    }
+  }
+  fn unit_micros(unit: &VarStr) -> Option<i64> {
+    const MICROS: i64 = 1;
+    const MILLIS: i64 = 1000 * MICROS;
+    const SECOND: i64 = 1000 * MILLIS;
+    const MINUTE: i64 = 60 * SECOND;
+    const HOUR: i64 = 60 * MINUTE;
+    const DAY: i64 = 24 * HOUR;
+    const WEEK: i64 = 7 * DAY;
+    const MONTH: i64 = 30 * DAY; // approximate
+    const YEAR: i64 = 365 * DAY; // approximate
+
+    match unit.as_bytes() {
+      b"us" | b"micro" | b"micros" | b"microsecond" | b"microseconds" => Some(MICROS),
+      b"ms" | b"milli" | b"millis" | b"millisecond" | b"milliseconds" => Some(MILLIS),
+      b"s" | b"sec" | b"secs" | b"second" | b"seconds" => Some(SECOND),
+      b"m" | b"min" | b"mins" | b"minute" | b"minutes" => Some(MINUTE),
+      b"h" | b"hr" | b"hrs" | b"hour" | b"hours" => Some(HOUR),
+      b"d" | b"day" | b"days" => Some(DAY),
+      b"w" | b"wk" | b"wks" | b"week" | b"weeks" => Some(WEEK),
+      b"mo" | b"month" | b"months" => Some(MONTH),
+      b"y" | b"yr" | b"yrs" | b"year" | b"years" => Some(YEAR),
+      _ => None,
+    }
+  }
+  fn tokenize(s: &str) -> ShResult<Vec<TimeTk>> {
+    let mut cur = SliceCursor::new(s.as_bytes());
+    let mut tks = vec![];
+
+    loop {
+      cur.bump_while(|c| c == b' ');
+      match cur.peek_byte() {
+        Some(c) if c.is_ascii_digit() => {
+          let start = cur.pos();
+          cur.bump_while(|c| c.is_ascii_digit());
+
+          let n = s[start..cur.pos()]
+            .parse()
+            .map_err(|_| sherr!(ParseErr, "number too large in time expression"))?;
+          tks.push(TimeTk::Num(n));
+        }
+        Some(c) if c.is_ascii_alphabetic() => {
+          let start = cur.pos();
+          cur.bump_while(|c| c.is_ascii_alphabetic());
+          let word = s[start..cur.pos()].to_ascii_lowercase();
+          tks.push(TimeTk::Word(word.as_str().into()));
+        }
+        Some(_) => cur.bump(),
+        None => break,
+      }
+    }
+
+    Ok(tks)
+  }
+  pub(crate) fn parse_dur(s: &str) -> ShResult<i64> {
+    let mut tks = Self::tokenize(s)?.into_iter().peekable();
+    let mut total: i64 = 0;
+    let mut saw_any = false;
+
+    while let Some(tk) = tks.next() {
+      match tk {
+        TimeTk::Num(n) => {
+          let Some(TimeTk::Word(unit)) = tks.next() else {
+            return Err(sherr!(ParseErr, "expected a unit after '{n}'"));
+          };
+          let Some(per) = Self::unit_micros(&unit) else {
+            return Err(sherr!(ParseErr, "unknown unit '{unit}'"));
+          };
+          let add = n
+            .checked_mul(per)
+            .ok_or_else(|| sherr!(ParseErr, "duration too large"))?;
+          total = total
+            .checked_add(add)
+            .ok_or_else(|| sherr!(ParseErr, "duration too large"))?;
+          saw_any = true;
+        }
+        TimeTk::Word(w) => return Err(sherr!(ParseErr, "unexpected '{w}' in duration")),
+      }
+    }
+
+    if !saw_any {
+      return Err(sherr!(ParseErr, "invalid duration '{s}'"));
+    }
+    Ok(total)
+  }
+}
+
 // this needs to be at least 2
 pub(crate) const EDIT_WEIGHT: usize = 2;
 
@@ -917,5 +1171,132 @@ mod levenshtein_tests {
     ] {
       assert_eq!(lev(a, b), lev(b, a), "asymmetric on {a:?} / {b:?}");
     }
+  }
+}
+
+#[cfg(test)]
+mod time_reader_tests {
+  use super::TimeReader;
+  use chrono::{Datelike, Days, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+
+  /// The local wall-clock time the parsed instant represents (timezone-independent).
+  fn wall(expr: &str) -> NaiveDateTime {
+    TimeReader::interpret(expr)
+      .unwrap()
+      .with_timezone(&Local)
+      .naive_local()
+  }
+
+  /// Assert a relative expression lands `expected` before now, allowing for the
+  /// time that elapses between the parse and this check.
+  fn assert_ago(expr: &str, expected: Duration) {
+    let got = TimeReader::interpret(expr).unwrap();
+    let off = (Utc::now() - got - expected).num_milliseconds().abs();
+    assert!(off < 2000, "{expr}: {off}ms off from expected");
+  }
+
+  fn ymd_hms(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> NaiveDateTime {
+    NaiveDate::from_ymd_opt(y, mo, d)
+      .unwrap()
+      .and_hms_opt(h, mi, s)
+      .unwrap()
+  }
+
+  // ─── parse_dur: exact, deterministic ─────────────────────────────
+
+  #[test]
+  fn dur_single_units() {
+    assert_eq!(TimeReader::parse_dur("5s").unwrap(), 5 * 1_000_000);
+    assert_eq!(
+      TimeReader::parse_dur("30 minutes").unwrap(),
+      30 * 60 * 1_000_000
+    );
+    assert_eq!(
+      TimeReader::parse_dur("2 hours").unwrap(),
+      2 * 3600 * 1_000_000
+    );
+    assert_eq!(TimeReader::parse_dur("1 day").unwrap(), 86_400 * 1_000_000);
+  }
+
+  #[test]
+  fn dur_multi_unit() {
+    assert_eq!(TimeReader::parse_dur("1h30m").unwrap(), 90 * 60 * 1_000_000);
+    assert_eq!(
+      TimeReader::parse_dur("1 day 3 hours").unwrap(),
+      (86_400 + 3 * 3600) * 1_000_000
+    );
+  }
+
+  #[test]
+  fn dur_rejects_non_durations() {
+    assert!(TimeReader::parse_dur("5").is_err()); // no unit
+    assert!(TimeReader::parse_dur("2 days ago").is_err()); // "ago" isn't a duration
+    assert!(TimeReader::parse_dur("5 potatoes").is_err()); // unknown unit
+    assert!(TimeReader::parse_dur("bananas").is_err());
+    assert!(TimeReader::parse_dur("").is_err());
+  }
+
+  // ─── interpret: relative offsets (delta from now) ────────────────
+
+  #[test]
+  fn interp_relative() {
+    assert_ago("2 days ago", Duration::days(2));
+    assert_ago("10 minutes ago", Duration::minutes(10));
+    assert_ago("1 hour ago", Duration::hours(1));
+    assert_ago("30 seconds ago", Duration::seconds(30));
+    assert_ago("1h30m ago", Duration::minutes(90));
+    assert_ago("5 days", Duration::days(5)); // bare offset defaults to the past
+  }
+
+  #[test]
+  fn interp_now() {
+    let got = TimeReader::interpret("now").unwrap();
+    assert!((Utc::now() - got).num_milliseconds().abs() < 2000);
+  }
+
+  // ─── interpret: calendar anchors (local wall-clock) ──────────────
+
+  #[test]
+  fn interp_day_keywords() {
+    let today = Local::now().date_naive();
+    assert_eq!(wall("today").date(), today);
+    assert_eq!(
+      wall("today").time(),
+      NaiveTime::from_hms_opt(0, 0, 0).unwrap()
+    );
+    assert_eq!(wall("yesterday").date(), today - Days::new(1));
+    assert_eq!(wall("tomorrow").date(), today + Days::new(1));
+  }
+
+  #[test]
+  fn interp_absolute() {
+    assert_eq!(wall("2024-01-01 12:00:00"), ymd_hms(2024, 1, 1, 12, 0, 0));
+    assert_eq!(wall("2024-06-15"), ymd_hms(2024, 6, 15, 0, 0, 0));
+  }
+
+  #[test]
+  fn interp_named_date() {
+    assert_eq!(wall("may 5 2024"), ymd_hms(2024, 5, 5, 0, 0, 0));
+    let wc = wall("may 5");
+    assert_eq!((wc.month(), wc.day()), (5, 5));
+    assert_eq!(wc.year(), Local::now().year());
+  }
+
+  #[test]
+  fn interp_offset_from_anchor() {
+    assert_eq!(
+      wall("5 days after may 5 2024"),
+      ymd_hms(2024, 5, 10, 0, 0, 0)
+    );
+    assert_eq!(
+      wall("5 days before may 5 2024"),
+      ymd_hms(2024, 4, 30, 0, 0, 0)
+    );
+  }
+
+  #[test]
+  fn interp_rejects_garbage() {
+    assert!(TimeReader::interpret("bananas").is_err());
+    assert!(TimeReader::interpret("5 potatoes").is_err());
   }
 }

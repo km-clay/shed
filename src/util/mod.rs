@@ -39,7 +39,7 @@ pub(crate) enum Direction {
 pub(super) use error::{ShErr, ShErrKind, ShResult, ShResultExt, get_context};
 
 pub(super) use strops::{
-  ByteCursor, EDIT_WEIGHT, QuoteState, SliceCursor, VarStrDisplay, ends_with_unescaped,
+  ByteCursor, EDIT_WEIGHT, QuoteState, SliceCursor, TimeReader, VarStrDisplay, ends_with_unescaped,
   format_mode, format_size, format_time, has_unescaped, levenshtein, parse_size, scan_param_exp,
   scan_parens, split_at_unescaped, split_tk,
 };
