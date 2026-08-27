@@ -127,6 +127,10 @@ Cross-reference links can also be `clicked` directly with the mouse.
   Files added to a `SHED_HPATH` directory are discovered the next
   time `help` runs.
 
+  `SHED_HPATH` is the help-page arm of a broader autoloading mechanism.
+  Functions and completions load from user directories the same way,
+  through `SHED_FUNC_PATH` and `SHED_COMPLETE_PATH`; see |autoloading|.
+
 ==============================================================================
 4. Markup Language                             *help-markup*
 
