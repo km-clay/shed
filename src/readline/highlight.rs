@@ -266,11 +266,7 @@ pub(crate) fn visualize_controls_str(text: &str) -> String {
 /// `:r!cat file_with_escapes`) would emit those bytes straight to the
 /// terminal, letting any clipboard-injection-style sequence change the
 /// title, write to OSC 52, etc.
-fn paint_with_visualized_controls<W: std::fmt::Write>(
-  out: &mut W,
-  text: &str,
-  style: PaletteEntry,
-) {
+fn paint_with<W: std::fmt::Write>(out: &mut W, text: &str, style: PaletteEntry) {
   // Hot path: nothing to visualize, single styled write.
   if !text.bytes().any(is_visualized_control) {
     write!(out, "{}", text.paint(style.style())).unwrap();
@@ -318,7 +314,7 @@ fn emit_with_selection<W: std::fmt::Write>(
     .collect();
 
   if overlapping.is_empty() {
-    paint_with_visualized_controls(out, &src[range], style);
+    paint_with(out, &src[range], style);
     return;
   }
 
@@ -345,18 +341,18 @@ fn emit_with_selection<W: std::fmt::Write>(
     let sel_end = sel.end.min(range.end);
 
     if pos < sel_start {
-      paint_with_visualized_controls(out, &src[pos..sel_start], style);
+      paint_with(out, &src[pos..sel_start], style);
     }
 
     if sel_start < sel_end {
-      paint_with_visualized_controls(out, &src[sel_start..sel_end], sel_style);
+      paint_with(out, &src[sel_start..sel_end], sel_style);
     }
 
     pos = sel_end;
   }
 
   if pos < range.end {
-    paint_with_visualized_controls(out, &src[pos..range.end], style);
+    paint_with(out, &src[pos..range.end], style);
   }
 }
 

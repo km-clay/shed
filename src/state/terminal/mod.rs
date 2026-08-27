@@ -611,8 +611,16 @@ impl Terminal {
 
   pub fn poll(&mut self, timeout: PollTimeout) -> ShResult<i32> {
     let Some(tty) = self.tty() else { return Ok(0) };
-    let poll_fd = PollFd::new(tty, PollFlags::POLLIN);
-    Ok(poll(&mut [poll_fd], timeout)?)
+
+    loop {
+      let mut fds = [PollFd::new(tty, PollFlags::POLLIN)];
+      let res = poll(&mut fds, timeout);
+      if matches!(res, Err(Errno::EINTR)) {
+        continue;
+      }
+
+      return Ok(res?);
+    }
   }
 
   pub fn get_cursor_pos(&mut self) -> ShResult<Option<(Rows, Cols)>> {
