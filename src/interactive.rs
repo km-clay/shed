@@ -23,7 +23,12 @@ use smallvec::SmallVec;
 use crate::{
   exec_term,
   signal::FOCUS_GAINED,
-  state::{logic::AutoCmdKind, terminal::CursorCtl, util::with_vars, vars::VarStr},
+  state::{
+    logic::{AutoCmdKind, LogTab},
+    terminal::CursorCtl,
+    util::with_vars,
+    vars::VarStr,
+  },
   status_msg, varstr,
 };
 
@@ -174,6 +179,7 @@ fn get_poll_timeout(readline: &mut ShedLine) -> ShedPollTimeout {
 /// Perform the initial setup for an interactive shell session.
 fn interactive_setup(args: &lifecycle::ShedArgs) -> ShResult<TermGuard> {
   let raw_mode = Shed::term_mut(Terminal::setup_terminal)?;
+  Shed::logic_mut(LogTab::register_autoload_comps);
 
   sig_setup();
 

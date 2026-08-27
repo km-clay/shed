@@ -268,12 +268,16 @@ pub(crate) struct LogTab {
 
 impl LogTab {
   pub fn new() -> Self {
-    Self::default()
+    let mut new = Self::default();
+    new.register_autoload_funcs();
+    new
   }
-  pub fn register_autoloads(&mut self) {
+  fn register_autoload_funcs(&mut self) {
     for (name, src) in autoload::FuncLoader.bundled() {
       self.functions.insert(name, ShFunc::Autoload(src));
     }
+  }
+  pub fn register_autoload_comps(&mut self) {
     self.comp_autoloads = autoload::CompLoader.bundled();
   }
   pub fn insert_comp_autoload(&mut self, name: &str, src: AutoloadSrc) {
