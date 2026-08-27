@@ -17,13 +17,11 @@
       inherit system;
       overlays = [
         (_: prev: {
-          # crate vendoring only works on newer versions if we change
-          # the user agent for the curl call, for some reason.
-          fetchurl = prev.fetchurl // {
-            __functor = _: arg: (prev.fetchurl arg).overrideAttrs (old: {
-              curlOptsList = (old.curlOptsList or [ ]) ++ [ "--user-agent" "nixpkgs-fetchurl" ];
-            });
-          };
+          # crate vendoring is breaking for some reason
+          # unless we change the curl flags
+          fetchurl = args: prev.fetchurl (args // {
+            curlOptsList = (args.curlOptsList or [ ]) ++ [ "--user-agent" "nixpkgs-fetchurl" ];
+          });
         })
         rust-overlay.overlays.default
       ];
