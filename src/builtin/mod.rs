@@ -43,6 +43,7 @@ use super::{
 mod alias;
 mod arrops;
 mod autocmd;
+mod autoload;
 mod cd;
 mod complete;
 mod dirstack;
@@ -112,6 +113,7 @@ register_builtins! {
   b"accept"   => sock::Accept,
   b"alias"    => alias::Alias,
   b"autocmd"  => autocmd::AutoCmdBuiltin,
+  b"autoload" => autoload::Autoload,
   b"bg"       => jobctl::Bg,
   b"break"    => flowctl::Break,
   b"builtin"  => BuiltinBuiltin,
