@@ -13,7 +13,7 @@ use nix::sys::signal::{
   SaFlags, SigAction, SigHandler, SigSet, SigmaskHow, Signal, raise, sigaction, sigprocmask,
 };
 
-use crate::eval::execute;
+use crate::{eval::execute, write_term};
 
 use super::{
   ShResult, Shed, autocmd,
@@ -345,15 +345,11 @@ pub(super) fn tear_down() -> ExitCode {
     );
   }
 
-  let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
-
-  while let Some(cmd) = deferred.pop() {
-    execute::dispatch_deferred_cmd(&cmd);
-  }
+  execute::dispatch_deferred_cmds();
 
   if Shed::meta(MetaTab::interactive_shell) {
     autocmd!(OnExit);
-    crate::write_term!("\n").ok();
+    write_term!("\n").ok();
   }
 
   Shed::jobs_mut(JobTab::hang_up);
@@ -374,11 +370,7 @@ pub(super) fn exit_shed(run_trap: bool, code: i32) -> ! {
     );
   }
 
-  let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
-
-  while let Some(cmd) = deferred.pop() {
-    execute::dispatch_deferred_cmd(&cmd);
-  }
+  execute::dispatch_deferred_cmds();
 
   if let Some(sig) = quit_sig {
     exit_signaled(sig);

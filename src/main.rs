@@ -83,7 +83,12 @@ fn main() -> ExitCode {
 
   // each type of input (`-c`, stdin, script path, etc) is handled in `input::dispatch_input()`
   match input::dispatch_input(args) {
-    Ok(()) => QUIT_CODE.store(Shed::get_status(), Ordering::SeqCst),
+    Ok(()) => {
+      // if SHOULD_QUIT is already set, the QUIT_CODE has already been handled
+      if !signal::SHOULD_QUIT.load(Ordering::SeqCst) {
+        QUIT_CODE.store(Shed::get_status(), Ordering::SeqCst);
+      }
+    }
 
     Err(e) => {
       if let ShErrKind::CleanExit(code) = e.kind() {

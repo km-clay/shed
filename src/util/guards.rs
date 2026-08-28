@@ -72,13 +72,7 @@ macro_rules! defer {
 /// Execute commands registered by `defer`
 /// Drop variables registered by `local`
 fn guard_drop(_: ()) {
-  let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
-
-  crate_util::with_saved_status(|| {
-    while let Some(cmd) = deferred.pop() {
-      execute::dispatch_deferred_cmd(&cmd);
-    }
-  });
+  crate_util::with_saved_status(execute::dispatch_deferred_cmds);
 
   Shed::vars_mut(ScopeStack::ascend);
 }

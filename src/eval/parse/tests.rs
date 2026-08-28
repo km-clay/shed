@@ -1801,6 +1801,58 @@ fn defer_does_not_clobber_outer_status() {
 }
 
 #[test]
+fn deferred_exit_halts_remaining_defers_and_latches_code() {
+  // `exit` from inside a deferred command is an intentional hard-stop: it
+  // terminates immediately and skips the rest of the defer stack. Defers fire
+  // LIFO, so `echo B` (registered last) runs, `exit 3` then halts the drain,
+  // and `echo A` (registered first) is skipped. The exit code is latched into
+  // QUIT_CODE so it survives the status save/restore around the defer drain.
+  let guard = TestGuard::new();
+  let _ = test_input("{ defer echo A; defer exit 3; defer echo B; }");
+  let out = guard.read_output();
+  let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
+  assert_eq!(
+    lines,
+    vec!["B"],
+    "a deferred exit must halt the rest of the stack; got: {out:?}"
+  );
+  assert_eq!(
+    crate::signal::QUIT_CODE.load(std::sync::atomic::Ordering::SeqCst),
+    3,
+    "a deferred exit's code must propagate via the quit latch"
+  );
+}
+
+#[test]
+fn deferred_exit_skips_outer_defers_but_plain_exit_runs_them() {
+  // Design decision: a deferred `exit` hard-stops and does NOT run outer-scope
+  // defers, whereas a plain `exit` unwinds cleanly and does run them. This
+  // asymmetry is intentional; lock it in so a refactor can't silently flip it.
+  {
+    let guard = TestGuard::new();
+    let _ = test_input("{ defer echo OUTER; { defer exit 0; echo inner; }; echo NOPE; }");
+    let out = guard.read_output();
+    let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
+    assert_eq!(
+      lines,
+      vec!["inner"],
+      "deferred exit hard-stops: the outer defer and rest of the body are skipped; got: {out:?}"
+    );
+  }
+  {
+    let guard = TestGuard::new();
+    let _ = test_input("{ defer echo OUTER; { echo inner; exit 0; }; echo NOPE; }");
+    let out = guard.read_output();
+    let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
+    assert_eq!(
+      lines,
+      vec!["inner", "OUTER"],
+      "plain exit unwinds cleanly and runs outer defers; got: {out:?}"
+    );
+  }
+}
+
+#[test]
 fn defer_failure_does_not_propagate_to_outer_errexit() {
   // A failing defer body must not trigger the surrounding errexit. The
   // `echo after` line proves the outer execution continued past the

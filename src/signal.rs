@@ -315,6 +315,11 @@ pub fn clear_quit_latch() {
   QUIT_SIGNAL.store(-1, Ordering::SeqCst);
 }
 
+pub fn request_exit(code: i32) {
+  SHOULD_QUIT.store(true, Ordering::SeqCst);
+  QUIT_CODE.store(code, Ordering::SeqCst);
+}
+
 extern "C" fn handle_signal(sig: libc::c_int) {
   SIGNALS.fetch_or(1 << sig, Ordering::SeqCst);
 }

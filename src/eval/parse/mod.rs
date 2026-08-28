@@ -133,6 +133,20 @@ impl ParsedSrc {
   }
 }
 
+/// Abstract Syntax Tree
+///
+/// The internal representation of a `shed` script. Contains a flat list (arena) of AST nodes to execute.
+/// `Ast` can only be indexed by [`NodeId`]. [`NodeId`] is passed out on creation of a [`Node`], and is the
+/// only way to reach a [`Node`] that is inside the arena. ///
+///
+/// [`NodeId`]'s are stored inside the nodes themselves, meaning you have to traverse the tree in order to reach them.
+/// The only nodes that are reachable without doing this are the "root" nodes, which are the top level nodes of the AST.
+/// The ids for these nodes are stored explicitly in the `roots` field, which can be accessed using [`Ast::roots()`]
+///
+/// ## Panics
+/// Attempting to use a [`NodeId`] that comes from a different
+/// `Ast` will cause a panic, similar to how indexing a `Vec` with an out-of-bounds index will panic.
+
 #[derive(Clone, Debug)]
 pub(crate) struct Ast {
   arena: Vec<Node>,

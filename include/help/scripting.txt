@@ -993,6 +993,10 @@ executable with a shebang line:
       Compound commands (`if`, `for`...)  fires on body exit
       The shell itself (top level)        fires on shell exit
 
+      In a loop (`for`, `while`, `until`), each iteration of the body
+      is its own scope, so a defer registered inside the loop fires at
+      the end of that iteration, not when the whole loop finishes.
+
   11.3 LIFO Ordering                             *script-defer-lifo*
 
       Multiple defers in the same scope fire in reverse registration
@@ -1080,6 +1084,23 @@ executable with a shebang line:
 
       Because shed's `shopt` produces source-able output, the saved
       value can be re-applied by deferring a call to `eval` on the output.
+
+  11.7 Exiting from a Deferred Command           *script-defer-exit*
+
+      Calling `exit` from inside a deferred command is a deliberate
+      hard-stop: it aborts cleanup and exits the shell immediately
+      with the given status and does NOT run the rest of the defer
+      stack or any outer-scope defers. A plain `exit` in ordinary
+      code unwinds cleanly and fires pending defers on the way out;
+      an `exit` from within a defer means "we're done, stop everything now".
+
+          `outer() { defer echo "outer cleanup"; inner; }`
+          `inner() { defer exit 3; echo working; }`
+          `outer                            # prints "working", exits 3`
+          `                                 # "outer cleanup" is skipped`
+
+      The exit status is still reported correctly, and the shell's
+      `EXIT` trap (if set) still runs.
 
 ==============================================================================
 12. File Descriptor Manipulation with exec       *script-exec-redirect*

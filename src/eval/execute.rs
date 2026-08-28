@@ -173,22 +173,40 @@ fn suppress_underscore_guard() -> impl Drop {
   crate::util::guard((), move |()| SUPPRESS_UNDERSCORE.with(|s| s.set(prev)))
 }
 
+/// Dispatch commands registered by the `defer` keyword.
+pub(crate) fn dispatch_deferred_cmds() {
+  let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
+
+  while let Some(cmd) = deferred.pop() {
+    if !dispatch_deferred_cmd(&cmd) {
+      break;
+    }
+  }
+}
+
 /// Run a command that was registered using the `defer` builtin
 ///
 /// Error handling happens inside the function, so this is infallible.
-pub(crate) fn dispatch_deferred_cmd(cmd: &Ast) {
+/// If the function returns false, that means we should stop executing deferred cmds
+pub(crate) fn dispatch_deferred_cmd(cmd: &Ast) -> bool {
   let mut dispatcher = Dispatcher::new("defer".into());
   if let Err(e) = dispatcher.begin_dispatch(cmd) {
     let maybe_flowctl = match e.kind() {
       ShErrKind::ErrInterrupt => {
         // set -e aborted the execution
         // so the error has already technically been handled
-        return;
+        return true;
       }
 
       ShErrKind::FuncReturn(_) => Some("return"),
       ShErrKind::LoopBreak(_) => Some("break"),
       ShErrKind::LoopContinue(_) => Some("continue"),
+
+      ShErrKind::CleanExit(code) => {
+        signal::request_exit(*code);
+        return false;
+      }
+
       _ => None,
     };
 
@@ -202,6 +220,7 @@ pub(crate) fn dispatch_deferred_cmd(cmd: &Ast) {
       e.print_error();
     }
   }
+  true
 }
 
 /// Arguments to the execvpe function
