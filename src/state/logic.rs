@@ -280,6 +280,30 @@ impl LogTab {
   pub fn register_autoload_comps(&mut self) {
     self.comp_autoloads = autoload::CompLoader.bundled();
   }
+  pub fn get_autoload_func_names(&self) -> Vec<String> {
+    let mut names: Vec<String> = self
+      .functions
+      .iter()
+      .filter_map(|(name, func)| match func {
+        ShFunc::Autoload(AutoloadSrc::Path(_)) => Some(name.clone()),
+        _ => None,
+      })
+      .collect();
+    names.sort();
+    names
+  }
+  pub fn get_autoload_comp_names(&self) -> Vec<String> {
+    let mut names: Vec<String> = self
+      .comp_autoloads
+      .iter()
+      .filter_map(|(name, src)| match src {
+        AutoloadSrc::Path(_) => Some(name.clone()),
+        AutoloadSrc::Embedded { .. } => None,
+      })
+      .collect();
+    names.sort();
+    names
+  }
   pub fn insert_comp_autoload(&mut self, name: &str, src: AutoloadSrc) {
     self.comp_autoloads.insert(name.into(), src);
   }

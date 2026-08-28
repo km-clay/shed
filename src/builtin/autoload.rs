@@ -1,8 +1,13 @@
+use itertools::Itertools;
+
 use crate::{
   ShResult,
   autoload::{self, AutoloadSrc, Autoloader},
-  sherr,
-  state::{Shed, logic::ShFunc},
+  expand, outln, sherr,
+  state::{
+    Shed,
+    logic::{LogTab, ShFunc},
+  },
   util::with_status,
   var,
 };
@@ -33,6 +38,21 @@ impl super::Builtin for Autoload {
         "comp" => comp = true,
         _ => return Err(sherr!(ParseErr @ opt.span(), "unknown option {opt}")),
       }
+    }
+
+    if args.no_arguments() {
+      let names = if comp {
+        Shed::logic(LogTab::get_autoload_comp_names)
+      } else {
+        Shed::logic(LogTab::get_autoload_func_names)
+      };
+
+      let output = names
+        .into_iter()
+        .map(|name| format!("autoload {}", expand::shell_quote(&name)))
+        .join("\n");
+
+      outln!("{output}");
     }
 
     if path {
