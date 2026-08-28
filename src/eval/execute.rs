@@ -983,36 +983,46 @@ impl Dispatcher {
         }
       };
       let CondNode { cond, body } = cond_node;
-      let _guard = util::shared_scope_guard();
       let mut last_body_status = 0;
       'outer: loop {
-        if let Err(mut e) = s.dispatch_node(tree, *cond) {
-          match e.kind_mut() {
-            ShErrKind::LoopBreak(count) => {
-              if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
-                Shed::set_status(0);
-                break 'outer;
-              }
-              *count -= 1;
-              return Err(e);
-            }
-            ShErrKind::LoopContinue(count) => {
-              if *count > 1 && Shed::meta(MetaTab::loop_depth) > 1 {
+        {
+          // condition scope
+          let _guard = util::shared_scope_guard();
+          if let Err(mut e) = s.dispatch_node(tree, *cond) {
+            match e.kind_mut() {
+              ShErrKind::LoopBreak(count) => {
+                if *count == 1 || Shed::meta(MetaTab::loop_depth) <= 1 {
+                  Shed::set_status(0);
+                  break 'outer;
+                }
                 *count -= 1;
                 return Err(e);
               }
-              Shed::set_status(0);
-              continue 'outer;
-            }
-            _ => {
-              Shed::set_status(1);
-              return Err(e);
+              ShErrKind::LoopContinue(count) => {
+                if *count > 1 && Shed::meta(MetaTab::loop_depth) > 1 {
+                  *count -= 1;
+                  return Err(e);
+                }
+                Shed::set_status(0);
+                continue 'outer;
+              }
+              _ => {
+                Shed::set_status(1);
+                return Err(e);
+              }
             }
           }
         }
 
         let status = Shed::get_status();
-        if keep_going(*kind, status) {
+
+        {
+          // body scope
+          let _guard = util::shared_scope_guard();
+          if !keep_going(*kind, status) {
+            Shed::set_status(last_body_status);
+            break;
+          }
           if let Err(mut e) = s.dispatch_node(tree, *body) {
             match e.kind_mut() {
               ShErrKind::LoopBreak(count) => {
@@ -1034,9 +1044,6 @@ impl Dispatcher {
             }
           }
           last_body_status = Shed::get_status();
-        } else {
-          Shed::set_status(last_body_status);
-          break;
         }
       }
 
@@ -1225,30 +1232,32 @@ impl Dispatcher {
     };
 
     let if_logic = |s: &mut Self, tree: &Ast| -> ShResult<()> {
-      let mut matched = false;
       for node in cond_nodes {
         let CondNode { cond, body } = node;
-        let _guard = util::shared_scope_guard();
 
-        if let Err(e) = s.dispatch_node(tree, *cond) {
-          Shed::set_status(1);
-          return Err(e);
+        {
+          // condition scope
+          let _guard = util::shared_scope_guard();
+          if let Err(e) = s.dispatch_node(tree, *cond) {
+            Shed::set_status(1);
+            return Err(e);
+          }
         }
 
-        if Shed::get_status() == 0 {
-          matched = true;
-          s.dispatch_node(tree, *body)?;
-          break; // Don't check remaining elif conditions
+        {
+          // body scope
+          if Shed::get_status() == 0 {
+            let _guard = util::shared_scope_guard();
+            return s.dispatch_node(tree, *body);
+          }
         }
       }
 
-      if !matched {
-        if let Some(body) = else_block {
-          let _guard = util::shared_scope_guard();
-          s.dispatch_node(tree, *body)?;
-        } else {
-          Shed::set_status(0);
-        }
+      if let Some(body) = else_block {
+        let _guard = util::shared_scope_guard();
+        s.dispatch_node(tree, *body)?;
+      } else {
+        Shed::set_status(0);
       }
 
       Ok(())
@@ -2302,30 +2311,30 @@ pub fn check_err(
   span: Option<Span>,
   context: &LabelCtx,
 ) -> ShResult<()> {
-  if Shed::get_status() != 0 && !flags.contains(NdFlags::NOT_ERR) {
-    if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Error)) {
-      util::with_saved_status(|| exec_nonint(trap, Some("trap ERR".into())))?;
-    }
-    if Shed::shopts(|o| o.set.errexit) {
-      if let Some(mut e) = err {
-        e.set_kind(ShErrKind::ErrInterrupt);
-        e.persist_redirs();
-        return Err(e.with_context(context.iter()));
-      } else if let Some(span) = span {
-        return Err(
-          sherr!(
-              ErrInterrupt @ span,
-              "Command returned non-zero exit status",
-          )
-          .with_context(context.iter()),
-        );
-      }
-      return Err(
-        sherr!(ErrInterrupt, "Command returned non-zero exit status",).with_context(context.iter()),
-      );
-    }
+  if Shed::get_status() == 0 || flags.contains(NdFlags::NOT_ERR) {
+    return Ok(());
   }
-  Ok(())
+
+  if let Some(trap) = Shed::logic(|l| l.get_trap(TrapTarget::Error)) {
+    util::with_saved_status(|| exec_nonint(trap, Some("trap ERR".into())))?;
+  }
+
+  if !shopt!(set.errexit) {
+    return Ok(());
+  }
+
+  if let Some(mut e) = err {
+    e.set_kind(ShErrKind::ErrInterrupt);
+    e.persist_redirs();
+    Err(e.with_context(context.iter()))
+  } else if let Some(span) = span {
+    Err(
+      sherr!(ErrInterrupt @ span, "Command returned non-zero exit status")
+        .with_context(context.iter()),
+    )
+  } else {
+    Err(sherr!(ErrInterrupt, "Command returned non-zero exit status",).with_context(context.iter()))
+  }
 }
 #[cfg(test)]
 mod tests {
