@@ -1027,7 +1027,7 @@ impl ExParser {
       ExCommand::Normal => self.parse_normal(self.bang),
       ExCommand::Edit => self.parse_edit(),
       ExCommand::Stash => self.parse_stash(),
-      ExCommand::Help => self.parse_help(),
+      ExCommand::Help => self.parse_help(self.bang),
       ExCommand::Shell => self.parse_shell(),
       ExCommand::Move => self.parse_move(),
       ExCommand::Transfer => self.parse_transfer(),
@@ -1084,7 +1084,7 @@ impl ExParser {
 
     ExR::success(ExNdRule::Shell(args_raw))
   }
-  fn parse_help(&mut self) -> ExR<ExNdRule> {
+  fn parse_help(&mut self, bang: bool) -> ExR<ExNdRule> {
     let mut args = vec![];
     while let Some(arg) = self.tokens.next() {
       args.push(Tk::new(lex::TkRule::Str, arg.span));
@@ -1093,8 +1093,10 @@ impl ExParser {
       .get_span() // extract total span of arg tokens
       .map(|s| s.to_str_lossy().to_string());
 
-    let cmd = if let Some(args) = args_raw {
-      ["help", args.as_str()].join(" ")
+    let cmd = if bang {
+      "help -".to_string() // resume the last help topic
+    } else if let Some(args) = args_raw {
+      format!("help {args}")
     } else {
       "help".to_string()
     };

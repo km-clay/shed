@@ -37,8 +37,59 @@ use nix::{
 
 pub const HELP_PAGE_INSTALL_DIR: Option<&str> = option_env!("SHED_HELP_DIR");
 
+struct PageStack {
+  stack: Vec<HelpPager>,
+  pager_idx: usize,
+}
+
+impl PageStack {
+  fn new(content: &str, line: usize, filename: Option<String>) -> Option<Self> {
+    let pager = HelpPager::new(content, line, filename)?;
+    Some(Self {
+      stack: vec![pager],
+      pager_idx: 0,
+    })
+  }
+  fn forward(&mut self) {
+    self.pager_idx = (self.pager_idx + 1).min(self.stack.len() - 1);
+  }
+  fn back(&mut self) {
+    self.pager_idx = self.pager_idx.saturating_sub(1);
+  }
+  fn close_page(&mut self) {
+    if self.stack.len() > 1 {
+      self.stack.remove(self.pager_idx);
+      self.pager_idx = self.pager_idx.saturating_sub(1);
+    }
+  }
+  fn open_page(&mut self, topic: &str) -> ShResult<()> {
+    match get_help_content(topic) {
+      // open new pager, push to stack
+      Some((line, content, filename)) => {
+        let new_pager = HelpPager::new(&content, line, filename)
+          .ok_or_else(|| sherr!(NotFound, "No relevant help page found for topic '{topic}'",))?;
+        self.stack.truncate(self.pager_idx + 1); // drop any "forward" history if we navigate to a new page
+        self.stack.push(new_pager);
+        self.pager_idx = self.stack.len() - 1;
+      }
+      None => {
+        return Err(sherr!(
+          NotFound,
+          "No relevant help page found for topic '{topic}'",
+        ));
+      }
+    }
+    Ok(())
+  }
+
+  fn get_mut(&mut self) -> Option<&mut HelpPager> {
+    self.stack.get_mut(self.pager_idx)
+  }
+}
+
 thread_local! {
   static TAG_CACHE: RefCell<Option<(util::PathCache, Vec<ScoredTag>)>> = const { RefCell::new(None) };
+  static PAGE_STACK: RefCell<Option<PageStack>> = const { RefCell::new(None) };
 }
 
 fn load_help(name: &str) -> Option<String> {
@@ -101,7 +152,12 @@ impl super::Builtin for Help {
         // no argument was given. open the index page
         return open_help_index();
       };
-      match get_help_content(&topic.to_str_lossy()) {
+      let topic = topic.to_str_lossy();
+      if topic.as_ref() == "-" {
+        // `help -` resumes the most recent pager session, like `cd -`.
+        return resume_help();
+      }
+      match get_help_content(&topic) {
         Some((line, content, filename)) => open_help(&content, line, filename),
         None => Err(sherr!(
             NotFound @ span,
@@ -255,86 +311,82 @@ pub fn open_help(content: &str, line: usize, filename: Option<String>) -> ShResu
   if Shed::term(Terminal::test_mode) {
     return with_status(0);
   }
-  let Some(pager) = HelpPager::new(content, line, filename) else {
+  let Some(page_stack) = PageStack::new(content, line, filename) else {
     return with_status(0); // means stdout is not a terminal, so return
   };
 
-  let mut page_stack = vec![pager];
-  let mut pager = 0usize; // index
+  // A normal `help {topic}` starts a fresh navigation, clobbering any prior
+  // session that `help -` could have resumed.
+  run_pager(page_stack)
+}
 
-  // now we use the same input pattern as in main.rs
-  let Some(tty) = Shed::term(|t| t.tty().map(|fd| fd.as_raw_fd())) else {
-    return with_status(0); // no tty, just return
-  };
-  let tty_fd = PollFd::new(unsafe { BorrowedFd::borrow_raw(tty) }, PollFlags::POLLIN);
+/// Reopen the most recent pager session (`help -` / `:h!`), restoring the page,
+/// scroll position, and back/forward history. Falls back to the index page when
+/// there is nothing to resume.
+pub fn resume_help() -> ShResult<()> {
+  if Shed::term(Terminal::test_mode) {
+    return with_status(0);
+  }
+  let existing = PAGE_STACK.with(|cell| cell.borrow_mut().take());
+  match existing {
+    Some(page_stack) => run_pager(page_stack),
+    None => open_help_index(),
+  }
+}
 
-  // restores terminal state on drop
-  let _tui_guard = Shed::term_mut(Terminal::prepare_for_pager);
+/// Drive the pager loop over `page_stack`, then stash it in `PAGE_STACK` so a
+/// later `help -` can resume exactly here.
+///
+/// The stack stays an owned local for the whole loop, so we never hold
+/// `PAGE_STACK` borrowed across terminal I/O; it is only borrowed for the
+/// instantaneous store-back at the end.
+fn run_pager(mut page_stack: PageStack) -> ShResult<()> {
+  // Same input pattern as in main.rs. If there's no tty we can't run the pager,
+  // but we still fall through to stash the stack so a later resume is coherent.
+  if let Some(tty) = Shed::term(|t| t.tty().map(|fd| fd.as_raw_fd())) {
+    let tty_fd = PollFd::new(unsafe { BorrowedFd::borrow_raw(tty) }, PollFlags::POLLIN);
 
-  loop {
-    let res = {
-      let Some(pager) = page_stack.get_mut(pager) else {
-        break;
-      };
-      pager.display()?;
-      match poll(&mut [tty_fd.clone()], PollTimeout::NONE) {
-        Ok(0) => {
-          // timeout? eof?
+    // restores terminal state on drop
+    let _tui_guard = Shed::term_mut(Terminal::prepare_for_pager);
+
+    loop {
+      let res = {
+        let Some(pager) = page_stack.get_mut() else {
           break;
+        };
+        pager.display()?;
+        match poll(&mut [tty_fd.clone()], PollTimeout::NONE) {
+          Ok(0) => {
+            // timeout? eof?
+            break;
+          }
+          Ok(_) => { /* fall through */ }
+          Err(Errno::EINTR) => continue, // just retry
+          Err(e) => {
+            return Err(sherr!(
+              InternalErr,
+              "Error polling for help pager input: {e}"
+            ));
+          }
         }
-        Ok(_) => { /* fall through */ }
-        Err(Errno::EINTR) => continue, // just retry
-        Err(e) => {
-          return Err(sherr!(
-            InternalErr,
-            "Error polling for help pager input: {e}"
-          ));
-        }
-      }
 
-      pager.handle_input()?
-    };
-    // if we are here, we have input to read
+        pager.handle_input()?
+      };
+      // if we are here, we have input to read
 
-    match res {
-      PagerEvent::OpenRef(crossref) => match get_help_content(&crossref) {
-        // open new pager, push to stack
-        Some((line, content, filename)) => {
-          let new_pager = HelpPager::new(&content, line, filename).ok_or_else(|| {
-            sherr!(
-              NotFound,
-              "No relevant help page found for topic '{crossref}'",
-            )
-          })?;
-          page_stack.truncate(pager + 1); // drop any "forward" history if we navigate to a new page
-          page_stack.push(new_pager);
-          pager = page_stack.len() - 1;
-        }
-        None => {
-          return Err(sherr!(
-            NotFound,
-            "No relevant help page found for topic '{crossref}'",
-          ));
-        }
-      },
-      PagerEvent::Forward => {
-        pager = (pager + 1).min(page_stack.len() - 1);
+      match res {
+        PagerEvent::OpenRef(crossref) => page_stack.open_page(&crossref)?,
+        PagerEvent::Forward => page_stack.forward(),
+        PagerEvent::Back => page_stack.back(),
+        PagerEvent::ClosePage => page_stack.close_page(),
+        PagerEvent::Continue => (),
+        PagerEvent::ExitPager => break,
       }
-      PagerEvent::Back => {
-        pager = pager.saturating_sub(1);
-      }
-      PagerEvent::ClosePage => {
-        if pager == 0 {
-          break; // if we close the last page, just exit
-        }
-        page_stack.pop();
-        pager -= 1;
-      }
-      PagerEvent::Continue => (),
-      PagerEvent::ExitPager => break,
     }
   }
 
+  // Remember this session so `help -` / `:h!` can pick it back up.
+  PAGE_STACK.with(|cell| *cell.borrow_mut() = Some(page_stack));
   with_status(0)
 }
 
