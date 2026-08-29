@@ -182,8 +182,17 @@ impl Expander {
     }
   }
   pub fn expand(self) -> ShResult<Vec<VarStr>> {
+    let noglob = self.noglob || shopt!(set.noglob);
+    if let Some(b) = self.raw.as_plain_bytes() {
+      // single literal byte string, so no splitting is needed
+      if noglob || !glob::might_be_glob(b) {
+        return Ok(vec![b.into()]); // no globs either, just return it
+      }
+      let exp = glob::expand_glob(b).into_iter().map(VarStr::from).collect();
+      return Ok(exp);
+    }
+
     let mark_split = !self.flags.contains(TkFlags::IS_HEREDOC) && !self.nosplit;
-    let noglob = self.noglob;
     let raw = self.expand_inner(mark_split)?;
 
     let words: Vec<stream::SegStream> = if mark_split {
@@ -192,13 +201,19 @@ impl Expander {
       vec![raw]
     };
 
-    if noglob || shopt!(set.noglob) {
+    if noglob {
       return Ok(words.into_iter().map(|w| w.into_bytes().into()).collect());
     }
 
     let mut glob_words: Vec<VarStr> = Vec::with_capacity(words.len());
 
     for word in words {
+      if !word.has_glob_meta() {
+        // no glob characters, just push the word
+        glob_words.push(word.into_bytes().into());
+        continue;
+      }
+
       let pattern_bytes = escape::markers_to_glob_escapes(&word);
       let literal: VarStr = word.into_bytes().into();
 

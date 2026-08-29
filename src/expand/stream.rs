@@ -10,11 +10,12 @@ use crate::{state::vars::VarStr, util::QuoteState};
 pub(crate) struct SegStream(Vec<StreamSeg>);
 
 impl SegStream {
-  /// Build a stream from a resolved *value*'s bytes, translating the value-layer
-  /// separators (`ARG_SEP`/`NULL_EXPAND`, byte-encoded inside a `VarStr`) into
-  /// real `Marker`s so word splitting sees element boundaries. Ordinary source
-  /// bytes never contain these sequences, so this is a no-op for them.
+  /// Convert `Marker::ArgSep` and `Marker::NullExpand` back into their byte representations,
+  /// so that the stream can be serialized to a string.
   fn from_value_bytes(bytes: &[u8]) -> Self {
+    // TODO: remove this function, and replace it with something that fits the SegStream system better
+    // this entire thing is basically just a necessary compatibility shim since ARG_SEP and NULL_EXPAND
+    // are load bearing components of the expansion system
     let mut out = SegStream::new();
     let mut rest = bytes;
 
@@ -41,6 +42,28 @@ impl SegStream {
     }
     out.push_bytes(rest);
     out
+  }
+
+  pub fn as_plain_bytes(&self) -> Option<&[u8]> {
+    if self.0.len() == 1
+      && let StreamSeg::Bytes(ref b) = self.0[0]
+    {
+      Some(b)
+    } else {
+      None
+    }
+  }
+
+  pub fn has_meta(&self) -> bool {
+    self.0.iter().any(|seg| match seg {
+      StreamSeg::Bytes(b) => b.iter().any(|&c| {
+        matches!(
+          c,
+          b'~' | b'\\' | b'(' | b'"' | b'\'' | b'`' | b'<' | b'>' | b'$'
+        )
+      }),
+      StreamSeg::Mark(_) => false,
+    })
   }
 }
 
@@ -129,10 +152,15 @@ impl SegStream {
   pub fn is_empty(&self) -> bool {
     self.0.is_empty()
   }
-  /// The leading run of literal bytes, up to the first marker (empty if the
-  /// stream starts with a marker). Used to match a parameter-expansion operator
-  /// prefix without an escaped/quoted char (which introduces a marker) being
-  /// mistaken for a doubled operator like `//` or `##`.
+
+  /// Check if this word has glob characters
+  pub fn has_glob_meta(&self) -> bool {
+    self.0.iter().any(|seg| match seg {
+      StreamSeg::Bytes(b) => b.iter().any(|c| matches!(c, b'*' | b'?' | b'[')),
+      StreamSeg::Mark(_) => false,
+    })
+  }
+  /// The leading run of literal bytes, up to the first marker
   pub fn leading_bytes(&self) -> &[u8] {
     match self.0.first() {
       Some(StreamSeg::Bytes(b)) => b,

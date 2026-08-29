@@ -4,7 +4,7 @@ use bitflags::bitflags;
 
 use crate::{
   eval::lex,
-  expand::stream::{ProcSubKind, SegCursor, StreamSeg},
+  expand::stream::{ProcSubKind, SegCursor},
   util::{ByteCursor, SliceCursor},
 };
 
@@ -101,16 +101,7 @@ fn push_glob_literal(out: &mut Vec<u8>, c: u8) {
 
 /// Install internal marker characters for substitution, quoting, escape, etc.,
 fn unescape_with(stream: SegStream, flags: ExpandFlags) -> SegStream {
-  let has_meta = stream.stream().iter().any(|seg| match seg {
-    StreamSeg::Bytes(b) => b.iter().any(|&c| {
-      matches!(
-        c,
-        b'~' | b'\\' | b'(' | b'"' | b'\'' | b'`' | b'<' | b'>' | b'$'
-      )
-    }),
-    StreamSeg::Mark(_) => false,
-  });
-  if !has_meta {
+  if !stream.has_meta() {
     return stream;
   }
 
