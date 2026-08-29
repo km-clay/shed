@@ -734,6 +734,7 @@ fn handle_line_get(header: &LineHeader, conn: &UnixStream, readline: &mut ShedLi
     hint,
     mode,
   } = readline.get_line_data();
+
   match header {
     LineHeader::Buffer => {
       write(conn, buffer.as_bytes()).ok();

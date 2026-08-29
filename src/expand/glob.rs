@@ -6,6 +6,8 @@ use std::{
   rc::Rc,
 };
 
+use bstr::ByteSlice;
+
 use crate::{
   match_loop, shopt,
   util::{path_entries, path_from_bytes},
@@ -35,7 +37,10 @@ impl One {
   }
 }
 
-/// A matcher representing `One` byte, or `Star` - one or more bytes
+/// Matching primitives
+///
+/// `One(_)` - matches a single byte
+/// `Star` - matches zero or more bytes
 #[derive(Debug, Clone)]
 enum Atom {
   One(One),
@@ -320,12 +325,6 @@ fn sweep_inner(atoms: &[Atom], text: &[u8], mode: SweepMode, ci: bool) -> Option
   result
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Pattern {
-  glob: Glob,
-  orig: Rc<[u8]>, // used for caching
-}
-
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct GlobOpts {
   no_case: bool,
@@ -352,21 +351,52 @@ impl GlobOpts {
   }
 }
 
+/// A compiled glob pattern, which can be used to match against strings.
 #[derive(Debug, Clone)]
-struct Glob {
+pub(crate) struct Pattern {
   atoms: Rc<[Atom]>,
+  orig: Rc<[u8]>, // used for caching
+  literal: Option<Rc<[u8]>>,
   opts: GlobOpts,
 }
-impl Glob {
-  fn new(pattern: &[u8], opts: GlobOpts) -> Self {
+
+impl Pattern {
+  pub fn compile(pattern: &[u8], opts: GlobOpts) -> Self {
+    let atoms = Atom::tokenize(pattern);
+    let literal = Self::compile_literal(&atoms, opts);
     Self {
-      atoms: Atom::tokenize(pattern),
+      atoms,
+      orig: pattern.into(),
+      literal,
       opts,
     }
   }
 
-  fn is_match(&self, other: &[u8]) -> bool {
-    sweep(&self.atoms, other, true, self.opts.no_case) == Some(other.len())
+  /// If the pattern is a literal string (no wildcards), return it as a byte slice.
+  /// Used for the literal-matching fast path
+  fn compile_literal(atoms: &[Atom], opts: GlobOpts) -> Option<Rc<[u8]>> {
+    let all_one = atoms.iter().all(|a| matches!(a, Atom::One(One::Byte(_))));
+    (!opts.no_case && all_one).then(|| {
+      atoms
+        .iter()
+        .map(|a| match a {
+          Atom::One(One::Byte(b)) => *b,
+          _ => unreachable!("guarded by all(One::Byte) above"),
+        })
+        .collect::<Rc<[u8]>>()
+    })
+  }
+
+  pub fn orig(&self) -> Rc<[u8]> {
+    self.orig.clone()
+  }
+
+  pub fn is_match(&self, other: &[u8]) -> bool {
+    if let Some(lit) = &self.literal {
+      lit.as_ref() == other
+    } else {
+      sweep(&self.atoms, other, true, self.opts.no_case) == Some(other.len())
+    }
   }
 
   pub fn match_shortest_prefix(&self, text: &[u8]) -> Option<usize> {
@@ -378,7 +408,11 @@ impl Glob {
   }
 
   fn match_prefix(&self, text: &[u8], longest: bool) -> Option<usize> {
-    sweep(&self.atoms, text, longest, self.opts.no_case)
+    if let Some(lit) = &self.literal {
+      text.starts_with(lit.as_ref()).then(|| lit.len())
+    } else {
+      sweep(&self.atoms, text, longest, self.opts.no_case)
+    }
   }
 
   pub fn match_shortest_suffix(&self, text: &[u8]) -> Option<usize> {
@@ -390,10 +424,19 @@ impl Glob {
   }
 
   fn match_suffix(&self, text: &[u8], longest: bool) -> Option<usize> {
-    rsweep(&self.atoms, text, longest, self.opts.no_case)
+    if let Some(lit) = &self.literal {
+      text.ends_with(lit.as_ref()).then(|| lit.len())
+    } else {
+      rsweep(&self.atoms, text, longest, self.opts.no_case)
+    }
   }
 
   pub fn find(&self, text: &[u8], from: usize) -> Option<(usize, usize)> {
+    if let Some(lit) = &self.literal {
+      return text[from..]
+        .find(lit.as_ref())
+        .map(|rel| (from + rel, from + rel + lit.len()));
+    }
     (from..=text.len()).find_map(|start| {
       sweep(&self.atoms, &text[start..], true, self.opts.no_case).map(|len| (start, start + len))
     })
@@ -535,36 +578,6 @@ fn parse_class(p: &[u8]) -> Option<(bool, Vec<ClassItem>, usize)> {
   }
 
   None
-}
-
-impl Pattern {
-  pub fn compile(pattern: &[u8], opts: GlobOpts) -> Self {
-    Self {
-      glob: Glob::new(pattern, opts),
-      orig: pattern.into(),
-    }
-  }
-  pub fn orig(&self) -> &Rc<[u8]> {
-    &self.orig
-  }
-  pub fn is_match(&self, text: &[u8]) -> bool {
-    self.glob.is_match(text)
-  }
-  pub fn match_shortest_prefix(&self, text: &[u8]) -> Option<usize> {
-    self.glob.match_shortest_prefix(text)
-  }
-  pub fn match_longest_prefix(&self, text: &[u8]) -> Option<usize> {
-    self.glob.match_longest_prefix(text)
-  }
-  pub fn match_shortest_suffix(&self, text: &[u8]) -> Option<usize> {
-    self.glob.match_shortest_suffix(text)
-  }
-  pub fn match_longest_suffix(&self, text: &[u8]) -> Option<usize> {
-    self.glob.match_longest_suffix(text)
-  }
-  pub fn find(&self, text: &[u8], from: usize) -> Option<(usize, usize)> {
-    self.glob.find(text, from)
-  }
 }
 
 /// Quick structural check: only return true if the string could plausibly be a glob.
