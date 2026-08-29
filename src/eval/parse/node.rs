@@ -54,6 +54,10 @@ impl LabelCtx {
     Rc::make_mut(&mut self.0).push_back(label);
   }
 
+  pub fn deep_clone(&self) -> VecDeque<LabelBuilder> {
+    self.0.iter().cloned().collect()
+  }
+
   pub fn iter(&self) -> impl Iterator<Item = &LabelBuilder> {
     self.0.iter()
   }
@@ -114,11 +118,6 @@ impl Ast {
       self.walk_tree_mut(child, f);
     }
   }
-  pub fn propagate_context(&mut self, id: NodeId, ctx: &LabelBuilder) {
-    self.walk_tree_mut(id, &mut |nd| {
-      nd.context.push_back(ctx.clone());
-    });
-  }
 }
 
 #[derive(Clone, Debug)]
@@ -168,7 +167,7 @@ impl Node {
         ids.push(*body);
       }
       NdRule::ForNode { body, .. }
-      | NdRule::DeferNode { body }
+      | NdRule::DeferNode { body, .. }
       | NdRule::Subshell { body }
       | NdRule::BraceGrp { body }
       | NdRule::FuncDef { body, .. } => ids.push(*body),
@@ -239,7 +238,7 @@ impl Node {
         ids.push(body);
       }
       NdRule::ForNode { body, .. }
-      | NdRule::DeferNode { body }
+      | NdRule::DeferNode { body, .. }
       | NdRule::Subshell { body }
       | NdRule::BraceGrp { body }
       | NdRule::FuncDef { body, .. } => ids.push(body),
@@ -476,9 +475,11 @@ pub(crate) enum NdRule {
     body: NodeId,
     err: Vec<Tk>,
     catch: Option<NodeId>,
+    ctx: LabelBuilder,
   },
   DeferNode {
     body: NodeId,
+    ctx: LabelBuilder,
   },
   ForArith {
     init: Option<NodeId>,
@@ -523,6 +524,7 @@ pub(crate) enum NdRule {
   FuncDef {
     name: Tk,
     body: NodeId,
+    ctx: LabelBuilder,
   },
 }
 

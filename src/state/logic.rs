@@ -3,6 +3,7 @@ use nix::sys::signal::Signal;
 use std::fmt::{self, Display};
 use std::rc::Rc;
 
+use crate::util::error::LabelBuilder;
 use crate::{
   HashMap, ShResult,
   autoload::{self, AutoloadSrc, Autoloader},
@@ -65,6 +66,7 @@ pub enum ShFunc {
   Defined {
     logic: Rc<Ast>, // immutable
     source: Span,
+    ctx: Option<LabelBuilder>,
     is_internal: Option<IsInternal>,
   },
   Autoload(AutoloadSrc),
@@ -75,8 +77,18 @@ impl ShFunc {
     Self::Defined {
       logic: Rc::new(logic),
       source,
+      ctx: None,
       is_internal: None,
     }
+  }
+  pub fn with_ctx(mut self, ctx: LabelBuilder) -> Self {
+    match &mut self {
+      Self::Defined { ctx: c, .. } => {
+        *c = Some(ctx);
+      }
+      Self::Autoload(_) => {}
+    }
+    self
   }
   #[allow(dead_code)]
   pub fn autoload_src(&self) -> Option<&AutoloadSrc> {

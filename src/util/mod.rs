@@ -36,7 +36,7 @@ pub(crate) enum Direction {
   Backward,
 }
 
-pub(super) use error::{ShErr, ShErrKind, ShResult, ShResultExt, get_context};
+pub(super) use error::{ShErr, ShErrKind, ShResult, ShResultExt};
 
 pub(super) use strops::{
   ByteCursor, EDIT_WEIGHT, QuoteState, SliceCursor, TimeReader, VarStrDisplay, ends_with_unescaped,

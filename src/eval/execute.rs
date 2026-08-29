@@ -9,7 +9,7 @@ use crate::{
   shopt_mut, signal, socket,
   state::{
     Shed, shopt,
-    vars::{VarStr, VarStrSliceExt},
+    vars::{DeferredAst, VarStr, VarStrSliceExt},
   },
   util, varstr,
 };
@@ -178,7 +178,7 @@ pub(crate) fn dispatch_deferred_cmds() {
   let mut deferred = Shed::vars_mut(|v| v.cur_scope_mut().take_deferred_cmds());
 
   while let Some(cmd) = deferred.pop() {
-    if !dispatch_deferred_cmd(&cmd) {
+    if !dispatch_deferred_cmd(cmd) {
       break;
     }
   }
@@ -188,9 +188,15 @@ pub(crate) fn dispatch_deferred_cmds() {
 ///
 /// Error handling happens inside the function, so this is infallible.
 /// If the function returns false, that means we should stop executing deferred cmds
-pub(crate) fn dispatch_deferred_cmd(cmd: &Ast) -> bool {
-  let mut dispatcher = Dispatcher::new("defer".into());
-  if let Err(e) = dispatcher.begin_dispatch(cmd) {
+pub(crate) fn dispatch_deferred_cmd(cmd: DeferredAst) -> bool {
+  let DeferredAst { ast, ctx } = cmd;
+
+  let outcome = {
+    let _frame = Shed::push_call_frame(vec![ctx]);
+    Dispatcher::new("defer".into()).begin_dispatch(&ast)
+  };
+
+  if let Err(e) = outcome {
     let maybe_flowctl = match e.kind() {
       ShErrKind::ErrInterrupt => {
         // set -e aborted the execution
@@ -510,7 +516,7 @@ impl Dispatcher {
     }
   }
   pub fn exec_defer(tree: &Ast, node: NodeId) -> ShResult<()> {
-    let NdRule::DeferNode { body } = &tree[node].class else {
+    let NdRule::DeferNode { body, ctx } = &tree[node].class else {
       unreachable!()
     };
     let mut body = tree.break_off(*body);
@@ -537,15 +543,22 @@ impl Dispatcher {
       return Err(e);
     }
 
-    Shed::vars_mut(|v| v.cur_scope_mut().defer_cmd(body));
+    Shed::vars_mut(|v| v.cur_scope_mut().defer_cmd(body, ctx.clone()));
     Ok(())
   }
   pub fn exec_try(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
     let try_blame = tree[node].get_span();
-    let NdRule::TryNode { body, err, catch } = &tree[node].class else {
+    let NdRule::TryNode {
+      body,
+      err,
+      catch,
+      ctx,
+    } = &tree[node].class
+    else {
       unreachable!()
     };
-    let context = tree[*body].context.clone();
+    let mut trace = tree[node].context.deep_clone();
+    trace.push_back(ctx.clone());
 
     // enable set -e -o pipefail temporarily
     let errexit = shopt!(set.errexit);
@@ -555,7 +568,12 @@ impl Dispatcher {
     defer!(shopt_mut!(set.errexit = errexit));
     defer!(shopt_mut!(set.pipefail = pipefail));
 
-    match self.dispatch_node(tree, *body) {
+    let outcome = {
+      let _frame = Shed::push_call_frame(vec![ctx.clone()]);
+      self.dispatch_node(tree, *body)
+    };
+
+    match outcome {
       Ok(()) => Ok(()),
       Err(e) => {
         if e.is_flow_control() {
@@ -572,7 +590,7 @@ impl Dispatcher {
           let msg = msg_parts.join_with(" ");
 
           ShErr::at(ShErrKind::TryFailed, blame, msg)
-            .with_context(context.iter())
+            .with_context(trace.iter())
             .print_error();
         }
 
@@ -649,17 +667,10 @@ impl Dispatcher {
   }
   pub fn exec_func_def(tree: &Ast, func_def: NodeId) -> ShResult<()> {
     let blame = tree[func_def].get_span();
-    let ctx = tree[func_def].context.clone();
-    let NdRule::FuncDef { name, body } = &tree[func_def].class else {
+    let NdRule::FuncDef { name, body, ctx } = &tree[func_def].class else {
       unreachable!()
     };
-    let mut body = tree.break_off(*body);
-    for label in ctx.iter() {
-      let Some(root) = body.get_root() else {
-        continue;
-      };
-      body[root].context.push_back(label.clone());
-    }
+    let body = tree.break_off(*body);
 
     let func_name = name.span.as_bytes();
     let func_name = func_name.strip_suffix(b"()").unwrap_or(func_name);
@@ -672,7 +683,7 @@ impl Dispatcher {
       ));
     }
 
-    let func = ShFunc::defined(body, blame);
+    let func = ShFunc::defined(body, blame).with_ctx(ctx.clone());
     Shed::logic_mut(|l| l.insert_func(&func_name.to_str_lossy(), func)); // Store the AST
     if Shed::term(Terminal::interactive) {
       Shed::meta_mut(|m| {
@@ -707,8 +718,10 @@ impl Dispatcher {
 
     // need to do this in a new scope so we can borrow func safely
     let (func_name, mut blame) = {
+      let borrow = &func;
+
       // borrow func.class to avoid partial move
-      let NdRule::Command { argv, .. } = &func.class else {
+      let NdRule::Command { ref argv, .. } = borrow.class else {
         unreachable!()
       };
 
@@ -735,8 +748,8 @@ impl Dispatcher {
       ));
     };
 
-    let func_body = match sh_func {
-      ShFunc::Defined { logic, .. } => logic,
+    let (func_body, func_src_ctx) = match sh_func {
+      ShFunc::Defined { logic, ctx, .. } => (logic, ctx),
       ShFunc::Autoload(src) => {
         Shed::logic_mut(|l| l.remove_func(&func_name.to_str_lossy())); // remove autoload from the table
         src.source()?;
@@ -755,11 +768,12 @@ impl Dispatcher {
       unreachable!()
     };
 
-    let func_ctx = util::get_context(
+    let caller_contexts: Vec<_> = func.context.iter().cloned().collect();
+
+    let call_ctx = util::error::get_context(
       styled_format!("in call to function '{}'", &func_name).into(),
       &blame,
     );
-    let caller_contexts: Vec<_> = func.context.iter().cloned().collect();
 
     let max_depth = Shed::shopts(|s| s.core.max_recurse_depth);
     let depth = Shed::meta(MetaTab::func_depth);
@@ -816,7 +830,10 @@ impl Dispatcher {
     };
 
     let mut frame = caller_contexts;
-    frame.push(func_ctx);
+    frame.push(call_ctx);
+    if let Some(ctx) = func_src_ctx {
+      frame.push(ctx.clone());
+    }
     let _ctx_frame = Shed::push_call_frame(frame);
 
     let _timer = self.take_timer();
@@ -840,8 +857,8 @@ impl Dispatcher {
           Err(e)
         }
         ShErrKind::ErrInterrupt => {
-          // set -e caught an error
-          Err(e.with_context(func_body[root].context.iter()))
+          // set -e caught an error.
+          Err(e.with_context(Shed::call_context().iter()))
         }
         _ => Err(e),
       },

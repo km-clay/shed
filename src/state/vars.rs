@@ -3,7 +3,7 @@ use crate::{
   eval::{lex::TkFlags, parse::Ast},
   expand::{Expander, expand_raw_inner, stream::SegStream},
   match_loop,
-  util::{self, ByteCursor, QuoteState, SliceCursor, random},
+  util::{self, ByteCursor, QuoteState, SliceCursor, error::LabelBuilder, random},
   varstr,
 };
 
@@ -1113,6 +1113,19 @@ pub(crate) enum ScopeKind {
   Block,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct DeferredAst {
+  pub ast: Ast,
+  pub ctx: LabelBuilder,
+}
+
+impl Deref for DeferredAst {
+  type Target = Ast;
+  fn deref(&self) -> &Self::Target {
+    &self.ast
+  }
+}
+
 #[derive(Default, Clone, Debug)]
 pub(crate) struct VarTab {
   // Variable *names* are always valid identifiers (`[A-Za-z_]\w*`), never byte
@@ -1123,7 +1136,7 @@ pub(crate) struct VarTab {
   sh_argv: VecDeque<VarStr>, /* Using a VecDeque makes the implementation of `shift` straightforward */
 
   kind: ScopeKind,
-  deferred_cmds: Vec<Ast>,
+  deferred_cmds: Vec<DeferredAst>,
 }
 
 impl VarTab {
@@ -1313,10 +1326,10 @@ impl VarTab {
       self.bpush_arg(VarStr::from(arg.into_vec()));
     }
   }
-  pub fn defer_cmd(&mut self, cmd: Ast) {
-    self.deferred_cmds.push(cmd);
+  pub fn defer_cmd(&mut self, ast: Ast, ctx: LabelBuilder) {
+    self.deferred_cmds.push(DeferredAst { ast, ctx });
   }
-  pub fn take_deferred_cmds(&mut self) -> Vec<Ast> {
+  pub fn take_deferred_cmds(&mut self) -> Vec<DeferredAst> {
     std::mem::take(&mut self.deferred_cmds)
   }
   pub fn has_deferred_cmds(&self) -> bool {

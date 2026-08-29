@@ -47,19 +47,16 @@ impl ParseStream {
 
     extend_span!(span, self.tree[body].get_span());
 
-    self.tree.propagate_context(
-      body,
-      &get_context(
-        styled_format!("in function '{}' defined here", name.to_str_lossy()).into(),
-        &span.clone().unwrap_or_default(),
-      ),
+    let ctx = get_context(
+      styled_format!("in function '{}' defined here", name.to_str_lossy()).into(),
+      &span.clone().unwrap_or_default(),
     );
 
     let mut redirs = vec![];
     self.parse_redir(&mut redirs, &mut span)?;
     self.tree[body].redirs.append(&mut redirs);
 
-    let node = node!(self, span, NdRule::FuncDef { name, body });
+    let node = node!(self, span, NdRule::FuncDef { name, body, ctx });
 
     Ok(Some(self.tree.insert_node(node)))
   }
@@ -779,12 +776,9 @@ impl ParseStream {
     } else {
       try_tk_span
     };
-    self.tree.propagate_context(
-      body,
-      &get_context(
-        styled_format!("in '{}' block defined here", "try").into(),
-        &try_span,
-      ),
+    let ctx = get_context(
+      styled_format!("in '{}' block defined here", "try").into(),
+      &try_span,
     );
 
     extend_span!(span, self.next_tk().unwrap().span); // consume 'catch'
@@ -814,7 +808,8 @@ impl ParseStream {
         NdRule::TryNode {
           body,
           err,
-          catch: None
+          catch: None,
+          ctx
         },
         redirs
       );
@@ -854,7 +849,17 @@ impl ParseStream {
     self.parse_redir(&mut redirs, &mut span)?;
     let catch = Some(catch_body);
 
-    let node = node!(self, span, NdRule::TryNode { body, err, catch }, redirs);
+    let node = node!(
+      self,
+      span,
+      NdRule::TryNode {
+        body,
+        err,
+        catch,
+        ctx
+      },
+      redirs
+    );
 
     Ok(Some(self.tree.insert_node(node)))
   }
@@ -884,17 +889,14 @@ impl ParseStream {
 
     extend_span!(span, self.tree[body].get_span());
 
-    self.tree.propagate_context(
-      body,
-      &get_context(
-        styled_format!("in '{}' block defined here", "defer").into(),
-        &defer_span,
-      ),
+    let ctx = get_context(
+      styled_format!("in '{}' block defined here", "defer").into(),
+      &defer_span,
     );
 
     self.catch_separator(&mut span);
 
-    let node = node!(self, span, NdRule::DeferNode { body });
+    let node = node!(self, span, NdRule::DeferNode { body, ctx });
 
     Ok(Some(self.tree.insert_node(node)))
   }
