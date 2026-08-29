@@ -16,7 +16,7 @@ use super::{
   shopt as shopt_macro, signal, socket,
   state::vars::{VarFlags, VarKind},
   system_msg, try_var, two_way_display, util as crate_util,
-  util::{Pos, ShErr, ShErrKind, ShResult},
+  util::{Pos, ShErr, ShErrKind, ShResult, error::LabelBuilder},
   var, writefd,
 };
 
@@ -31,6 +31,17 @@ pub(super) mod vars;
 
 thread_local! {
   static SHED: Shed = Shed::new();
+}
+
+/// Pops a call frame's traceback labels on drop, restoring the context stack
+/// to the length it had before the frame was pushed. See [`Shed::push_call_frame`].
+pub(crate) struct CallFrameGuard {
+  restore: usize,
+}
+impl Drop for CallFrameGuard {
+  fn drop(&mut self) {
+    SHED.with(|shed| shed.call_context.borrow_mut().truncate(self.restore));
+  }
 }
 
 #[derive(Clone, Debug)]
@@ -115,6 +126,12 @@ pub(super) struct Shed {
   socket: RefCell<Option<Arc<socket::ShedSocket>>>,
   subscribers: RefCell<Vec<Arc<UnixStream>>>,
 
+  /// Traceback context stack: each active function call pushes its
+  /// "in call to …" (and caller) labels. Attached to errors at print time,
+  /// so a forked child that prints an error mid-call sees the call chain,
+  /// while an error that propagates out after the frame pops does not.
+  call_context: RefCell<Vec<LabelBuilder>>,
+
   sinks: RefCell<procio::Sinks>,
 
   #[cfg(test)]
@@ -140,6 +157,7 @@ impl Shed {
 
       socket: RefCell::new(None),
       subscribers: RefCell::new(vec![]),
+      call_context: RefCell::new(vec![]),
 
       sinks: RefCell::new(procio::Sinks::new()),
 
@@ -433,6 +451,22 @@ impl Shed {
   pub fn num_subscribers() -> usize {
     SHED.with(|shed| shed.subscribers.borrow().len())
   }
+  /// Push a call frame's traceback labels; the returned guard pops them when
+  /// the frame exits (restoring the stack to its prior length).
+  pub fn push_call_frame(labels: Vec<LabelBuilder>) -> CallFrameGuard {
+    let restore = SHED.with(|shed| {
+      let mut cc = shed.call_context.borrow_mut();
+      let restore = cc.len();
+      cc.extend(labels);
+      restore
+    });
+    CallFrameGuard { restore }
+  }
+  /// Snapshot the active traceback-context stack, for attaching to an error
+  /// as it is printed.
+  pub fn call_context() -> Vec<LabelBuilder> {
+    SHED.with(|shed| shed.call_context.borrow().clone())
+  }
   pub fn broadcast_msg(msg: &str) {
     let payload = msg
       .lines()
@@ -590,6 +624,7 @@ impl Shed {
       system_msg_hist: RefCell::new(self.system_msg_hist.borrow().clone()),
       socket: RefCell::new(self.socket.borrow().clone()),
       subscribers: RefCell::new(self.subscribers.borrow().clone()),
+      call_context: RefCell::new(self.call_context.borrow().clone()),
       sinks: RefCell::new(self.sinks.borrow().clone()),
       saved: RefCell::new(None),
       status_code: AtomicI32::new(self.status_code.load(Ordering::Relaxed)),

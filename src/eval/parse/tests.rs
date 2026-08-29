@@ -1852,6 +1852,117 @@ fn deferred_exit_skips_outer_defers_but_plain_exit_runs_them() {
   }
 }
 
+/// Strip ANSI CSI (`ESC[…m`) sequences so traceback assertions match on the
+/// rendered text, not the color codes ariadne wraps it in.
+fn strip_ansi(s: &str) -> String {
+  let mut out = String::new();
+  let mut chars = s.chars();
+  while let Some(c) = chars.next() {
+    if c == '\x1b' {
+      for c2 in chars.by_ref() {
+        if c2 == 'm' {
+          break;
+        }
+      }
+    } else {
+      out.push(c);
+    }
+  }
+  out
+}
+
+// ─── Golden traceback tests ──────────────────────────────────────────────
+// Lock in the error-context ("in call to function …") behavior so the lazy /
+// on-the-way-up context refactor can be verified to preserve it. A
+// command-not-found inside a function is printed-and-swallowed, so its
+// traceback is captured from the terminal; errexit propagates as an Err, so
+// its labels are inspected directly.
+
+#[test]
+fn traceback_function_error_shows_call_chain() {
+  let guard = TestGuard::new();
+  let _ = test_input("f() { nonexistent_xyz_123; }; f");
+  let out = strip_ansi(&guard.read_output());
+  for expect in [
+    "command not found",
+    "in function 'f' defined here",
+    "in call to function 'f'",
+  ] {
+    assert!(
+      out.contains(expect),
+      "missing {expect:?} in traceback:\n{out}"
+    );
+  }
+}
+
+#[test]
+fn traceback_nested_function_error_shows_full_chain() {
+  let guard = TestGuard::new();
+  let _ = test_input("g() { nonexistent_xyz_123; }; f() { g; }; f");
+  let out = strip_ansi(&guard.read_output());
+  for expect in [
+    "command not found",
+    "in function 'g' defined here",
+    "in function 'f' defined here",
+    "in call to function 'g'",
+    "in call to function 'f'",
+  ] {
+    assert!(
+      out.contains(expect),
+      "missing {expect:?} in traceback:\n{out}"
+    );
+  }
+}
+
+#[test]
+fn traceback_errexit_in_function_is_bare() {
+  // `set -e` surfaces just the failing command; no function call-chain context.
+  let _guard = TestGuard::new();
+  let err = test_input("set -e; f() { false; echo NOPE; }; f").unwrap_err();
+  let labels = err.label_messages();
+  assert!(
+    labels
+      .iter()
+      .any(|l| l.contains("Command returned non-zero exit status")),
+    "labels: {labels:?}"
+  );
+  assert!(
+    !labels.iter().any(|l| l.contains("in call to function")),
+    "errexit should not carry call-chain labels; got: {labels:?}"
+  );
+}
+
+#[test]
+fn traceback_propagating_builtin_error_shows_call_chain() {
+  // A builtin error (cd) propagates out of the function and is printed at the
+  // top — it must still carry the call chain (unlike a forked command error,
+  // it never dies in a child).
+  let guard = TestGuard::new();
+  let _ = test_input("f() { cd /nonexistent_dir_xyz_987; }; f");
+  let out = strip_ansi(&guard.read_output());
+  for expect in ["in function 'f' defined here", "in call to function 'f'"] {
+    assert!(
+      out.contains(expect),
+      "missing {expect:?} in traceback:\n{out}"
+    );
+  }
+}
+
+#[test]
+fn traceback_raise_in_function_surfaces_message() {
+  // `raise` surfaces its message. (Its *collapse* to a single call-site label
+  // at func_depth<=1 is depth-sensitive and not cleanly reproducible under the
+  // test harness's frame depth; the collapsed rendering is verified
+  // byte-for-byte against the eager baseline separately.)
+  let _guard = TestGuard::new();
+  let err = test_input("f() { raise MyErr \"boom\"; }; f").unwrap_err();
+  let labels = err.label_messages();
+  assert!(
+    labels.iter().any(|l| l.contains("boom")),
+    "expected raised message in labels; got: {labels:?}"
+  );
+}
+
 #[test]
 fn defer_failure_does_not_propagate_to_outer_errexit() {
   // A failing defer body must not trigger the surrounding errexit. The

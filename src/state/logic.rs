@@ -1,6 +1,7 @@
 use nix::sys::signal::Signal;
 
 use std::fmt::{self, Display};
+use std::rc::Rc;
 
 use crate::{
   HashMap, ShResult,
@@ -62,7 +63,7 @@ pub(crate) enum IsInternal {
 #[derive(Clone, Debug)]
 pub enum ShFunc {
   Defined {
-    logic: Ast,
+    logic: Rc<Ast>, // immutable
     source: Span,
     is_internal: Option<IsInternal>,
   },
@@ -72,7 +73,7 @@ pub enum ShFunc {
 impl ShFunc {
   pub fn defined(logic: Ast, source: Span) -> Self {
     Self::Defined {
-      logic,
+      logic: Rc::new(logic),
       source,
       is_internal: None,
     }
@@ -94,14 +95,7 @@ impl ShFunc {
   #[allow(dead_code)]
   pub fn logic(&self) -> Option<&Ast> {
     match self {
-      Self::Defined { logic, .. } => Some(logic),
-      Self::Autoload(_) => None,
-    }
-  }
-  #[allow(dead_code)]
-  pub fn logic_mut(&mut self) -> Option<&mut Ast> {
-    match self {
-      Self::Defined { logic, .. } => Some(logic),
+      Self::Defined { logic, .. } => Some(&**logic),
       Self::Autoload(_) => None,
     }
   }

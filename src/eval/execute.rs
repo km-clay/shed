@@ -521,7 +521,7 @@ impl Dispatcher {
       ));
     };
 
-    // something like `defer eval "$(shopt core.nullglob)"`
+    // something like `defer shopt core.nullglob=$(shopt core.nullglob)`
     // needs to expand at registration time, and not at
     // execution time.
     let mut err: Option<ShErr> = None;
@@ -728,7 +728,7 @@ impl Dispatcher {
       (name, func_name.span.clone())
     };
 
-    let Some(ref mut sh_func) = Shed::logic(|l| l.get_func(&func_name.to_str_lossy())) else {
+    let Some(sh_func) = Shed::logic(|l| l.get_func(&func_name.to_str_lossy())) else {
       return Err(sherr!(
         InternalErr @ blame,
         "Failed to find function '{func_name}'"
@@ -814,14 +814,13 @@ impl Dispatcher {
           "Function body has no root node",
       ));
     };
-    for ctx in caller_contexts.into_iter().rev() {
-      func_body.propagate_context(root, &ctx);
-    }
-    func_body.propagate_context(root, &func_ctx);
-    func_body[root].flags = func.flags;
+
+    let mut frame = caller_contexts;
+    frame.push(func_ctx);
+    let _ctx_frame = Shed::push_call_frame(frame);
 
     let _timer = self.take_timer();
-    match self.dispatch_node(func_body, root) {
+    match self.dispatch_node(&func_body, root) {
       Ok(()) => Ok(()),
       Err(e) => match e.kind() {
         ShErrKind::FuncReturn(code) => {
@@ -831,8 +830,9 @@ impl Dispatcher {
         ShErrKind::Raised(_, code) => {
           Shed::set_status(*code);
           if Shed::meta(MetaTab::func_depth) <= 1 {
-            // raise builtin has been called
-            // set the status, attach the function call span
+            // raise builtin: fold the live call-frame context into the error so
+            // collapse_context sees the outer call-site span, then collapse to a single label.
+            let e = e.with_context(Shed::call_context().iter());
             return Err(e.collapse_context());
           }
 

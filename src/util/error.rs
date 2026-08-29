@@ -267,6 +267,17 @@ impl ShErr {
   pub fn is_flow_control(&self) -> bool {
     self.kind.is_flow_control()
   }
+  /// Test-only: the messages of every label attached to this error, in
+  /// attachment order. Lets us golden-test traceback *context* without
+  /// coupling to ANSI/box-drawing rendering.
+  #[cfg(test)]
+  pub(crate) fn label_messages(&self) -> Vec<String> {
+    self
+      .labels
+      .iter()
+      .filter_map(|l| l.message.as_ref().map(|m| m.to_str_lossy().into_owned()))
+      .collect()
+  }
   pub fn option_promote(self, span: Option<Span>) -> Self {
     match span {
       Some(span) => self.promote(span),
@@ -455,10 +466,18 @@ impl ShErr {
     }
   }
   pub fn print_error(self) {
-    let error = if shopt!(core.compact_errors) {
-      self.collapse_context()
-    } else {
+    // retrieve and attach the active call-frame traceback context, if any
+    let frames = crate::state::Shed::call_context();
+    let with_frames = if frames.is_empty() {
       self
+    } else {
+      self.with_context(frames.iter())
+    };
+
+    let error = if shopt!(core.compact_errors) {
+      with_frames.collapse_context()
+    } else {
+      with_frames
     };
 
     error.print_error_internal(&mut FdWriter(stderr_fileno()));
