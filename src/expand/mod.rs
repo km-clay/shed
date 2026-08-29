@@ -181,16 +181,18 @@ impl Expander {
       ..self
     }
   }
-  pub fn expand(&mut self) -> ShResult<Vec<VarStr>> {
+  pub fn expand(self) -> ShResult<Vec<VarStr>> {
     let mark_split = !self.flags.contains(TkFlags::IS_HEREDOC) && !self.nosplit;
-    self.expand_inner(mark_split)?;
+    let noglob = self.noglob;
+    let raw = self.expand_inner(mark_split)?;
+
     let words: Vec<stream::SegStream> = if mark_split {
-      self.split_words()
+      Self::split_words(&raw)
     } else {
-      vec![self.raw.clone()]
+      vec![raw]
     };
 
-    if self.noglob || shopt!(set.noglob) {
+    if noglob || shopt!(set.noglob) {
       return Ok(words.into_iter().map(|w| w.into_bytes().into()).collect());
     }
 
@@ -214,16 +216,16 @@ impl Expander {
 
     Ok(glob_words)
   }
-  pub fn expand_no_side_effects(&mut self) -> ShResult<VarStr> {
+  pub fn expand_no_side_effects(mut self) -> ShResult<VarStr> {
     self.allow_side_effects = false;
     let raw = self.expand_inner(false)?;
     Ok(raw.into_bytes().into())
   }
-  pub fn expand_no_split(&mut self) -> ShResult<VarStr> {
+  pub fn expand_no_split(self) -> ShResult<VarStr> {
     let raw = self.expand_inner(false)?;
     Ok(raw.into_bytes().into())
   }
-  pub fn expand_keep_quotes(&mut self) -> ShResult<VarStr> {
+  pub fn expand_keep_quotes(self) -> ShResult<VarStr> {
     let raw = self.expand_inner(false)?;
     let mut out: Vec<u8> = Vec::new();
     let mut cursor = raw.cursor();
@@ -237,24 +239,24 @@ impl Expander {
     }
     Ok(out.into())
   }
-  pub fn expand_for_glob(&mut self) -> ShResult<VarStr> {
+  pub fn expand_for_glob(self) -> ShResult<VarStr> {
     let raw = self.expand_inner(false)?;
     Ok(escape::markers_to_glob_escapes(&raw).into())
   }
-  pub fn expand_inner(&mut self, mark_split: bool) -> ShResult<stream::SegStream> {
+  pub fn expand_inner(self, mark_split: bool) -> ShResult<stream::SegStream> {
     let mut cursor = self.raw.cursor();
-    self.raw = expand_raw_inner(&mut cursor, self.allow_side_effects, mark_split)?;
+    let raw = expand_raw_inner(&mut cursor, self.allow_side_effects, mark_split)?;
 
-    Ok(self.raw.clone())
+    Ok(raw)
   }
   /// Perform POSIX word splitting.
   ///
   /// Resolves escapes and the special `$@`/`$*` cases, and performs IFS field
   /// splitting, but only inside `EXPAND_START`/`EXPAND_END` runs.
-  pub fn split_words(&mut self) -> Vec<stream::SegStream> {
+  pub fn split_words(raw: &stream::SegStream) -> Vec<stream::SegStream> {
     use stream::{Marker, Quote, SegStream, StreamSeg, Unit};
     let mut words: Vec<SegStream> = vec![];
-    let mut cursor = self.raw.cursor();
+    let mut cursor = raw.cursor();
     let mut cur_word = SegStream::new();
     let mut was_quoted = false;
     let ifs = state::util::get_separators();
@@ -461,14 +463,14 @@ mod tests {
       markers::EXPAND_START,
       markers::EXPAND_END
     );
-    let mut exp = Expander {
+    let exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: false,
       nosplit: false,
       flags: TkFlags::empty(),
     };
-    let words = exp.split_words();
+    let words = Expander::split_words(&exp.raw);
     assert_eq!(words, vec!["hello", "world", "foo"]);
   }
 
@@ -478,14 +480,14 @@ mod tests {
     Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
 
     let raw = format!("{}a:b:c{}", markers::EXPAND_START, markers::EXPAND_END);
-    let mut exp = Expander {
+    let exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: false,
       nosplit: false,
       flags: TkFlags::empty(),
     };
-    let words = exp.split_words();
+    let words = Expander::split_words(&exp.raw);
     assert_eq!(words, vec!["a", "b", "c"]);
   }
 
@@ -501,14 +503,14 @@ mod tests {
       markers::EXPAND_START,
       markers::EXPAND_END
     );
-    let mut exp = Expander {
+    let exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: false,
       nosplit: false,
       flags: TkFlags::empty(),
     };
-    let words = exp.split_words();
+    let words = Expander::split_words(&exp.raw);
     assert_eq!(words, vec!["hello world"]);
   }
 
@@ -517,14 +519,14 @@ mod tests {
     let _guard = TestGuard::new();
 
     let raw = format!("{}hello world{}", markers::DUB_QUOTE, markers::DUB_QUOTE);
-    let mut exp = Expander {
+    let exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: false,
       nosplit: false,
       flags: TkFlags::empty(),
     };
-    let words = exp.split_words();
+    let words = Expander::split_words(&exp.raw);
     assert_eq!(words, vec!["hello world"]);
   }
 
@@ -535,7 +537,7 @@ mod tests {
     let _guard = TestGuard::new();
 
     let raw = format!("hello{}world", render(&unescape_str(b"\\ ")));
-    let mut exp = Expander {
+    let exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: true,
@@ -551,7 +553,7 @@ mod tests {
     let _guard = TestGuard::new();
 
     let raw = format!("hello{}world", render(&unescape_str(b"\\\t")));
-    let mut exp = Expander {
+    let exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: true,
@@ -568,7 +570,7 @@ mod tests {
     Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
 
     let raw = format!("a{}b:c", render(&unescape_str(b"\\:")));
-    let mut exp = Expander {
+    let exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: true,
