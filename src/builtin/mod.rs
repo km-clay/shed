@@ -490,6 +490,18 @@ impl BuiltinArgs {
       _ => None,
     })
   }
+  pub fn has_opt(&self, key: &str) -> bool {
+    self.options().any(|o| o.key() == key)
+  }
+  pub fn opt_value(&self, key: &str) -> Option<VarStr> {
+    self
+      .options()
+      .find_map(|o| {
+        let opt_key = o.key();
+        (opt_key == key).then(|| o.value().ok()).flatten()
+      })
+      .map(VarStr::from)
+  }
   pub fn no_arguments(&self) -> bool {
     self
       .argv

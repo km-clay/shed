@@ -330,8 +330,8 @@ impl LogTab {
   pub fn keymaps(&self) -> &[KeyMap] {
     &self.keymaps
   }
-  pub fn clear_autocmds(&mut self, kind: AutoCmdKind) {
-    self.autocmds.remove(&kind);
+  pub fn clear_autocmds(&mut self, kind: AutoCmdKind) -> Option<Vec<AutoCmd>> {
+    self.autocmds.remove(&kind)
   }
   pub fn insert_keymap(&mut self, keymap: KeyMap) {
     for map in &mut self.keymaps {

@@ -1,3 +1,6 @@
+//! Contains the `autocmd` builtin, which allows for registering commands to be executed automatically on certain events,
+//! like before or after a command, changing directories, etc.
+
 use crate::opt;
 
 use super::{
@@ -17,13 +20,7 @@ impl super::Builtin for AutoCmdBuiltin {
     true
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let mut clear = false;
-    for opt in args.options() {
-      match opt.key() {
-        "clear" => clear = true,
-        _ => return Err(sherr!(ExecFail, "unexpected option: {opt}")),
-      }
-    }
+    let clear = args.options().any(|opt| opt.key() == "clear");
 
     let mut arg_vec = args.arguments();
 
@@ -39,7 +36,11 @@ impl super::Builtin for AutoCmdBuiltin {
     };
 
     if clear {
-      Shed::logic_mut(|l| l.clear_autocmds(autocmd_kind));
+      let count = Shed::logic_mut(|l| l.clear_autocmds(autocmd_kind))
+        .map(|cmds| cmds.len())
+        .unwrap_or_default();
+
+      outln!("cleared {count} autocmds");
       return with_status(0);
     }
 

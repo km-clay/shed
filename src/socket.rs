@@ -1,5 +1,8 @@
+//! This module contains the logic for `shed`'s IPC socket.
+//! Functions and types used for interfacing with the socket, and handling requests can be found here.
+
 use std::{
-  fmt::{Debug, Display},
+  fmt::Debug,
   io::Write,
   os::{
     fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, RawFd},
@@ -9,7 +12,6 @@ use std::{
     },
   },
   path::{Path, PathBuf},
-  sync::LazyLock,
 };
 
 use bstr::ByteSlice;
@@ -44,43 +46,55 @@ use super::{
   util::{Pos, ShErr},
   var,
 };
+pub(crate) use private::authorize;
 
-/// Used to validate requests to the socket's private interface.
-///
-/// This shall never be inspected or printed anywhere. It should be a secret known
-/// only to the process, all of it's threads, and it's child processes.
-///
-/// Used in operations that are somewhat heavy, such as tab-completion autosuggestions.
-/// A thread is dispatched, and then writes it's findings to the socket via the private interface.
-/// This allows us to have actual async in a mostly single-threaded program.
-static PRIVATE_TOKEN: LazyLock<PrivateToken> = LazyLock::new(PrivateToken::new);
+mod private {
+  //! This module contains the private token used to authorize requests to the socket's private interface.
+  //! It exposes exactly two functions: `authorize` and `validate`. The former generates a string that can
+  //! be sent to the socket to authorize a request to the private interface. The latter checks if a given token is valid.
 
-/// Generate a string that can be sent to the socket to authorize a request to the private interface.
-pub(crate) fn authorize(request: impl Display) -> String {
-  PRIVATE_TOKEN.authorize(request)
-}
+  use super::random;
+  use std::{fmt::Display, sync::LazyLock};
 
-struct PrivateToken(String);
-impl PrivateToken {
-  fn new() -> Self {
-    Self(random::Uuid::new_v4().to_string())
+  /// Used to validate requests to the socket's private interface.
+  ///
+  /// This shall never be inspected or printed anywhere. It should be a secret known
+  /// only to the process, all of it's threads, and it's child processes.
+  ///
+  /// Used in operations that are somewhat heavy, such as tab-completion autosuggestions.
+  /// A thread is dispatched, and then writes it's findings to the socket via the private interface.
+  /// This allows us to have actual async in a mostly single-threaded program.
+  static PRIVATE_TOKEN: LazyLock<PrivateToken> = LazyLock::new(PrivateToken::new);
+
+  /// Generate a string that can be sent to the socket to authorize a request to the private interface.
+  pub(crate) fn authorize(request: impl Display) -> String {
+    PRIVATE_TOKEN.authorize(request)
   }
-  fn check(&self, other: &str) -> bool {
-    self.0 == other
+
+  pub(crate) fn validate(token: &[u8]) -> bool {
+    PRIVATE_TOKEN.check_bytes(token)
   }
-  fn authorize(&self, request: impl Display) -> String {
-    let token = &self.0;
-    format!("PRIVATE {token} {request}")
+
+  /// A private token
+  struct PrivateToken(String);
+  impl PrivateToken {
+    fn new() -> Self {
+      Self(random::Uuid::new_v4().to_string())
+    }
+    fn check_bytes(&self, other: &[u8]) -> bool {
+      self.0.as_bytes() == other
+    }
+    fn authorize(&self, request: impl Display) -> String {
+      let token = &self.0;
+      format!("PRIVATE {token} {request}")
+    }
   }
 }
 
 /// Write something to the socket as a client.
 pub(crate) fn send_to_socket(msg: &str) -> ShResult<()> {
   let Some(path) = try_var!("SHED_SOCK") else {
-    return Err(sherr!(
-      InternalErr,
-      "SHED_SOCK environment variable not set."
-    ));
+    return Err(sherr!(InternalErr, "Socket path not found"));
   };
   let mut stream = UnixStream::connect(path)?;
 
@@ -93,6 +107,7 @@ pub(crate) fn send_to_socket(msg: &str) -> ShResult<()> {
   Ok(())
 }
 
+/// Possible fields for the `status` socket command
 #[derive(Debug)]
 pub(crate) enum StatusHeader {
   ExitCode,
@@ -102,6 +117,29 @@ pub(crate) enum StatusHeader {
   Pgid,
 }
 
+impl StatusHeader {
+  fn from_bytes(s: &[u8]) -> Option<Self> {
+    match s.to_ascii_lowercase().as_slice() {
+      b"code" => Some(Self::ExitCode),
+      b"command" => Some(Self::CommandName),
+      b"runtime" => Some(Self::Runtime),
+      b"pid" => Some(Self::Pid),
+      b"pgid" => Some(Self::Pgid),
+      _ => None,
+    }
+  }
+  fn all_headers() -> Vec<Self> {
+    vec![
+      Self::ExitCode,
+      Self::CommandName,
+      Self::Runtime,
+      Self::Pid,
+      Self::Pgid,
+    ]
+  }
+}
+
+/// Possible queries for the `query` socket command
 #[derive(Debug)]
 pub(crate) enum QueryHeader {
   Cwd,
@@ -110,18 +148,109 @@ pub(crate) enum QueryHeader {
   Status(Vec<StatusHeader>),
 }
 
+impl QueryHeader {
+  fn parse_status<'a>(args: &mut impl Iterator<Item = &'a [u8]>) -> ShResult<Self> {
+    let mut headers = vec![];
+
+    while let Some(header) = args.next() {
+      let Some(header) = StatusHeader::from_bytes(header) else {
+        return Err(sherr!(
+          ParseErr,
+          "Unknown status header in 'query status' request: {}",
+          header.to_str_lossy(),
+        ));
+      };
+      headers.push(header);
+    }
+
+    if headers.is_empty() {
+      headers = StatusHeader::all_headers();
+    }
+    Ok(QueryHeader::Status(headers))
+  }
+  fn parse_var<'a>(args: &mut impl Iterator<Item = &'a [u8]>) -> ShResult<Self> {
+    let Some(kind) = args.next() else {
+      return Err(sherr!(ParseErr, "Expected 'get' or 'set' in 'var' query",));
+    };
+    match kind {
+      b"get" => {
+        let Some(var_name) = args.next() else {
+          return Err(sherr!(
+            ParseErr,
+            "Missing variable name in 'query var get' request",
+          ));
+        };
+        Ok(QueryHeader::GetVar(var_name.into()))
+      }
+      b"set" => Self::parse_var_set(args),
+      _ => Err(sherr!(
+        ParseErr,
+        "Unknown query kind in 'query var' request: {}",
+        kind.to_str_lossy(),
+      )),
+    }
+  }
+  fn parse_var_set<'a>(args: &mut impl Iterator<Item = &'a [u8]>) -> ShResult<Self> {
+    let Some(var_name) = args.next() else {
+      return Err(sherr!(
+        ParseErr,
+        "Missing variable name in 'query var set' request",
+      ));
+    };
+    let Some(value) = args.next() else {
+      return Err(sherr!(
+        ParseErr,
+        "Missing variable value in 'query var set' request",
+      ));
+    };
+    let mut flags = VarFlags::empty();
+    while let Some(flag) = args.next() {
+      match flag.to_ascii_lowercase().as_slice() {
+        b"export" => flags |= VarFlags::EXPORT,
+        b"local" => flags |= VarFlags::LOCAL,
+        b"readonly" => flags |= VarFlags::READONLY,
+        _ => {
+          return Err(sherr!(
+            ParseErr,
+            "Unknown variable flag in 'query var set' request: {}",
+            flag.to_str_lossy(),
+          ));
+        }
+      }
+    }
+    Ok(QueryHeader::SetVar(var_name.into(), value.into(), flags))
+  }
+  fn parse_args<'a>(
+    query_kind: &'a [u8],
+    args: &mut impl Iterator<Item = &'a [u8]>,
+  ) -> ShResult<Self> {
+    match query_kind.to_ascii_lowercase().as_slice() {
+      b"cwd" => Ok(QueryHeader::Cwd),
+      b"status" => Self::parse_status(args),
+      b"var" => Self::parse_var(args),
+      _ => Err(sherr!(
+        ParseErr,
+        "Unknown query kind in 'query' request: {}",
+        query_kind.to_str_lossy(),
+      )),
+    }
+  }
+}
+
+/// Possible queries to the socket's private interface
 #[derive(Debug)]
 pub(crate) enum PrivateHeader {
-  /// `(req_gen, token_start, line)`. `token_start` is the byte offset
-  /// where the completed token began in the buffer at request time;
-  /// the receiver uses it to clear the hint when the user backspaces
-  /// past the token boundary.
-  SetCompletionHint(u64, usize, VarStr),
+  SetCompletionHint {
+    req_gen: u64,       // request generation
+    token_start: usize, // byte offset of token
+    line: VarStr,
+  },
 
   /// Used for reporting errors from child processes.
   PostError(VarStr),
 }
 
+/// Possible headers for the `line` socket query
 #[derive(Debug)]
 pub(crate) enum LineHeader {
   Buffer,
@@ -131,6 +260,7 @@ pub(crate) enum LineHeader {
   Anchor,
 }
 
+/// All possible requests that can be sent to the socket
 #[derive(Debug)]
 pub(crate) enum SocketRequest {
   /// Posts a system message. System messages appear above the prompt, the same way that job status notifications do.
@@ -173,7 +303,7 @@ impl SocketRequest {
       return err;
     };
 
-    if !PRIVATE_TOKEN.check(&token.to_str_lossy()) {
+    if !private::validate(token) {
       log::warn!("Received socket request with invalid private token");
       return err;
     }
@@ -187,13 +317,19 @@ impl SocketRequest {
       b"set-comp-hint" => {
         let (req_gen_str, rest) = payload.split_once_str(" ").unwrap_or((payload, b""));
         let (token_start_str, line) = rest.split_once_str(" ").unwrap_or((rest, b""));
+
         let Some(req_gen) = util::parse_bytes::<u64>(req_gen_str) else {
           return err;
         };
         let Some(token_start) = util::parse_bytes::<usize>(token_start_str) else {
           return err;
         };
-        PrivateHeader::SetCompletionHint(req_gen, token_start, line.into())
+
+        PrivateHeader::SetCompletionHint {
+          req_gen,
+          token_start,
+          line: line.into(),
+        }
       }
       b"post-error" => PrivateHeader::PostError(payload.into()),
       _ => return err,
@@ -202,7 +338,6 @@ impl SocketRequest {
     Ok(Self::Private(header))
   }
 
-  #[expect(clippy::too_many_lines)]
   pub(crate) fn parse_request(r: &[u8]) -> ShResult<Self> {
     if let Some(stripped) = r.strip_prefix(b"PRIVATE ") {
       return Self::parse_private_request(stripped);
@@ -223,212 +358,119 @@ impl SocketRequest {
     }
 
     let rest = r[request_kind.len()..].trim();
-    let mut sep = util::scratch_buf();
     let mut bytes = SliceCursor::new(rest);
 
-    // collect the separator
-    while let Some(b) = bytes.peek_byte() {
-      if !b.is_ascii_alphanumeric() && b.is_ascii_graphic() {
-        sep.push(b);
-        bytes.bump();
-      } else {
-        break;
-      }
-    }
-    let rest = bytes.into_slice();
-    let mut args = rest.split_str(&*sep);
+    // skip separator bytes
+    bytes.bump_while(|b| !b.is_ascii_alphanumeric() && b.is_ascii_graphic());
+    let sep_end = bytes.pos();
+
+    // split the rest on the separator bytes
+    let remainder = bytes.into_slice();
+    let mut args = remainder.split_str(&rest[..sep_end]);
 
     match request_kind.trim() {
-      b"msg" => {
-        let Some(msg_kind) = args.next() else {
-          return Err(sherr!(ParseErr, "Missing message kind in 'msg' request",));
-        };
-        match msg_kind.to_ascii_lowercase().as_slice() {
-          b"system" => {
-            let Some(msg) = args.next() else {
-              return Err(sherr!(ParseErr, "Missing message in system msg request",));
-            };
-            Ok(Self::PostSystemMessage(msg.into()))
-          }
-          b"status" => {
-            let Some(msg) = args.next() else {
-              return Err(sherr!(ParseErr, "Missing message in status msg request",));
-            };
-            Ok(Self::PostStatusMessage(msg.into()))
-          }
-          _ => Err(sherr!(
-            ParseErr,
-            "Unknown message kind in 'msg' request: {}",
-            msg_kind.to_str_lossy(),
-          )),
-        }
-      }
+      b"msg" => Self::parse_msg(&mut args),
+      b"query" => Self::parse_query(&mut args),
+      b"line" => Self::parse_line(&mut args),
 
-      b"query" => {
-        let Some(query_kind) = args.next() else {
-          return Err(sherr!(ParseErr, "Missing query kind in 'query' request",));
-        };
-        match query_kind.to_ascii_lowercase().as_slice() {
-          b"cwd" => Ok(Self::Query(QueryHeader::Cwd)),
-          b"status" => {
-            let mut headers = vec![];
-            while let Some(header) = args.next() {
-              let status_header = match header.to_ascii_lowercase().as_slice() {
-                b"code" => StatusHeader::ExitCode,
-                b"command" => StatusHeader::CommandName,
-                b"runtime" => StatusHeader::Runtime,
-                b"pid" => StatusHeader::Pid,
-                b"pgid" => StatusHeader::Pgid,
-                _ => {
-                  return Err(sherr!(
-                    ParseErr,
-                    "Unknown status header in 'query status' request: {}",
-                    header.to_str_lossy(),
-                  ));
-                }
-              };
-              headers.push(status_header);
-            }
-            if headers.is_empty() {
-              headers = vec![
-                StatusHeader::ExitCode,
-                StatusHeader::CommandName,
-                StatusHeader::Runtime,
-                StatusHeader::Pid,
-                StatusHeader::Pgid,
-              ];
-            }
-            Ok(Self::Query(QueryHeader::Status(headers)))
-          }
-          b"var" => {
-            let Some(kind) = args.next() else {
-              return Err(sherr!(ParseErr, "Expected 'get' or 'set' in 'var' query",));
-            };
-            match kind {
-              b"get" => {
-                let Some(var_name) = args.next() else {
-                  return Err(sherr!(
-                    ParseErr,
-                    "Missing variable name in 'query var get' request",
-                  ));
-                };
-                Ok(Self::Query(QueryHeader::GetVar(var_name.into())))
-              }
-              b"set" => {
-                let Some(var_name) = args.next() else {
-                  return Err(sherr!(
-                    ParseErr,
-                    "Missing variable name in 'query var set' request",
-                  ));
-                };
-                let Some(value) = args.next() else {
-                  return Err(sherr!(
-                    ParseErr,
-                    "Missing variable value in 'query var set' request",
-                  ));
-                };
-                let mut flags = VarFlags::empty();
-                while let Some(flag) = args.next() {
-                  match flag.to_ascii_lowercase().as_slice() {
-                    b"export" => flags |= VarFlags::EXPORT,
-                    b"local" => flags |= VarFlags::LOCAL,
-                    b"readonly" => flags |= VarFlags::READONLY,
-                    _ => {
-                      return Err(sherr!(
-                        ParseErr,
-                        "Unknown variable flag in 'query var set' request: {}",
-                        flag.to_str_lossy(),
-                      ));
-                    }
-                  }
-                }
-                Ok(Self::Query(QueryHeader::SetVar(
-                  var_name.into(),
-                  value.into(),
-                  flags,
-                )))
-              }
-              _ => Err(sherr!(
-                ParseErr,
-                "Unknown query kind in 'query var' request: {}",
-                kind.to_str_lossy(),
-              )),
-            }
-          }
-          _ => Err(sherr!(
-            ParseErr,
-            "Unknown query kind in 'query' request: {}",
-            query_kind.to_str_lossy(),
-          )),
-        }
-      }
-
-      b"line" => {
-        let Some(header) = args.next() else {
-          return Err(sherr!(ParseErr, "Missing line header in 'line' request",));
-        };
-        match header {
-          b"get" => {
-            let Some(header2) = args.next() else {
-              return Err(sherr!(
-                ParseErr,
-                "Missing line header kind in 'line get' request",
-              ));
-            };
-            match header2 {
-              b"buffer" => Ok(Self::LineGet(LineHeader::Buffer)),
-              b"cursor" => Ok(Self::LineGet(LineHeader::Cursor)),
-              b"hint" => Ok(Self::LineGet(LineHeader::Hint)),
-              b"mode" => Ok(Self::LineGet(LineHeader::Mode)),
-              b"anchor" => Ok(Self::LineGet(LineHeader::Anchor)),
-              _ => Err(sherr!(
-                ParseErr,
-                "Unknown line header kind in 'line get' request: {}",
-                header2.to_str_lossy()
-              )),
-            }
-          }
-          b"set" => {
-            let Some(header2) = args.next() else {
-              return Err(sherr!(
-                ParseErr,
-                "Missing line header kind in 'line set' request",
-              ));
-            };
-            let Some(value) = args.next() else {
-              return Err(sherr!(ParseErr, "Missing value in 'line set' request",));
-            };
-            match header2 {
-              b"buffer" => Ok(Self::LineSet(LineHeader::Buffer, value.into())),
-              b"cursor" => Ok(Self::LineSet(LineHeader::Cursor, value.into())),
-              b"hint" => Ok(Self::LineSet(LineHeader::Hint, value.into())),
-              b"mode" => Ok(Self::LineSet(LineHeader::Mode, value.into())),
-              b"anchor" => Ok(Self::LineSet(LineHeader::Anchor, value.into())),
-              _ => Err(sherr!(
-                ParseErr,
-                "Unknown line header kind in 'line set' request: {}",
-                header2.to_str_lossy()
-              )),
-            }
-          }
-          b"keys" => {
-            let Some(value) = args.next() else {
-              return Err(sherr!(ParseErr, "Missing value in 'line keys' request",));
-            };
-            let events = expand_keymap(&value.to_str_lossy());
-            Ok(Self::LineSendKeys(events))
-          }
-          _ => Err(sherr!(
-            ParseErr,
-            "Unknown line request kind in 'line' request: {}",
-            header.to_str_lossy()
-          )),
-        }
-      }
       _ => Err(sherr!(
         ParseErr,
         "Unknown socket request kind: {}",
         request_kind.to_str_lossy(),
+      )),
+    }
+  }
+
+  fn parse_msg<'a>(args: &mut impl Iterator<Item = &'a [u8]>) -> ShResult<Self> {
+    let Some(msg_kind) = args.next() else {
+      return Err(sherr!(ParseErr, "Missing message kind in 'msg' request",));
+    };
+    match msg_kind.to_ascii_lowercase().as_slice() {
+      b"system" => {
+        let Some(msg) = args.next() else {
+          return Err(sherr!(ParseErr, "Missing message in system msg request",));
+        };
+        Ok(Self::PostSystemMessage(msg.into()))
+      }
+      b"status" => {
+        let Some(msg) = args.next() else {
+          return Err(sherr!(ParseErr, "Missing message in status msg request",));
+        };
+        Ok(Self::PostStatusMessage(msg.into()))
+      }
+      _ => Err(sherr!(
+        ParseErr,
+        "Unknown message kind in 'msg' request: {}",
+        msg_kind.to_str_lossy(),
+      )),
+    }
+  }
+
+  fn parse_query<'a>(args: &mut impl Iterator<Item = &'a [u8]>) -> ShResult<Self> {
+    let Some(query_kind) = args.next() else {
+      return Err(sherr!(ParseErr, "Missing query kind in 'query' request",));
+    };
+    Ok(Self::Query(QueryHeader::parse_args(query_kind, args)?))
+  }
+  fn parse_line<'a>(args: &mut impl Iterator<Item = &'a [u8]>) -> ShResult<Self> {
+    let Some(header) = args.next() else {
+      return Err(sherr!(ParseErr, "Missing line header in 'line' request",));
+    };
+    match header {
+      b"get" => {
+        let Some(header2) = args.next() else {
+          return Err(sherr!(
+            ParseErr,
+            "Missing line header kind in 'line get' request",
+          ));
+        };
+        match header2 {
+          b"buffer" => Ok(Self::LineGet(LineHeader::Buffer)),
+          b"cursor" => Ok(Self::LineGet(LineHeader::Cursor)),
+          b"hint" => Ok(Self::LineGet(LineHeader::Hint)),
+          b"mode" => Ok(Self::LineGet(LineHeader::Mode)),
+          b"anchor" => Ok(Self::LineGet(LineHeader::Anchor)),
+          _ => Err(sherr!(
+            ParseErr,
+            "Unknown line header kind in 'line get' request: {}",
+            header2.to_str_lossy()
+          )),
+        }
+      }
+      b"set" => {
+        let Some(header2) = args.next() else {
+          return Err(sherr!(
+            ParseErr,
+            "Missing line header kind in 'line set' request",
+          ));
+        };
+        let Some(value) = args.next() else {
+          return Err(sherr!(ParseErr, "Missing value in 'line set' request",));
+        };
+        match header2 {
+          b"buffer" => Ok(Self::LineSet(LineHeader::Buffer, value.into())),
+          b"cursor" => Ok(Self::LineSet(LineHeader::Cursor, value.into())),
+          b"hint" => Ok(Self::LineSet(LineHeader::Hint, value.into())),
+          b"mode" => Ok(Self::LineSet(LineHeader::Mode, value.into())),
+          b"anchor" => Ok(Self::LineSet(LineHeader::Anchor, value.into())),
+          _ => Err(sherr!(
+            ParseErr,
+            "Unknown line header kind in 'line set' request: {}",
+            header2.to_str_lossy()
+          )),
+        }
+      }
+      b"keys" => {
+        let Some(value) = args.next() else {
+          return Err(sherr!(ParseErr, "Missing value in 'line keys' request",));
+        };
+        let events = expand_keymap(&value.to_str_lossy());
+        Ok(Self::LineSendKeys(events))
+      }
+      _ => Err(sherr!(
+        ParseErr,
+        "Unknown line request kind in 'line' request: {}",
+        header.to_str_lossy()
       )),
     }
   }
@@ -543,197 +585,37 @@ impl Drop for ShedSocket {
   }
 }
 
-#[expect(clippy::too_many_lines)]
 pub(super) fn handle_socket_request(
   conn: UnixStream,
   request: SocketRequest,
   readline: &mut ShedLine,
 ) -> ShResult<Option<ReadlineEvent>> {
   match request {
-    SocketRequest::PostSystemMessage(msg) => {
-      system_msg!("{msg}");
-      write(&conn, b"ok\n").ok();
+    SocketRequest::PostSystemMessage(msg) => system_msg!("{msg}"),
+    SocketRequest::PostStatusMessage(msg) => status_msg!("{msg}"),
+    SocketRequest::RefreshPrompt => kill(Pid::this(), Signal::SIGUSR1)?,
+    SocketRequest::LineGet(_) | SocketRequest::LineSet(_, _) | SocketRequest::LineSendKeys(_) => {
+      return handle_line_request(request, &conn, readline);
     }
-    SocketRequest::PostStatusMessage(msg) => {
-      status_msg!("{msg}");
-      write(&conn, b"ok\n").ok();
-    }
+    SocketRequest::Query(query_header) => return handle_query_request(query_header, &conn),
     SocketRequest::Subscribe => {
       Shed::push_subscriber(conn);
+      return Ok(None);
     }
-    SocketRequest::RefreshPrompt => {
-      kill(Pid::this(), Signal::SIGUSR1)?;
-      write(&conn, b"ok\n").ok();
-    }
-    SocketRequest::LineGet(line_header) => {
-      let LineData {
-        buffer,
-        cursor,
-        anchor,
-        hint,
-        mode,
-      } = readline.get_line_data();
-      match line_header {
-        LineHeader::Buffer => {
-          write(&conn, buffer.as_bytes()).ok();
-          write(&conn, b"\n").ok();
-        }
-        LineHeader::Cursor => {
-          write(&conn, cursor.to_string().as_bytes()).ok();
-          write(&conn, b"\n").ok();
-        }
-        LineHeader::Anchor => {
-          if let Some(anchor) = anchor {
-            write(&conn, anchor.to_string().as_bytes()).ok();
-          }
-          write(&conn, b"\n").ok();
-        }
-        LineHeader::Hint => {
-          if let Some(hint) = hint {
-            write(&conn, hint.as_bytes()).ok();
-          }
-          write(&conn, b"\n").ok();
-        }
-        LineHeader::Mode => {
-          write(&conn, mode.clone().as_bytes()).ok();
-          write(&conn, b"\n").ok();
-        }
-      }
-    }
-    SocketRequest::LineSet(line_header, value) => {
-      let value = value.to_str_lossy();
-      match line_header {
-        LineHeader::Buffer => {
-          let joined = readline.editor().to_string();
-          let pos = readline.editor().cursor_to_flat();
-
-          readline.editor_mut().edit(|this| {
-            this.set_buffer(&value);
-          });
-
-          readline.history_mut().update_pending_cmd((&joined, pos));
-
-          let hint = readline.history().get_hint();
-
-          readline.editor_mut().set_hint(hint);
-          readline.editor_mut().move_cursor_to_end();
-          readline.mark_dirty();
-        }
-        LineHeader::Cursor => readline.editor_mut().with_hint(|this| {
-          if let Some((row, col)) = value.split_once(':')
-            && let Ok(row) = row.parse::<usize>()
-            && let Ok(col) = col.parse::<usize>()
-          {
-            this.set_cursor(Pos::new(row, col));
-          } else if let Ok(pos) = value.parse::<usize>() {
-            this.set_cursor_from_flat(pos);
-          }
-        }),
-        LineHeader::Hint => {
-          log::debug!("Setting hint from socket: {value}");
-          readline
-            .editor_mut()
-            .set_hint(Some(Hint::Override(Lines::to_lines(&value))));
-          readline.mark_dirty();
-        }
-        LineHeader::Mode => {
-          if !readline.try_swap_mode_from_str(&value) {
-            return Ok(None);
-          }
-        }
-        LineHeader::Anchor => {
-          if let Some((row, col)) = value.split_once(':')
-            && let Ok(row) = row.parse::<usize>()
-            && let Ok(col) = col.parse::<usize>()
-          {
-            readline.editor_mut().set_anchor(Pos::new(row, col));
-          } else if let Ok(pos) = value.parse::<usize>() {
-            readline.editor_mut().set_anchor_from_flat(pos);
-          }
-        }
-      }
-    }
-    SocketRequest::LineSendKeys(events) => {
-      if let Some(event) = readline.replay_keys(events, true)? {
-        return Ok(Some(event));
-      }
-    }
-    SocketRequest::Query(query_header) => match query_header {
-      QueryHeader::Cwd => {
-        let cwd = std::env::current_dir()?.to_string_lossy().to_string();
-        write(&conn, cwd.as_bytes()).ok();
-        write(&conn, b"\n").ok();
-      }
-      QueryHeader::GetVar(var) => {
-        let var = var!(&var.to_str_lossy());
-        write(&conn, var.as_bytes()).ok();
-        write(&conn, b"\n").ok();
-      }
-      QueryHeader::SetVar(var, val, flags) => {
-        Shed::vars_mut(|v| v.set_var(&var.to_str_lossy(), VarKind::string(val), flags)).ok();
-        write(&conn, b"ok\n").ok();
-      }
-      QueryHeader::Status(headers) => {
-        let mut responses: Vec<VarStr> = vec![];
-        for header in headers {
-          match header {
-            StatusHeader::ExitCode => responses.push(varstr!("{}", Shed::get_status())),
-            StatusHeader::CommandName => {
-              let Some(name) = Shed::meta(|m| m.last_job().and_then(Job::name)) else {
-                responses.push(VarStr::default());
-                continue;
-              };
-
-              responses.push(name.clone());
-            }
-            StatusHeader::Runtime => {
-              let Some(dur) = Shed::meta_mut(|m| m.get_time()) else {
-                responses.push(VarStr::default());
-                continue;
-              };
-              responses.push(varstr!("{}", dur.as_millis()));
-            }
-            StatusHeader::Pid => {
-              let job = Shed::meta_mut(|m| {
-                m.last_job().map(|j| {
-                  j.get_pids()
-                    .first()
-                    .map(|pid| varstr!("{pid}"))
-                    .unwrap_or_default()
-                })
-              });
-              let Some(job) = job else {
-                responses.push(VarStr::default());
-                continue;
-              };
-              responses.push(job);
-            }
-            StatusHeader::Pgid => {
-              let Some(job) = Shed::meta_mut(|m| m.last_job().map(|j| varstr!("{}", j.pgid())))
-              else {
-                responses.push(VarStr::default());
-                continue;
-              };
-              responses.push(job);
-            }
-          }
-        }
-        let output = responses.join_with(" ");
-        write(&conn, output.as_bytes()).ok();
-        write(&conn, b"\n").ok();
-      }
-    },
 
     SocketRequest::Private(req) => match req {
       PrivateHeader::PostError(err) => {
         system_msg!("{err}");
-        write(&conn, b"ok\n").ok();
       }
-      PrivateHeader::SetCompletionHint(req_gen, token_start, hint) => {
+      PrivateHeader::SetCompletionHint {
+        req_gen,
+        token_start,
+        line,
+      } => {
         let cur_gen = readline.worker_req_gen();
-        if cur_gen == req_gen && !hint.is_empty() {
+        if cur_gen == req_gen && !line.is_empty() {
           readline.editor_mut().set_hint(Some(Hint::Completion {
-            lines: Lines::to_lines(&hint.to_str_lossy()),
+            lines: Lines::to_lines(&line.to_str_lossy()),
             token_start,
           }));
           readline.mark_dirty();
@@ -741,7 +623,199 @@ pub(super) fn handle_socket_request(
       }
     },
   }
+  write(&conn, b"ok\n").ok();
   Ok(None)
+}
+
+fn handle_query_request(header: QueryHeader, conn: &UnixStream) -> ShResult<Option<ReadlineEvent>> {
+  match header {
+    QueryHeader::Cwd => {
+      let cwd = std::env::current_dir()?.to_string_lossy().to_string();
+      write(conn, cwd.as_bytes()).ok();
+      write(conn, b"\n").ok();
+      return Ok(None);
+    }
+    QueryHeader::GetVar(var) => {
+      let var = var!(&var.to_str_lossy());
+      write(conn, var.as_bytes()).ok();
+      write(conn, b"\n").ok();
+      return Ok(None);
+    }
+    QueryHeader::SetVar(var, val, flags) => {
+      let var_name = &var.to_str_lossy();
+      let val = VarKind::string(val.to_str_lossy().into());
+
+      Shed::vars_mut(|v| v.set_var(var_name, val, flags)).ok();
+    }
+    QueryHeader::Status(headers) => return handle_status_query(headers, conn),
+  }
+  write(conn, b"ok\n").ok();
+  Ok(None)
+}
+
+fn handle_status_query(
+  headers: Vec<StatusHeader>,
+  conn: &UnixStream,
+) -> ShResult<Option<ReadlineEvent>> {
+  let mut responses: Vec<VarStr> = vec![];
+  for header in headers {
+    match header {
+      StatusHeader::ExitCode => responses.push(varstr!("{}", Shed::get_status())),
+      StatusHeader::CommandName => {
+        let Some(name) = Shed::meta(|m| m.last_job().and_then(Job::name)) else {
+          responses.push(VarStr::default());
+          continue;
+        };
+
+        responses.push(name.clone());
+      }
+      StatusHeader::Runtime => {
+        let Some(dur) = Shed::meta(|m| m.get_time().map(|d| d.as_millis())) else {
+          responses.push(VarStr::default());
+          continue;
+        };
+        responses.push(varstr!("{dur}"));
+      }
+      StatusHeader::Pid => {
+        let job = Shed::meta(|m| {
+          m.last_job().map(|j| {
+            j.get_pids()
+              .first()
+              .map(|pid| varstr!("{pid}"))
+              .unwrap_or_default()
+          })
+        });
+        let Some(job) = job else {
+          responses.push(VarStr::default());
+          continue;
+        };
+        responses.push(job);
+      }
+      StatusHeader::Pgid => {
+        let Some(job) = Shed::meta(|m| m.last_job().map(|j| varstr!("{}", j.pgid()))) else {
+          responses.push(VarStr::default());
+          continue;
+        };
+        responses.push(job);
+      }
+    }
+  }
+  let output = responses.join_with(" ");
+  write(conn, output.as_bytes()).ok();
+  write(conn, b"\n").ok();
+  Ok(None)
+}
+
+fn handle_line_request(
+  request: SocketRequest,
+  conn: &UnixStream,
+  readline: &mut ShedLine,
+) -> ShResult<Option<ReadlineEvent>> {
+  match request {
+    SocketRequest::LineGet(line_header) => handle_line_get(&line_header, conn, readline),
+    SocketRequest::LineSet(line_header, value) => {
+      handle_line_set(&line_header, &value, conn, readline)
+    }
+    SocketRequest::LineSendKeys(events) => {
+      if let Some(event) = readline.replay_keys(events, true)? {
+        return Ok(Some(event));
+      }
+    }
+    _ => unreachable!(),
+  }
+  Ok(None)
+}
+
+fn handle_line_get(header: &LineHeader, conn: &UnixStream, readline: &mut ShedLine) {
+  let LineData {
+    buffer,
+    cursor,
+    anchor,
+    hint,
+    mode,
+  } = readline.get_line_data();
+  match header {
+    LineHeader::Buffer => {
+      write(conn, buffer.as_bytes()).ok();
+    }
+    LineHeader::Cursor => {
+      write(conn, cursor.to_string().as_bytes()).ok();
+    }
+    LineHeader::Anchor => {
+      if let Some(anchor) = anchor {
+        write(conn, anchor.to_string().as_bytes()).ok();
+      }
+    }
+    LineHeader::Hint => {
+      if let Some(hint) = hint {
+        write(conn, hint.as_bytes()).ok();
+      }
+    }
+    LineHeader::Mode => {
+      write(conn, mode.clone().as_bytes()).ok();
+    }
+  }
+  write(conn, b"\n").ok();
+}
+
+fn handle_line_set(
+  header: &LineHeader,
+  value: &VarStr,
+  conn: &UnixStream,
+  readline: &mut ShedLine,
+) {
+  let value = value.to_str_lossy();
+  match header {
+    LineHeader::Buffer => {
+      let joined = readline.editor().to_string();
+      let pos = readline.editor().cursor_to_flat();
+
+      readline.editor_mut().edit(|this| {
+        this.set_buffer(&value);
+      });
+
+      readline.history_mut().update_pending_cmd((&joined, pos));
+
+      let hint = readline.history().get_hint();
+
+      readline.editor_mut().set_hint(hint);
+      readline.editor_mut().move_cursor_to_end();
+      readline.mark_dirty();
+    }
+    LineHeader::Cursor => readline.editor_mut().with_hint(|this| {
+      if let Some((row, col)) = value.split_once(':')
+        && let Ok(row) = row.parse::<usize>()
+        && let Ok(col) = col.parse::<usize>()
+      {
+        this.set_cursor(Pos::new(row, col));
+      } else if let Ok(pos) = value.parse::<usize>() {
+        this.set_cursor_from_flat(pos);
+      }
+    }),
+    LineHeader::Hint => {
+      readline
+        .editor_mut()
+        .set_hint(Some(Hint::Override(Lines::to_lines(&value))));
+      readline.mark_dirty();
+    }
+    LineHeader::Mode => {
+      if !readline.try_swap_mode_from_str(&value) {
+        write(conn, format!("error: invalid mode: {value}\n").as_bytes()).ok();
+        return;
+      }
+    }
+    LineHeader::Anchor => {
+      if let Some((row, col)) = value.split_once(':')
+        && let Ok(row) = row.parse::<usize>()
+        && let Ok(col) = col.parse::<usize>()
+      {
+        readline.editor_mut().set_anchor(Pos::new(row, col));
+      } else if let Ok(pos) = value.parse::<usize>() {
+        readline.editor_mut().set_anchor_from_flat(pos);
+      }
+    }
+  }
+  write(conn, b"ok\n").ok();
 }
 
 #[cfg(test)]

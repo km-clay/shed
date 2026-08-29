@@ -1,3 +1,8 @@
+//! The `cd` builtin. Used to change the current working directory.
+//!
+//! Also contains `zd`, which uses directory history to jump to
+//! partial matches, instead of requiring an absolute path.
+
 use std::{
   path::{Path, PathBuf},
   time::{SystemTime, UNIX_EPOCH},
@@ -45,14 +50,13 @@ impl super::Builtin for Cd {
         print_dir = true;
         (old_pwd, Some(span.clone()))
       } else {
+        // we only use cd path if the argument is not absolute or relative (starts with / or .)
         try_cd_path = !arg.to_str_lossy().starts_with(['/', '.']);
         (PathBuf::from(arg), Some(span.clone()))
       }
     } else {
-      (
-        PathBuf::from(util::get_home_str().unwrap_or("/".into())),
-        None,
-      )
+      let home_dir = util::get_home_str().unwrap_or("/".into());
+      (PathBuf::from(home_dir), None)
     };
 
     let span = arg_span.unwrap_or(args.cmd_span());
@@ -62,6 +66,8 @@ impl super::Builtin for Cd {
       new_dir = found;
     }
 
+    // if resolve_syms is true, we turn symlinks into their canonical paths,
+    // which refer to the actual position of the file in the filesystem
     let logical_pwd = if resolve_syms {
       None
     } else {
@@ -88,6 +94,7 @@ impl super::Builtin for Cd {
       }
     };
 
+    // handle weird cases
     if !target.exists() {
       return Err(sherr!(ExecFail @ span.clone(), "Directory not found: {}", target.display()));
     }
@@ -110,12 +117,12 @@ impl super::Builtin for Cd {
 fn search_cd_path(new_dir: impl AsRef<Path>) -> Option<PathBuf> {
   let path = var!("CDPATH");
   let path = path.to_str_lossy();
-  let mut paths = path
-    .split(':')
-    .filter(|p| !p.trim().is_empty())
-    .map(PathBuf::from);
 
-  paths.find_map(|p| p.join(&new_dir).is_dir().then(|| p.join(&new_dir)))
+  // find the first path that contains a directory matching `new_dir`
+  crate::util::split_path_list(&path).find_map(|p| {
+    let resolved = p.join(&new_dir);
+    resolved.is_dir().then_some(resolved)
+  })
 }
 
 struct Sort {
@@ -131,6 +138,7 @@ enum SortKind {
   Path,
 }
 
+/// The `zd` builtin. Uses directory history to jump to partial matches, instead of requiring an absolute path.
 pub(super) struct Zd;
 impl super::Builtin for Zd {
   fn opts(&self) -> Vec<OptSpec> {
@@ -148,10 +156,13 @@ impl super::Builtin for Zd {
     let first = args.arguments().next().map(|(s, _)| s).cloned();
     let first = first.as_ref().map(|s| s.to_str_lossy());
     match first.as_deref() {
+      // check subcommands
       Some("add") => Self::add(args),
       Some("remove") => Self::remove(args),
       Some("clean") => Self::clean(),
       Some("list") => Self::list(args),
+
+      // normal case, querying for a directory
       _ => Self::query(args),
     }
   }
@@ -269,10 +280,8 @@ impl Zd {
 
     for opt in args.options() {
       match opt.key() {
-        // `-r` shares its short flag with `add`/`remove`'s recursive option, so
-        // it resolves to the "recursive" key — but in `list` it means reverse.
-        // (The parsed opt only carries the key, not the spelling, so `-r` and
-        // `--reverse` both arrive here.)
+        // 'reverse' and 'recursive' both share the '-r' shorthand,
+        // it means different things on different subcommands.
         "reverse" | "recursive" => sort.reverse = true,
         "json" => json = true,
         "quoted" => quoted = true,
@@ -472,6 +481,7 @@ impl Zd {
           sherr!(ExecFail @ args.span, "zd: a directory query is required when non-interactive"),
         );
       }
+      // no argument, let's open the fuzzy finder
       let selector = FuzzyBuilder::new()
         .with_entries(entries)
         .with_placeholder("pick a directory (type to filter, enter selects, esc cancels)")

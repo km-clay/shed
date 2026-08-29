@@ -1,3 +1,9 @@
+//! Contains commands that interact with the directory stack.
+//!
+//! `pushd` - push a directory onto the stack and change to it
+//! `popd` - pop a directory off the stack and change to it
+//! `dirs` - display the directory stack
+
 use std::{env, path::PathBuf};
 
 use crate::procio::{out_bytes, outln_bytes};
@@ -24,7 +30,7 @@ struct DirStackArgs {
 }
 
 fn parse_dirstack_args(args: &super::BuiltinArgs, cmd: &str) -> ShResult<DirStackArgs> {
-  let no_cd = args.options().any(|o| o.key() == "no_cd");
+  let no_cd = args.has_opt("no_cd");
   let mut index = None;
   let mut dir = None;
 

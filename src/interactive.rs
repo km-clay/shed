@@ -257,6 +257,7 @@ pub(super) fn shed_interactive(
 
   let mut poll_fds: SmallVec<[PollFd; 2]> = SmallVec::new();
   let Some(tty_fd) = Shed::term(|t| t.tty().map(|fd| fd.as_raw_fd())) else {
+    // Can't have an interactive session without a terminal
     errln!("Failed to access terminal file descriptor");
     QUIT_CODE.store(1, Ordering::SeqCst);
     return Err(sherr!(CleanExit(1), "terminal access failed",));

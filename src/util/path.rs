@@ -150,11 +150,8 @@ pub fn resolve_in_path(path_list: &str, cmd: &str) -> Option<PathBuf> {
   None
 }
 
+/// Split a POSIX path-list-style string (colon separated paths) into an iterator of `PathBuf`s.
 pub fn split_path_list(path_list: &str) -> impl Iterator<Item = PathBuf> {
-  // `split_all_with` calls `build(start, end)` — both byte indices into
-  // `path_list`, not (start, length). Naming the second arg `end` keeps the
-  // slice expression honest; the previous `start + len` form treated it as
-  // a length and ran past the buffer once `cursor` grew large.
   let paths = super::strops::split_all_with(
     path_list.as_bytes(),
     |paths| super::split_at_unescaped(paths, b":"),

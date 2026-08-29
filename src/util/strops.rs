@@ -191,6 +191,7 @@ pub trait ByteCursor {
   }
   /// Consume the byte at the current position if it satisfies the predicate `f`.
   /// Returns `true` if a byte was consumed, `false` otherwise.
+  /// A byte that does not satisfy `f` is not consumed.
   fn bump_if(&mut self, f: impl Fn(u8) -> bool) -> bool {
     let Some(b) = self.peek_byte() else {
       return false;
@@ -204,11 +205,13 @@ pub trait ByteCursor {
   }
   /// Consume the byte at the current position if it is equal to `b`.
   /// Returns `true` if a byte was consumed, `false` otherwise.
+  /// A byte that does not equal `b` is not consumed.
   fn bump_if_eq(&mut self, b: u8) -> bool {
     self.bump_if(|x| x == b)
   }
   /// Consume bytes at the current position while they satisfy the predicate `f`.
   /// Stops when a byte does not satisfy `f` or when there are no more bytes to consume.
+  /// A byte that does not satisfy `f` is not consumed.
   fn bump_while(&mut self, f: impl Fn(u8) -> bool) {
     while self.bump_if(&f) {}
   }

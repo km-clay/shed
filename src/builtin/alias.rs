@@ -1,3 +1,8 @@
+//! Contains builtins that pertain to shell aliases.
+//! `alias` - create, list, and display shell aliases
+//! `unalias` - remove shell aliases
+//! `excmd` - create, list, and display ex command aliases
+
 use bstr::ByteSlice;
 
 use crate::opt;
@@ -12,6 +17,10 @@ use super::{
 };
 use crate::procio::outln_bytes;
 
+/// Create a shell alias
+///
+/// Aliases are stored in the shell state and can be used to create shortcuts for commands.
+/// The `alias` command can be used to create, list, and display aliases.
 pub(super) struct Alias;
 impl super::Builtin for Alias {
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -24,6 +33,8 @@ impl super::Builtin for Alias {
 
     for (arg, span) in args.arguments() {
       let (name, value) = split_assignment_raw(arg);
+
+      // reject these two
       if name == b"command" || name == b"builtin" {
         return Err(sherr!(
           ExecFail @ span.clone(),
@@ -49,6 +60,7 @@ impl super::Builtin for Alias {
   }
 }
 
+/// Unset a shell alias
 pub(super) struct Unalias;
 impl super::Builtin for Unalias {
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -73,6 +85,9 @@ impl super::Builtin for Unalias {
   }
 }
 
+/// Create an ex mode alias.
+///
+/// Ex mode aliases are stored in the shell state and can be used to create shortcuts for ex commands.
 pub(super) struct ExCmd;
 impl super::Builtin for ExCmd {
   fn opts(&self) -> Vec<OptSpec> {
@@ -103,17 +118,12 @@ impl super::Builtin for ExCmd {
 
       if !remove && let Some(value) = value {
         Shed::logic_mut(|l| l.insert_ex_alias(name, &value.into(), span.clone()));
-      } else if let Some(alias) = Shed::logic(|l| l.get_ex_alias(name)) {
-        if remove {
-          Shed::logic_mut(|l| l.remove_ex_alias(name));
-        } else {
-          outln_bytes(&display_as_var(name.as_bytes(), alias.body()));
-        }
       } else {
-        return Err(sherr!(
-          SyntaxErr @ span.clone(),
-          "Unknown ex command alias '{name}'",
-        ));
+        match Shed::logic(|l| l.get_ex_alias(name)) {
+          Some(_) if remove => Shed::logic_mut(|l| l.remove_ex_alias(name)),
+          Some(alias) => outln_bytes(&display_as_var(name.as_bytes(), alias.body())),
+          None => return Err(sherr!(SyntaxErr @ span.clone(),"Unknown ex command alias '{name}'")),
+        }
       }
     }
 

@@ -1,3 +1,8 @@
+//! Contains builtins related to registering custom tab completion specs.
+//!
+//! `complete` - bash-style completion spec registration
+//! `compadd` - zsh-style completion candidate addition
+
 use itertools::{EitherOrBoth, Itertools};
 
 use crate::{
@@ -165,6 +170,28 @@ impl super::Builtin for CompGen {
   }
 }
 
+struct CompaddOpts {
+  prefix: Option<VarStr>,
+  suffix: Option<VarStr>,
+  desc_arr: Option<VarStr>,
+  cand_arr: Option<VarStr>,
+  assoc_arr: Option<VarStr>,
+  desc: Option<VarStr>,
+}
+
+impl CompaddOpts {
+  fn from_args(args: &BuiltinArgs) -> Self {
+    Self {
+      prefix: args.opt_value("prefix"),
+      suffix: args.opt_value("suffix"),
+      desc_arr: args.opt_value("desc_arr"),
+      cand_arr: args.opt_value("cand_arr"),
+      assoc_arr: args.opt_value("assoc_arr"),
+      desc: args.opt_value("desc"),
+    }
+  }
+}
+
 pub(super) struct Compadd;
 impl super::Builtin for Compadd {
   fn opts(&self) -> Vec<OptSpec> {
@@ -178,26 +205,10 @@ impl super::Builtin for Compadd {
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let mut prefix: Option<VarStr> = None;
-    let mut suffix: Option<VarStr> = None;
-    let mut desc_arr: Option<VarStr> = None;
-    let mut cand_arr: Option<VarStr> = None;
-    let mut assoc_arr: Option<VarStr> = None;
-    let mut desc: Option<VarStr> = None;
-    for opt in args.options() {
-      match opt.key() {
-        "desc_arr" => desc_arr = Some(opt.value()?.into()),
-        "desc" => desc = Some(opt.value()?.into()),
-        "prefix" => prefix = Some(opt.value()?.into()),
-        "suffix" => suffix = Some(opt.value()?.into()),
-        "cand_arr" => cand_arr = Some(opt.value()?.into()),
-        "assoc_arr" => assoc_arr = Some(opt.value()?.into()),
-        _ => {}
-      }
-    }
+    let opts = CompaddOpts::from_args(&args);
 
     let make_candidate = |a: &str| -> Candidate {
-      match (&prefix, &suffix) {
+      match (&opts.prefix, &opts.suffix) {
         (Some(p), Some(s)) => format!("{p}{a}{s}").into(),
         (Some(p), None) => format!("{p}{a}").into(),
         (None, Some(s)) => format!("{a}{s}").into(),
@@ -210,7 +221,7 @@ impl super::Builtin for Compadd {
       .map(|(s, _)| make_candidate(&s.to_str_lossy()))
       .collect();
 
-    if let Some(cand_arr) = cand_arr {
+    if let Some(cand_arr) = opts.cand_arr {
       let elems: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems(&cand_arr.to_str_lossy()))
         .iter()
         .map(|v| make_candidate(&v.to_str_lossy()))
@@ -219,14 +230,18 @@ impl super::Builtin for Compadd {
       candidates.extend(elems);
     }
 
-    let descriptions = if let Some(desc) = desc {
+    let descriptions = if let Some(desc) = opts.desc {
+      // single description
       vec![desc; candidates.len()]
-    } else if let Some(desc_arr) = desc_arr {
+    } else if let Some(desc_arr) = opts.desc_arr {
+      // description array
       Shed::vars(|v| v.get_arr_elems(&desc_arr.to_str_lossy()))
     } else {
+      // nothing
       vec![]
     };
 
+    // zip the candidate list with the list of descriptions
     let mut described: Vec<Candidate> = candidates
       .into_iter()
       .zip_longest(descriptions)
@@ -237,7 +252,7 @@ impl super::Builtin for Compadd {
       })
       .collect();
 
-    if let Some(assoc_arr) = assoc_arr
+    if let Some(assoc_arr) = opts.assoc_arr
       && let Some(assoc_arr) = Shed::vars(|v| v.try_get_var_meta(&assoc_arr.to_str_lossy()))
       && let VarKind::AssocArr(arr) = assoc_arr.kind()
     {

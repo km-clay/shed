@@ -242,7 +242,7 @@ pub fn change_dir_with_pwd<P: AsRef<Path>>(dir: P, logical_pwd: Option<PathBuf>)
   Ok(())
 }
 
-/// Lexically normalize a path: drop `.` components and resolve `..` against
+/// Lexically normalize a path: drop `.` components and resolve `..`
 pub fn lex_normalize_path(path: &Path) -> PathBuf {
   use std::path::Component;
   let mut out: Vec<Component> = Vec::new();

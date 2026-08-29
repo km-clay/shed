@@ -1,3 +1,14 @@
+//! Contains builtins that operate on shell arrays.
+//! `shed`'s array variables are actually [`VecDeque`] under the hood,
+//! so the goal of these builtins is to provide access to the deque's double-ended
+//! interaction surface.
+//!
+//! `pop` - removes the last element of an array and prints it to stdout. ([`VecDeque::pop_back()`])
+//! `fpop` - removes the first element of an array and prints it to stdout. ([`VecDeque::pop_front()`])
+//! `push` - adds one or more elements to the end of an array. ([`VecDeque::push_back()`])
+//! `fpush` - adds one or more elements to the front of an array. ([`VecDeque::push_front()`])
+//! `rotate` - rotates the elements of an array left or right. ([`VecDeque::rotate_left()`] and [`VecDeque::rotate_right()`])
+
 use std::collections::VecDeque;
 
 use crate::procio::outln_bytes;
@@ -12,7 +23,13 @@ use super::{
   with_status,
 };
 
+/// Trait that provides common functionality for array operations like push and pop.
+///
+/// Each of the array operation builtins (`push`, `pop`, `fpush`, `fpop`) implement this trait,
+/// because the only difference between each one is the direction of the operation (front or back)
+/// and whether it is a push or pop.
 trait ArrOp {
+  /// Common options
   fn arr_opts(&self) -> Vec<OptSpec> {
     vec![
       OptSpec::new("count").short(b'c').argc(1),
@@ -20,12 +37,13 @@ trait ArrOp {
       OptSpec::new("reverse").short(b'r'),
     ]
   }
+  /// Whether we are pushing or popping
   fn action(&self) -> Action;
+  /// Which side of the array we are acting on
   fn direction(&self) -> End;
+  /// Executes the array operation, dispatching to either `push` or `pop` based on the action.
   fn exec_arr_op(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let action = self.action();
-
-    match action {
+    match self.action() {
       Action::Push => self.push(args),
       Action::Pop => self.pop(args),
     }
@@ -38,24 +56,26 @@ trait ArrOp {
     let mut arguments = args.arguments();
     let name = arguments.next().unwrap().0;
 
-    for (val, span) in arguments {
-      Shed::vars_mut(|v| {
-        if let Ok(arr) = v.get_arr_mut(&name.to_str_lossy()) {
-          match end {
+    // each argument is pushed to the array
+    Shed::vars_mut(|v| -> ShResult<()> {
+      for (val, span) in arguments {
+        match v.get_arr_mut(&name.to_str_lossy()).ok() {
+          Some(arr) => match end {
             End::Front => arr.push_front(val.clone()),
             End::Back => arr.push_back(val.clone()),
+          },
+          None => {
+            v.set_var(
+              &name.to_str_lossy(),
+              VarKind::arr([val.clone()]),
+              VarFlags::empty(),
+            )
+            .promote_err(span.clone())?;
           }
-          Ok(())
-        } else {
-          v.set_var(
-            &name.to_str_lossy(),
-            VarKind::arr([val.clone()]),
-            VarFlags::empty(),
-          )
         }
-      })
-      .promote_err(span.clone())?;
-    }
+      }
+      Ok(())
+    })?;
 
     with_status(0)
   }
@@ -227,8 +247,9 @@ impl super::Builtin for Rotate {
       }
     }
 
-    for (arg, _) in args.arguments() {
-      Shed::vars_mut(|v| -> ShResult<()> {
+    Shed::vars_mut(|v| -> ShResult<()> {
+      // each arg is a variable name of an array to rotate
+      for (arg, _) in args.arguments() {
         let arr = v
           .get_arr_mut(&arg.to_str_lossy())
           .promote_err(args.span())?;
@@ -237,9 +258,9 @@ impl super::Builtin for Rotate {
         } else {
           arr.rotate_left(count.min(arr.len()));
         }
-        Ok(())
-      })?;
-    }
+      }
+      Ok(())
+    })?;
 
     with_status(0)
   }
