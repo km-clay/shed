@@ -11,7 +11,8 @@ use crate::{
     Shed, shopt,
     vars::{DeferredAst, VarStr, VarStrSliceExt},
   },
-  util, varstr,
+  util::{self, error::LabelMsg},
+  varstr,
 };
 use bstr::ByteSlice;
 use std::{
@@ -770,8 +771,9 @@ impl Dispatcher {
 
     let caller_contexts: Vec<_> = func.context.iter().cloned().collect();
 
+    let label_name = func_name.clone();
     let call_ctx = util::error::get_context(
-      styled_format!("in call to function '{}'", &func_name).into(),
+      LabelMsg::lazy(move || styled_format!("in call to function '{}'", &label_name).into()),
       &blame,
     );
 

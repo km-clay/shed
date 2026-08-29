@@ -3,8 +3,9 @@ use ariadne::{Color, Label};
 use ariadne::{Report, ReportKind};
 use nix::errno::Errno;
 use std::cell::RefCell;
-use std::fmt::{self, Display};
+use std::fmt::{self, Debug, Display};
 use std::io::Write;
+use std::rc::Rc;
 
 use crate::procio::bytes_to_string;
 use crate::state::vars::VarStr;
@@ -86,7 +87,7 @@ pub(crate) fn last_color() -> Color {
   COLOR_RNG.with(|rng| rng.borrow_mut().last_color())
 }
 
-pub fn get_context(msg: VarStr, span: &Span) -> LabelBuilder {
+pub fn get_context(msg: impl Into<LabelMsg>, span: &Span) -> LabelBuilder {
   let color = last_color();
   LabelBuilder::new(span.clone())
     .with_color(color)
@@ -177,10 +178,72 @@ impl<T> ShResultExt for Result<T, ShErr> {
   }
 }
 
+#[derive(Clone)]
+pub(crate) enum LabelMsg {
+  Eager(VarStr),
+  Lazy(Rc<dyn Fn() -> VarStr>),
+}
+
+impl Display for LabelMsg {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      LabelMsg::Eager(msg) => write!(f, "{msg}"),
+      LabelMsg::Lazy(fmt) => write!(f, "{}", fmt()),
+    }
+  }
+}
+
+impl Debug for LabelMsg {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      LabelMsg::Eager(msg) => write!(f, "LabelMsg::Eager({msg:?})"),
+      LabelMsg::Lazy(_) => write!(f, "LabelMsg::Lazy(<closure>)"),
+    }
+  }
+}
+
+impl LabelMsg {
+  #[cfg(test)]
+  fn get(self) -> VarStr {
+    match self {
+      LabelMsg::Eager(msg) => msg,
+      LabelMsg::Lazy(f) => f(),
+    }
+  }
+
+  pub fn lazy(f: impl Fn() -> VarStr + 'static) -> Self {
+    LabelMsg::Lazy(Rc::new(f))
+  }
+}
+
+impl From<VarStr> for LabelMsg {
+  fn from(msg: VarStr) -> Self {
+    LabelMsg::Eager(msg)
+  }
+}
+
+impl From<Rc<dyn Fn() -> VarStr>> for LabelMsg {
+  fn from(msg: Rc<dyn Fn() -> VarStr>) -> Self {
+    LabelMsg::Lazy(msg)
+  }
+}
+
+impl From<&str> for LabelMsg {
+  fn from(msg: &str) -> Self {
+    LabelMsg::Eager(VarStr::from(msg))
+  }
+}
+
+impl From<String> for LabelMsg {
+  fn from(msg: String) -> Self {
+    Self::from(msg.as_str())
+  }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct LabelBuilder {
   span: Span,
-  message: Option<VarStr>,
+  message: Option<LabelMsg>,
   color: Option<Color>,
 }
 
@@ -192,8 +255,8 @@ impl LabelBuilder {
       color: None,
     }
   }
-  pub fn with_message(mut self, message: VarStr) -> Self {
-    self.message = Some(message);
+  pub fn with_message(mut self, message: impl Into<LabelMsg>) -> Self {
+    self.message = Some(message.into());
     self
   }
   pub fn with_color(mut self, color: Color) -> Self {
@@ -275,7 +338,11 @@ impl ShErr {
     self
       .labels
       .iter()
-      .filter_map(|l| l.message.as_ref().map(|m| m.to_str_lossy().into_owned()))
+      .filter_map(|l| {
+        l.message
+          .as_ref()
+          .map(|m| m.clone().get().to_str_lossy().into_owned())
+      })
       .collect()
   }
   pub fn option_promote(self, span: Option<Span>) -> Self {
@@ -599,7 +666,7 @@ impl Display for ShErrKind {
       }
       Self::Raised(kind, _) => {
         if let Some(kind) = kind {
-          return kind.fmt(f);
+          return Display::fmt(&kind, f);
         }
         return write!(f, "Raised Error");
       }

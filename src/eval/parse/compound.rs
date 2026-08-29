@@ -2,6 +2,7 @@ use shed_macros::styled_format;
 
 use crate::{
   eval::parse::node::NodeId,
+  state::vars::VarStr,
   util::{error::get_context, parse_bytes},
 };
 
@@ -48,7 +49,10 @@ impl ParseStream {
     extend_span!(span, self.tree[body].get_span());
 
     let ctx = get_context(
-      styled_format!("in function '{}' defined here", name.to_str_lossy()).into(),
+      VarStr::from(styled_format!(
+        "in function '{}' defined here",
+        name.to_str_lossy()
+      )),
       &span.clone().unwrap_or_default(),
     );
 
@@ -777,7 +781,7 @@ impl ParseStream {
       try_tk_span
     };
     let ctx = get_context(
-      styled_format!("in '{}' block defined here", "try").into(),
+      VarStr::from(styled_format!("in '{}' block defined here", "try")),
       &try_span,
     );
 
@@ -890,7 +894,7 @@ impl ParseStream {
     extend_span!(span, self.tree[body].get_span());
 
     let ctx = get_context(
-      styled_format!("in '{}' block defined here", "defer").into(),
+      VarStr::from(styled_format!("in '{}' block defined here", "defer")),
       &defer_span,
     );
 

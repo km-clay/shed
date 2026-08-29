@@ -259,7 +259,7 @@ impl ParseStream {
         );
         if let Some(assignments_span) = assignments_span {
           nd.context.push_back(get_context(
-            "in variable assignment defined here".into(),
+            "in variable assignment defined here",
             &assignments_span,
           ));
         }
