@@ -6,7 +6,7 @@ use std::{
 use regex::Regex;
 use serde_json::Value;
 
-use crate::{procio::bytes_to_string, state::vars::VarStr, util::random};
+use crate::{procio::bytes_to_string, util::random};
 
 use super::{
   history::HistEntry,
@@ -144,7 +144,7 @@ fn try_import_bash(content: &str) -> Vec<HistEntry> {
   entries
 }
 
-fn collect_continuation<'a>(first: &'a str, lines: &mut impl Iterator<Item = &'a str>) -> VarStr {
+fn collect_continuation<'a>(first: &'a str, lines: &mut impl Iterator<Item = &'a str>) -> String {
   let mut parts = vec![];
   let mut line = first;
   loop {
@@ -163,7 +163,7 @@ fn collect_continuation<'a>(first: &'a str, lines: &mut impl Iterator<Item = &'a
       break;
     }
   }
-  parts.join("\n").into()
+  parts.join("\n")
 }
 
 /// Returns true if `line` looks like a zsh extended-history header:
@@ -216,7 +216,7 @@ fn try_import_zsh(content: &str) -> ShResult<Vec<HistEntry>> {
   Ok(entries)
 }
 
-fn expand_fish_cmd(cmd: &str) -> VarStr {
+fn expand_fish_cmd(cmd: &str) -> String {
   let mut out = String::new();
   let mut chars = cmd.chars();
 
@@ -238,7 +238,7 @@ fn expand_fish_cmd(cmd: &str) -> VarStr {
     _ => out.push(ch)
   });
 
-  out.into()
+  out
 }
 
 fn try_import_fish(content: &str) -> ShResult<Vec<HistEntry>> {

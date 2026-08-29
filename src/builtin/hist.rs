@@ -464,8 +464,8 @@ impl HistQuery {
             .into(),
         ),
       );
-      map.insert("command".into(), Value::String(command.to_string()));
-      map.insert("cwd".into(), Value::String(cwd.to_string()));
+      map.insert("command".into(), Value::String(command.clone()));
+      map.insert("cwd".into(), Value::String(cwd.clone()));
       map.insert("status".into(), Value::Number(i64::from(*status).into()));
       map.insert("token".into(), Value::String(token.to_string()));
       Value::Object(map)
@@ -1155,7 +1155,7 @@ mod tests {
     let results = q.execute(&h).unwrap();
     assert_eq!(results.len(), 2);
     for r in &results {
-      assert!(!r.1.command.to_str_lossy().contains("danger"));
+      assert!(!r.1.command.contains("danger"));
     }
   }
 

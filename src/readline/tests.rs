@@ -883,10 +883,7 @@ fn hist_restore_preserves_new_entries() {
 
   // all commands should be present, ordered by timestamp
   let entries = hist.query("ORDER BY id ASC", &[]).unwrap();
-  let cmds: Vec<&str> = entries
-    .iter()
-    .map(|(_, e)| e.command.to_str().unwrap_or_default())
-    .collect();
+  let cmds: Vec<&str> = entries.iter().map(|(_, e)| e.command.as_str()).collect();
   assert!(cmds.contains(&"cmd1"));
   assert!(cmds.contains(&"cmd2"));
   assert!(cmds.contains(&"cmd3"));

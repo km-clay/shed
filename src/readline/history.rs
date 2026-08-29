@@ -16,14 +16,14 @@ use super::{
   sherr, shopt, state,
   util::ShResult,
 };
-use crate::{HashMap, state::vars::VarStr, util::random::Uuid};
+use crate::{HashMap, util::random::Uuid};
 
 #[derive(Debug, Clone)]
 pub struct HistEntry {
   pub runtime: Duration,
   pub timestamp: SystemTime,
-  pub command: VarStr,
-  pub cwd: VarStr,
+  pub command: String,
+  pub cwd: String,
   pub status: i32,
   pub token: Uuid,
 }
@@ -52,8 +52,8 @@ impl Default for HistEntry {
     Self {
       runtime: Duration::default(),
       timestamp: SystemTime::now(),
-      command: VarStr::default(),
-      cwd: VarStr::default(),
+      command: String::new(),
+      cwd: String::new(),
       status: 0,
       token: Uuid::new_v4(),
     }
@@ -62,7 +62,7 @@ impl Default for HistEntry {
 
 impl HistEntry {
   pub fn command(&self) -> &str {
-    self.command.to_str().unwrap_or_default()
+    self.command.as_str()
   }
   /// The raw command bytes (byte-native; preserves non-UTF-8).
   pub fn command_bytes(&self) -> &[u8] {
@@ -226,7 +226,7 @@ impl History {
         // Merge helper: drop loaded entries shadowed by in-session pushes,
         // then prepend the rest so pushes stay at the end (newest).
         let merge = |existing: &mut Vec<HistEntry>, loaded: Vec<HistEntry>| {
-          let pushed_cmds: crate::HashSet<VarStr> =
+          let pushed_cmds: crate::HashSet<String> =
             existing.iter().map(|e| e.command.clone()).collect();
           let mut merged: Vec<HistEntry> = loaded
             .into_iter()
@@ -369,7 +369,7 @@ impl History {
       .duration_since(UNIX_EPOCH)
       .unwrap()
       .as_secs() as i64;
-    let cwd: Option<VarStr> = env::current_dir().map(|p| p.to_string_lossy().into()).ok();
+    let cwd: Option<String> = env::current_dir().map(|p| p.to_string_lossy().into()).ok();
     let token = Uuid::new_v4();
 
     {
@@ -738,7 +738,7 @@ impl History {
           |row| row.get(0),
         )
         .ok();
-      if last.as_deref() == Some(command.to_str_lossy().as_ref()) {
+      if last.as_deref() == Some(command.as_ref()) {
         return Ok(false);
       }
     }

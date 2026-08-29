@@ -714,7 +714,7 @@ fn handle_line_request(
   match request {
     SocketRequest::LineGet(line_header) => handle_line_get(&line_header, conn, readline),
     SocketRequest::LineSet(line_header, value) => {
-      handle_line_set(&line_header, &value, conn, readline)
+      handle_line_set(&line_header, &value, conn, readline);
     }
     SocketRequest::LineSendKeys(events) => {
       if let Some(event) = readline.replay_keys(events, true)? {

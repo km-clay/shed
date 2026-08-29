@@ -262,18 +262,16 @@ fn fc_reexec(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
     let mut command = entry.command;
     let mut should_push = false;
     if let Some((old, new)) = &opts.replace {
-      let new_cmd = command
-        .to_str_lossy()
-        .replace(old.to_str_lossy().as_ref(), new.to_str_lossy().as_ref());
+      let new_cmd = command.replace(old.to_str_lossy().as_ref(), new.to_str_lossy().as_ref());
       if new_cmd.as_bytes() != command.as_bytes() {
-        command = new_cmd.into();
+        command = new_cmd;
         should_push = true;
       }
     }
 
-    exec_input(command.clone(), Some("fc re-exec".into()))?;
+    exec_input(command.clone().into(), Some("fc re-exec".into()))?;
     if should_push {
-      hist.push(&command.to_str_lossy())?;
+      hist.push(&command)?;
     }
   }
 
@@ -721,10 +719,7 @@ mod fc_edit_tests {
     .unwrap();
     // History should now contain the opts-editor's rewrite.
     let entries = hist_view().query_range(1, 100).unwrap();
-    let cmds: Vec<&str> = entries
-      .iter()
-      .map(|(_, e)| e.command.to_str().unwrap_or_default())
-      .collect();
+    let cmds: Vec<&str> = entries.iter().map(|(_, e)| e.command.as_str()).collect();
     assert!(cmds.contains(&": picked-opts"), "got: {cmds:?}");
     assert!(!cmds.contains(&": picked-fcedit"), "got: {cmds:?}");
   }
@@ -740,7 +735,7 @@ mod fc_edit_tests {
     let hist = fresh_history();
     hist.push(": original").unwrap();
     fc_edit(&hist, fc_opts(None, None, None)).unwrap();
-    let cmds: Vec<VarStr> = hist_view()
+    let cmds: Vec<String> = hist_view()
       .query_range(1, 100)
       .unwrap()
       .into_iter()
@@ -841,10 +836,7 @@ mod fc_edit_tests {
       false,
     )
     .unwrap();
-    let cmds: Vec<&str> = entries
-      .iter()
-      .map(|(_, e)| e.command.to_str().unwrap_or_default())
-      .collect();
+    let cmds: Vec<&str> = entries.iter().map(|(_, e)| e.command.as_str()).collect();
     assert_eq!(cmds, vec![": b", ": c", ": d"]);
   }
 }
@@ -980,7 +972,7 @@ mod fc_reexec_tests {
       .unwrap()
       .1
       .command;
-    assert!(last.to_str_lossy().contains("replaced_marker"));
+    assert!(last.contains("replaced_marker"));
   }
 
   #[test]
