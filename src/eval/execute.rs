@@ -1631,7 +1631,7 @@ impl Dispatcher {
   #[expect(clippy::too_many_lines)]
   pub fn exec_cmd(&mut self, tree: &Ast, cmd_id: NodeId) -> ShResult<()> {
     let cmd = &tree[cmd_id];
-    let context = cmd.context.clone();
+    let context = &cmd.context;
     let NdRule::Command { assignments, argv } = &cmd.class else {
       unreachable!(
         "found node class '{:?}' in exec_cmd",

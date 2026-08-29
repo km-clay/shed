@@ -1315,6 +1315,9 @@ impl VarTab {
   pub fn take_deferred_cmds(&mut self) -> Vec<Ast> {
     std::mem::take(&mut self.deferred_cmds)
   }
+  pub fn has_deferred_cmds(&self) -> bool {
+    !self.deferred_cmds.is_empty()
+  }
   pub fn sh_argv(&self) -> &VecDeque<VarStr> {
     &self.sh_argv
   }

@@ -72,7 +72,9 @@ macro_rules! defer {
 /// Execute commands registered by `defer`
 /// Drop variables registered by `local`
 fn guard_drop(_: ()) {
-  crate_util::with_saved_status(execute::dispatch_deferred_cmds);
+  if Shed::vars(ScopeStack::has_deferred_cmds) {
+    crate_util::with_saved_status(execute::dispatch_deferred_cmds);
+  }
 
   Shed::vars_mut(ScopeStack::ascend);
 }

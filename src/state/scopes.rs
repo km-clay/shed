@@ -164,6 +164,9 @@ impl ScopeStack {
 
     flat_vars
   }
+  pub fn has_deferred_cmds(&self) -> bool {
+    self.cur_scope().has_deferred_cmds()
+  }
   pub fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     if flags.contains(VarFlags::LOCAL) {
       return self.set_var_local(var_name, val, flags);

@@ -1075,6 +1075,8 @@ impl ExParser {
     let mut args = vec![];
     while let Some(arg) = self.tokens.next() {
       // wrap in Tk so we can use get_span()
+      // Tk is just a Span with a TkRule, so its fine
+      // to just build one like this
       args.push(Tk::new(lex::TkRule::Str, arg.span));
     }
     let args_raw = args
