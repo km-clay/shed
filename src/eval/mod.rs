@@ -1,3 +1,5 @@
+//! Parsing, lexing, and execution
+
 use super::{
   Shed, builtin, errln, expand, match_loop, procio, sherr, shopt, signal, state, state::jobs,
   try_var, two_way_display, util, var,

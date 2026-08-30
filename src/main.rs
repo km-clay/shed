@@ -12,8 +12,8 @@
   clippy::result_large_err
 )]
 
-//! The main entry point for the shell.
-//! Handles setup and teardown of the shell's environment, and dispatches the execution logic
+//! `shed`, a POSIX shell that focuses on rich interactive features and customizability.
+
 /*
 MIT License
 

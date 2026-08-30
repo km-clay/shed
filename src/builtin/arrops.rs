@@ -1,4 +1,5 @@
 //! Contains builtins that operate on shell arrays.
+//!
 //! `shed`'s array variables are actually [`VecDeque`] under the hood,
 //! so the goal of these builtins is to provide access to the deque's double-ended
 //! interaction surface.

@@ -1,4 +1,5 @@
-//! This module contains the logic for `shed`'s IPC socket.
+//! Contains the logic for `shed`'s IPC socket.
+//!
 //! Functions and types used for interfacing with the socket, and handling requests can be found here.
 
 use std::{

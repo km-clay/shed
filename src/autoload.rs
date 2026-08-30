@@ -1,3 +1,8 @@
+//! Autoloading machinery
+//!
+//! Handles autoloading for functions, completions, and the help pages.
+//! This includes files we bundle with the shell, and also files provided by the user.
+
 use std::path::PathBuf;
 
 use crate::{

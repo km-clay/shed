@@ -1,5 +1,7 @@
 //! This module contains functions for managing the lifecycle of the program.
-//! These functions do stuff like setting up the logger, parsing the command line arguments, hanging up child processes on exit, etc.
+//!
+//! These functions do stuff like setting up the logger, parsing the command
+//! line arguments, hanging up child processes on exit, etc.
 
 use std::{
   io::Write,

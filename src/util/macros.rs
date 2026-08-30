@@ -79,6 +79,7 @@ macro_rules! queue_term {
 }
 
 /// Shorthand for creating `VerbCmds`, like `verb!(Verb::Delete)` or `verb!(3, Verb::Change)`
+///
 /// If no count is given, the count defaults to 1.
 #[macro_export]
 macro_rules! verb {
@@ -315,7 +316,9 @@ macro_rules! match_loop {
 	};
 }
 
-/// A macro that abbreviates the creation of a `ShErr`, allowing you to specify the kind and a format string with arguments, and optionally a span for error location.
+/// A macro that abbreviates the creation of a `ShErr`
+///
+/// The macro allows you to specify the kind and a format string with arguments, and optionally a span for error location.
 /// Providing a span will automatically make the printed error point at the offending text referred to by the span.
 /// Examples:
 /// ```
@@ -351,6 +354,7 @@ macro_rules! sherr {
 }
 
 /// Defines a two-way mapping between an enum and its string representation, implementing both Display and `FromStr`.
+///
 /// Example:
 ///
 /// ```
@@ -513,6 +517,7 @@ macro_rules! var {
 }
 
 /// Try to get a shell variable from `Shed::vars()`. Returns None if unset. Checks env vars too.
+///
 /// Useful if you need to match on whether a variable exists or not.
 #[macro_export]
 macro_rules! try_var {
@@ -530,6 +535,7 @@ macro_rules! shopt {
 }
 
 /// Get a mutable shell option from `Shed::shopts_mut()`.
+///
 /// You can use this to alter shopt values inline.
 #[macro_export]
 macro_rules! shopt_mut {
@@ -538,6 +544,9 @@ macro_rules! shopt_mut {
   };
 }
 
+/// Assert that a const array of strings is sorted alphabetically at compile time.
+///
+/// Used mainly to ensure the `BUILTIN_TABLE` is sorted, so that builtin lookup works.
 #[macro_export]
 macro_rules! assert_sorted {
   ($arr:expr) => {

@@ -1,5 +1,4 @@
-//! Contains the `autocmd` builtin, which allows for registering commands to be executed automatically on certain events,
-//! like before or after a command, changing directories, etc.
+//! The `autocmd` builtin - register commands to be executed automatically on certain shell events
 
 use crate::opt;
 

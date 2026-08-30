@@ -1,3 +1,10 @@
+//! `shed`'s builtin commands.
+//!
+//! This module contains the implementation of all builtin commands, as well as the [`Builtin`] trait
+//! that defines the interface for builtins. Each builtin is implemented as a struct that implements
+//! the [`Builtin`] trait. The builtins are registered in the [`BUILTIN_TABLE`] static variable, which
+//! is used to look up builtins by name.
+
 use crate::defer;
 use ariadne::Span as ASpan;
 use itertools::Itertools;
@@ -87,6 +94,7 @@ mod width;
 pub(crate) use help::HELP_PAGE_INSTALL_DIR;
 use opt::{Opt, OptSpec};
 
+/// A macro to register builtins in the `BUILTIN_TABLE` static variable.
 macro_rules! register_builtins {
   ($($name:literal => $ty:expr),* $(,)?) => {
     static BUILTIN_TABLE: &[(&[u8], &dyn Builtin)] = &[
@@ -97,6 +105,7 @@ macro_rules! register_builtins {
       $($name),*
     ];
 
+    // this is in util::macros
     $crate::assert_sorted!(BUILTIN_NAMES);
   };
 }
@@ -198,6 +207,10 @@ pub(super) fn lookup_builtin(name: &[u8]) -> Option<&'static dyn Builtin> {
     .map(|idx| BUILTIN_TABLE[idx].1 as &dyn Builtin)
 }
 
+/// A trait that provides a common interface for all builtin commands.
+///
+/// Has exactly one required member: `execute()`, which is called to run the builtin.
+/// All other members have default implementations.
 pub(super) trait Builtin: Sync {
   /// The actual logic of the builtin. The only required member of Builtin.
   fn execute(&self, args: BuiltinArgs) -> ShResult<()>;
@@ -227,9 +240,8 @@ pub(super) trait Builtin: Sync {
     false
   }
 
-  /// If this is overridden to return `true`, variables
-  /// assigned via command prefix, i.e. `FOO=bar command`,
-  /// are persisted after the builtin returns. POSIX thing.
+  /// Whether or not to persist variables assigned via command prefix i.e. `FOO=bar command`
+  /// It's a POSIX thing
   fn is_special(&self) -> bool {
     false
   }
@@ -297,7 +309,8 @@ pub(super) trait Builtin: Sync {
     Some(buf)
   }
 
-  /// The main entry point for running a builtin. This is responsible for setting up the environment, handling redirections, and catching control flow errors.
+  /// The main entry point for running a builtin.
+  /// This is responsible for setting up the environment, handling redirections, and catching control flow errors.
   fn setup_builtin(
     &self,
     tree: &Ast,
@@ -467,8 +480,10 @@ pub(super) trait Builtin: Sync {
 /// from a previous builtin in an in-process pipeline.
 pub struct BuiltinArgs {
   argv: Vec<Word>,
-  span: Span,     // the entire call
-  cmd_span: Span, // just the command
+  /// The span of the entire builtin call
+  span: Span,
+  /// The span of just the command
+  cmd_span: Span,
 }
 
 impl BuiltinArgs {
@@ -480,21 +495,25 @@ impl BuiltinArgs {
     self.cmd_span.clone()
   }
 
+  /// Get an iterator over the arguments (non-option words) of the builtin.
   pub fn arguments(&self) -> impl Iterator<Item = (&VarStr, &Span)> {
     self.argv.iter().filter_map(|word| match word {
       Word::Arg(value, span) => Some((value, span)),
       _ => None,
     })
   }
+  /// Get an iterator over the options of the builtin.
   pub fn options(&self) -> impl Iterator<Item = &Opt> {
     self.argv.iter().filter_map(|word| match word {
       Word::Opt(opt) => Some(opt),
       _ => None,
     })
   }
+  /// Check if the builtin has an option with the given key.
   pub fn has_opt(&self, key: &str) -> bool {
     self.options().any(|o| o.key() == key)
   }
+  /// Get the value of an option with the given key, if it exists.
   pub fn opt_value(&self, key: &str) -> Option<VarStr> {
     self
       .options()
@@ -513,6 +532,8 @@ impl BuiltinArgs {
   pub fn no_options(&self) -> bool {
     self.argv.iter().all(|word| !matches!(word, Word::Opt(_)))
   }
+  /// Take the arguments and options from the builtin, leaving `argv` empty.
+  /// Splits `argv` into a vector of `(VarStr, Span)` for arguments and a vector of `Opt` for options.
   pub fn take_argv(&mut self) -> (Vec<(VarStr, Span)>, Vec<Opt>) {
     self
       .argv
@@ -526,12 +547,14 @@ impl BuiltinArgs {
   }
 }
 
-// Join all of the word-split arguments into a single string
-// Preserve the span too
+/// Join all of the word-split arguments into a single string
+/// Preserve the span too
 pub fn join_raw_args(args: Vec<(VarStr, Span)>) -> (VarStr, Span) {
   join_raw_arg_iter(args.into_iter())
 }
 
+/// Join all of the word-split arguments into a single string
+/// Preserve the span too
 pub fn join_raw_arg_iter(args: impl Iterator<Item = (VarStr, Span)>) -> (VarStr, Span) {
   args.fold((VarStr::default(), Span::default()), |mut acc, arg| {
     if acc.1 == Span::default() {
@@ -553,6 +576,7 @@ pub fn join_raw_arg_iter(args: impl Iterator<Item = (VarStr, Span)>) -> (VarStr,
 
 // The easy ones
 
+/// The POSIX no-op command. It does nothing.
 struct Colon;
 impl Builtin for Colon {
   fn is_special(&self) -> bool {
@@ -566,6 +590,7 @@ impl Builtin for Colon {
   }
 }
 
+/// Sets the shell's status to '0' and then returns
 struct True;
 impl Builtin for True {
   fn no_help(&self) -> bool {
@@ -576,6 +601,7 @@ impl Builtin for True {
   }
 }
 
+/// Sets the shell's status to '1' and then returns
 struct False;
 impl Builtin for False {
   fn no_help(&self) -> bool {
@@ -586,6 +612,7 @@ impl Builtin for False {
   }
 }
 
+/// Evaluate arithmetic expressions and set the shell's status based on the result
 struct Let;
 impl Builtin for Let {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
@@ -602,14 +629,13 @@ impl Builtin for Let {
   }
 }
 
-// Stdin reads go through `Sinks`: the in-process pipeline sink if present,
-// else the real fd 0. Each chunk is its own `Shed::sinks` borrow so it
-// never overlaps the `out_bytes` write below.
+/// A source of bytes for the `thru` builtin, which can be either a file or stdin.
 enum ThruSource {
   File(fs::File),
   Stdin,
 }
 impl ThruSource {
+  /// Read bytes from the source into the provided buffer, returning the number of bytes read.
   fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
     match self {
       ThruSource::File(f) => f.read(buf),
@@ -618,6 +644,9 @@ impl ThruSource {
   }
 }
 
+/// Identity function that reads from stdin or files and writes to stdout, optionally teeing to a file and counting bytes.
+///
+/// Basically `cat` + `tee`, with no fork involved. Useful for keeping pipelines in-process if speed matters in a script.
 struct Thru;
 impl Builtin for Thru {
   fn strict_opts(&self) -> bool {
@@ -739,6 +768,10 @@ impl Builtin for Thru {
   }
 }
 
+/// A builtin that runs another builtin, bypassing the normal command lookup and dispatch.
+///
+/// This is mainly used to bypass symbols that may shadow existing commands.
+/// Yes the struct name is unfortunate. No, I'm not changing it.
 struct BuiltinBuiltin;
 impl Builtin for BuiltinBuiltin {
   // lol
@@ -808,6 +841,9 @@ fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
   Ok(out)
 }
 
+/// The `command` builtin, which runs a command while bypassing any shell functions or aliases that may shadow it.
+///
+/// This is a special builtin that always forks, because it needs to run the command in a new process to avoid shadowing.
 pub struct CommandBuiltin;
 impl Builtin for CommandBuiltin {
   fn always_forks(&self) -> bool {

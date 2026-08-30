@@ -1,4 +1,5 @@
 //! Functions for handling input to the shell.
+//!
 //! The functions contained within handle both interactive and non-interactive contexts.
 //! This includes the `-c <COMMAND>` flag, script path arguments, commands from stdin, and interactive mode.
 

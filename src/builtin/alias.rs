@@ -1,4 +1,5 @@
 //! Contains builtins that pertain to shell aliases.
+//!
 //! `alias` - create, list, and display shell aliases
 //! `unalias` - remove shell aliases
 //! `excmd` - create, list, and display ex command aliases

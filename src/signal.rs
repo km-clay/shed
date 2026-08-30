@@ -1,4 +1,5 @@
 //! Signal handling for the shell.
+//!
 //! This module provides functions to install signal handlers, check for pending signals, and handle them appropriately.
 //! It also provides functions to manage the job table and child processes in response to signals.
 

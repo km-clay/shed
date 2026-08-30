@@ -1,3 +1,8 @@
+//! `shed`'s shell state management.
+//!
+//! This module contains the [`Shed`] struct, which is the central repository for all of the shell's state.
+//! Fun fact: the [`size_of`] the [`Shed`] struct is 2584 bytes, which is a bit over 2.5 KB. This is a lot of state to manage, but it is necessary for the shell to function properly.
+
 use chrono::{DateTime, Local};
 use std::{
   cell::RefCell,
@@ -44,6 +49,11 @@ impl Drop for CallFrameGuard {
   }
 }
 
+/// A message with a timestamp.
+///
+/// This is used to store both system and status messages that are posted by the shell.
+/// System messages are drawn with the prompt, or echoed to stdout in non-interactive sessions.
+/// Status messages appear under the prompt, and last for a few seconds.
 #[derive(Clone, Debug)]
 pub(super) struct Message {
   when: SystemTime,
@@ -72,6 +82,7 @@ impl Display for Message {
   }
 }
 
+/// Generates an accessor for a field of the [`Shed`] struct.
 macro_rules! access {
   ($shed:ident, $field:ident, $f:expr) => {{
     let caller = ::std::panic::Location::caller();
@@ -87,6 +98,7 @@ macro_rules! access {
   }};
 }
 
+/// Generates a mutable accessor for a field of the [`Shed`] struct.
 macro_rules! access_mut {
   ($shed:ident, $field:ident, $f:expr) => {{
     let caller = ::std::panic::Location::caller();
@@ -102,39 +114,51 @@ macro_rules! access_mut {
   }};
 }
 
-/// The shell
+/// `shed`'s internal state struct.
 ///
-/// Every bit of data that this program needs to track over
+/// Every last bit of data that this program needs to track over
 /// its lifecycle is stored here
 #[derive(Debug)]
 pub(super) struct Shed {
   // constructed in state/util.rs
+  /// The job table
   jobs: RefCell<jobs::JobTab>,
+  /// Shell variable scopes
   var_scopes: RefCell<scopes::ScopeStack>,
+  /// Metadata and miscellaneous bookkeeping
   meta: RefCell<meta::MetaTab>,
+  /// Table for functions, aliases, etc
   logic: RefCell<logic::LogTab>,
+  /// The terminal state
   terminal: RefCell<terminal::Terminal>,
+  /// The shell configuration options
   shopts: RefCell<shopt::ShOpts>,
+  /// The last exit status code, used by `$?`
   status_code: AtomicI32,
 
+  /// Pending status messages to be displayed under the prompt
   status_msg_queue: RefCell<VecDeque<Message>>,
+  /// History of status messages that have been displayed
   status_msg_hist: RefCell<VecDeque<Message>>,
 
+  /// Pending system messages to be displayed with the prompt
   system_msg_queue: RefCell<VecDeque<Message>>,
+  /// History of system messages that have been displayed
   system_msg_hist: RefCell<VecDeque<Message>>,
 
+  /// The IPC socket
   socket: RefCell<Option<Arc<socket::ShedSocket>>>,
+  /// The list of subscribers to the IPC socket
   subscribers: RefCell<Vec<Arc<UnixStream>>>,
 
-  /// Traceback context stack: each active function call pushes its
-  /// "in call to …" (and caller) labels. Attached to errors at print time,
-  /// so a forked child that prints an error mid-call sees the call chain,
-  /// while an error that propagates out after the frame pops does not.
+  /// The call context stack, used for traceback and error reporting
   call_context: RefCell<Vec<LabelBuilder>>,
 
+  /// Internal I/O sinks, used to allow builtins to chain in pipelines without forking.
   sinks: RefCell<procio::Sinks>,
 
   #[cfg(test)]
+  /// A saved copy of the shell state, used for testing.
   saved: RefCell<Option<Box<Self>>>,
 }
 
@@ -168,6 +192,8 @@ impl Shed {
 
   /*
    * State Accessor Functions
+   *
+   * READ THIS!!!!!!!!!!!!!!!!!!!!!!!!!!!!
    *
    * The reason we use this "take a function, execute it on a borrow" pattern
    * is to make positively sure that the lifetimes of the borrows are handled safely.
@@ -208,6 +234,7 @@ impl Shed {
   {
     access!(SHED, jobs, f)
   }
+  /// Mutate the job table
   #[track_caller]
   pub fn jobs_mut<T, F>(f: F) -> T
   where
@@ -233,6 +260,7 @@ impl Shed {
   {
     access!(SHED, var_scopes, f)
   }
+  /// Mutate the var scope stack
   #[track_caller]
   pub fn vars_mut<T, F>(f: F) -> T
   where
@@ -249,6 +277,7 @@ impl Shed {
   {
     access!(SHED, meta, f)
   }
+  /// Mutate the metadata table
   #[track_caller]
   pub fn meta_mut<T, F>(f: F) -> T
   where
@@ -265,6 +294,7 @@ impl Shed {
   {
     access!(SHED, logic, f)
   }
+  /// Mutate the logic table
   #[track_caller]
   pub fn logic_mut<T, F>(f: F) -> T
   where
@@ -281,6 +311,7 @@ impl Shed {
   {
     access!(SHED, shopts, f)
   }
+  /// Mutate the shell options
   #[track_caller]
   pub fn shopts_mut<T, F>(f: F) -> T
   where
@@ -289,6 +320,7 @@ impl Shed {
     access_mut!(SHED, shopts, f)
   }
 
+  /// Read from the terminal state
   #[track_caller]
   pub fn term<T, F>(f: F) -> T
   where
@@ -296,6 +328,7 @@ impl Shed {
   {
     access!(SHED, terminal, f)
   }
+  /// Mutate the terminal state
   #[track_caller]
   pub fn term_mut<T, F>(f: F) -> T
   where
@@ -304,6 +337,7 @@ impl Shed {
     access_mut!(SHED, terminal, f)
   }
 
+  /// Broadcast a message to all subscribers of the IPC socket.
   fn broadcast<F>(mut f: F)
   where
     F: FnMut(&Arc<UnixStream>) -> std::io::Result<()>,
@@ -377,6 +411,7 @@ impl Shed {
   pub fn get_socket() -> Option<Arc<socket::ShedSocket>> {
     SHED.with(|shed| shed.socket.borrow().clone())
   }
+  /// Read all pending requests from the IPC socket, returning a vector of (connection, request) tuples.
   pub fn read_socket() -> Vec<(UnixStream, socket::SocketRequest)> {
     let mut requests = vec![];
     let Some(listener) = Self::get_socket() else {
@@ -467,6 +502,7 @@ impl Shed {
   pub fn call_context() -> Vec<LabelBuilder> {
     SHED.with(|shed| shed.call_context.borrow().clone())
   }
+  /// Broadcast a message to all subscribers of the IPC socket.
   pub fn broadcast_msg(msg: &str) {
     let payload = msg
       .lines()
@@ -476,9 +512,11 @@ impl Shed {
 
     Self::broadcast(|sub| writefd!(sub, "{payload}\n"));
   }
+  /// Broadcast an autocmd event to all subscribers of the IPC socket.
   pub fn notify_autocmd(kind: logic::AutoCmdKind) {
     Self::broadcast(|sub| writefd!(sub, "autocmd_event>>{kind}\n"));
   }
+  /// Broadcast a job completion event to all subscribers of the IPC socket.
   pub fn notify_job_complete(job: &jobs::Job) {
     use itertools::izip;
     use std::fmt::Write as _;
@@ -503,6 +541,7 @@ impl Shed {
       Ok(())
     });
   }
+  /// Broadcast a line edit event to all subscribers of the IPC socket.
   pub fn notify_line_edit(data: readline::LineData) {
     use nix::unistd::write;
     use std::fmt::Write as _;
@@ -531,6 +570,7 @@ impl Shed {
       Ok(())
     });
   }
+  /// Broadcast a key event to all subscribers of the IPC socket.
   pub fn notify_key_event(event: &keys::KeyEvent) {
     use nix::unistd::write;
 
@@ -563,13 +603,17 @@ impl Shed {
     })
   }
 
+  /// Get the last exit status code, used by `$?`.
+  ///
+  /// The value is masked to 8 bits to match bash behavior.
   pub fn get_status() -> i32 {
-    // mask to 8 bits to match bash behavior
     SHED.with(|shed| shed.status_code.load(Ordering::Relaxed)) & 255
   }
+  /// Set the last exit status code, used by `$?`.
   pub fn set_status(code: i32) {
     SHED.with(|shed| shed.status_code.store(code, Ordering::Relaxed));
   }
+  /// Set the last exit status code from a boolean value, where `true` is success (0) and `false` is failure (1).
   pub fn set_status_from_bool(code: bool) {
     Self::set_status(i32::from(!code));
   }
