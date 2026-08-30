@@ -1,3 +1,21 @@
+//!
+//! Context Lexing
+//!
+//! When it comes to things like syntax highlighting and tab completion,
+//! we need a specialized approach to figuring out what a span of text "is".
+//! Normal lexing via [`LexStream`] works for getting arguments and stuff, but
+//! is not great for problems like "the user pressed tab, what is the cursor sitting on?"
+//!
+//! This module proposes a solution to this issue. We'll use the [`LexStream`] as usual,
+//! but every Tk will be processed into a [`CtxTk`], which is a wrapper for Tk that contains
+//! more contextual metadata.
+//!
+//! Tk is itself a wrapper for a Span, and as such is just a flat line of text.
+//! [`CtxTk`] carries a vector of sub-tokens, which allows us to take something
+//! like `foo"bar $(echo biz) baz"buzz` which is itself a single token, and construct
+//! a tree-like structure from the tokens nested within it. This tree can then be walked
+//! to find what a specific byte position represents.
+
 use std::{
   collections::VecDeque,
   iter::Peekable,
@@ -22,26 +40,6 @@ use super::{
   state::{self, meta::UtilKind, util::get_exec_wrappers, vars::ShellParam},
   util::{QuoteState, has_unescaped, split_at_unescaped},
 };
-
-/*
- * Context Lexing
- *
- * When it comes to things like syntax highlighting and tab completion,
- * we need a specialized approach to figuring out what a span of text "is".
- * Normal lexing via LexStream works for getting arguments and stuff, but
- * is not great for problems like "the user pressed tab, what is the cursor sitting on?"
- *
- * This module proposes a solution to this issue. We'll use the LexStream as usual,
- * but every Tk will be processed into a CtxTk, which is a wrapper for Tk that contains
- * more contextual metadata.
- *
- * Tk is itself a wrapper for a Span, and as such is just a flat line of text.
- * CtxTk carries a vector of sub-tokens, which allows us to take something
- * like `foo"bar $(echo biz) baz"buzz` which is itself a single token, and construct
- * a tree-like structure from the tokens nested within it. This tree can then be walked
- * to find what a specific byte position represents.
- *
- */
 
 /// Turn raw shell input into `CtxTks`
 pub fn get_context_tokens(input: &str) -> Vec<CtxTk> {

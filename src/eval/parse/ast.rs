@@ -29,10 +29,19 @@ static AST_GENERATION: AtomicU32 = AtomicU32::new(0);
 
 /// Abstract Syntax Tree
 ///
-/// The internal representation of a `shed` script. Contains "flat trees" of [`Node`]s, which are the actual statements to execute. Each [`Node`] is just a bag of indices used to reach other nodes, tokens, and redirections in the [`Ast`]. Each of these arenas has a corresponding `Id` type, which is used to index into the arena.
+/// The internal representation of a `shed` script. Contains "flat trees" of
+/// [`Node`]s, which are the actual statements to execute. Each [`Node`] is
+/// just a bag of indices used to reach other nodes, tokens, and redirections
+/// in the [`Ast`]. Each of these arenas has a corresponding `Id` type, which
+/// is used to index into the right arena.
 ///
-/// The [`Ast`] implements [`Index`] for each of these `Id` types. Indexing automatically dispatches to the correct arena, and checks that the `Id`'s `ast_id` matches the `Ast`'s `id`.
-
+/// The [`Ast`] implements [`Index`] for each of these `Id` types.
+/// Indexing automatically dispatches to the correct arena, and checks that the
+/// `Id`'s `ast_id` matches the `Ast`'s `id`.
+///
+/// If you know how many tokens this thing is going to parse, construct it using
+/// [`Ast::with_capacity()`], this saves us from having to contsantly resize 10 vectors
+/// during the parse.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Ast {
   nodes: Vec<Node>,             // all ast nodes
@@ -57,7 +66,7 @@ impl Ast {
       ..Default::default()
     }
   }
-  pub(super) fn reserve(&mut self, n: usize) {
+  fn reserve(&mut self, n: usize) {
     // based on testing, these ratios seem to be
     // the upper bound of AST memory usage.
     // 'n' is equal to the number of input tokens.
@@ -72,6 +81,9 @@ impl Ast {
     self.case_nodes.reserve(n / 4);
     self.cond_nodes.reserve(n / 4);
   }
+  /// Create a new [`Ast`] that sizes its arenas to hold `size` tokens.
+  /// This is actually an important step for performance, juggling resize
+  /// for 9 different arenas is expensive, so we try to size them all up front.
   pub fn with_capacity(size: usize) -> Self {
     let mut new = Self::new();
     new.reserve(size);
@@ -79,20 +91,6 @@ impl Ast {
   }
   pub fn alloc<T: ArenaMember>(&mut self, value: T) -> T::Id {
     value.alloc_in(self)
-  }
-  #[cfg(test)]
-  pub(crate) fn arena_lens(&self) -> Vec<(&'static str, usize)> {
-    vec![
-      ("nodes", self.nodes.len()),
-      ("tokens", self.tokens.len()),
-      ("spans", self.spans.len()),
-      ("child_nodes", self.child_nodes.len()),
-      ("redirs", self.redirs.len()),
-      ("case_nodes", self.case_nodes.len()),
-      ("cond_nodes", self.cond_nodes.len()),
-      ("conjuncts", self.conjuncts.len()),
-      ("labels", self.labels.len()),
-    ]
   }
   pub fn mark_root(&mut self, id: NodeId) {
     if !self.roots.contains(&id) {
