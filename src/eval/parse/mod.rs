@@ -156,14 +156,13 @@ impl Debug for ParseStream {
 }
 
 impl ParseStream {
-  pub fn new(tokens: Vec<Tk>, context: LabelCtx) -> Self {
-    let tokens = tokens
-      .into_iter()
-      .filter(|tk| tk.class != TkRule::Comment)
-      .collect();
+  pub fn new(mut tokens: Vec<Tk>, context: LabelCtx) -> Self {
+    tokens.retain(|tk| tk.class != TkRule::Comment);
+
+    let tree = Ast::with_capacity(tokens.len());
     Self {
       tokens,
-      tree: Ast::new(),
+      tree,
       cursor: 0,
       context,
       flags: ParseFlags::empty(),
