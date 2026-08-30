@@ -1,3 +1,8 @@
+//! The internal representation of `shed` scripts
+//!
+//! Contains the [`Ast`], which contains "flat trees" of [`Node`]s, which are the actual statements to execute.
+//! [`Node`]s themselves are just bags of indices used to reach other nodes, tokens, and redirections in the [`Ast`].
+
 use std::{
   ops::{Index, IndexMut},
   sync::atomic::{AtomicU32, Ordering},
@@ -24,30 +29,19 @@ static AST_GENERATION: AtomicU32 = AtomicU32::new(0);
 
 /// Abstract Syntax Tree
 ///
-/// The internal representation of a `shed` script. Contains a flat list (arena) of AST nodes to execute.
-/// `Ast` can only be indexed by [`NodeId`]. [`NodeId`] is passed out on creation of a [`Node`], and is the
-/// only way to reach a [`Node`] that is inside the arena. ///
+/// The internal representation of a `shed` script. Contains "flat trees" of [`Node`]s, which are the actual statements to execute. Each [`Node`] is just a bag of indices used to reach other nodes, tokens, and redirections in the [`Ast`]. Each of these arenas has a corresponding `Id` type, which is used to index into the arena.
 ///
-/// [`NodeId`]'s are stored inside the nodes themselves, meaning you have to traverse the tree in order to reach them.
-/// The only nodes that are reachable without doing this are the "root" nodes, which are the top level nodes of the AST.
-/// The ids for these nodes are stored explicitly in the `roots` field, which can be accessed using [`Ast::roots()`]
-///
-/// ## Panics
-/// Attempting to use a [`NodeId`] that comes from a different
-/// `Ast` will cause a panic, similar to how indexing a `Vec` with an out-of-bounds index will panic.
+/// The [`Ast`] implements [`Index`] for each of these `Id` types. Indexing automatically dispatches to the correct arena, and checks that the `Id`'s `ast_id` matches the `Ast`'s `id`.
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Ast {
-  // core arena
-  nodes: Vec<Node>,   // all ast nodes
-  roots: Vec<NodeId>, // top-level statements (entry points)
-
-  tokens: Vec<Tk>,        // every token in the tree
-  redirs: Vec<RedirSpec>, // every node's list of redirections
-
-  child_nodes: Vec<NodeId>, // lists of NodeIds, like for pipelines and stuff
-  case_nodes: Vec<CaseNode>, // every case node in the tree, used by `case`
-  cond_nodes: Vec<CondNode>, // every conditional node in the tree, used by `if`/`while`
+  nodes: Vec<Node>,             // all ast nodes
+  roots: Vec<NodeId>,           // top-level statements (entry points)
+  tokens: Vec<Tk>,              // every token in the tree
+  redirs: Vec<RedirSpec>,       // every node's list of redirections
+  child_nodes: Vec<NodeId>,     // lists of NodeIds, like for pipelines and stuff
+  case_nodes: Vec<CaseNode>,    // every case node in the tree, used by `case`
+  cond_nodes: Vec<CondNode>,    // every conditional node in the tree, used by `if`/`while`
   conjuncts: Vec<ConjunctNode>, // every conjunction node in the tree, used by `&&`/`||`
 
   spans: Vec<Span>,
@@ -344,11 +338,16 @@ impl Ast {
   }
 }
 
+/// A trait for types that can be allocated in an [`Ast`].
+///
+/// This trait is implemented for all types that can be stored in an [`Ast`]'s arenas. It provides a method to allocate the value in the given [`Ast`] and return its corresponding `Id` type.
 pub trait ArenaMember {
   type Id;
   fn alloc_in(self, ast: &mut Ast) -> Self::Id;
 }
 
+/// A macro to generate arena types and their corresponding `Id` types.
+/// There are seven of these we have to generate, so this saves a lot of boilerplate
 macro_rules! arenas {
   ($($ty:ident => $field:ident : $out:ty,)*) => {
     $(
@@ -387,6 +386,10 @@ macro_rules! arenas {
   };
 }
 
+/// A macro to generate range types for arenas and their corresponding allocation methods in [`Ast`].
+/// The range types are used to represent a contiguous range of `Id`s in an arena, and the allocation methods allow for allocating multiple items at once and returning a range of their `Id`s.
+///
+/// Ranges are basically the equivalent of storing a [`Vec`] directly on the [`Node`].
 macro_rules! arena_ranges {
   ($($range:ident, $alloc:ident, $id:ident => $field:ident : $out:ty,)*) => {
     $(
@@ -516,6 +519,7 @@ impl Index<Option<RedirRange>> for Ast {
   }
 }
 
+// same for this
 impl Index<Option<LabelRange>> for Ast {
   type Output = [LabelBuilder];
   fn index(&self, r: Option<LabelRange>) -> &[LabelBuilder] {

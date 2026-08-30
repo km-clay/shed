@@ -305,7 +305,12 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node_id: NodeId) -> bool {
     }
 
     match &node.class {
-      NdRule::Command { .. } => {
+      NdRule::Command { argv, .. } => {
+        if argv.is_empty() {
+          // assignment-only command (e.g. `a=1`); runs in-process, never forks
+          res = Some(true);
+          return;
+        }
         if !is_func_node(id, tree) {
           res = Some(is_builtin(id, tree));
           return;
