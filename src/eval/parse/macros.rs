@@ -56,12 +56,18 @@ macro_rules! node {
     if $parser.last_consumed_was_sep() {
       flags |= $crate::eval::parse::node::NdFlags::PUNCTUATED;
     }
+    let context = (!$parser.context.is_empty()).then(|| {
+      $parser
+        .tree
+        .alloc_labels($parser.context.clone().into_iter())
+    });
+
     $crate::eval::parse::node::Node {
       class: $class,
       flags,
       redirs: $redirs,
-      context: $parser.context.clone(),
-      span: $span.unwrap_or_default(),
+      context,
+      span: $span,
     }
   }};
   ($parser:expr, $span:expr, $class:expr, $redirs:expr) => {{
@@ -69,12 +75,17 @@ macro_rules! node {
     if $parser.last_consumed_was_sep() {
       flags |= $crate::eval::parse::node::NdFlags::PUNCTUATED;
     }
+    let context = Some(
+      $parser
+        .tree
+        .alloc_labels($parser.context.clone().into_iter()),
+    );
     $crate::eval::parse::node::Node {
       class: $class,
       flags,
       redirs: $redirs,
-      context: $parser.context.clone(),
-      span: $span.unwrap_or_default(),
+      context,
+      span: $span,
     }
   }};
   ($parser:expr, $span:expr, $class:expr) => {{
@@ -82,12 +93,17 @@ macro_rules! node {
     if $parser.last_consumed_was_sep() {
       flags |= $crate::eval::parse::node::NdFlags::PUNCTUATED;
     }
+    let context = Some(
+      $parser
+        .tree
+        .alloc_labels($parser.context.clone().into_iter()),
+    );
     $crate::eval::parse::node::Node {
       class: $class,
       flags,
-      redirs: vec![],
-      context: $parser.context.clone(),
-      span: $span.unwrap_or_default(),
+      redirs: None,
+      context,
+      span: $span,
     }
   }};
 }

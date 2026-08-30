@@ -1,6 +1,6 @@
 use crate::{
   HashMap,
-  eval::{lex::TkFlags, parse::Ast},
+  eval::{lex::TkFlags, parse::ast::Ast},
   expand::{Expander, expand_raw_inner, stream::SegStream},
   match_loop,
   util::{self, ByteCursor, QuoteState, SliceCursor, error::LabelBuilder, random},

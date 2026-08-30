@@ -7,7 +7,7 @@ use crate::util::error::LabelBuilder;
 use crate::{
   HashMap, ShResult,
   autoload::{self, AutoloadSrc, Autoloader},
-  eval::parse::Ast,
+  eval::parse::ast::Ast,
   sherr,
   state::vars::VarStr,
 };

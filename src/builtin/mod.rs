@@ -11,7 +11,7 @@ use crate::{
   builtin::opt::{Parsed, Word, parse_opts_with},
   eval::{
     execute,
-    parse::{Ast, node::NodeId},
+    parse::ast::{Ast, NodeId},
   },
   procio::{bytes_to_string, out_bytes},
   state::{
@@ -305,8 +305,10 @@ pub(super) trait Builtin: Sync {
     dispatcher: &mut Dispatcher,
   ) -> ShResult<()> {
     let node = &tree[node_id];
-    let cmd_raw = node.get_command().unwrap().as_bytes();
-    let context = node.context.clone();
+    let cmd = node.get_command().unwrap();
+    let cmd_raw = tree[cmd].as_bytes();
+
+    let context = node.context;
     let NdRule::Command { assignments, argv } = &node.class else {
       unreachable!()
     };
@@ -318,12 +320,12 @@ pub(super) trait Builtin: Sync {
 
     // reverts any variable assignments made by the builtin if it is a special builtin
     let _var_guard = matches!(assign_behavior, AssignBehavior::Export)
-      .then(|| prefix_assign_guard(tree, assignments));
+      .then(|| prefix_assign_guard(tree, &tree[*assignments]));
 
-    Dispatcher::set_assignments(tree, assignments, assign_behavior)?;
+    Dispatcher::set_assignments(tree, &tree[*assignments], assign_behavior)?;
     let fork_builtins = node.flags.contains(NdFlags::FORK_BUILTINS);
 
-    if !self.no_help() && argv.len() == 2 && argv[1].as_bytes() == b"--help" {
+    if !self.no_help() && argv.len() == 2 && tree[argv.get(1)].as_bytes() == b"--help" {
       // we have been asked for help
       // is this a hack? only the nose knows.
       return exec_nonint(
@@ -333,7 +335,7 @@ pub(super) trait Builtin: Sync {
     }
 
     // Set up redirections here so we can attach the guard to propagated errors.
-    let redirs: RedirSet = RedirSet::from(&node.redirs);
+    let redirs: RedirSet = RedirSet::from(&tree[node.redirs]);
     let fatal = self.is_special() && !Shed::term(Terminal::interactive);
     let guard = match redirs.try_apply(fatal) {
       RedirResult::Applied(guard) => Some(guard),
@@ -404,7 +406,7 @@ pub(super) trait Builtin: Sync {
             _ => 1,
           };
           Shed::set_status(status);
-          Err(e.with_context(context.iter()))
+          Err(e.with_context(tree[context].iter()))
         } else {
           let status = if let ShErrKind::Custom(_, code) = e.kind() {
             *code
@@ -412,7 +414,7 @@ pub(super) trait Builtin: Sync {
             1
           };
 
-          e.with_context(context.iter()).print_error();
+          e.with_context(tree[context].iter()).print_error();
           with_status(status)
         }
       }
@@ -421,7 +423,7 @@ pub(super) trait Builtin: Sync {
   /// Parse arguments and options, pack `BuiltinArgs`, run `self.execute()`
   fn run_builtin(&self, tree: &Ast, node_id: NodeId, _dispatcher: &mut Dispatcher) -> ShResult<()> {
     let node = &tree[node_id];
-    let span = node.get_span().clone();
+    let span = tree[node.get_span()].clone();
     let no_split = node.flags.contains(NdFlags::NO_SPLIT);
     let NdRule::Command {
       assignments: _,
@@ -433,9 +435,9 @@ pub(super) trait Builtin: Sync {
 
     let cmd_span = argv
       .first()
-      .map_or_else(|| span.clone(), |tk| tk.span.clone());
+      .map_or_else(|| span.clone(), |tk| tree[tk].span.clone());
 
-    let parsed = self.get_argv_and_opts(cmd_span.clone(), argv, no_split)?;
+    let parsed = self.get_argv_and_opts(cmd_span.clone(), &tree[*argv], no_split)?;
 
     if !node.flags.contains(NdFlags::NO_TRACE) {
       // Trace the flat, in-order expansion (options + their args intact),
@@ -750,11 +752,11 @@ impl Builtin for BuiltinBuiltin {
     dispatcher: &mut Dispatcher,
   ) -> ShResult<()> {
     let node = &tree[node_id];
-    let span = node.get_span();
+    let span = tree[node.get_span()].clone();
     let NdRule::Command { argv, .. } = &node.class else {
       unreachable!()
     };
-    let mut inner_argv = expand_argv(argv)?;
+    let mut inner_argv = expand_argv(&tree[*argv])?;
 
     if !node.flags.contains(NdFlags::NO_TRACE) {
       xtrace_print_tokens(&inner_argv);
@@ -772,11 +774,13 @@ impl Builtin for BuiltinBuiltin {
 
     // copy the wrapped invocation into its own ast, then dispatch
     let mut sub_ast = tree.break_off(node_id);
+    let inner_argv = sub_ast.alloc_tokens(inner_argv);
+
     let fwd_id = sub_ast.get_root().expect("forwarded command has no root");
     let NdRule::Command { assignments, .. } = &sub_ast[fwd_id].class else {
       unreachable!()
     };
-    let assignments = assignments.clone();
+    let assignments = *assignments;
     sub_ast[fwd_id].class = NdRule::Command {
       assignments,
       argv: inner_argv,
@@ -820,7 +824,7 @@ impl Builtin for CommandBuiltin {
     };
     // Expand first so a smuggled `command` (`C="command echo hi"`) is split
     // into words before we strip the leading `command`.
-    let mut argv = expand_argv(argv)?;
+    let mut argv = expand_argv(&tree[*argv])?;
 
     if !node.flags.contains(NdFlags::NO_TRACE) {
       xtrace_print_tokens(&argv);
@@ -872,14 +876,18 @@ impl Builtin for CommandBuiltin {
     argv = rest;
 
     let mut sub_ast = tree.break_off(node_id);
+    let inner_argv = sub_ast.alloc_tokens(argv);
     let root = sub_ast
       .get_root()
       .expect("command: forwarded node has no root");
     let NdRule::Command { assignments, .. } = &sub_ast[root].class else {
       unreachable!()
     };
-    let assignments = assignments.clone();
-    sub_ast[root].class = NdRule::Command { assignments, argv };
+    let assignments = *assignments;
+    sub_ast[root].class = NdRule::Command {
+      assignments,
+      argv: inner_argv,
+    };
     sub_ast[root].flags |= NdFlags::NO_TRACE;
 
     if use_default_path {
@@ -890,7 +898,8 @@ impl Builtin for CommandBuiltin {
         );
 
         #[cfg(not(target_os = "android"))]
-        return Err(sherr!(ExecFail @ sub_ast[root].get_span(), "unable to get default path"));
+        let span = sub_ast[sub_ast[root].get_span()].clone();
+        return Err(sherr!(ExecFail @ span, "unable to get default path"));
       };
       // TODO: Find a way to do this that doesn't involve forcing a full PATH rehash twice
       defer! {
@@ -922,7 +931,7 @@ impl CommandBuiltin {
       let Some(name) = argv.first() else {
         return with_status(2);
       };
-      let name_word = name.word();
+      let name_word = tree[name].word();
       let name_str = name_word.to_str_lossy();
       match state::util::which_util(&name_str) {
         Some(util) => match util.kind() {
@@ -948,7 +957,7 @@ impl CommandBuiltin {
       let Some(name) = argv.first() else {
         return with_status(2);
       };
-      let name_word = name.word();
+      let name_word = tree[name].word();
       let name_str = name_word.to_str_lossy();
       match state::util::which_util(&name_str) {
         Some(util) => match util.kind() {

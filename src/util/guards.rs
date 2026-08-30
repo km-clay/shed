@@ -4,7 +4,7 @@ use crate::{
   HashSet,
   eval::{
     NdRule, execute,
-    parse::{Ast, node::NodeId},
+    parse::ast::{Ast, NodeId},
   },
   state::{
     util,
@@ -186,8 +186,8 @@ pub fn prefix_assign_guard(tree: &Ast, assignments: &[NodeId]) -> impl Drop {
       NdRule::Assignment { var, .. } => {
         // An indexed assignment (`arr[i]=v`) touches the whole array variable,
         // so snapshot/restore under the base name.
-        let name = util::parse_arr_bracket(var.span.as_bytes())
-          .map_or_else(|| var.span.as_var_str(), |(base, _)| base);
+        let name = util::parse_arr_bracket(tree[*var].span.as_bytes())
+          .map_or_else(|| tree[*var].span.as_var_str(), |(base, _)| base);
         Some(name)
       }
       _ => None,

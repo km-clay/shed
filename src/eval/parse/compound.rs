@@ -1,14 +1,14 @@
 use shed_macros::styled_format;
 
 use crate::{
-  eval::parse::node::NodeId,
+  eval::parse::ast::NodeId,
   state::vars::VarStr,
   util::{error::get_context, parse_bytes},
 };
 
 use super::{
-  CaseNode, CondNode, LoopKind, NdRule, Node, ParseStream, ShResult, Tk, TkFlags, TkRule,
-  lex::Span, util::split_for_arith_tk,
+  CaseNode, CondNode, LoopKind, NdRule, ParseStream, ShResult, Tk, TkFlags, TkRule, lex::Span,
+  util::split_for_arith_tk,
 };
 
 impl ParseStream {
@@ -46,7 +46,7 @@ impl ParseStream {
       );
     };
 
-    extend_span!(span, self.tree[body].get_span());
+    extend_span!(span, self.tree.span_for(body));
 
     let ctx = get_context(
       VarStr::from(styled_format!(
@@ -58,11 +58,17 @@ impl ParseStream {
 
     let mut redirs = vec![];
     self.parse_redir(&mut redirs, &mut span)?;
-    self.tree[body].redirs.append(&mut redirs);
+    if !redirs.is_empty() {
+      self.tree[body].redirs = Some(self.tree.alloc_redirs(redirs));
+    }
+
+    let name = self.tree.alloc(name);
+    let ctx = self.tree.alloc(ctx);
+    let span = self.tree.alloc(span.unwrap_or_default());
 
     let node = node!(self, span, NdRule::FuncDef { name, body, ctx });
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
   pub(super) fn parse_subsh(&mut self) -> ShResult<Option<NodeId>> {
     if *self.next_tk_class() != TkRule::SubshStart {
@@ -84,8 +90,8 @@ impl ParseStream {
         break;
       }
       if let Some(node) = self.parse_conjunction()? {
-        extend_span!(span, self.tree[node].get_span());
-        extend_span!(body_span, self.tree[node].get_span());
+        extend_span!(span, self.tree.span_for(node));
+        extend_span!(body_span, self.tree.span_for(node));
         body.push(node);
       } else if *self.next_tk_class() != TkRule::SubshEnd {
         let next = self.peek_tk().cloned();
@@ -115,15 +121,21 @@ impl ParseStream {
       }
     }
 
-    let node = node!(self, body_span, NdRule::List { commands: body }, vec![]);
+    let body_span = self.tree.alloc(body_span.unwrap_or_default());
+    let body = self.tree.alloc_children(body);
 
-    let body = self.tree.insert_node(node);
+    let node = node!(self, body_span, NdRule::List { commands: body }, None);
+
+    let body = self.tree.alloc(node);
 
     self.parse_redir(&mut redirs, &mut span)?;
 
+    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+    let span = self.tree.alloc(span.unwrap_or_default());
+
     let node = node!(self, span, NdRule::Subshell { body }, redirs);
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
   pub(super) fn parse_brc_grp(&mut self, from_func_def: bool) -> ShResult<Option<NodeId>> {
     if *self.next_tk_class() != TkRule::BraceGrpStart {
@@ -146,8 +158,8 @@ impl ParseStream {
         break;
       }
       if let Some(node) = self.parse_conjunction()? {
-        extend_span!(span, self.tree[node].get_span());
-        extend_span!(body_span, self.tree[node].get_span());
+        extend_span!(span, self.tree.span_for(node));
+        extend_span!(body_span, self.tree.span_for(node));
         body.push(node);
       } else if *self.next_tk_class() != TkRule::BraceGrpEnd {
         let next = self.peek_tk().cloned();
@@ -173,16 +185,22 @@ impl ParseStream {
       }
     }
 
-    let node = node!(self, body_span, NdRule::List { commands: body }, vec![]);
-    let body = self.tree.insert_node(node);
+    let body_span = self.tree.alloc(body_span.unwrap_or_default());
+    let body = self.tree.alloc_children(body);
+
+    let node = node!(self, body_span, NdRule::List { commands: body }, None);
+    let body = self.tree.alloc(node);
 
     if !from_func_def {
       self.parse_redir(&mut redirs, &mut span)?;
     }
 
+    let span = self.tree.alloc(span.unwrap_or_default());
+    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+
     let node = node!(self, span, NdRule::BraceGrp { body }, redirs);
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
   #[expect(clippy::too_many_lines)]
   pub(super) fn parse_case(&mut self) -> ShResult<Option<NodeId>> {
@@ -288,7 +306,7 @@ impl ParseStream {
         let Some(conj) = self.parse_conjunction()? else {
           break;
         };
-        extend_span!(arm_span, self.tree[conj].get_span());
+        extend_span!(arm_span, self.tree.span_for(conj));
 
         let trailing_dbl_semi = self
           .tokens
@@ -302,6 +320,9 @@ impl ParseStream {
         }
       }
 
+      let arm_span = self.tree.alloc(arm_span.unwrap_or_default());
+      let arm_commands = self.tree.alloc_children(arm_commands);
+
       let arm_body = node!(
         self,
         arm_span,
@@ -310,10 +331,9 @@ impl ParseStream {
         }
       );
 
-      let case_node = CaseNode {
-        patterns,
-        body: self.tree.insert_node(arm_body),
-      };
+      let body = self.tree.alloc(arm_body);
+
+      let case_node = CaseNode { patterns, body };
       case_blocks.push(case_node);
 
       self.catch_separator(&mut span);
@@ -330,6 +350,11 @@ impl ParseStream {
       }
     }
 
+    let span = self.tree.alloc(span.unwrap_or_default());
+    let pattern = self.tree.alloc(pattern);
+    let case_blocks = self.tree.alloc_cases(case_blocks);
+    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+
     let node = node!(
       self,
       span,
@@ -340,7 +365,7 @@ impl ParseStream {
       redirs
     );
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
   pub(super) fn parse_time(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword(b"time") {
@@ -355,14 +380,17 @@ impl ParseStream {
       bail!(self, span, "Expected a command after 'time'");
     };
 
-    self.tree.walk_tree_mut(cmd, &mut Node::not_err);
+    self
+      .tree
+      .walk_tree_mut(cmd, &mut |id, tree| tree[id].not_err());
 
-    extend_span!(span, self.tree[cmd].get_span());
+    extend_span!(span, self.tree.span_for(cmd));
     self.catch_separator(&mut span);
 
+    let span = self.tree.alloc(span.unwrap_or_default());
     let node = node!(self, span, NdRule::Timed { cmd });
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
   pub(super) fn parse_func_keyword(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword(b"function") {
@@ -387,9 +415,13 @@ impl ParseStream {
       bail!(self, span, "Unexpected argument after arithmetic command");
     }
 
-    let node = node!(self, span, NdRule::Arithmetic { body: arith_tk }, redirs);
+    let span = self.tree.alloc(span.unwrap_or_default());
+    let body = self.tree.alloc(arith_tk);
+    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
-    Ok(Some(self.tree.insert_node(node)))
+    let node = node!(self, span, NdRule::Arithmetic { body }, redirs);
+
+    Ok(Some(self.tree.alloc(node)))
   }
   pub(super) fn parse_negate(&mut self) -> ShResult<Option<NodeId>> {
     if (!self.check_keyword(b"not") && !self.check_keyword(b"!")) || !self.next_tk_is_some() {
@@ -404,14 +436,17 @@ impl ParseStream {
     let Some(cmd) = self.parse_block(true)? else {
       bail!(self, span, "Expected a command after '{display}'");
     };
-    self.tree.walk_tree_mut(cmd, &mut Node::not_err); // disable set -e for negated commands
+    self
+      .tree
+      .walk_tree_mut(cmd, &mut |id, tree| tree[id].not_err()); // disable set -e for negated commands
 
-    extend_span!(span, self.tree[cmd].get_span());
+    extend_span!(span, self.tree.span_for(cmd));
     self.catch_separator(&mut span);
 
+    let span = self.tree.alloc(span.unwrap_or_default());
     let node = node!(self, span, NdRule::Negate { cmd });
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
   pub(super) fn parse_if(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword(b"if") {
@@ -430,8 +465,10 @@ impl ParseStream {
       let Some(cond) = self.parse_cmd_list()? else {
         bail!(self, span, "Expected a command after '{prefix_keywrd}'");
       };
-      extend_span!(span, self.tree[cond].get_span());
-      self.tree.walk_tree_mut(cond, &mut Node::not_err); // disable set -e for condition commands
+      extend_span!(span, self.tree.span_for(cond));
+      self
+        .tree
+        .walk_tree_mut(cond, &mut |id, tree| tree[id].not_err()); // disable set -e for condition commands
 
       if !self.check_keyword(b"then") {
         bail!(
@@ -446,7 +483,7 @@ impl ParseStream {
       let Some(body) = self.parse_cmd_list()? else {
         bail!(self, span, "Expected a command after 'then'");
       };
-      extend_span!(span, self.tree[body].get_span());
+      extend_span!(span, self.tree.span_for(body));
 
       let cond_node = CondNode { cond, body };
       cond_nodes.push(cond_node);
@@ -481,6 +518,10 @@ impl ParseStream {
 
     self.assert_separator(&mut span)?;
 
+    let span = self.tree.alloc(span.unwrap_or_default());
+    let cond_nodes = self.tree.alloc_conds(cond_nodes);
+    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+
     let node = node!(
       self,
       span,
@@ -491,7 +532,7 @@ impl ParseStream {
       redirs
     );
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
   pub(super) fn parse_for_arith(&mut self, span: &mut Option<Span>) -> ShResult<Option<NodeId>> {
     let mut redirs = vec![];
@@ -529,10 +570,12 @@ impl ParseStream {
     extend_span!(*span, self.next_tk().unwrap().span);
 
     self.parse_redir(&mut redirs, span)?;
+    let span = self.tree.alloc(span.clone().unwrap_or_default());
+    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
     let node = node!(
       self,
-      span.clone(),
+      span,
       NdRule::ForArith {
         init,
         cond,
@@ -542,7 +585,7 @@ impl ParseStream {
       redirs
     );
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
   pub(super) fn parse_for_arr(&mut self, span: &mut Option<Span>) -> ShResult<Option<NodeId>> {
     let mut vars: Vec<Tk> = vec![];
@@ -625,10 +668,14 @@ impl ParseStream {
     self.parse_redir(&mut redirs, span)?;
 
     self.assert_separator(span)?;
+    let span = self.tree.alloc(span.clone().unwrap_or_default());
+    let vars = self.tree.alloc_tokens(vars);
+    let arr = self.tree.alloc_tokens(arr);
+    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
     let node = node!(
       self,
-      span.clone(),
+      span,
       NdRule::ForNode {
         vars,
         arr,
@@ -638,7 +685,7 @@ impl ParseStream {
       redirs
     );
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
   pub(super) fn parse_for(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword(b"for") {
@@ -672,8 +719,10 @@ impl ParseStream {
     let Some(cond) = self.parse_cmd_list()? else {
       bail!(self, span, "Expected a command after '{loop_kind}'");
     };
-    extend_span!(span, self.tree[cond].get_span());
-    self.tree.walk_tree_mut(cond, &mut Node::not_err); // disable set -e for condition commands
+    extend_span!(span, self.tree.span_for(cond));
+    self
+      .tree
+      .walk_tree_mut(cond, &mut |id, tree| tree[id].not_err()); // disable set -e for condition commands
 
     if !self.check_keyword(b"do") {
       bail!(self, span, "Expected 'do' after '{loop_kind}' condition");
@@ -695,7 +744,9 @@ impl ParseStream {
 
     self.assert_separator(&mut span)?;
 
-    let cond_node = CondNode { cond, body };
+    let cond_node = self.tree.alloc(CondNode { cond, body });
+    let span = self.tree.alloc(span.unwrap_or_default());
+    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
     let node = node!(
       self,
@@ -707,7 +758,7 @@ impl ParseStream {
       redirs
     );
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
   #[expect(clippy::too_many_lines)]
   pub(super) fn parse_try(&mut self) -> ShResult<Option<NodeId>> {
@@ -742,8 +793,8 @@ impl ParseStream {
       }
 
       if let Some(node) = self.parse_conjunction()? {
-        extend_span!(span, self.tree[node].get_span());
-        extend_span!(body_span, self.tree[node].get_span());
+        extend_span!(span, self.tree.span_for(node));
+        extend_span!(body_span, self.tree.span_for(node));
         body.push(node);
       } else {
         bail!(
@@ -766,15 +817,16 @@ impl ParseStream {
       }
     }
 
-    let body = self.tree.insert_node(node!(
-      self,
-      body_span,
-      NdRule::List { commands: body },
-      vec![]
-    ));
-    self.tree.walk_tree_mut(body, &mut Node::is_err);
+    let body_span = self.tree.alloc(body_span.unwrap_or_default());
+    let body = self.tree.alloc_children(body);
+    let body_node = node!(self, body_span, NdRule::List { commands: body }, None);
 
-    let try_span = self.tree[body].get_span().merge_with(&try_tk_span).unwrap();
+    let body = self.tree.alloc(body_node);
+    self
+      .tree
+      .walk_tree_mut(body, &mut |id, tree| tree[id].is_err());
+
+    let try_span = self.tree.span_for(body).merge_with(&try_tk_span).unwrap();
     let try_span = if try_span.as_bytes().contains(&b'\n') {
       try_span
     } else {
@@ -806,6 +858,11 @@ impl ParseStream {
     if !self.check_keyword(b"do") {
       self.parse_redir(&mut redirs, &mut span)?;
 
+      let span = self.tree.alloc(span.unwrap_or_default());
+      let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+      let err = self.tree.alloc_tokens(err);
+      let ctx = self.tree.alloc(ctx);
+
       let node = node!(
         self,
         span,
@@ -818,7 +875,7 @@ impl ParseStream {
         redirs
       );
 
-      return Ok(Some(self.tree.insert_node(node)));
+      return Ok(Some(self.tree.alloc(node)));
     }
 
     extend_span!(span, self.next_tk().unwrap().span); // consume 'do'
@@ -834,9 +891,11 @@ impl ParseStream {
         "catch"
       );
     };
-    extend_span!(span, self.tree[catch_body].get_span());
+    extend_span!(span, self.tree.span_for(catch_body));
 
-    self.tree.walk_tree_mut(catch_body, &mut |n| n.not_err());
+    self
+      .tree
+      .walk_tree_mut(catch_body, &mut |id, tree| tree[id].not_err());
 
     if !self.check_keyword(b"done") {
       bail!(
@@ -851,7 +910,12 @@ impl ParseStream {
     extend_span!(span, self.next_tk().unwrap().span);
 
     self.parse_redir(&mut redirs, &mut span)?;
+
     let catch = Some(catch_body);
+    let span = self.tree.alloc(span.unwrap_or_default());
+    let err = self.tree.alloc_tokens(err);
+    let ctx = self.tree.alloc(ctx);
+    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
     let node = node!(
       self,
@@ -865,7 +929,7 @@ impl ParseStream {
       redirs
     );
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
   pub(super) fn parse_defer(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword(b"defer") {
@@ -884,14 +948,14 @@ impl ParseStream {
       bail!(self, span, "Expected a command after '{}' keyword", "defer");
     };
 
-    let body_span = self.tree[body].get_span();
+    let body_span = self.tree.span_for(body);
     let defer_span = if body_span.as_bytes().contains(&b'\n') {
       body_span.merge_with(&defer_tk_span).unwrap()
     } else {
       defer_tk_span
     };
 
-    extend_span!(span, self.tree[body].get_span());
+    extend_span!(span, self.tree.span_for(body));
 
     let ctx = get_context(
       VarStr::from(styled_format!("in '{}' block defined here", "defer")),
@@ -900,9 +964,12 @@ impl ParseStream {
 
     self.catch_separator(&mut span);
 
+    let span = self.tree.alloc(span.unwrap_or_default());
+    let ctx = self.tree.alloc(ctx);
+
     let node = node!(self, span, NdRule::DeferNode { body, ctx });
 
-    Ok(Some(self.tree.insert_node(node)))
+    Ok(Some(self.tree.alloc(node)))
   }
 }
 

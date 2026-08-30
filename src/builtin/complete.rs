@@ -6,7 +6,7 @@
 use itertools::{EitherOrBoth, Itertools};
 
 use crate::{
-  eval::parse::{Ast, node::NodeId},
+  eval::parse::ast::{Ast, NodeId},
   state::vars::{VarStr, VarStrSliceExt},
 };
 
@@ -127,7 +127,7 @@ impl super::Builtin for CompGen {
       unreachable!()
     };
 
-    let parsed = parse_opts(argv, &self.opts())?;
+    let parsed = parse_opts(&tree[*argv], &self.opts())?;
     // the whole expanded command line, for the spec's stored source
     let src = parsed.trace.join_with(" ");
 

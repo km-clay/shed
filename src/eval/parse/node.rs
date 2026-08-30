@@ -1,65 +1,39 @@
-use std::{
-  collections::VecDeque,
-  ops::{Index, IndexMut},
-  rc::Rc,
-};
+use std::{collections::VecDeque, rc::Rc};
 
 use crate::{
-  ShResult, Shed,
+  Shed,
   eval::{
     execute::{is_builtin, is_func_node},
-    parse::Ast,
+    parse::{
+      Ast,
+      ast::{
+        CaseNodeRange, ChildRange, CondNodeId, CondNodeRange, ConjunctRange, LabelId, LabelRange,
+        RedirRange, SpanId, TkId, TkRange,
+      },
+    },
   },
   expand::subshell,
   state::logic::{IsInternal, ShFunc},
   util::error::LabelBuilder,
 };
 
-use super::{
-  lex::{Span, Tk},
-  procio::RedirSpec,
-  two_way_display,
-};
-use ariadne::Span as AriadneSpan;
+use super::{ast::NodeId, lex::Tk, two_way_display};
 use bitflags::bitflags;
-use smallvec::SmallVec;
-
-pub(crate) trait NodeVecUtils<Node> {
-  fn get_span(&self, tree: &Ast) -> Option<Span>;
-}
-
-impl NodeVecUtils<Node> for Vec<NodeId> {
-  fn get_span(&self, tree: &Ast) -> Option<Span> {
-    if let Some(first_nd) = self.first()
-      && let Some(last_nd) = self.last()
-    {
-      let first_start = tree[*first_nd].get_span().range().start;
-      let last_end = tree[*last_nd].get_span().range().end;
-      if first_start <= last_end {
-        return Some(Span::new(
-          first_start..last_end,
-          tree[*first_nd].get_span().source().content(),
-        ));
-      }
-    }
-    None
-  }
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct LabelCtx(Rc<VecDeque<LabelBuilder>>);
 
 impl LabelCtx {
-  pub fn push_back(&mut self, label: LabelBuilder) {
-    Rc::make_mut(&mut self.0).push_back(label);
-  }
-
-  pub fn deep_clone(&self) -> VecDeque<LabelBuilder> {
-    self.0.iter().cloned().collect()
-  }
-
   pub fn iter(&self) -> impl Iterator<Item = &LabelBuilder> {
     self.0.iter()
+  }
+  pub fn is_empty(&self) -> bool {
+    self.0.is_empty()
+  }
+  pub fn into_iter(self) -> impl Iterator<Item = LabelBuilder> {
+    Rc::try_unwrap(self.0)
+      .unwrap_or_else(|rc| (*rc).clone())
+      .into_iter()
   }
 }
 
@@ -69,241 +43,28 @@ impl From<VecDeque<LabelBuilder>> for LabelCtx {
   }
 }
 
-/// An index into an instance of `Ast`.
-///
-/// Contains the actual id of the `Node` itself, and the id of the `Ast` that it refers to.
-/// Attempting to index any instance of `Ast` with a `NodeId` that does not match its own id will panic.
-///
-/// `NodeId` cannot be constructed outside of this module, and cannot be mutated once created. Because `Ast` is also immutable, this means that using a `NodeId` to index an `Ast` is guaranteed to be safe, as long as the `NodeId` was
-/// created by the same `Ast` instance.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct NodeId {
-  node_id: u32,
-  ast_id: u32,
-}
-
-impl NodeId {
-  pub(super) fn new(node_id: u32, ast_id: u32) -> Self {
-    NodeId { node_id, ast_id }
-  }
-}
-
-impl Index<NodeId> for super::Ast {
-  type Output = Node;
-  fn index(&self, index: NodeId) -> &Self::Output {
-    assert_eq!(index.ast_id, self.id, "NodeId does not match Ast");
-    &self.arena[index.node_id as usize]
-  }
-}
-
-impl IndexMut<NodeId> for super::Ast {
-  fn index_mut(&mut self, index: NodeId) -> &mut Self::Output {
-    assert_eq!(index.ast_id, self.id, "NodeId does not match Ast");
-    &mut self.arena[index.node_id as usize]
-  }
-}
-
-impl Ast {
-  pub fn walk_tree<F: FnMut(&Node)>(&self, id: NodeId, f: &mut F) {
-    f(&self[id]);
-    let children = self[id].child_ids();
-    for child in children {
-      self.walk_tree(child, f);
-    }
-  }
-  pub fn walk_tree_mut<F: FnMut(&mut Node)>(&mut self, id: NodeId, f: &mut F) {
-    f(&mut self[id]);
-    let children = self[id].child_ids();
-    for child in children {
-      self.walk_tree_mut(child, f);
-    }
-  }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Node {
   pub class: NdRule,
   pub flags: NdFlags,
-  pub redirs: Vec<RedirSpec>,
-  pub span: Span,
-  pub context: LabelCtx,
+  pub redirs: Option<RedirRange>,
+  pub span: SpanId,
+  pub context: Option<LabelRange>,
 }
 
 impl Node {
-  pub fn get_command(&self) -> Option<&Tk> {
-    if let NdRule::Command {
+  pub fn get_command(&self) -> Option<TkId> {
+    let NdRule::Command {
       assignments: _,
       argv,
     } = &self.class
-    {
-      argv.iter().next()
-    } else {
-      None
-    }
-  }
-  /// Collect this node's direct child ids into an owned buffer, so callers can
-  /// drop the borrow on the arena before recursing.
-  pub fn child_ids(&self) -> SmallVec<[NodeId; 4]> {
-    let mut ids: SmallVec<[NodeId; 4]> = SmallVec::new();
-    match &self.class {
-      NdRule::List { commands } => ids.extend_from_slice(commands),
-      NdRule::IfNode {
-        cond_nodes,
-        else_block,
-      } => {
-        for CondNode { cond, body } in cond_nodes {
-          ids.push(*cond);
-          ids.push(*body);
-        }
-        if let Some(block) = else_block {
-          ids.push(*block);
-        }
-      }
-      NdRule::LoopNode {
-        cond_node: CondNode { cond, body },
-        ..
-      } => {
-        ids.push(*cond);
-        ids.push(*body);
-      }
-      NdRule::ForNode { body, .. }
-      | NdRule::DeferNode { body, .. }
-      | NdRule::Subshell { body }
-      | NdRule::BraceGrp { body }
-      | NdRule::FuncDef { body, .. } => ids.push(*body),
-      NdRule::TryNode { body, catch, .. } => {
-        ids.push(*body);
-        if let Some(catch) = catch {
-          ids.push(*catch);
-        }
-      }
-      NdRule::ForArith {
-        init,
-        cond,
-        step,
-        body,
-      } => {
-        if let Some(init) = init {
-          ids.push(*init);
-        }
-        if let Some(cond) = cond {
-          ids.push(*cond);
-        }
-        if let Some(step) = step {
-          ids.push(*step);
-        }
-        ids.push(*body);
-      }
-      NdRule::CaseNode { case_blocks, .. } => {
-        for CaseNode { body, .. } in case_blocks {
-          ids.push(*body);
-        }
-      }
-      NdRule::Command { assignments, .. } => ids.extend_from_slice(assignments),
-      NdRule::Pipeline { cmds } => ids.extend_from_slice(cmds),
-      NdRule::Conjunction { elements } => {
-        for ConjunctNode { cmd, .. } in elements {
-          ids.push(*cmd);
-        }
-      }
-      NdRule::Timed { cmd } | NdRule::Negate { cmd } => ids.push(*cmd),
-      NdRule::Arithmetic { .. } | NdRule::Assignment { .. } => (),
-    }
-    ids
-  }
-  /// Like [`Node::child_ids`] but yields mutable references, so a caller holding
-  /// an owned clone of this node can remap its child ids in place (see
-  /// `Ast::extract_subtree`).
-  pub fn child_ids_mut(&mut self) -> SmallVec<[&mut NodeId; 4]> {
-    let mut ids: SmallVec<[&mut NodeId; 4]> = SmallVec::new();
-    match &mut self.class {
-      NdRule::List { commands } => ids.extend(commands.iter_mut()),
-      NdRule::IfNode {
-        cond_nodes,
-        else_block,
-      } => {
-        for CondNode { cond, body } in cond_nodes.iter_mut() {
-          ids.push(cond);
-          ids.push(body);
-        }
-        if let Some(block) = else_block {
-          ids.push(block);
-        }
-      }
-      NdRule::LoopNode {
-        cond_node: CondNode { cond, body },
-        ..
-      } => {
-        ids.push(cond);
-        ids.push(body);
-      }
-      NdRule::ForNode { body, .. }
-      | NdRule::DeferNode { body, .. }
-      | NdRule::Subshell { body }
-      | NdRule::BraceGrp { body }
-      | NdRule::FuncDef { body, .. } => ids.push(body),
-      NdRule::TryNode { body, catch, .. } => {
-        ids.push(body);
-        if let Some(catch) = catch {
-          ids.push(catch);
-        }
-      }
-      NdRule::ForArith {
-        init,
-        cond,
-        step,
-        body,
-      } => {
-        if let Some(init) = init {
-          ids.push(init);
-        }
-        if let Some(cond) = cond {
-          ids.push(cond);
-        }
-        if let Some(step) = step {
-          ids.push(step);
-        }
-        ids.push(body);
-      }
-      NdRule::CaseNode { case_blocks, .. } => {
-        for CaseNode { body, .. } in case_blocks.iter_mut() {
-          ids.push(body);
-        }
-      }
-      NdRule::Command { assignments, .. } => ids.extend(assignments.iter_mut()),
-      NdRule::Pipeline { cmds } => ids.extend(cmds.iter_mut()),
-      NdRule::Conjunction { elements } => {
-        for ConjunctNode { cmd, .. } in elements.iter_mut() {
-          ids.push(cmd);
-        }
-      }
-      NdRule::Timed { cmd } | NdRule::Negate { cmd } => ids.push(cmd),
-      NdRule::Arithmetic { .. } | NdRule::Assignment { .. } => (),
-    }
-    ids
-  }
-  pub fn eager_expand(&mut self) -> ShResult<()> {
-    let expand_tk = |tk: &mut Tk| -> ShResult<()> {
-      *tk = std::mem::take(tk).expand()?;
-      Ok(())
+    else {
+      return None;
     };
-
-    match &mut self.class {
-      NdRule::Command { argv: tks, .. } | NdRule::ForNode { arr: tks, .. } => {
-        for tk in tks {
-          expand_tk(tk)?;
-        }
-      }
-      NdRule::Assignment { val: tk, .. }
-      | NdRule::CaseNode { pattern: tk, .. }
-      | NdRule::Arithmetic { body: tk } => {
-        expand_tk(tk)?;
-      }
-
-      _ => {}
-    }
-
-    Ok(())
+    argv.first()
+  }
+  pub fn redirs_empty(&self) -> bool {
+    self.redirs.is_none_or(RedirRange::is_empty)
   }
   /// Mark this node as exempt from `set -e`
   ///
@@ -313,19 +74,13 @@ impl Node {
       self.flags.insert(NdFlags::NOT_ERR);
     }
   }
-  /// Mark this node as exempt from `set -e` exemptions.
-  ///
-  /// Unless it is already marked as `NOT_ERR`, in which case do nothing
-  ///
-  /// This is used for `try` blocks to force `set -e` to propagate their errors
-  /// even when `try` is used in a context that is exempt from them, like a `catch` block.
   pub fn is_err(&mut self) {
     if !self.flags.contains(NdFlags::NOT_ERR) {
       self.flags.insert(NdFlags::IS_ERR);
     }
   }
-  pub fn get_span(&self) -> Span {
-    self.span.clone()
+  pub fn get_span(&self) -> SpanId {
+    self.span
   }
 }
 
@@ -352,7 +107,7 @@ bitflags! {
 /// A conditional AST node
 ///
 /// Used in `while`/`until`/`if` conditions
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) struct CondNode {
   pub cond: NodeId,
   pub body: NodeId,
@@ -391,7 +146,7 @@ two_way_display!(LoopKind,
   Until <=> "until";
 );
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum AssignKind {
   Eq,
   PlusEq,
@@ -452,34 +207,34 @@ impl NdRule {
 ///
 /// A load-bearing component of `shed`'s execution logic.
 /// Each member contains all of the data required to execute the associated type of statement
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum NdRule {
   List {
-    commands: Vec<NodeId>,
+    commands: ChildRange,
   },
   IfNode {
-    cond_nodes: Vec<CondNode>,
+    cond_nodes: CondNodeRange,
     else_block: Option<NodeId>,
   },
   LoopNode {
     kind: LoopKind,
-    cond_node: CondNode,
+    cond_node: CondNodeId,
   },
   ForNode {
-    vars: Vec<Tk>,
-    arr: Vec<Tk>,
+    vars: TkRange,
+    arr: TkRange,
     body: NodeId,
     positional: bool, // true if no "in" keyword is passed to the for loop
   },
   TryNode {
     body: NodeId,
-    err: Vec<Tk>,
+    err: TkRange,
     catch: Option<NodeId>,
-    ctx: LabelBuilder,
+    ctx: LabelId,
   },
   DeferNode {
     body: NodeId,
-    ctx: LabelBuilder,
+    ctx: LabelId,
   },
   ForArith {
     init: Option<NodeId>,
@@ -488,7 +243,7 @@ pub(crate) enum NdRule {
     body: NodeId,
   },
   Arithmetic {
-    body: Tk,
+    body: TkId,
   },
   Negate {
     cmd: NodeId,
@@ -497,23 +252,23 @@ pub(crate) enum NdRule {
     cmd: NodeId,
   },
   CaseNode {
-    pattern: Tk,
-    case_blocks: Vec<CaseNode>,
+    pattern: TkId,
+    case_blocks: CaseNodeRange,
   },
   Command {
-    assignments: Vec<NodeId>,
-    argv: Vec<Tk>,
+    assignments: ChildRange,
+    argv: TkRange,
   },
   Pipeline {
-    cmds: Vec<NodeId>,
+    cmds: ChildRange,
   },
   Conjunction {
-    elements: Vec<ConjunctNode>,
+    elements: ConjunctRange,
   },
   Assignment {
     kind: AssignKind,
-    var: Tk,
-    val: Tk,
+    var: TkId,
+    val: TkId,
   },
   Subshell {
     body: NodeId,
@@ -522,20 +277,21 @@ pub(crate) enum NdRule {
     body: NodeId,
   },
   FuncDef {
-    name: Tk,
+    name: TkId,
     body: NodeId,
-    ctx: LabelBuilder,
+    ctx: LabelId,
   },
 }
 
-pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
+pub(crate) fn node_has_only_builtins(tree: &Ast, node_id: NodeId) -> bool {
   let mut res = None;
-  tree.walk_tree(node, &mut |node| {
+  tree.walk_tree(node_id, &mut |id, tree| {
+    let node = &tree[id];
     if let Some(false) = res {
       return;
     }
 
-    if !node.redirs.is_empty() {
+    if node.redirs.is_some_and(|r| !r.is_empty()) {
       res = Some(false);
       return;
     }
@@ -550,8 +306,8 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
 
     match &node.class {
       NdRule::Command { .. } => {
-        if !is_func_node(node) {
-          res = Some(is_builtin(node));
+        if !is_func_node(id, tree) {
+          res = Some(is_builtin(id, tree));
           return;
         }
         let name = node.get_command().unwrap();
@@ -559,8 +315,8 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
         // Caller is about to execute this anyway (cmd sub, pipeline, etc),
         // so source the autoload now while we have the chance.
         let autoload_src = Shed::logic_mut(|l| {
-          if let Some(ShFunc::Autoload(_)) = l.get_func_ref(&name.to_str_lossy()) {
-            let func = l.remove_func(&name.to_str_lossy())?;
+          if let Some(ShFunc::Autoload(_)) = l.get_func_ref(&tree[name].to_str_lossy()) {
+            let func = l.remove_func(&tree[name].to_str_lossy())?;
             if let ShFunc::Autoload(src) = func {
               return Some(src);
             }
@@ -576,7 +332,7 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
         }
 
         let short_circuit = Shed::logic(|l| {
-          let Some(func) = l.get_func_ref(&name.to_str_lossy()) else {
+          let Some(func) = l.get_func_ref(&tree[name].to_str_lossy()) else {
             return Some(false);
           };
 
@@ -597,7 +353,7 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
 
         // Cache miss: function exists, is Defined, is_internal is None.
         // Mark Checking and clone the body in a single borrow.
-        let Some(logic) = Shed::logic_mut(|l| match l.get_func_mut(&name.to_str_lossy()) {
+        let Some(logic) = Shed::logic_mut(|l| match l.get_func_mut(&tree[name].to_str_lossy()) {
           Some(ShFunc::Defined {
             logic, is_internal, ..
           }) => {
@@ -613,11 +369,11 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node: NodeId) -> bool {
           return;
         };
 
-        let body_src = logic[root].get_span();
+        let body_src = logic.span_for(root);
         let is = subshell::is_internal(&body_src.to_str_lossy());
         let verdict = if is { IsInternal::Yes } else { IsInternal::No };
         Shed::logic_mut(|l| {
-          if let Some(func) = l.get_func_mut(&name.to_str_lossy()) {
+          if let Some(func) = l.get_func_mut(&tree[name].to_str_lossy()) {
             func.set_is_internal(verdict).ok();
           }
         });

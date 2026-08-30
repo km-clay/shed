@@ -1430,10 +1430,14 @@ fn parse_not_matches_bang_structure() {
 
   let mut bang_kinds = vec![];
   let bang_root = bang_ast.get_root().unwrap();
-  bang_ast.walk_tree(bang_root, &mut |n| bang_kinds.push(n.class.as_nd_kind()));
+  bang_ast.walk_tree(bang_root, &mut |id, tree| {
+    bang_kinds.push(tree[id].class.as_nd_kind())
+  });
   let mut not_kinds = vec![];
   let not_root = not_ast.get_root().unwrap();
-  not_ast.walk_tree(not_root, &mut |n| not_kinds.push(n.class.as_nd_kind()));
+  not_ast.walk_tree(not_root, &mut |id, tree| {
+    not_kinds.push(tree[id].class.as_nd_kind())
+  });
 
   assert_eq!(bang_kinds, not_kinds);
 }
@@ -1667,10 +1671,14 @@ fn parse_defer_matches_time_structure() {
 
   let mut time_kinds = vec![];
   let time_root = time_ast.get_root().unwrap();
-  time_ast.walk_tree(time_root, &mut |n| time_kinds.push(n.class.as_nd_kind()));
+  time_ast.walk_tree(time_root, &mut |id, tree| {
+    time_kinds.push(tree[id].class.as_nd_kind())
+  });
   let mut defer_kinds = vec![];
   let defer_root = defer_ast.get_root().unwrap();
-  defer_ast.walk_tree(defer_root, &mut |n| defer_kinds.push(n.class.as_nd_kind()));
+  defer_ast.walk_tree(defer_root, &mut |id, tree| {
+    defer_kinds.push(tree[id].class.as_nd_kind())
+  });
 
   // Replace Timed with DeferNode for the comparison.
   let normalized: Vec<NdKind> = time_kinds

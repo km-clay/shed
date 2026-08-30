@@ -1,11 +1,11 @@
 use crate::{
-  eval::parse::node::{LabelCtx, NodeId},
+  eval::parse::{ast::NodeId, node::LabelCtx},
   util::{self, ByteCursor, SliceCursor, error::get_context},
 };
 
 use super::{
   NdFlags, NdRule, Node, ParseStream, ShResult, Span, Tk, TkFlags, TkRule,
-  node::{AssignKind, NodeVecUtils},
+  node::AssignKind,
   procio::{RedirBldr, RedirSpec, RedirTarget, RedirType},
   sherr,
 };
@@ -112,7 +112,7 @@ impl ParseStream {
       dangling_pipe = None;
       let is_punctuated = self.tree[cmd].flags.contains(NdFlags::PUNCTUATED);
 
-      extend_span!(span, self.tree[cmd].span);
+      extend_span!(span, self.tree.span_for(cmd));
       let next_class = self.next_tk_class().clone();
       if next_class == TkRule::ErrPipe {
         self.tree[cmd].flags |= NdFlags::PIPE_ERR;
@@ -120,8 +120,10 @@ impl ParseStream {
       if matches!(next_class, TkRule::Pipe | TkRule::ErrPipe) {
         self
           .tree
-          .walk_tree_mut(cmd, &mut |n| n.flags |= NdFlags::PIPE_CMD);
-        self.tree.walk_tree_mut(cmd, &mut Node::not_err);
+          .walk_tree_mut(cmd, &mut |id, tree| tree[id].flags |= NdFlags::PIPE_CMD);
+        self
+          .tree
+          .walk_tree_mut(cmd, &mut |id, tree| tree[id].not_err());
       }
 
       cmds.push(cmd);
@@ -150,23 +152,18 @@ impl ParseStream {
     if cmds.is_empty() {
       Ok(None)
     } else {
-      let node = node!(
-        self,
-        span,
-        NdRule::Pipeline { cmds },
-        vec![/*redirs*/],
-        flags
-      );
-      Ok(Some(self.tree.insert_node(node)))
+      let span = self.tree.alloc(span.unwrap_or_default());
+      let cmds = self.tree.alloc_children(cmds);
+      let node = node!(self, span, NdRule::Pipeline { cmds }, None, flags);
+      Ok(Some(self.tree.alloc(node)))
     }
   }
-  #[expect(clippy::while_let_loop, clippy::too_many_lines)]
+  #[expect(clippy::too_many_lines)]
   pub(super) fn parse_cmd(&mut self) -> ShResult<Option<NodeId>> {
     let mut span: Option<Span> = None;
+    let next_tk = |this: &mut Self, off: usize| this.tokens.get(this.cursor + off).cloned();
 
     let result = 'out: {
-      let tk_slice = self.tokens();
-      let mut tk_iter = tk_slice.iter().peekable();
       let mut tk_counter = 0;
       let mut redirs = vec![];
       let mut argv = vec![];
@@ -174,7 +171,7 @@ impl ParseStream {
       let mut assignments = vec![];
 
       loop {
-        let Some(prefix_tk) = tk_iter.next() else {
+        let Some(prefix_tk) = next_tk(self, tk_counter) else {
           break;
         };
         let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
@@ -187,7 +184,7 @@ impl ParseStream {
           argv.push(prefix_tk.clone());
           break;
         } else if is_assignment {
-          let Some(assign) = self.parse_assignment(prefix_tk) else {
+          let Some(assign) = self.parse_assignment(&prefix_tk) else {
             // it's marked as an assignment, but it doesn't parse.
             // just treat it as the command word
             extend_span!(span, prefix_tk.span);
@@ -205,9 +202,9 @@ impl ParseStream {
           tk_counter += 1;
           let ctx = self.context.clone();
           if let Err(e) = Self::push_redir(
-            prefix_tk,
+            &prefix_tk,
             || {
-              let tk = tk_iter.next().cloned();
+              let tk = next_tk(self, tk_counter);
               if tk.is_some() {
                 tk_counter += 1;
               }
@@ -243,30 +240,36 @@ impl ParseStream {
         // we still need to execute this, so emit an empty command node.
         self.commit(tk_counter);
 
-        // replace the Nodes with NodeId by inserting them into our arena
-        let assignments = assignments
-          .into_iter()
-          .map(|a| self.tree.insert_node(a))
-          .collect::<Vec<_>>();
+        let had_assignments = !assignments.is_empty();
 
-        let assignments_span = assignments.get_span(&self.tree);
+        let node_range = self.tree.alloc_nodes(assignments);
+        let assignments = self.tree.alloc_children(node_range.ids());
+
+        let span = self.tree.alloc(span.unwrap_or_default());
+        let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+        let argv = self.tree.alloc_tokens(argv);
         let mut nd = node!(
           self,
-          span.clone(),
+          span,
           NdRule::Command { assignments, argv },
           redirs,
           flags
         );
-        if let Some(assignments_span) = assignments_span {
-          nd.context.push_back(get_context(
-            "in variable assignment defined here",
-            &assignments_span,
-          ));
+        if had_assignments {
+          let assignments_span = self.tree.span_for_range(node_range);
+          let label = get_context("in variable assignment defined here", &assignments_span);
+          let mut labels: Vec<_> = nd
+            .context
+            .map(|r| self.tree[r].to_vec())
+            .unwrap_or_default();
+          labels.push(label);
+          nd.context = Some(self.tree.alloc_labels(labels));
         }
-        return Ok(Some(self.tree.insert_node(nd)));
+
+        return Ok(Some(self.tree.alloc(nd)));
       }
       loop {
-        let Some(tk) = tk_iter.next() else {
+        let Some(tk) = next_tk(self, tk_counter) else {
           break;
         };
         match tk.class {
@@ -303,9 +306,9 @@ impl ParseStream {
             tk_counter += 1;
             let ctx = self.context.clone();
             if let Err(e) = Self::push_redir(
-              tk,
+              &tk,
               || {
-                let tk = tk_iter.next().cloned();
+                let tk = next_tk(self, tk_counter);
                 if tk.is_some() {
                   tk_counter += 1;
                 }
@@ -335,11 +338,12 @@ impl ParseStream {
       }
       self.commit(tk_counter);
 
-      // replace the Nodes with NodeId by inserting them into our arena
-      let assignments = assignments
-        .into_iter()
-        .map(|a| self.tree.insert_node(a))
-        .collect::<Vec<_>>();
+      // arena allocation
+      let node_range = self.tree.alloc_nodes(assignments);
+      let assignments = self.tree.alloc_children(node_range.ids());
+      let span = self.tree.alloc(span.unwrap_or_default());
+      let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+      let argv = self.tree.alloc_tokens(argv);
 
       let node = node!(
         self,
@@ -349,7 +353,7 @@ impl ParseStream {
         flags
       );
 
-      return Ok(Some(self.tree.insert_node(node)));
+      return Ok(Some(self.tree.alloc(node)));
     };
 
     match result {
@@ -360,7 +364,7 @@ impl ParseStream {
       }
     }
   }
-  fn parse_assignment(&self, token: &Tk) -> Option<Node> {
+  fn parse_assignment(&mut self, token: &Tk) -> Option<Node> {
     let base = token.span.range().start;
     let mut cur = SliceCursor::new(token.span.as_bytes());
     let mut var_name = util::scratch_buf();
@@ -452,15 +456,19 @@ impl ParseStream {
       NdFlags::empty()
     };
 
+    let span = self.tree.alloc(token.span.clone());
+    let var = self.tree.alloc(var);
+    let val = self.tree.alloc(val);
+
     Some(node!(
       self,
-      Some(token.span.clone()),
+      span,
       NdRule::Assignment {
         kind: assign_kind,
         var,
         val
       },
-      vec![/*redirs*/],
+      None,
       flags
     ))
   }

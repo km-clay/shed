@@ -18,7 +18,9 @@ use nix::{
 };
 
 use crate::{
-  HashMap, signal,
+  HashMap,
+  eval::parse::ast::Ast,
+  signal,
   state::{scopes::ScopeStack, util},
 };
 
@@ -412,7 +414,7 @@ impl Drop for TestGuard {
   }
 }
 
-pub(crate) fn get_ast(input: &str) -> ShResult<crate::eval::parse::Ast> {
+pub(crate) fn get_ast(input: &str) -> ShResult<Ast> {
   let input = expand_aliases(input);
 
   let mut parser = ParsedSrc::new(input.into())
@@ -426,7 +428,7 @@ pub(crate) fn get_ast(input: &str) -> ShResult<crate::eval::parse::Ast> {
   Ok(parser.into_ast())
 }
 
-impl crate::eval::parse::Ast {
+impl Ast {
   pub fn assert_structure(
     &self,
     expected: &mut impl Iterator<Item = NdKind>,
@@ -437,20 +439,20 @@ impl crate::eval::parse::Ast {
     let mut after = vec![];
     let mut offender = None;
 
-    self.walk_tree(root, &mut |s| {
+    self.walk_tree(root, &mut |id, tree| {
       let expected_rule = expected.next();
-      full_structure.push(s.class.as_nd_kind());
+      full_structure.push(tree[id].class.as_nd_kind());
 
       if offender.is_none()
         && expected_rule
           .as_ref()
-          .is_none_or(|e| *e != s.class.as_nd_kind())
+          .is_none_or(|e| *e != tree[id].class.as_nd_kind())
       {
-        offender = Some((s.class.as_nd_kind(), expected_rule));
+        offender = Some((tree[id].class.as_nd_kind(), expected_rule));
       } else if offender.is_none() {
-        before.push(s.class.as_nd_kind());
+        before.push(tree[id].class.as_nd_kind());
       } else {
-        after.push(s.class.as_nd_kind());
+        after.push(tree[id].class.as_nd_kind());
       }
     });
 

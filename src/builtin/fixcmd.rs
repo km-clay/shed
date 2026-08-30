@@ -4,7 +4,7 @@ use bstr::ByteSlice;
 use tempfile::NamedTempFile;
 
 use crate::{
-  eval::parse::{Ast, node::NodeId},
+  eval::parse::ast::{Ast, NodeId},
   state::vars::VarStr,
   varstr,
 };
@@ -162,7 +162,7 @@ impl super::Builtin for FixCmd {
   }
   fn run_builtin(&self, tree: &Ast, node_id: NodeId, _dispatcher: &mut Dispatcher) -> ShResult<()> {
     let node = &tree[node_id];
-    let span = node.get_span();
+    let span = tree[node.get_span()].clone();
     let NdRule::Command {
       assignments: _,
       argv,
@@ -171,7 +171,7 @@ impl super::Builtin for FixCmd {
       unreachable!()
     };
 
-    let (_argv, opts) = parse_fc_args(argv).promote_err(span.clone())?;
+    let (_argv, opts) = parse_fc_args(&tree[*argv]).promote_err(span.clone())?;
 
     let conn = state::util::get_db_conn()
       .ok_or_else(|| sherr!(InternalErr, "database not available"))

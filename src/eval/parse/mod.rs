@@ -2,13 +2,13 @@ use bitflags::bitflags;
 use std::{
   collections::VecDeque,
   fmt::{self, Debug},
-  sync::atomic::{AtomicU32, Ordering},
 };
 
 pub(crate) mod node;
 pub(crate) use node::{
   AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node,
 };
+pub(crate) mod ast;
 
 #[cfg(test)]
 pub(crate) use node::NdKind;
@@ -23,7 +23,10 @@ mod util;
 pub mod tests;
 
 use crate::{
-  eval::parse::node::{LabelCtx, NodeId},
+  eval::parse::{
+    ast::{Ast, NodeId},
+    node::LabelCtx,
+  },
   match_loop,
   state::vars::VarStr,
 };
@@ -33,12 +36,6 @@ use super::{
   procio, sherr, two_way_display,
   util::{self as crate_util, ShErr, ShResult},
 };
-
-/// Used to identify instances of `Ast`.
-///
-/// `Ast` is indexed by `NodeId`, which also carries this identifier.
-/// `Ast` being indexed by a mismatched `NodeId` is a panic.
-static AST_GENERATION: AtomicU32 = AtomicU32::new(0);
 
 /// The parsed AST along with the source input it parsed
 ///
@@ -133,66 +130,6 @@ impl ParsedSrc {
   }
 }
 
-/// Abstract Syntax Tree
-///
-/// The internal representation of a `shed` script. Contains a flat list (arena) of AST nodes to execute.
-/// `Ast` can only be indexed by [`NodeId`]. [`NodeId`] is passed out on creation of a [`Node`], and is the
-/// only way to reach a [`Node`] that is inside the arena. ///
-///
-/// [`NodeId`]'s are stored inside the nodes themselves, meaning you have to traverse the tree in order to reach them.
-/// The only nodes that are reachable without doing this are the "root" nodes, which are the top level nodes of the AST.
-/// The ids for these nodes are stored explicitly in the `roots` field, which can be accessed using [`Ast::roots()`]
-///
-/// ## Panics
-/// Attempting to use a [`NodeId`] that comes from a different
-/// `Ast` will cause a panic, similar to how indexing a `Vec` with an out-of-bounds index will panic.
-
-#[derive(Clone, Debug)]
-pub(crate) struct Ast {
-  arena: Vec<Node>,
-  roots: Vec<NodeId>,
-  id: u32,
-}
-
-impl Ast {
-  pub fn new() -> Self {
-    Self {
-      arena: vec![],
-      roots: vec![],
-      id: AST_GENERATION.fetch_add(1, Ordering::SeqCst),
-    }
-  }
-  pub fn insert_node(&mut self, node: Node) -> NodeId {
-    let id = NodeId::new(self.arena.len() as u32, self.id);
-    self.arena.push(node);
-    id
-  }
-  pub fn mark_root(&mut self, id: NodeId) {
-    if !self.roots.contains(&id) {
-      self.roots.push(id);
-    }
-  }
-  pub fn roots(&self) -> &[NodeId] {
-    &self.roots
-  }
-  pub fn get_root(&self) -> Option<NodeId> {
-    self.roots.first().copied()
-  }
-  pub fn break_off(&self, id: NodeId) -> Self {
-    let mut new = Self::new();
-    let root = self.copy_into(id, &mut new);
-    new.mark_root(root);
-    new
-  }
-  fn copy_into(&self, id: NodeId, dst: &mut Self) -> NodeId {
-    let mut node = self[id].clone();
-    for child in node.child_ids_mut() {
-      *child = self.copy_into(*child, dst);
-    }
-    dst.insert_node(node)
-  }
-}
-
 bitflags! {
   #[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Hash,PartialOrd,Ord)]
   pub(crate) struct ParseFlags: u32 {
@@ -240,13 +177,15 @@ impl ParseStream {
     let mut commands = vec![];
     let mut span: Option<Span> = None;
     while let Some(cmd) = self.parse_conjunction()? {
-      extend_span!(span, self.tree[cmd].get_span());
+      extend_span!(span, self.tree.span_for(cmd));
       commands.push(cmd);
     }
 
     let node = (!commands.is_empty()).then(|| {
+      let commands = self.tree.alloc_children(commands);
+      let span = self.tree.alloc(span.unwrap_or_default());
       let node = node!(self, span, NdRule::List { commands });
-      self.tree.insert_node(node)
+      self.tree.alloc(node)
     });
 
     Ok(node)
@@ -258,7 +197,7 @@ impl ParseStream {
     let mut dangling_op: Option<Span> = None;
     while let Some(block) = self.parse_block(true)? {
       dangling_op = None;
-      extend_span!(span, self.tree[block].get_span());
+      extend_span!(span, self.tree.span_for(block));
       self.catch_separator(&mut span);
 
       let conjunct_op = match self.next_tk_class() {
@@ -278,7 +217,9 @@ impl ParseStream {
       }
 
       if conjunct_op != ConjunctOp::Null {
-        self.tree.walk_tree_mut(block, &mut Node::not_err);
+        self
+          .tree
+          .walk_tree_mut(block, &mut |id, tree| tree[id].not_err());
       }
 
       let conjunction = ConjunctNode {
@@ -312,8 +253,10 @@ impl ParseStream {
     if elements.is_empty() {
       Ok(None)
     } else {
+      let elements = self.tree.alloc_conjuncts(elements);
+      let span = self.tree.alloc(span.unwrap_or_default());
       let node = node!(self, span, NdRule::Conjunction { elements });
-      Ok(Some(self.tree.insert_node(node)))
+      Ok(Some(self.tree.alloc(node)))
     }
   }
   /// This tries to match on different stuff that can appear in a command

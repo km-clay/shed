@@ -1,6 +1,4 @@
-use std::collections::VecDeque;
-
-use crate::eval::parse::{Ast, node::NodeId};
+use crate::eval::parse::ast::{Ast, NodeId};
 
 use super::{
   LabelCtx, NdFlags, NdRule, Node, ParseStream, ShErr, ShResult, Span, Tk, TkFlags, TkRule,
@@ -131,47 +129,46 @@ pub(super) fn split_for_arith_tk(
   let Some(init_tk) = tks.next() else {
     return Err(sherr!(ParseErr @ span, "Missing init statement"));
   };
+  let span = tree.alloc(init_tk.span.clone());
+  let init_tk = tree.alloc(init_tk);
   let init = Node {
-    class: NdRule::Arithmetic {
-      body: init_tk.clone(),
-    },
+    class: NdRule::Arithmetic { body: init_tk },
     flags: NdFlags::empty(),
-    redirs: vec![],
-    span: init_tk.span,
-    context: VecDeque::default().into(),
+    redirs: None,
+    span,
+    context: None,
   };
 
   let Some(cond_tk) = tks.next() else {
-    return Err(sherr!(ParseErr @ span, "Missing condition statement"));
+    return Err(sherr!(ParseErr @ tree[span].clone(), "Missing condition statement"));
   };
+
+  let cond_tk_span = tree.alloc(cond_tk.span.clone());
+  let cond_tk = tree.alloc(cond_tk);
   let cond = Node {
-    class: NdRule::Arithmetic {
-      body: cond_tk.clone(),
-    },
+    class: NdRule::Arithmetic { body: cond_tk },
     flags: NdFlags::empty(),
-    redirs: vec![],
-    span: cond_tk.span,
-    context: VecDeque::default().into(),
+    redirs: None,
+    span: cond_tk_span,
+    context: None,
   };
 
   let Some(step_tk) = tks.next() else {
-    return Err(sherr!(ParseErr @ span, "Missing step statement"));
-  };
-  let step = Node {
-    class: NdRule::Arithmetic {
-      body: step_tk.clone(),
-    },
-    flags: NdFlags::empty(),
-    redirs: vec![],
-    span: step_tk.span,
-    context: VecDeque::default().into(),
+    return Err(sherr!(ParseErr @ tree[span].clone(), "Missing step statement"));
   };
 
-  let nodes = (
-    tree.insert_node(init),
-    tree.insert_node(cond),
-    tree.insert_node(step),
-  );
+  let step_tk_span = tree.alloc(step_tk.span.clone());
+  let step_tk = tree.alloc(step_tk);
+
+  let step = Node {
+    class: NdRule::Arithmetic { body: step_tk },
+    flags: NdFlags::empty(),
+    redirs: None,
+    span: step_tk_span,
+    context: None,
+  };
+
+  let nodes = (tree.alloc(init), tree.alloc(cond), tree.alloc(step));
 
   Ok(Some(nodes))
 }
