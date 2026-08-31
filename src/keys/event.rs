@@ -9,7 +9,6 @@ use crate::{util, varstr};
 pub(crate) struct KeyEvent(pub KeyCode, pub ModKeys);
 
 impl KeyEvent {
-  #[expect(clippy::too_many_lines)]
   pub(crate) fn as_vim_seq(&self) -> VarStr {
     let mut seq = util::scratch_buf();
     let KeyEvent(event, mods) = self;

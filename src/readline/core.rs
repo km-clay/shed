@@ -223,7 +223,6 @@ impl EditorCore {
     Ok(())
   }
 
-  #[expect(clippy::too_many_lines)]
   pub(crate) fn exec_mode_transition(
     &mut self,
     mut cmd: EditCmd,

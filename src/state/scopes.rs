@@ -336,7 +336,6 @@ impl ScopeStack {
     self.index_var_sliced(var_name, idx, None, None)
   }
 
-  #[expect(clippy::too_many_lines)]
   pub(crate) fn index_var_sliced(
     &self,
     var_name: &str,

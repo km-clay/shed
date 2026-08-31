@@ -1556,7 +1556,6 @@ impl ByteCursor for LexStream {
 // The lexer essentially acts as a streaming cursor over the original input.
 impl Iterator for LexStream {
   type Item = ShResult<Tk>;
-  #[expect(clippy::too_many_lines)]
   fn next(&mut self) -> Option<Self::Item> {
     assert!(self.cursor <= self.source.len());
     // We are at the end of the input

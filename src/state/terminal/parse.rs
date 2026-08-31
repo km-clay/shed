@@ -367,7 +367,6 @@ impl vte::Perform for EventParser {
     self.push(event);
   }
 
-  #[expect(clippy::too_many_lines)]
   fn csi_dispatch(
     &mut self,
     params: &vte::Params,

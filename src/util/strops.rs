@@ -328,7 +328,6 @@ fn scan_delims<C: ByteCursor>(opener: u8, c: &mut C, mut depth: usize) -> bool {
   depth == 0
 }
 
-#[expect(clippy::too_many_lines)]
 pub(crate) fn format_time(dur: std::time::Duration) -> String {
   const ETERNITY: u128 = f32::INFINITY as u128;
   let mut micros = dur.as_micros();

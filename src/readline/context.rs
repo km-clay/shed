@@ -679,7 +679,6 @@ impl CtxTk {
     }
   }
 
-  #[expect(clippy::too_many_lines)]
   /// Create a `CtxTk` from a Tk
   ///
   /// returns a Vec<CtxTk> because this is used to recursively classify child tokens as well
@@ -1057,7 +1056,6 @@ fn parse_op_body(
   arg_end
 }
 
-#[expect(clippy::too_many_arguments)] // teehee
 fn get_subtoken(
   chars: &mut Peekable<CharIndices>,
   span: &Span,
@@ -1081,7 +1079,6 @@ fn get_subtoken(
   }
 }
 
-#[expect(clippy::too_many_lines)]
 fn scan_subspans(
   chars: &mut Peekable<CharIndices>,
   span: &Span,

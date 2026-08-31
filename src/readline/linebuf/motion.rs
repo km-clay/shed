@@ -186,7 +186,6 @@ impl super::LineBuf {
   pub(super) fn eval_motion_with_hint(&mut self, cmd: &EditCmd) -> ShResult<Option<MotionKind>> {
     self.eval_motion_inner(cmd, true)
   }
-  #[expect(clippy::too_many_lines)]
   fn eval_motion_inner(&mut self, cmd: &EditCmd, check_hint: bool) -> ShResult<Option<MotionKind>> {
     let EditCmd { verb, motion, .. } = cmd;
     let Some(Cmd(count, motion)) = motion.as_ref() else {
@@ -1004,7 +1003,6 @@ impl super::LineBuf {
       | TextObj::Angle(bound) => self.text_obj_delim(obj, bound),
     }
   }
-  #[expect(clippy::too_many_lines)]
   pub(super) fn text_obj_word(
     &mut self,
     from: Pos,

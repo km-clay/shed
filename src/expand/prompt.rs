@@ -38,7 +38,6 @@ pub(crate) enum PromptTk {
   JobCount,
 }
 
-#[expect(clippy::too_many_lines)]
 fn tokenize_prompt(raw: &[u8]) -> Vec<PromptTk> {
   let mut cur = SliceCursor::new(raw);
   let mut tk_text = util::scratch_buf();

@@ -506,7 +506,6 @@ fn read_var_as_i64(name: &str) -> ShResult<i64> {
 }
 
 impl ArithTk {
-  #[expect(clippy::too_many_lines)]
   pub(crate) fn tokenize(raw: &[u8]) -> ShResult<Vec<Self>> {
     let mut tokens = Vec::new();
     let mut cur = SliceCursor::new(raw);
@@ -954,7 +953,6 @@ impl ArithTk {
     Ok(())
   }
 
-  #[expect(clippy::too_many_lines)]
   fn to_rpn(tokens: Vec<ArithTk>) -> ShResult<Vec<ArithTk>> {
     let mut output: Vec<ArithTk> = Vec::new();
     let mut ops: Vec<ArithTk> = Vec::new();
@@ -1115,7 +1113,6 @@ impl ArithTk {
     Ok(output)
   }
 
-  #[expect(clippy::too_many_lines)]
   pub(crate) fn eval_rpn(tokens: &[ArithTk]) -> ShResult<i64> {
     let mut stack: Vec<StackVal> = Vec::new();
 

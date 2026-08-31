@@ -202,7 +202,6 @@ impl ParseStream {
 
     Ok(Some(self.tree.alloc(node)))
   }
-  #[expect(clippy::too_many_lines)]
   pub(super) fn parse_case(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword(b"case") {
       return Ok(None);
@@ -760,7 +759,6 @@ impl ParseStream {
 
     Ok(Some(self.tree.alloc(node)))
   }
-  #[expect(clippy::too_many_lines)]
   pub(super) fn parse_try(&mut self) -> ShResult<Option<NodeId>> {
     if !self.check_keyword(b"try") {
       return Ok(None);

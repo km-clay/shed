@@ -1598,7 +1598,6 @@ impl Dispatcher {
       Ok(())
     }
   }
-  #[expect(clippy::too_many_lines)]
   pub(crate) fn exec_cmd(&mut self, tree: &Ast, cmd_id: NodeId) -> ShResult<()> {
     let cmd = &tree[cmd_id];
     let context = &cmd.context;
@@ -1885,7 +1884,6 @@ impl Dispatcher {
   pub(crate) fn take_timer(&mut self) -> Option<CmdTimer> {
     self.timer_stack.last_mut().and_then(Option::take)
   }
-  #[expect(clippy::too_many_lines)]
   pub(crate) fn set_assignments(
     tree: &Ast,
     assigns: &[NodeId],

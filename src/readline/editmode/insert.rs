@@ -62,7 +62,6 @@ impl ViInsert {
 }
 
 impl EditMode for ViInsert {
-  #[expect(clippy::too_many_lines)]
   fn handle_key(&mut self, key: E) -> Option<EditCmd> {
     if let Some(mut normal) = self.normal.take() {
       if matches!(key, key!(Esc)) {

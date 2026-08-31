@@ -289,7 +289,6 @@ pub(crate) enum LoopAction {
 }
 
 /// Run a single iteration of the main interactive loop.
-#[expect(clippy::too_many_lines)]
 fn shed_loop_iter(
   readline: &mut ShedLine,
   poll_fds: &mut SmallVec<[PollFd<'static>; 2]>,

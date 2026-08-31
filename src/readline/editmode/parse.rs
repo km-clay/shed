@@ -167,7 +167,6 @@ impl ViParser {
       None => Self::common_verb(chars, count),
     }
   }
-  #[expect(clippy::too_many_lines)]
   fn common_motion(
     chars: &mut Peekable<Chars<'_>>,
     verb: Option<&Cmd<Verb>>,
@@ -368,7 +367,6 @@ impl ViParser {
     };
     C::partial(motion!(count, Motion::TextObj(obj)))
   }
-  #[expect(clippy::too_many_lines)]
   fn common_verb(chars: &mut Peekable<Chars<'_>>, count: usize) -> CallbackResult<Cmd<Verb>> {
     use CallbackResult as C;
     let Some(ch) = chars.next() else {

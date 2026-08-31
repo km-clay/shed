@@ -76,7 +76,6 @@ impl ViVisual {
   fn parser() -> ViParser {
     ViParser::new(None, Some(Self::parse_verb), Self::validate_combination)
   }
-  #[expect(clippy::too_many_lines)]
   pub(crate) fn parse_verb(
     chars: &mut Peekable<Chars<'_>>,
     count: usize,
@@ -281,7 +280,6 @@ impl Default for ViVisual {
 }
 
 impl EditMode for ViVisual {
-  #[expect(clippy::too_many_lines)]
   fn handle_key(&mut self, key: E) -> Option<EditCmd> {
     let mut cmd: Option<EditCmd> = match key {
       E(K::Char(ch), M::NONE) => {

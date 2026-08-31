@@ -81,7 +81,6 @@ impl Default for ViNormal {
 }
 
 impl EditMode for ViNormal {
-  #[expect(clippy::too_many_lines)]
   fn handle_key(&mut self, key: E) -> Option<EditCmd> {
     let mut cmd: Option<EditCmd> = match key {
       key!('V') => Some(EditCmd {

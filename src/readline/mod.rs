@@ -1845,7 +1845,6 @@ impl ShedLine {
     self.needs_redraw
   }
 
-  #[expect(clippy::too_many_lines)]
   pub(crate) fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
     let _sync = SyncOutputGuard::begin();
     if self.statline.is_some() && !shopt!(statline.enable) {

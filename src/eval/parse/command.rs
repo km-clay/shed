@@ -161,7 +161,6 @@ impl ParseStream {
       Ok(Some(self.tree.alloc(node)))
     }
   }
-  #[expect(clippy::too_many_lines)]
   pub(super) fn parse_cmd(&mut self) -> ShResult<Option<NodeId>> {
     let mut span: Option<Span> = None;
     let next_tk = |this: &mut Self, off: usize| this.tokens.get(this.cursor + off).cloned();

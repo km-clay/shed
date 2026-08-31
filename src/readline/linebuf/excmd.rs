@@ -251,7 +251,6 @@ impl super::LineBuf {
 
     Ok(())
   }
-  #[expect(clippy::too_many_lines)]
   fn ex_stash(&mut self, args: &StashArgs) -> ShResult<()> {
     let Ok(stash) = Stash::new() else {
       status_msg!("Failed to access stash - database unreachable");

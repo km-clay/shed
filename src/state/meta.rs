@@ -214,7 +214,6 @@ impl CmdTimer {
     Ok(Self::format_ms(total_ms))
   }
 
-  #[expect(clippy::too_many_lines)]
   pub(crate) fn format_report(&self, fmt_str: &str) -> ShResult<String> {
     if self.still_running() {
       return Err(sherr!(
