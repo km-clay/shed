@@ -1,3 +1,5 @@
+//! Posix extensions
+
 use nix::errno::Errno;
 use nix::unistd::execve;
 use std::convert::Infallible;

@@ -375,7 +375,7 @@ fn eval_leaf(leaf: &[(VarStr, Span)], extended: bool) -> ShResult<bool> {
 pub(super) struct Test;
 impl super::Builtin for Test {
   /// Custom override so we can pair the opener (`[`/`[[`/`test`) against its
-  /// required closer (`]`/`]]`/none) while argv[0] is still present, then
+  /// required closer (`]`/`]]`/none) while `argv[0]` is still present, then
   /// hand the operands-only argv to `execute`.
   fn get_argv_and_opts(
     &self,

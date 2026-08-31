@@ -1,3 +1,7 @@
+//! Terminal styling and measurement
+//!
+//! color/decoration parsing, ANSI rendering, box-drawing glyphs, and display-width ([`calc_str_width`] / [`truncate_visual`]).
+
 use std::fmt::Write;
 use std::sync::OnceLock;
 use unicode_segmentation::UnicodeSegmentation;

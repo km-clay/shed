@@ -1,3 +1,7 @@
+//! Macros used in the parsing process
+//!
+//! These macros are used to cut down on boilerplate code and make the parsing functions more readable.
+
 /// Try to match a specific parsing rule
 ///
 /// # Notes

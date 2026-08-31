@@ -1,3 +1,8 @@
+//! The [`KeyEvent`] struct and related types
+//!
+//! [`KeyEvent`] is the main representation of a key event in the editor. It consists of a [`KeyCode`] and a set of modifier
+//! keys ([`ModKeys`]). This module also provides methods for converting [`KeyEvent`]s to and from vim-style key sequences.
+
 use std::sync::Arc;
 
 use crate::state::vars::VarStr;

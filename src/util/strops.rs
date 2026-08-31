@@ -1,3 +1,7 @@
+//! Shell-aware byte-string utilities
+//!
+//! escape/quote-aware splitting and delimiter scanning, byte cursors, and size/time/mode parsing and formatting.
+
 use std::{collections::VecDeque, fmt::Display};
 
 use bstr::ByteSlice;

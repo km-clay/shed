@@ -1,3 +1,9 @@
+//! The [`KeyMap`] struct and related types
+//!
+//! This module contains the [`KeyMap`] struct, which represents a key mapping in the editor. It also contains the
+//! [`KeyMapFlags`] bitflags, which represent the modes in which the key mapping is active, and the [`KeyMapMatch`] enum,
+//! which represents the result of comparing two key mappings.
+
 use std::fmt::Display;
 
 use bitflags::bitflags;

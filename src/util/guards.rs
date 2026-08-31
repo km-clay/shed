@@ -1,3 +1,5 @@
+//! RAII guards that snapshot and restore shell state (cwd, umask, scopes, shopts) on drop, plus the `defer!` macro.
+
 use nix::sys::stat;
 
 use crate::{
@@ -17,10 +19,6 @@ use crate::{
   },
   try_var, util, var,
 };
-
-// ============================================================================
-// ScopeGuard - run a closure on drop (local replacement for the scopeguard crate)
-// ============================================================================
 
 /// Wraps a value with a closure that runs when the guard is dropped, receiving
 /// the value. Derefs to the value so it stays usable until then. The `Option`s

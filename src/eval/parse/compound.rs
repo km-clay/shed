@@ -1,3 +1,7 @@
+//! Parsing of compound commands, including `if`, `for`, `while`, `until`, `case`, and function definitions.
+//!
+//! Also includes parsing of subshells, brace groups, and `shed`'s `try`/`defer` blocks.
+
 use shed_macros::styled_format;
 
 use crate::{

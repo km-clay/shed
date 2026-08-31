@@ -1,3 +1,4 @@
+//! The shell's error type (`ShErr` / `ShResult`) and its `ariadne`-rendered diagnostics.
 #![expect(clippy::needless_pass_by_value)]
 use ariadne::{Color, Label};
 use ariadne::{Report, ReportKind};

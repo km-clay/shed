@@ -1,7 +1,17 @@
+//! AST nodes and associated data structures
+//!
+//! This module contains the definitions of the various AST node types used in `shed`'s execution logic, as well as
+//! associated data structures and utility functions.
+//!
+//! The [`Node`] type itself is just a bag of ids/indices used to index the instance of [`Ast`](super::ast::Ast) that it
+//! lives inside of. This means that individual [`Node`]s are basically free to clone and pass around, since they don't
+//! contain any actual data themselves. The actual data is stored in the [`Ast`] instance, which contains flat vectors of all
+//! of the data types used in the AST.
+
 use std::{collections::VecDeque, rc::Rc};
 
 use super::{
-  super::execute::classify::{is_builtin, is_func_node},
+  super::execute::classify,
   ast::{
     Ast, CaseNodeRange, ChildRange, CondNodeId, CondNodeRange, ConjunctRange, LabelId, LabelRange,
     RedirRange, SpanId, TkId, TkRange,
@@ -311,8 +321,8 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node_id: NodeId) -> bool {
           res = Some(true);
           return;
         }
-        if !is_func_node(id, tree) {
-          res = Some(is_builtin(id, tree));
+        if !classify::is_func_node(id, tree) {
+          res = Some(classify::is_builtin(id, tree));
           return;
         }
         let name = node.get_command().unwrap();

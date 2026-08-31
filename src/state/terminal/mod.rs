@@ -1,3 +1,8 @@
+//! The terminal abstraction
+//!
+//! [`Terminal`] manages terminal attributes (raw mode, alt buffer, cursor, mouse,
+//! scroll region) and all tty I/O, buffering output until flushed.
+
 use std::{
   fmt::Debug,
   io::Write,

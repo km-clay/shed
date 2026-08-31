@@ -1,6 +1,6 @@
 //! The internal representation of `shed` scripts
 //!
-//! Contains the [`Ast`], which contains "flat trees" of [`Node`]s, which are the actual statements to execute.
+//! Contains the [`Ast`], which contains an arena (flat tree) of [`Node`]s, which are the actual statements to execute.
 //! [`Node`]s themselves are just bags of indices used to reach other nodes, tokens, and redirections in the [`Ast`].
 
 use std::{

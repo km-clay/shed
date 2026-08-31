@@ -1,3 +1,5 @@
+//! General utilities for the [`ParseStream`] type
+
 use crate::{sherr, util::strops};
 
 use super::{

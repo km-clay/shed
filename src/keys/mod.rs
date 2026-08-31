@@ -1,3 +1,5 @@
+//! Logic for keymaps and key events.
+
 mod event;
 mod map;
 

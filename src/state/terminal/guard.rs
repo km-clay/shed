@@ -1,6 +1,12 @@
+//! RAII guards for terminal state and output
+//!
+//! [`TermGuard`] snapshots terminal attributes (raw mode, alt buffer, cursor,
+//! mouse, …) and restores them on drop; [`SyncOutputGuard`] brackets synchronized
+//! output and [`FlushGuard`] flushes the buffer on drop.
+
 use crate::queue_term;
 
-use super::{CursorStyle, Shed};
+use super::{CursorStyle, ScrollRegionState, Shed};
 
 /*
  * These two structs get their own module because the public API is the only way
@@ -12,7 +18,8 @@ use super::{CursorStyle, Shed};
 /// A guard that saves the terminal state on creation and restores it on drop.
 ///
 /// This is returned from any Terminal method that modifies the terminal state.
-/// This allows us to scope terminal state changes, and ensures that the terminal state is always restored even if the code panics or returns early.
+/// This allows us to scope terminal state changes, and ensures that the terminal state is always restored
+/// even if the code panics or returns early.
 #[derive(Debug)]
 pub(crate) struct TermGuard {
   raw_mode: Option<bool>,
@@ -27,10 +34,32 @@ pub(crate) struct TermGuard {
   termios_depth: Option<usize>,
   /// Outer Option: did this guard capture the scroll region?
   /// Inner Option: was a scroll region active at capture time?
-  scroll_region: Option<super::ScrollRegionState>,
+  scroll_region: Option<ScrollRegionState>,
 
   /// This determines whether the drop impl will actually restore the state or not.
+  /// Also prevents any of the builder methods from modifying the guard after it has been activated.
   active: bool,
+}
+
+/// A macro to generate builder methods for [`TermGuard`].
+macro_rules! builder_methods {
+  ($($name1:ident,$name2:ident: $ty:ty),* $(,)?) => {
+    impl TermGuard {
+      $(
+      pub(crate) fn $name1(mut self, value: $ty) -> Self {
+        if self.active {
+          return self;
+        }
+        self.$name2 = Some(value);
+        self
+      }
+      #[allow(dead_code)]
+      pub(crate) fn $name2(&self) -> Option<$ty> {
+        self.$name2
+      }
+      )*
+    }
+  };
 }
 
 impl TermGuard {
@@ -50,114 +79,6 @@ impl TermGuard {
       active: false,
     }
   }
-  pub(crate) fn with_raw_mode(mut self, raw_mode: bool) -> Self {
-    if self.active {
-      return self;
-    } // enforce that we can't modify an active guard
-    self.raw_mode = Some(raw_mode);
-    self
-  }
-  pub(crate) fn with_bracketed_paste(mut self, bracketed_paste: bool) -> Self {
-    if self.active {
-      return self;
-    }
-    self.bracketed_paste = Some(bracketed_paste);
-    self
-  }
-  pub(crate) fn with_kitty_proto(mut self, kitty_proto: bool) -> Self {
-    if self.active {
-      return self;
-    }
-    self.kitty_proto = Some(kitty_proto);
-    self
-  }
-  pub(crate) fn with_report_focus(mut self, report_focus: bool) -> Self {
-    if self.active {
-      return self;
-    }
-    self.report_focus = Some(report_focus);
-    self
-  }
-  pub(crate) fn with_alt_buffer(mut self, alt_buffer: bool) -> Self {
-    if self.active {
-      return self;
-    }
-    self.alt_buffer = Some(alt_buffer);
-    self
-  }
-  pub(crate) fn with_cursor_style(mut self, cursor_style: CursorStyle) -> Self {
-    if self.active {
-      return self;
-    }
-    self.cursor_style = Some(cursor_style);
-    self
-  }
-  pub(crate) fn with_cursor_visible(mut self, cursor_visible: bool) -> Self {
-    if self.active {
-      return self;
-    }
-    self.cursor_visible = Some(cursor_visible);
-    self
-  }
-  pub(crate) fn with_mouse_support(mut self, mouse_support: bool) -> Self {
-    if self.active {
-      return self;
-    }
-    self.mouse_support = Some(mouse_support);
-    self
-  }
-  pub(crate) fn with_interactive(mut self, interactive: bool) -> Self {
-    if self.active {
-      return self;
-    }
-    self.interactive = Some(interactive);
-    self
-  }
-  pub(crate) fn with_termios_depth(mut self, termios_depth: usize) -> Self {
-    if self.active {
-      return self;
-    }
-    self.termios_depth = Some(termios_depth);
-    self
-  }
-  pub(crate) fn with_scroll_region(mut self, scroll_region: super::ScrollRegionState) -> Self {
-    if self.active {
-      return self;
-    }
-    self.scroll_region = Some(scroll_region);
-    self
-  }
-  pub(crate) fn bracketed_paste(&self) -> Option<bool> {
-    self.bracketed_paste
-  }
-  pub(crate) fn kitty_proto(&self) -> Option<bool> {
-    self.kitty_proto
-  }
-  pub(crate) fn report_focus(&self) -> Option<bool> {
-    self.report_focus
-  }
-  pub(crate) fn alt_buffer(&self) -> Option<bool> {
-    self.alt_buffer
-  }
-  pub(crate) fn cursor_style(&self) -> Option<CursorStyle> {
-    self.cursor_style
-  }
-  pub(crate) fn cursor_visible(&self) -> Option<bool> {
-    self.cursor_visible
-  }
-  pub(crate) fn mouse_support(&self) -> Option<bool> {
-    self.mouse_support
-  }
-  pub(crate) fn interactive(&self) -> Option<bool> {
-    self.interactive
-  }
-  pub(crate) fn termios_depth(&self) -> Option<usize> {
-    self.termios_depth
-  }
-  pub(crate) fn scroll_region(&self) -> Option<super::ScrollRegionState> {
-    self.scroll_region
-  }
-
   pub(crate) fn activate(self) -> Self {
     if self.active {
       return self;
@@ -167,6 +88,21 @@ impl TermGuard {
       ..self
     }
   }
+}
+
+// generate the getter/setters
+builder_methods! {
+  with_raw_mode,raw_mode: bool,
+  with_bracketed_paste,bracketed_paste: bool,
+  with_kitty_proto,kitty_proto: bool,
+  with_report_focus,report_focus: bool,
+  with_alt_buffer,alt_buffer: bool,
+  with_cursor_style,cursor_style: CursorStyle,
+  with_cursor_visible,cursor_visible: bool,
+  with_mouse_support,mouse_support: bool,
+  with_interactive,interactive: bool,
+  with_termios_depth,termios_depth: usize,
+  with_scroll_region,scroll_region: ScrollRegionState,
 }
 
 impl Default for TermGuard {

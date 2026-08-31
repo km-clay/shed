@@ -1,3 +1,7 @@
+//! The parser for `shed`'s shell language.
+//!
+//! This is a recursive descent parser that consumes a stream of tokens and produces an AST.
+
 use bitflags::bitflags;
 use std::{
   collections::VecDeque,
@@ -33,14 +37,9 @@ use crate::{
   util::error::{ShErr, ShResult},
 };
 
-use super::lex::{self, LexFlags, LexStream, Span, Tk, TkFlags, TkRule, clean_input};
+use super::lex::{self, LexFlags, LexStream, Span, Tk, TkFlags, TkRule};
 
 /// The parsed AST along with the source input it parsed
-///
-/// Uses Rc<str> instead of &str because the reference has to stay alive
-/// while errors are propagated upwards The string also has to stay alive in the
-/// case of pre-parsed shell function nodes, which live in the logic table Using
-/// &str for this use-case dramatically overcomplicates the code
 #[derive(Clone, Debug)]
 pub(crate) struct ParsedSrc {
   pub src: VarStr,
@@ -54,7 +53,7 @@ pub(crate) struct ParsedSrc {
 impl ParsedSrc {
   pub(crate) fn new(src: VarStr) -> Self {
     let src = if src.contains_slice(b"\\\n") || src.contains(&b'\r') {
-      clean_input(&src)
+      lex::clean_input(&src)
     } else {
       src
     };
@@ -85,7 +84,6 @@ impl ParsedSrc {
     let mut stream = LexStream::new(&self.src, self.lex_flags).with_name(self.name.clone());
 
     while let Some(lex_result) = stream.next() {
-      // inline what the previous .filter() did
       if lex_result
         .as_ref()
         .is_ok_and(|tk| matches!(tk.class, TkRule::Comment))

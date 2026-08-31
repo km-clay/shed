@@ -1,15 +1,15 @@
 #![allow(dead_code)]
 //! Typed terminal control sequences and their escape code formatting.
 //!
-//! [`TermCtl`] is used by [`super::Terminal::execute_control`], which
+//! [`TermCtl`] is used by [`Terminal::execute_control`](super::Terminal::execute_control), which
 //! writes the display implementations directly to the terminal, with
-//! zero intermediate allocations. For external consumers, the [`crate::exec_term`]
-//! and [`crate::queue_term`] macros can be used for ergonomic access
+//! zero intermediate allocations. For external consumers, the [`exec_term!`](crate::exec_term!)
+//! and [`queue_term!`](crate::queue_term!) macros can be used for ergonomic access
 //! to this API.
 //!
 //! The reason why these macros can only be used by external consumers,
-//! is because they call [`super::Shed::term_mut`] internally, which
-//! will panic if called inside of any of the [`super::Terminal`] methods.
+//! is because they call [`Shed::term_mut`](super::Shed::term_mut) internally, which
+//! will panic if called inside of any of the [`Terminal`](super::Terminal) methods.
 //!
 //! Starting to look an awful lot like crossterm around here...
 
@@ -58,7 +58,7 @@ pub(crate) enum TermCtl {
   SyncStart,
   /// Output sync end marker
   ///
-  /// See [`SyncStart`]
+  /// See [`TermCtl::SyncStart`]
   SyncEnd,
 
   RingBell,
@@ -108,7 +108,7 @@ pub(crate) enum Scroll {
   SetRegion(u16, u16),
   /// Reset the scroll region
   ///
-  /// See [`SetRegion`].
+  /// See [`Scroll::SetRegion`].
   ResetRegion,
   ResetRegionNoClear, // Same, without clearing the area outside the scroll region
 }
@@ -191,16 +191,16 @@ pub(crate) enum OscCtl {
   PromptStart,
   /// Prompt end marker
   ///
-  /// See [`PromptStart`]
+  /// See [`OscCtl::PromptStart`]
   PromptEnd,
 
   /// Execution start marker
   ///
-  /// Supported by some modern terminals, used to signal the start of a command's output alongside the [`ExecEnd`] marker.
+  /// Supported by some modern terminals, used to signal the start of a command's output alongside the [`OscCtl::ExecEnd`] marker.
   ExecStart,
   /// Execution end marker, with exit code.
   ///
-  /// See [`ExecStart`].
+  /// See [`OscCtl::ExecStart`].
   ExecEnd(i32), // exit code
 }
 

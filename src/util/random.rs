@@ -1,3 +1,5 @@
+//! Randomness: OS entropy ([`os_random`]) and a fast thread-local PRNG ([`random`] / [`random_range`]), plus [`Uuid`].
+
 use std::{cell::Cell, fmt::Display, ops::Range, str::FromStr};
 
 use crate::{

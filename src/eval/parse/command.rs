@@ -1,3 +1,11 @@
+//! Command parsing: `parse_cmd` and `parse_pipeln`
+//!
+//! [`ParseStream::parse_cmd()`] - handles the prefix section (assignments, redirections, command word) and the argv loop (command arguments, redirections, separators).
+//! [`ParseStream::parse_pipeln()`] - handles pipelines and backgrounding.
+//!
+//! All commands run through [`ParseStream::parse_pipeln()`], and are parsed into [`NdRule::Pipeline`] nodes, even
+//! single-command invocations. A single command is a pipeline with one element.
+
 use crate::{
   eval::parse::{ast::NodeId, node::LabelCtx},
   util::{

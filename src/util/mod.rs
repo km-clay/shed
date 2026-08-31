@@ -1,3 +1,5 @@
+//! Small general-purpose helpers shared across the crate, and the root of the `util` submodules.
+
 pub(crate) mod error;
 pub(crate) mod flog;
 pub(crate) mod guards;

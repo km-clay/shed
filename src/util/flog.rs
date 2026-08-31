@@ -1,3 +1,5 @@
+//! A `log`-crate backend that routes log records into the shell's message output.
+
 use super::ui;
 use crate::{sherr, system_msg, util::error::ShResult, var};
 

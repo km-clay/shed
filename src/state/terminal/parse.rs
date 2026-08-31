@@ -1,3 +1,9 @@
+//! Terminal input parsing
+//!
+//! Decodes tty input into [`TermEvent`]s with a `vte`-driven [`EventParser`]
+//! (key presses, cursor/size reports, version replies); [`PollReader`] does the
+//! non-blocking reads that feed it.
+
 use itertools::Itertools;
 use nix::{errno::Errno, unistd::read};
 use std::{

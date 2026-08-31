@@ -1,3 +1,8 @@
+//! Low-level termios and window-size control
+//!
+//! `termios` flag manipulation for [`enable_raw_mode`] / [`enable_cooked_mode`]
+//! and the `TIOCGWINSZ` ioctl behind [`get_win_size`].
+
 use std::os::fd::RawFd;
 
 use nix::{

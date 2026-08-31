@@ -1,3 +1,7 @@
+//! Crate-wide declarative macros
+//!
+//! terminal output ([`write_term!`](crate::write_term) / [`flush_term!`](crate::flush_term)), error construction ([`sherr!`](crate::sherr)), var/shopt access ([`var!`](crate::var) / [`shopt!`](crate::shopt)), and editor-command builders ([`verb!`](crate::verb) / [`motion!`](crate::motion) / [`key!`](crate::key)).
+
 /// Write to the internal Terminal buffer
 ///
 /// The given input will be buffered, meaning it won't be sent to the terminal until `Terminal::flush()` is called

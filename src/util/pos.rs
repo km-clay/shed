@@ -1,3 +1,5 @@
+//! Row/column position types (`Pos` / `SignedPos`) for the line editor's 2D grapheme grid.
+
 use std::cmp::Ordering;
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
