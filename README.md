@@ -77,10 +77,10 @@ To build from source:
 ```sh
 git clone https://github.com/km-clay/shed.git
 cd shed
-cargo build --release
+cargo build --profile dist
 ```
 
-The binary will be at `target/release/shed`.
+The binary will be at `target/dist/shed`.
 
 ### Nix
 
