@@ -3,12 +3,12 @@ members = [".", "crates/shed_macros"]
 resolver = "2"
 
 [package]
-name = "shed"
+name = "shed-sh"
 description = "A linux shell written in rust"
 authors = ["Kyler Clay"]
 license = "MIT"
 repository = "https://github.com/km-clay/shed"
-publish = false
+publish = true
 version = "0.41.2"
 
 edition = "2024"
@@ -22,7 +22,7 @@ debug = false
 strip = true
 
 [dependencies]
-shed_macros = { path = "./crates/shed_macros" }
+shed-macros = { path = "./crates/shed_macros", version = "0.1.0" }
 ariadne = "0.6.0"
 bitflags = { version = "2.11.1", features = ["serde"] }
 chrono = "0.4.44"
@@ -50,3 +50,4 @@ tempfile = "3.27.0"
 
 [[bin]]
 name = "shed"
+path = "src/main.rs"

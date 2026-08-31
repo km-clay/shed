@@ -625,7 +625,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "shed"
+name = "shed-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "shed-sh"
 version = "0.41.2"
 dependencies = [
  "ariadne",
@@ -641,7 +650,7 @@ dependencies = [
  "rusqlite",
  "rustc-hash",
  "serde_json",
- "shed_macros",
+ "shed-macros",
  "smallvec",
  "smol_str",
  "stacker",
@@ -650,15 +659,6 @@ dependencies = [
  "unicode-width",
  "vte",
  "yansi",
-]
-
-[[package]]
-name = "shed_macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
