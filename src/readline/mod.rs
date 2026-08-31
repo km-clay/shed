@@ -1846,6 +1846,10 @@ impl ShedLine {
   }
 
   pub(crate) fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
+    if Shed::term_mut(|t| t.take_prompt_cleared()) {
+      // A `:!` command erased our prompt block; don't clear_rows a stale layout.
+      self.old_layout = None;
+    }
     let _sync = SyncOutputGuard::begin();
     if self.statline.is_some() && !shopt!(statline.enable) {
       self.statline = None;
@@ -2197,6 +2201,9 @@ impl ShedLine {
     }
 
     let finish = |this: &mut Self| {
+      Shed::term_mut(|t| {
+        t.set_prompt_extent(new_layout.cursor.row as u16, new_layout.end.row as u16);
+      });
       this.old_layout = Some(new_layout);
       this.needs_redraw = false;
       // Last cursor op: park it on the active overlay's query line, if any.

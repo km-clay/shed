@@ -126,6 +126,10 @@ pub(crate) struct Terminal {
   /// instead of sending escape sequences and waiting for replies. Used by
   /// tests where the PTY peer doesn't synthesize responses.
   test_mode: bool,
+
+  // these are used for handling prompt redraws when executing `:!...` ex mode commands
+  prompt_extent: Option<(u16, u16)>,
+  prompt_cleared: bool,
 }
 
 impl Clone for Terminal {
@@ -303,6 +307,8 @@ impl Terminal {
       last_bell: None,
       last_input: None,
       test_mode: false,
+      prompt_extent: None,
+      prompt_cleared: false,
     }
   }
 
@@ -660,6 +666,56 @@ impl Terminal {
       return Ok(Some((row, col)));
     }
     Ok(None)
+  }
+  /// Record the `(cursor_row, end_row)` extent of the readline block just drawn.
+  pub(crate) fn set_prompt_extent(&mut self, cursor_row: u16, end_row: u16) {
+    self.prompt_extent = Some((cursor_row, end_row));
+  }
+  pub(crate) fn take_prompt_cleared(&mut self) -> bool {
+    std::mem::take(&mut self.prompt_cleared)
+  }
+  /// Erase the readline block described by the last-pushed extent and home the
+  /// cursor to its top-left, so a command's output starts where the prompt was.
+  /// No-op when no extent is set.
+  pub(crate) fn clear_prompt_block(&mut self) {
+    let Some((cursor_row, end_row)) = self.prompt_extent.take() else {
+      return;
+    };
+    let down = end_row.saturating_sub(cursor_row);
+    self
+      .execute_control(&TermCtl::Cursor(CursorCtl::Down(down)))
+      .ok();
+    for _ in 0..end_row {
+      self
+        .execute_control(&TermCtl::Clear(ClearCtl::WholeLine))
+        .ok();
+      self
+        .execute_control(&TermCtl::Cursor(CursorCtl::Up(1)))
+        .ok();
+    }
+    self
+      .execute_control(&TermCtl::Clear(ClearCtl::WholeLine))
+      .ok();
+    self.execute_control(&TermCtl::PrintChar('\r')).ok();
+    self.flush().ok();
+    self.prompt_cleared = true;
+  }
+  /// After a command wrote to the terminal, put the cursor on a fresh line at the
+  /// true end of the output (a `\n` first if it didn't end on a line boundary),
+  /// ready for the next prompt draw.
+  pub(crate) fn reanchor_after_output(&mut self) {
+    if self
+      .get_cursor_pos()
+      .ok()
+      .flatten()
+      .is_some_and(|(_, col)| col.0 > 1)
+    {
+      self.execute_control(&TermCtl::PrintChar('\n')).ok();
+    }
+    self
+      .execute_control(&TermCtl::Cursor(CursorCtl::Col(1)))
+      .ok();
+    self.flush().ok();
   }
   /// If the cursor is outside of the scroll region, move it into the scroll region
   ///

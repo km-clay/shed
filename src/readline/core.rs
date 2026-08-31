@@ -140,10 +140,19 @@ impl EditorCore {
   /// old `fire_editor_command`; the wrapper handles statline/prompt refresh by
   /// draining the flags raised here.
   fn fire(&mut self, cmd: &EditCmd) -> ShResult<()> {
+    let terminal_shell = cmd.is_terminal_shell_cmd();
     if cmd.is_shell_cmd() {
       self.shell_cmd_ran = true;
     }
+    // A bare `:!cmd` writes straight to the terminal: erase the prompt block
+    // first so its output lands where the prompt was, then re-anchor below it.
+    if terminal_shell {
+      Shed::term_mut(|t| t.clear_prompt_block());
+    }
     let res = self.editor.exec_cmd(cmd);
+    if terminal_shell {
+      Shed::term_mut(|t| t.reanchor_after_output());
+    }
     self.needs_redraw = true;
     res
   }

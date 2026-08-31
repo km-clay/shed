@@ -56,6 +56,13 @@ impl EditCmd {
   pub(crate) fn verb_is(&self, verb: &Verb) -> bool {
     self.verb().is_some_and(|v| v.1 == *verb)
   }
+  /// true for `:!...` ex mode commands
+  pub(crate) fn is_terminal_shell_cmd(&self) -> bool {
+    matches!(
+      self.verb().map(|v| &v.1),
+      Some(Verb::ExCmd(node)) if matches!(node.kind, ExNdRule::Shell(_)) && node.address.is_none()
+    )
+  }
   pub(crate) fn motion_is(&self, motion: &Motion) -> bool {
     self.motion().is_some_and(|m| m.1 == *motion)
   }
