@@ -7,7 +7,7 @@ use crate::{
   },
   sherr,
   state::{
-    self, Shed,
+    Shed,
     meta::MetaTab,
     vars::{VarFlags, VarKind, VarStr},
   },
@@ -117,9 +117,9 @@ impl super::Builtin for GetOpts {
     let explicit_args: Vec<VarStr> = arg_vec.map(|(word, _)| word.clone()).collect();
     if explicit_args.is_empty() {
       let pos_params: Vec<VarStr> = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect());
-      getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &pos_params, &span)
+      Self::getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &pos_params, &span)
     } else {
-      getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &explicit_args, &span)
+      Self::getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &explicit_args, &span)
     }
   }
 }
@@ -133,55 +133,16 @@ fn advance_optind(opt_index: usize, amount: usize) -> ShResult<()> {
   })
 }
 
-fn getopts_inner(
-  opts_spec: &GetOptsSpec,
-  opt_var: &str,
-  argv: &[VarStr],
-  blame: &Span,
-) -> ShResult<()> {
-  let opt_index = var!("OPTIND").to_str_lossy().parse::<usize>().unwrap_or(1);
-  // OPTIND is 1-based
-  let arr_idx = opt_index.saturating_sub(1);
+struct OptCursor {
+  ch: char,
+  char_idx: usize,
+  last_in_arg: bool,
+  opt_index: usize,
+  arr_idx: usize,
+}
 
-  let Some(arg) = argv.get(arr_idx) else {
-    state::Shed::set_status(1);
-    return Ok(());
-  };
-  // Option syntax (`-`, `--`, the flag chars) is ASCII, so parse over a lossy
-  // view; the *argument value* (OPTARG) is pulled from the raw `arg` bytes below.
-  let arg_str = arg.to_str_lossy();
-
-  // "--" stops option processing
-  if arg_str == "--" {
-    advance_optind(opt_index, 1)?;
-    Shed::meta_mut(MetaTab::reset_getopts_char_offset);
-    return util::with_status(1);
-  }
-
-  // Not an option - done
-  let Some(opt_str) = arg_str.strip_prefix('-') else {
-    return util::with_status(1);
-  };
-
-  // Bare "-" is not an option
-  if opt_str.is_empty() {
-    return util::with_status(1);
-  }
-
-  let char_idx = Shed::meta(MetaTab::getopts_char_offset);
-  let Some(ch) = opt_str.chars().nth(char_idx) else {
-    // Ran out of chars in this arg (shouldn't normally happen),
-    // advance to next arg and signal done for this call
-    Shed::meta_mut(MetaTab::reset_getopts_char_offset);
-    advance_optind(opt_index, 1)?;
-    return util::with_status(1);
-  };
-
-  let last_char_in_arg = char_idx >= opt_str.len() - 1;
-
-  // Advance past this character: either move to next char in this
-  // arg, or reset offset and bump OPTIND to the next arg.
-  let advance_one_char = |last: bool| -> ShResult<()> {
+impl GetOpts {
+  fn advance_one_char(last: bool, opt_index: usize) -> ShResult<()> {
     if last {
       Shed::meta_mut(MetaTab::reset_getopts_char_offset);
       advance_optind(opt_index, 1)?;
@@ -189,68 +150,26 @@ fn getopts_inner(
       Shed::meta_mut(MetaTab::inc_getopts_char_offset);
     }
     Ok(())
-  };
+  }
+  fn getopts_inner(
+    opts_spec: &GetOptsSpec,
+    opt_var: &str,
+    argv: &[VarStr],
+    blame: &Span,
+  ) -> ShResult<()> {
+    let Some(cur) = Self::resolve(argv)? else {
+      return Ok(());
+    };
+    let ch = cur.ch;
 
-  let _ = Shed::vars_mut(|v| v.unset_var("OPTARG"));
+    let _ = Shed::vars_mut(|v| v.unset_var("OPTARG"));
 
-  match opts_spec.matches(ch) {
-    OptMatch::NoMatch => {
-      advance_one_char(last_char_in_arg)?;
-      if opts_spec.silent_err {
-        Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::empty()))?;
-        Shed::vars_mut(|v| {
-          v.set_var(
-            "OPTARG",
-            VarKind::Str(ch.to_string().into()),
-            VarFlags::empty(),
-          )
-        })?;
-      } else {
-        Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::empty()))?;
-        sherr!(
-          ExecFail @ blame.clone(),
-          "illegal option '-{ch}'",
-        )
-        .print_error();
-      }
-      state::Shed::set_status(0);
-    }
-    OptMatch::IsMatch => {
-      advance_one_char(last_char_in_arg)?;
-      Shed::vars_mut(|v| {
-        v.set_var(
-          opt_var,
-          VarKind::Str(ch.to_string().into()),
-          VarFlags::empty(),
-        )
-      })?;
-      state::Shed::set_status(0);
-    }
-    OptMatch::WantsArg => {
-      Shed::meta_mut(MetaTab::reset_getopts_char_offset);
-
-      if !last_char_in_arg {
-        // Remaining bytes in this arg are the argument: -bVALUE. The option
-        // syntax up to here (`-` + flag chars) is single-byte ASCII, so the
-        // value begins at byte offset `char_idx + 2` (past `-` and the flag).
-        let optarg = VarStr::from(&arg.as_bytes()[char_idx + 2..]);
-        Shed::vars_mut(|v| v.set_var("OPTARG", VarKind::string(optarg), VarFlags::empty()))?;
-        advance_optind(opt_index, 1)?;
-      } else if let Some(next_arg) = argv.get(arr_idx + 1) {
-        // Next arg is the argument
-        Shed::vars_mut(|v| {
-          v.set_var(
-            "OPTARG",
-            VarKind::string(next_arg.clone()),
-            VarFlags::empty(),
-          )
-        })?;
-        // Skip both the option arg and its value
-        advance_optind(opt_index, 2)?;
-      } else {
-        // Missing required argument
+    match opts_spec.matches(ch) {
+      OptMatch::NoMatch => {
+        // char does not match any option in the spec, report error and set opt_var to "?".
+        Self::advance_one_char(cur.last_in_arg, cur.opt_index)?;
         if opts_spec.silent_err {
-          Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str(":".into()), VarFlags::empty()))?;
+          Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::empty()))?;
           Shed::vars_mut(|v| {
             v.set_var(
               "OPTARG",
@@ -262,25 +181,155 @@ fn getopts_inner(
           Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::empty()))?;
           sherr!(
             ExecFail @ blame.clone(),
-            "option '-{ch}' requires an argument",
+            "illegal option '-{ch}'",
           )
           .print_error();
         }
-        advance_optind(opt_index, 1)?;
-        return util::with_status(0);
+        Shed::set_status(0);
       }
+      OptMatch::IsMatch => {
+        // matches a flag, set opt_var to the char and advance to next char or arg
+        Self::advance_one_char(cur.last_in_arg, cur.opt_index)?;
+        Shed::vars_mut(|v| {
+          v.set_var(
+            opt_var,
+            VarKind::Str(ch.to_string().into()),
+            VarFlags::empty(),
+          )
+        })?;
+        Shed::set_status(0);
+      }
+      // the complicated case
+      OptMatch::WantsArg => Self::handle_wants_arg(&cur, argv, opt_var, opts_spec, blame)?,
+    }
 
+    util::with_status(0)
+  }
+
+  /// Advance the getopts cursor to the next option char to process.
+  ///
+  /// Returns `None` (with `$?` already set to 1) when there are no more
+  /// options in `argv`: a `--` terminator, a non-option word, a bare `-`,
+  /// or running off the end of the current arg / `argv`.
+  fn resolve(argv: &[VarStr]) -> ShResult<Option<OptCursor>> {
+    let opt_index = var!("OPTIND").to_str_lossy().parse::<usize>().unwrap_or(1);
+    // OPTIND is 1-based
+    let arr_idx = opt_index.saturating_sub(1);
+
+    let Some(arg) = argv.get(arr_idx) else {
+      Shed::set_status(1);
+      return Ok(None);
+    };
+    // Option syntax (`-`, `--`, the flag chars) is ASCII, so parse over a lossy
+    // view; the argument value (OPTARG) is pulled from the raw `arg` bytes below.
+    let arg_str = arg.to_str_lossy();
+
+    // "--" stops option processing
+    if arg_str == "--" {
+      advance_optind(opt_index, 1)?;
+      Shed::meta_mut(MetaTab::reset_getopts_char_offset);
+      Shed::set_status(1);
+      return Ok(None);
+    }
+
+    // Not an option, done
+    let Some(opt_str) = arg_str.strip_prefix('-') else {
+      Shed::set_status(1);
+      return Ok(None);
+    };
+
+    // Bare "-" is not an option
+    if opt_str.is_empty() {
+      Shed::set_status(1);
+      return Ok(None);
+    }
+
+    let char_idx = Shed::meta(MetaTab::getopts_char_offset);
+    let Some(ch) = opt_str.chars().nth(char_idx) else {
+      // Ran out of chars in this arg (shouldn't normally happen),
+      // advance to next arg and signal done for this call
+      Shed::meta_mut(MetaTab::reset_getopts_char_offset);
+      advance_optind(opt_index, 1)?;
+      Shed::set_status(1);
+      return Ok(None);
+    };
+
+    let last_in_arg = char_idx >= opt_str.len() - 1;
+
+    // now report the current option char and its context
+    Ok(Some(OptCursor {
+      ch,
+      char_idx,
+      last_in_arg,
+      opt_index,
+      arr_idx,
+    }))
+  }
+
+  /// Handle an option that takes an argument (`OptMatch::WantsArg`): pull
+  /// `OPTARG` from the rest of this arg (`-bVALUE`) or the next arg, or
+  /// report a missing required argument.
+  fn handle_wants_arg(
+    cur: &OptCursor,
+    argv: &[VarStr],
+    opt_var: &str,
+    opts_spec: &GetOptsSpec,
+    blame: &Span,
+  ) -> ShResult<()> {
+    let ch = cur.ch;
+    Shed::meta_mut(MetaTab::reset_getopts_char_offset);
+
+    if !cur.last_in_arg {
+      // Remaining bytes in this arg are the argument: -bVALUE. The option
+      // syntax up to here (`-` + flag chars) is single-byte ASCII, so the
+      // value begins at byte offset `char_idx + 2` (past `-` and the flag).
+      let arg = &argv[cur.arr_idx];
+      let optarg = VarStr::from(&arg.as_bytes()[cur.char_idx + 2..]);
+      Shed::vars_mut(|v| v.set_var("OPTARG", VarKind::string(optarg), VarFlags::empty()))?;
+      advance_optind(cur.opt_index, 1)?;
+    } else if let Some(next_arg) = argv.get(cur.arr_idx + 1) {
+      // Next arg is the argument
       Shed::vars_mut(|v| {
         v.set_var(
-          opt_var,
-          VarKind::Str(ch.to_string().into()),
+          "OPTARG",
+          VarKind::string(next_arg.clone()),
           VarFlags::empty(),
         )
       })?;
+      // Skip both the option arg and its value
+      advance_optind(cur.opt_index, 2)?;
+    } else {
+      // Missing required argument
+      if opts_spec.silent_err {
+        Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str(":".into()), VarFlags::empty()))?;
+        Shed::vars_mut(|v| {
+          v.set_var(
+            "OPTARG",
+            VarKind::Str(ch.to_string().into()),
+            VarFlags::empty(),
+          )
+        })?;
+      } else {
+        Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::empty()))?;
+        sherr!(
+          ExecFail @ blame.clone(),
+          "option '-{ch}' requires an argument",
+        )
+        .print_error();
+      }
+      advance_optind(cur.opt_index, 1)?;
+      return util::with_status(0);
     }
-  }
 
-  util::with_status(0)
+    Shed::vars_mut(|v| {
+      v.set_var(
+        opt_var,
+        VarKind::Str(ch.to_string().into()),
+        VarFlags::empty(),
+      )
+    })?;
+    Ok(())
+  }
 }
 
 #[cfg(test)]
