@@ -15,16 +15,19 @@ impl super::Builtin for Pwd {
     vec![
       OptSpec::new_short("logical", b'L'),
       OptSpec::new_short("physical", b'P'),
+      OptSpec::new_short("trunc", b't'),
     ]
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut logical = true;
+    let mut truncate = false;
 
     for opt in args.options() {
       match opt.key() {
         "logical" => logical = true,
         "physical" => logical = false,
+        "trunc" => truncate = true,
         _ => return Err(sherr!(ParseErr @ opt.span(), "Invalid option: {opt}")),
       }
     }
@@ -48,7 +51,13 @@ impl super::Builtin for Pwd {
       ));
     };
 
-    procio::outln_bytes(dir.as_bytes());
+    if truncate {
+      let display_path = paths::display_path(dir);
+      procio::outln_bytes(display_path.as_bytes());
+    } else {
+      procio::outln_bytes(dir.as_bytes());
+    }
+
     util::with_status(0)
   }
 }
