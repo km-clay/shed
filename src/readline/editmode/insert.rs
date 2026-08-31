@@ -14,7 +14,7 @@ use super::{
 };
 
 #[derive(Default, Debug)]
-pub struct ViInsert {
+pub(crate) struct ViInsert {
   cmds: Vec<EditCmd>,
   normal: Option<ViNormal>,
   pending_cmd: EditCmd,
@@ -22,24 +22,24 @@ pub struct ViInsert {
 }
 
 impl ViInsert {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub fn record_cmd(mut self, cmd: EditCmd) -> Self {
+  pub(crate) fn record_cmd(mut self, cmd: EditCmd) -> Self {
     self.cmds.push(cmd);
     self
   }
-  pub fn with_count(mut self, repeat_count: u16) -> Self {
+  pub(crate) fn with_count(mut self, repeat_count: u16) -> Self {
     self.repeat_count = repeat_count;
     self
   }
-  pub fn register_and_return(&mut self) -> EditCmd {
+  pub(crate) fn register_and_return(&mut self) -> EditCmd {
     let mut cmd = self.take_cmd();
     cmd.normalize_counts();
     self.register_cmd(&cmd);
     cmd
   }
-  pub fn ctrl_w_is_undo(&self) -> bool {
+  pub(crate) fn ctrl_w_is_undo(&self) -> bool {
     let insert_count = self
       .cmds
       .iter()
@@ -53,10 +53,10 @@ impl ViInsert {
 
     insert_count > backspace_count
   }
-  pub fn register_cmd(&mut self, cmd: &EditCmd) {
+  pub(crate) fn register_cmd(&mut self, cmd: &EditCmd) {
     self.cmds.push(cmd.clone());
   }
-  pub fn take_cmd(&mut self) -> EditCmd {
+  pub(crate) fn take_cmd(&mut self) -> EditCmd {
     std::mem::take(&mut self.pending_cmd)
   }
 }

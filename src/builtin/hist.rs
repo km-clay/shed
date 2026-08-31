@@ -40,7 +40,7 @@ macro_rules! cond {
 
 #[expect(clippy::struct_excessive_bools)]
 #[derive(Debug, Default, Clone)]
-pub struct HistQuery {
+pub(super) struct HistQuery {
   after: (Option<VarStr>, bool),
   before: (Option<VarStr>, bool),
   contains: (Option<VarStr>, bool),
@@ -70,11 +70,11 @@ pub struct HistQuery {
 }
 
 impl HistQuery {
-  pub fn new() -> Self {
+  pub(super) fn new() -> Self {
     Self::default()
   }
 
-  pub fn execute(&self, hist: &History) -> ShResult<Vec<(i64, HistEntry)>> {
+  pub(super) fn execute(&self, hist: &History) -> ShResult<Vec<(i64, HistEntry)>> {
     let mut conditions: Vec<String> = vec![];
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
     let mut idx = 1;
@@ -267,7 +267,7 @@ impl HistQuery {
     Ok(entries)
   }
 
-  pub fn from_opts(opts: &[Opt]) -> ShResult<Self> {
+  pub(super) fn from_opts(opts: &[Opt]) -> ShResult<Self> {
     let mut new = Self::new();
     let mut negated = false; // '--not' flag flips this for one argument
     let value = |opt: &Opt| -> Option<VarStr> { opt.value().ok().map(VarStr::from) };
@@ -378,7 +378,7 @@ impl HistQuery {
     Ok(new)
   }
 
-  pub fn format_entries(
+  pub(super) fn format_entries(
     &self,
     entries: &[(i64, HistEntry)],
     f: &mut impl std::io::Write,

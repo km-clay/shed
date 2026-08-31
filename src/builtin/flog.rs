@@ -13,7 +13,7 @@ use crate::{
 
 use super::{argv, opt::OptSpec};
 
-pub struct Flog;
+pub(super) struct Flog;
 impl super::Builtin for Flog {
   fn opts(&self) -> Vec<OptSpec> {
     vec![opt!("prefix" | b'p', 1)]

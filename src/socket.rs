@@ -487,10 +487,10 @@ pub(crate) struct ShedSocket {
 }
 
 impl ShedSocket {
-  pub fn path(&self) -> &Path {
+  pub(crate) fn path(&self) -> &Path {
     &self.path
   }
-  pub fn mode() -> Mode {
+  pub(crate) fn mode() -> Mode {
     var!("SHED_SOCK_MODE")
       .to_str_lossy()
       .parse::<stat::mode_t>()
@@ -498,7 +498,7 @@ impl ShedSocket {
       .and_then(Mode::from_bits)
       .unwrap_or(Mode::S_IRUSR | Mode::S_IWUSR)
   }
-  pub fn new() -> ShResult<Self> {
+  pub(crate) fn new() -> ShResult<Self> {
     let Some(runtime) = paths::runtime_dir() else {
       return Err(sherr!(
         ExecFail,
@@ -562,7 +562,7 @@ impl ShedSocket {
       path: sock_path,
     })
   }
-  pub fn listener(&self) -> &UnixListener {
+  pub(crate) fn listener(&self) -> &UnixListener {
     &self.listener
   }
 }

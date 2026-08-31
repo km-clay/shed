@@ -25,7 +25,7 @@ impl<T: Display + ?Sized> VarStrDisplay for T {
 
 /// Used to track whether the lexer is currently inside a quote, and if so, which type
 #[derive(Default, Copy, Debug, PartialEq, Clone)]
-pub enum QuoteState {
+pub(crate) enum QuoteState {
   #[default]
   Outside,
   Single,
@@ -33,20 +33,20 @@ pub enum QuoteState {
 }
 
 impl QuoteState {
-  pub fn outside(self) -> bool {
+  pub(crate) fn outside(self) -> bool {
     matches!(self, QuoteState::Outside)
   }
-  pub fn in_single(self) -> bool {
+  pub(crate) fn in_single(self) -> bool {
     matches!(self, QuoteState::Single)
   }
-  pub fn in_double(self) -> bool {
+  pub(crate) fn in_double(self) -> bool {
     matches!(self, QuoteState::Double)
   }
-  pub fn in_quote(self) -> bool {
+  pub(crate) fn in_quote(self) -> bool {
     !self.outside()
   }
   /// Toggles whether we are in a double quote. If self = `QuoteState::Single` or `QuoteState::Backtick,` this does nothing, since double quotes inside those quotes are just literal characters
-  pub fn toggle_double(&mut self) {
+  pub(crate) fn toggle_double(&mut self) {
     match self {
       QuoteState::Outside => *self = QuoteState::Double,
       QuoteState::Double => *self = QuoteState::Outside,
@@ -54,7 +54,7 @@ impl QuoteState {
     }
   }
   /// Toggles whether we are in a single quote. If self == `QuoteState::Double` or `QuoteState::Backtick,` this does nothing, since single quotes inside those quotes are just literal characters
-  pub fn toggle_single(&mut self) {
+  pub(crate) fn toggle_single(&mut self) {
     match self {
       QuoteState::Outside => *self = QuoteState::Single,
       QuoteState::Single => *self = QuoteState::Outside,
@@ -68,7 +68,7 @@ impl QuoteState {
  * so we have to roll our own stuff. we can take a functional approach to to this that generalizes quite well
  */
 
-pub fn split_tk(tk: &Tk, pat: &[u8]) -> Vec<Tk> {
+pub(crate) fn split_tk(tk: &Tk, pat: &[u8]) -> Vec<Tk> {
   let slice = tk.as_bytes();
   let base = tk.span.range().start;
   split_all_with(
@@ -83,7 +83,7 @@ pub fn split_tk(tk: &Tk, pat: &[u8]) -> Vec<Tk> {
   )
 }
 
-pub fn split_all_with<T, F, B>(slice: &[u8], segment_fn: F, mut build: B) -> Vec<T>
+pub(crate) fn split_all_with<T, F, B>(slice: &[u8], segment_fn: F, mut build: B) -> Vec<T>
 where
   F: Fn(&[u8]) -> Option<(usize, usize)>,
   B: FnMut(usize, usize) -> T,
@@ -102,15 +102,15 @@ where
 
 /// Splits a byte slice at the first occurrence of a pattern, but only if the pattern is not escaped by a backslash
 /// and not in quotes. Returns None if the pattern is not found or only found escaped.
-pub fn split_at_unescaped(slice: &[u8], pat: &[u8]) -> Option<(usize, usize)> {
+pub(crate) fn split_at_unescaped(slice: &[u8], pat: &[u8]) -> Option<(usize, usize)> {
   split_at_any_unescaped(slice, &[pat])
 }
 
-pub fn split_at_any_unescaped(slice: &[u8], pats: &[&[u8]]) -> Option<(usize, usize)> {
+pub(crate) fn split_at_any_unescaped(slice: &[u8], pats: &[&[u8]]) -> Option<(usize, usize)> {
   split_at_any_inner(slice, pats, b'\\', b'\'', b'"')
 }
 
-pub fn split_assignment_raw(arg: &[u8]) -> (&[u8], Option<&[u8]>) {
+pub(crate) fn split_assignment_raw(arg: &[u8]) -> (&[u8], Option<&[u8]>) {
   let Some((e, l)) = split_at_unescaped(arg, b"=") else {
     return (arg, None);
   };
@@ -158,7 +158,7 @@ fn split_at_any_inner(
   None
 }
 
-pub fn pos_is_escaped(slice: &[u8], pos: usize) -> bool {
+pub(crate) fn pos_is_escaped(slice: &[u8], pos: usize) -> bool {
   let mut escaped = false;
   let mut i = pos;
   while i > 0 && slice[i - 1] == b'\\' {
@@ -168,11 +168,11 @@ pub fn pos_is_escaped(slice: &[u8], pos: usize) -> bool {
   escaped
 }
 
-pub fn ends_with_unescaped(slice: &[u8], pat: &[u8]) -> bool {
+pub(crate) fn ends_with_unescaped(slice: &[u8], pat: &[u8]) -> bool {
   slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
 }
 
-pub fn has_unescaped(slice: &[u8], pat: &[u8]) -> bool {
+pub(crate) fn has_unescaped(slice: &[u8], pat: &[u8]) -> bool {
   split_at_unescaped(slice, pat).is_some()
 }
 
@@ -182,7 +182,7 @@ pub fn has_unescaped(slice: &[u8], pat: &[u8]) -> bool {
 /// for standalone scans over a plain byte slice (arithmetic, tests, etc). This
 /// is what lets the delimiter scanners below crawl bytes without caring whether
 /// they're driving the live lexer or a throwaway buffer.
-pub trait ByteCursor {
+pub(crate) trait ByteCursor {
   /// The byte at the current position, without advancing.
   fn peek_byte(&self) -> Option<u8>;
   /// Consume and return the byte at the current position, advancing by one.
@@ -239,15 +239,15 @@ pub(crate) struct SliceCursor<'a> {
 }
 
 impl<'a> SliceCursor<'a> {
-  pub fn new(bytes: &'a [u8]) -> Self {
+  pub(crate) fn new(bytes: &'a [u8]) -> Self {
     Self { bytes, pos: 0 }
   }
   /// Number of bytes consumed so far.
-  pub fn pos(&self) -> usize {
+  pub(crate) fn pos(&self) -> usize {
     self.pos
   }
 
-  pub fn into_slice(self) -> &'a [u8] {
+  pub(crate) fn into_slice(self) -> &'a [u8] {
     &self.bytes[self.pos..]
   }
 }
@@ -269,13 +269,13 @@ impl ByteCursor for SliceCursor<'_> {
 /// Scan a balanced `(...)`, consuming through the closing paren. `depth` is the
 /// nesting already entered — pass `1` when the opening `(` was just consumed.
 /// Returns `true` if the group closed, `false` if input ran out first.
-pub fn scan_parens<C: ByteCursor>(c: &mut C, depth: usize) -> bool {
+pub(crate) fn scan_parens<C: ByteCursor>(c: &mut C, depth: usize) -> bool {
   scan_delims(b'(', c, depth)
 }
 
 /// Scan a balanced `${...}`, following nested `${...}` / `$(...)`. See
 /// [`scan_parens`] for the `depth` convention and return value.
-pub fn scan_param_exp<C: ByteCursor>(c: &mut C, mut depth: usize) -> bool {
+pub(crate) fn scan_param_exp<C: ByteCursor>(c: &mut C, mut depth: usize) -> bool {
   let mut qt = QuoteState::default();
   match_loop!(c.next_byte() => b, {
     b'\\' => { c.next_byte(); }
@@ -507,7 +507,7 @@ pub(crate) fn format_time(dur: std::time::Duration) -> String {
 }
 
 /// Parse human-readable size strings into raw byte number
-pub fn parse_size(s: &str) -> ShResult<u64> {
+pub(crate) fn parse_size(s: &str) -> ShResult<u64> {
   let s = s.trim().to_lowercase();
 
   let units: [(&str, f64); 19] = [
@@ -563,7 +563,7 @@ pub fn parse_size(s: &str) -> ShResult<u64> {
   }
 }
 
-pub fn format_size(bytes: u64, buf: &mut impl std::fmt::Write) -> std::fmt::Result {
+pub(crate) fn format_size(bytes: u64, buf: &mut impl std::fmt::Write) -> std::fmt::Result {
   const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
   let mut size = bytes as f64;
   let mut unit = 0;
@@ -578,7 +578,7 @@ pub fn format_size(bytes: u64, buf: &mut impl std::fmt::Write) -> std::fmt::Resu
   }
 }
 
-pub fn format_mode(mode: u32) -> String {
+pub(crate) fn format_mode(mode: u32) -> String {
   let mut out = String::new();
   let mut check_bit = |bit: u32, ch: char| {
     if mode & bit != 0 {
@@ -624,7 +624,7 @@ pub(crate) struct TimeReader<'a> {
 }
 
 impl<'a> TimeReader<'a> {
-  pub fn interpret(s: &'a str) -> ShResult<DateTime<Utc>> {
+  pub(crate) fn interpret(s: &'a str) -> ShResult<DateTime<Utc>> {
     Self {
       orig: s,
       tks: vec![],
@@ -646,7 +646,7 @@ impl<'a> TimeReader<'a> {
     self.tks.get(self.pos)
   }
 
-  pub fn parse(&mut self) -> ShResult<DateTime<Utc>> {
+  pub(crate) fn parse(&mut self) -> ShResult<DateTime<Utc>> {
     for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S"] {
       if let Ok(time) = NaiveDateTime::parse_from_str(self.orig, fmt) {
         return local_to_utc(time);

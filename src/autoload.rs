@@ -82,13 +82,13 @@ impl Autoloader for HelpLoader {
 }
 
 #[derive(Clone, Debug)]
-pub enum AutoloadSrc {
+pub(crate) enum AutoloadSrc {
   Path(PathBuf),
   Embedded { name: VarStr, body: VarStr },
 }
 
 impl AutoloadSrc {
-  pub fn source(&self) -> ShResult<()> {
+  pub(crate) fn source(&self) -> ShResult<()> {
     match self {
       Self::Path(p) => source_file(p.clone()),
       Self::Embedded { name, body } => exec_nonint(

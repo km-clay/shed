@@ -41,7 +41,7 @@ impl From<bool> for Toggle {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum TermCtl {
+pub(crate) enum TermCtl {
   Cursor(CursorCtl),
   Clear(ClearCtl),
   PrintChar(char),
@@ -65,7 +65,7 @@ pub enum TermCtl {
 }
 
 impl TermCtl {
-  pub fn cap_burst() -> Vec<Self> {
+  pub(crate) fn cap_burst() -> Vec<Self> {
     vec![
       Self::Query(TermQuery::KittyKbdFlags),
       Self::Query(TermQuery::Capability(CapQuery::SyncOutput)),
@@ -95,7 +95,7 @@ impl Display for TermCtl {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Scroll {
+pub(crate) enum Scroll {
   Up(u16),
   Down(u16),
   InsertLines(u16),
@@ -129,7 +129,7 @@ impl Display for Scroll {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum TermQuery {
+pub(crate) enum TermQuery {
   CursorPos,
   KittyKbdFlags,
   Version,
@@ -157,7 +157,7 @@ impl Display for TermQuery {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum CapQuery {
+pub(crate) enum CapQuery {
   SyncOutput,
   TrueColor,
   /// Styled underlines (`Smulx`). Terminals advertising this also support an
@@ -183,7 +183,7 @@ impl Display for CapQuery {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum OscCtl {
+pub(crate) enum OscCtl {
   /// Prompt start marker
   ///
   /// Supported by some modern terminals, used for navigation via hotkeys
@@ -216,7 +216,7 @@ impl Display for OscCtl {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Attr {
+pub(crate) enum Attr {
   FocusReport(Toggle),
   AltBuffer(Toggle),
   SyncOutput(Toggle),
@@ -260,7 +260,7 @@ impl Display for Attr {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ClearCtl {
+pub(crate) enum ClearCtl {
   LineToEnd,
   LineToStart,
   WholeLine,
@@ -285,7 +285,7 @@ impl Display for ClearCtl {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum CursorCtl {
+pub(crate) enum CursorCtl {
   Absolute { row: u16, col: u16 },
   Home,
   Col(u16),

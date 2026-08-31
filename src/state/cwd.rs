@@ -17,11 +17,14 @@ use super::{
 };
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
-pub fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
+pub(crate) fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
   change_dir_with_pwd(dir, None)
 }
 
-pub fn change_dir_with_pwd<P: AsRef<Path>>(dir: P, logical_pwd: Option<PathBuf>) -> ShResult<()> {
+pub(crate) fn change_dir_with_pwd<P: AsRef<Path>>(
+  dir: P,
+  logical_pwd: Option<PathBuf>,
+) -> ShResult<()> {
   let dir = dir.as_ref();
   let dir_raw = paths::path_to_varstr(dir);
   defer!(super::autocmd!(PostChangeDir));

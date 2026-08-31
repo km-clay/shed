@@ -9,7 +9,7 @@ use super::opt::OptSpec;
 /// `genrc` — print an rc file built from the current shell state to
 /// stdout. Used to (re)generate `~/.shedrc` after a shopt rename, or to
 /// inspect the live config in re-sourceable form.
-pub struct GenRc;
+pub(super) struct GenRc;
 
 impl super::Builtin for GenRc {
   fn opts(&self) -> Vec<OptSpec> {

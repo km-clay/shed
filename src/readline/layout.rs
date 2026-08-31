@@ -15,7 +15,12 @@ fn gutter_width(offset: usize, line_count: usize) -> usize {
   max_num_len + 3
 }
 
-pub fn pad_prompt_for_gutter(prompt: &str, line: &str, offset: usize, term_width: usize) -> String {
+pub(super) fn pad_prompt_for_gutter(
+  prompt: &str,
+  line: &str,
+  offset: usize,
+  term_width: usize,
+) -> String {
   let prompt_end = Layout::calc_pos(term_width, prompt, Pos { col: 0, row: 0 }, 0, false);
   let multiline = line.contains('\n') || prompt_end.col == 0;
   if !multiline {
@@ -35,7 +40,7 @@ pub fn pad_prompt_for_gutter(prompt: &str, line: &str, offset: usize, term_width
   out
 }
 
-pub fn enumerate_lines(
+pub(super) fn enumerate_lines(
   s: &str,
   left_pad: usize,
   show_numbers: bool,
@@ -121,7 +126,7 @@ fn expand_tabs(s: &str, left_margin: usize, tab_stop: usize) -> String {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Layout {
+pub(super) struct Layout {
   pub prompt_end: Pos,
   pub cursor: Pos,
   pub end: Pos,
@@ -130,7 +135,7 @@ pub struct Layout {
 }
 
 impl Layout {
-  pub fn new() -> Self {
+  pub(super) fn new() -> Self {
     Self {
       prompt_end: Pos::default(),
       cursor: Pos::default(),
@@ -139,7 +144,7 @@ impl Layout {
       t_cols: 0,
     }
   }
-  pub fn from_parts(term_width: usize, prompt: &str, to_cursor: &str, to_end: &str) -> Self {
+  pub(super) fn from_parts(term_width: usize, prompt: &str, to_cursor: &str, to_end: &str) -> Self {
     let prompt_end = Self::calc_pos(term_width, prompt, Pos { col: 0, row: 0 }, 0, false);
     let cursor = Self::calc_pos(term_width, to_cursor, prompt_end, prompt_end.col, true);
     let end = Self::calc_pos(term_width, to_end, prompt_end, prompt_end.col, false);
@@ -160,7 +165,7 @@ impl Layout {
     matches!(b, 0x00..=0x08 | 0x0b..=0x1f | 0x7f)
   }
 
-  pub fn calc_pos(
+  pub(super) fn calc_pos(
     term_width: usize,
     s: &str,
     orig: Pos,
@@ -203,7 +208,7 @@ impl Default for Layout {
   }
 }
 
-pub fn redraw(
+pub(super) fn redraw(
   prompt: &str,
   line: &str,
   new_layout: &Layout,
@@ -264,7 +269,7 @@ pub fn redraw(
   Shed::term_mut(|t| t.calc_cursor_movement(end, cursor)).ok();
 }
 
-pub fn move_cursor_to_end(layout: &Layout) {
+pub(super) fn move_cursor_to_end(layout: &Layout) {
   let t_cols = Shed::term(Terminal::t_cols);
   let mut end = layout.end.row;
   if layout.psr_end.is_some() && layout.t_cols > t_cols && t_cols > 0 {
@@ -277,7 +282,7 @@ pub fn move_cursor_to_end(layout: &Layout) {
   queue_term!(TermCtl::Cursor(Down(cursor_motion as u16))).ok();
 }
 
-pub fn clear_rows(layout: &Layout) {
+pub(super) fn clear_rows(layout: &Layout) {
   // Account for lines that may have wrapped due to terminal resize.
   // If a PSR was drawn, the last row extended to the old terminal width.
   // When the terminal shrinks, that row wraps into extra physical rows.

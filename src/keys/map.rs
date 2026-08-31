@@ -46,27 +46,27 @@ impl Display for KeyMapFlags {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyMapMatch {
+pub(crate) enum KeyMapMatch {
   NoMatch,
   IsPrefix,
   IsExact,
 }
 
 #[derive(Debug, Clone)]
-pub struct KeyMap {
+pub(crate) struct KeyMap {
   pub flags: KeyMapFlags,
   pub keys: VarStr,
   pub action: VarStr,
 }
 
 impl KeyMap {
-  pub fn keys_expanded(&self) -> Vec<KeyEvent> {
+  pub(crate) fn keys_expanded(&self) -> Vec<KeyEvent> {
     alias::expand_keymap(&self.keys.to_str_lossy())
   }
-  pub fn action_expanded(&self) -> Vec<KeyEvent> {
+  pub(crate) fn action_expanded(&self) -> Vec<KeyEvent> {
     alias::expand_keymap(&self.action.to_str_lossy())
   }
-  pub fn compare(&self, other: &[KeyEvent]) -> KeyMapMatch {
+  pub(crate) fn compare(&self, other: &[KeyEvent]) -> KeyMapMatch {
     let ours = self.keys_expanded();
     if other == ours {
       KeyMapMatch::IsExact

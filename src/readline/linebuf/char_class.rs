@@ -3,7 +3,7 @@ use crate::util::pos::Pos;
 use super::{Grapheme, Lines};
 
 #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
-pub enum CharClass {
+pub(crate) enum CharClass {
   #[default]
   Alphanum,
   Symbol,
@@ -12,17 +12,17 @@ pub enum CharClass {
 }
 
 impl CharClass {
-  pub fn is_other_class(self, other: CharClass) -> bool {
+  pub(crate) fn is_other_class(self, other: CharClass) -> bool {
     !self.eq(&other)
   }
-  pub fn is_other_class_or_ws(self, other: CharClass) -> bool {
+  pub(crate) fn is_other_class_or_ws(self, other: CharClass) -> bool {
     if self.is_ws() || other.is_ws() {
       true
     } else {
       self.is_other_class(other)
     }
   }
-  pub fn is_ws(self) -> bool {
+  pub(crate) fn is_ws(self) -> bool {
     self == CharClass::Whitespace
   }
 }
@@ -77,7 +77,7 @@ pub(super) struct CharClassIter<'a> {
 }
 
 impl<'a> CharClassIter<'a> {
-  pub fn new(lines: &'a Lines, start_pos: Pos) -> Self {
+  pub(super) fn new(lines: &'a Lines, start_pos: Pos) -> Self {
     Self {
       lines,
       row: start_pos.row,
@@ -160,7 +160,7 @@ pub(super) struct CharClassIterRev<'a> {
 }
 
 impl<'a> CharClassIterRev<'a> {
-  pub fn new(lines: &'a Lines, start_pos: Pos) -> Self {
+  pub(super) fn new(lines: &'a Lines, start_pos: Pos) -> Self {
     let row = start_pos.row.min(lines.len().saturating_sub(1));
     let col = if lines.is_empty() || lines[row].is_empty() {
       0

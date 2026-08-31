@@ -48,27 +48,27 @@ const BENIGN_SIGNALS: u64 = (1 << Signal::SIGCHLD as u64)
 
 /// Whether the SIGCHLD handler is enabled. If disabled, SIGCHLD is ignored and the shell will not reap child processes.
 /// This is used in `exec_nonint` to avoid reaping children that are being waited on by the caller.
-pub static REAPING_ENABLED: AtomicBool = AtomicBool::new(true);
+pub(crate) static REAPING_ENABLED: AtomicBool = AtomicBool::new(true);
 /// Whether the shell should exit cleanly. Set by `hang_up`, `check_signals`, and other signal handlers.
-pub static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
+pub(crate) static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
 /// Whether a job has finished and needs to be reaped.
 /// Set by `child_exited` and cleared by the main loop after reaping.
-pub static JOB_DONE: AtomicBool = AtomicBool::new(false);
+pub(crate) static JOB_DONE: AtomicBool = AtomicBool::new(false);
 /// The exit code to use when quitting cleanly. Set by `hang_up`, `check_signals`, and other signal handlers.
-pub static QUIT_CODE: AtomicI32 = AtomicI32::new(0);
+pub(crate) static QUIT_CODE: AtomicI32 = AtomicI32::new(0);
 /// When exiting by signal, signal number is stored here.
-pub static QUIT_SIGNAL: AtomicI32 = AtomicI32::new(-1);
+pub(crate) static QUIT_SIGNAL: AtomicI32 = AtomicI32::new(-1);
 
 /// Window size change signal
-pub static GOT_SIGWINCH: AtomicBool = AtomicBool::new(false);
+pub(crate) static GOT_SIGWINCH: AtomicBool = AtomicBool::new(false);
 
 /// SIGUSR1 tells the prompt that it needs to fully refresh.
 /// Useful for dynamic prompt content and asynchronous refreshing
-pub static GOT_SIGUSR1: AtomicBool = AtomicBool::new(false);
+pub(crate) static GOT_SIGUSR1: AtomicBool = AtomicBool::new(false);
 
 /// The terminal has notified us that it has regained focus
 /// We refresh the prompt now
-pub static FOCUS_GAINED: AtomicBool = AtomicBool::new(false);
+pub(crate) static FOCUS_GAINED: AtomicBool = AtomicBool::new(false);
 
 /// Signals that are not handled specially in `check_signals` and thus are
 /// handled generically by checking for a trap and, if none, terminating the shell
@@ -98,7 +98,7 @@ const MISC_SIGNALS: &[Signal] = &[
   Signal::SIGPWR,
 ];
 
-pub fn quit_signal() -> Option<Signal> {
+pub(crate) fn quit_signal() -> Option<Signal> {
   let sig = QUIT_SIGNAL.swap(-1, Ordering::SeqCst);
   if sig > 0 {
     Signal::try_from(sig).ok()
@@ -107,7 +107,7 @@ pub fn quit_signal() -> Option<Signal> {
   }
 }
 
-pub fn parse_signal(s: &str) -> ShResult<Signal> {
+pub(crate) fn parse_signal(s: &str) -> ShResult<Signal> {
   // Try as signal name (e.g. "TERM", "SIGTERM", "term")
   let upper = s.to_uppercase();
   if let Ok(sig) = upper.parse::<Signal>() {
@@ -128,16 +128,16 @@ pub fn parse_signal(s: &str) -> ShResult<Signal> {
   Err(sherr!(SyntaxErr, "Invalid signal name or number: {s}"))
 }
 
-pub fn signals_pending() -> bool {
+pub(crate) fn signals_pending() -> bool {
   SIGNALS.load(Ordering::SeqCst) != 0 || SHOULD_QUIT.load(Ordering::SeqCst)
 }
 
-pub fn sigint_pending() -> bool {
+pub(crate) fn sigint_pending() -> bool {
   SIGNALS.load(Ordering::SeqCst) & (1 << Signal::SIGINT as u64) != 0
 }
 
 /// Whether a pending signal warrants interrupting a blocking `read`/`wait`.
-pub fn has_actionable_pending() -> bool {
+pub(crate) fn has_actionable_pending() -> bool {
   if SHOULD_QUIT.load(Ordering::SeqCst) {
     return true;
   }
@@ -145,7 +145,7 @@ pub fn has_actionable_pending() -> bool {
 }
 
 /// The first available interrupting signal, as an `i32`
-pub fn first_actionable_signal() -> Option<i32> {
+pub(crate) fn first_actionable_signal() -> Option<i32> {
   let pending = SIGNALS.load(Ordering::SeqCst) & !BENIGN_SIGNALS;
   MISC_SIGNALS
     .iter()
@@ -193,7 +193,7 @@ fn default_terminates(sig: Signal) -> bool {
 /// but rather control flow signals to the shell's main loop.
 /// We basically abuse Rust's error propagation to abort execution and travel upward
 /// to a place that catches and handles it.
-pub fn check_signals() -> ShResult<()> {
+pub(crate) fn check_signals() -> ShResult<()> {
   let pending = SIGNALS.swap(0, Ordering::SeqCst);
 
   let got_signal = |sig: Signal| -> bool { pending & (1 << sig as u64) != 0 };
@@ -259,14 +259,14 @@ pub fn check_signals() -> ShResult<()> {
   Ok(())
 }
 
-pub fn disable_reaping() {
+pub(crate) fn disable_reaping() {
   REAPING_ENABLED.store(false, Ordering::SeqCst);
 }
-pub fn enable_reaping() {
+pub(crate) fn enable_reaping() {
   REAPING_ENABLED.store(true, Ordering::SeqCst);
 }
 
-pub fn install_signal_handlers() {
+pub(crate) fn install_signal_handlers() {
   let flags = SaFlags::empty();
   let action = SigAction::new(SigHandler::Handler(handle_signal), flags, SigSet::empty());
 
@@ -281,7 +281,7 @@ pub fn install_signal_handlers() {
 ///
 /// SIGTTIN and SIGTTOU are ignored so that the shell can read/write to the terminal,
 /// even if it's in the background.
-pub fn sig_setup() {
+pub(crate) fn sig_setup() {
   install_signal_handlers();
 
   let flags = SaFlags::empty();
@@ -299,7 +299,7 @@ pub fn sig_setup() {
 /// Reset signal dispositions to `SIG_DFL`.
 /// Called in child processes before exec so that the shell's custom
 /// handlers and `SIG_IGN` dispositions don't leak into child programs.
-pub fn reset_signals(is_fg: bool) {
+pub(crate) fn reset_signals(is_fg: bool) {
   let default = SigAction::new(SigHandler::SigDfl, SaFlags::empty(), SigSet::empty());
   unsafe {
     sigaction(Signal::SIGPIPE, &default).ok();
@@ -310,13 +310,13 @@ pub fn reset_signals(is_fg: bool) {
   }
 }
 
-pub fn clear_quit_latch() {
+pub(crate) fn clear_quit_latch() {
   SHOULD_QUIT.store(false, Ordering::SeqCst);
   SIGNALS.store(0, Ordering::SeqCst);
   QUIT_SIGNAL.store(-1, Ordering::SeqCst);
 }
 
-pub fn request_exit(code: i32) {
+pub(crate) fn request_exit(code: i32) {
   SHOULD_QUIT.store(true, Ordering::SeqCst);
   QUIT_CODE.store(code, Ordering::SeqCst);
 }
@@ -325,7 +325,7 @@ extern "C" fn handle_signal(sig: libc::c_int) {
   SIGNALS.fetch_or(1 << sig, Ordering::SeqCst);
 }
 
-pub fn hang_up(_: libc::c_int) {
+pub(crate) fn hang_up(_: libc::c_int) {
   SHOULD_QUIT.store(true, Ordering::SeqCst);
   QUIT_CODE.store(1, Ordering::SeqCst);
   Shed::jobs_mut(|j| {
@@ -336,7 +336,7 @@ pub fn hang_up(_: libc::c_int) {
 /// Send SIGTSTP to the foreground job, if any, to stop it and return control of the terminal to the shell.
 ///
 /// This is called when the user presses Ctrl-Z, or when a SIGTSTP signal is received.
-pub fn terminal_stop() -> ShResult<()> {
+pub(crate) fn terminal_stop() -> ShResult<()> {
   Shed::jobs_mut(|j| {
     if let Some(job) = j.get_fg_mut() {
       job.killpg(Signal::SIGTSTP)
@@ -347,7 +347,7 @@ pub fn terminal_stop() -> ShResult<()> {
   // TODO: It seems like there is supposed to be a take_term() call here, needs testing
 }
 
-pub fn interrupt() -> ShResult<()> {
+pub(crate) fn interrupt() -> ShResult<()> {
   Shed::jobs_mut(|j| {
     if let Some(job) = j.get_fg_mut() {
       job.killpg(Signal::SIGINT)
@@ -358,7 +358,7 @@ pub fn interrupt() -> ShResult<()> {
 }
 
 /// Wait for any child processes to change state (exit, stop, continue) and update the job table accordingly.
-pub fn wait_child() -> ShResult<()> {
+pub(crate) fn wait_child() -> ShResult<()> {
   let flags = WtFlag::WNOHANG | WtFlag::WUNTRACED;
   while let Ok(status) = waitpid(None, Some(flags)) {
     match status {
@@ -385,7 +385,7 @@ pub fn wait_child() -> ShResult<()> {
 }
 
 /// Child process received a signal (e.g. SIGINT, SIGTERM, etc).
-pub fn child_signaled(pid: Pid, sig: Signal) {
+pub(crate) fn child_signaled(pid: Pid, sig: Signal) {
   Shed::jobs_mut(|j| {
     if let Some(job) = j.query_mut(JobID::Pid(pid))
       && let Some(child) = job.children_mut().iter_mut().find(|chld| pid == chld.pid())
@@ -399,7 +399,7 @@ pub fn child_signaled(pid: Pid, sig: Signal) {
 }
 
 /// Child process stopped (received SIGTSTP).
-pub fn child_stopped(pid: Pid, sig: Signal) -> ShResult<()> {
+pub(crate) fn child_stopped(pid: Pid, sig: Signal) -> ShResult<()> {
   let child_pgid = getpgid(Some(pid)).unwrap_or(pid);
   Shed::jobs_mut(|j| {
     if let Some(job) = j.query_mut(JobID::Pgid(child_pgid)) {
@@ -416,7 +416,7 @@ pub fn child_stopped(pid: Pid, sig: Signal) -> ShResult<()> {
 
 /// Child process continued (received SIGCONT).
 /// Resume the job in the job table if it exists.
-pub fn child_continued(pid: Pid) {
+pub(crate) fn child_continued(pid: Pid) {
   let child_pgid = getpgid(Some(pid)).unwrap_or(pid);
   Shed::jobs_mut(|j| {
     if let Some(job) = j.query_mut(JobID::Pgid(child_pgid)) {
@@ -426,7 +426,7 @@ pub fn child_continued(pid: Pid) {
 }
 
 /// Child process exited normally.
-pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
+pub(crate) fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   /*
    * Here we are going to get metadata on the exited process by querying the
    * job table with the pid. Then if the discovered job is the fg task,

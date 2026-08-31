@@ -19,7 +19,7 @@ use super::{
 use crate::{HashMap, state::db, util::random::Uuid};
 
 #[derive(Debug, Clone)]
-pub struct HistEntry {
+pub(crate) struct HistEntry {
   pub runtime: Duration,
   pub timestamp: SystemTime,
   pub command: String,
@@ -61,11 +61,11 @@ impl Default for HistEntry {
 }
 
 impl HistEntry {
-  pub fn command(&self) -> &str {
+  pub(crate) fn command(&self) -> &str {
     self.command.as_str()
   }
   /// The raw command bytes (byte-native; preserves non-UTF-8).
-  pub fn command_bytes(&self) -> &[u8] {
+  pub(crate) fn command_bytes(&self) -> &[u8] {
     self.command.as_bytes()
   }
 }
@@ -121,7 +121,7 @@ fn query_masked(prefix: Option<&str>, conn: &Connection, table: &str) -> Vec<His
 }
 
 #[derive(Debug)]
-pub struct History {
+pub(crate) struct History {
   pub pending: Option<LineBuf>,
   pub fuzzy_finder: Option<FuzzySelector>,
   pub cursor: usize,
@@ -149,7 +149,7 @@ impl History {
   /// `init_db` and the background cache loader. Used for forked-child access
   /// (e.g. `hist` in a pipeline) where the inherited connection is fenced off
   /// and migrating or writing isn't possible.
-  pub fn attach(conn: Arc<Mutex<Connection>>, table: &str) -> Self {
+  pub(crate) fn attach(conn: Arc<Mutex<Connection>>, table: &str) -> Self {
     let max_hist = shopt!(history.max_entries);
     let max_size = (max_hist >= 0).then_some(max_hist as u32);
     Self {
@@ -166,7 +166,7 @@ impl History {
     }
   }
 
-  pub fn new(conn: Arc<Mutex<Connection>>, table: &str) -> ShResult<Self> {
+  pub(crate) fn new(conn: Arc<Mutex<Connection>>, table: &str) -> ShResult<Self> {
     let max_hist = shopt!(history.max_entries);
 
     Self::init_db(
@@ -254,7 +254,7 @@ impl History {
     Ok(hist)
   }
 
-  pub fn empty(table: &str) -> Self {
+  pub(crate) fn empty(table: &str) -> Self {
     let conn = Connection::open_in_memory().expect("Failed to open in-memory database");
     Self::init_db(&conn, table).expect("Failed to initialize in-memory database");
     Self {
@@ -360,7 +360,7 @@ impl History {
     }
     Ok(())
   }
-  pub fn push(&self, command: &str) -> ShResult<Option<Uuid>> {
+  pub(crate) fn push(&self, command: &str) -> ShResult<Option<Uuid>> {
     if command.is_empty() {
       return Ok(None);
     }
@@ -425,7 +425,7 @@ impl History {
     Ok(Some(token))
   }
 
-  pub fn set_status(&self, token: Uuid, runtime: Option<Duration>, status: i32) {
+  pub(crate) fn set_status(&self, token: Uuid, runtime: Option<Duration>, status: i32) {
     let table = self.table.clone();
 
     std::thread::spawn(move || {
@@ -502,7 +502,7 @@ impl History {
     }
   }
 
-  pub fn last_id(&self) -> i64 {
+  pub(crate) fn last_id(&self) -> i64 {
     Self::last_id_conn(&self.lock(), &self.table)
   }
 
@@ -517,7 +517,7 @@ impl History {
       .unwrap_or(0)
   }
 
-  pub fn delete(
+  pub(crate) fn delete(
     &self,
     where_clause: &str,
     params: &[&dyn rusqlite::ToSql],
@@ -554,7 +554,7 @@ impl History {
   /// filters (e.g. a `--matches` regex) in Rust and then delete precisely the
   /// resolved set, instead of handing an unfiltered/empty WHERE to `delete`
   /// (which would wipe the whole table).
-  pub fn delete_ids(&self, ids: &[i64]) -> ShResult<Vec<(i64, HistEntry)>> {
+  pub(crate) fn delete_ids(&self, ids: &[i64]) -> ShResult<Vec<(i64, HistEntry)>> {
     if ids.is_empty() {
       return Ok(vec![]);
     }
@@ -569,7 +569,7 @@ impl History {
   }
 
   /// Restores the history table from the rolling backup created by the last delete operation.
-  pub fn restore_backup(&self) -> ShResult<i64> {
+  pub(crate) fn restore_backup(&self) -> ShResult<i64> {
     let table = &self.table;
     let conn = self.lock();
     let has_backup: bool = conn.query_row(
@@ -624,7 +624,7 @@ impl History {
     Ok(restored)
   }
 
-  pub fn sort_by_timestamp(&self) -> ShResult<()> {
+  pub(crate) fn sort_by_timestamp(&self) -> ShResult<()> {
     let table = &self.table;
     let conn = self.lock();
     let tx = conn.unchecked_transaction()?;
@@ -650,7 +650,7 @@ impl History {
     Ok(())
   }
 
-  pub fn transaction<T, F: FnOnce(&Connection) -> ShResult<T>>(&self, f: F) -> ShResult<T> {
+  pub(crate) fn transaction<T, F: FnOnce(&Connection) -> ShResult<T>>(&self, f: F) -> ShResult<T> {
     let conn = self.lock();
     conn.execute_batch("BEGIN")?;
     match f(&conn) {
@@ -666,7 +666,7 @@ impl History {
   }
 
   /// Runs a query on the history table with the given WHERE clause and parameters, returning a vector of (id, `HistEntry`) tuples.
-  pub fn query(
+  pub(crate) fn query(
     &self,
     where_clause: &str,
     params: &[&dyn rusqlite::ToSql],
@@ -682,7 +682,7 @@ impl History {
     Ok(rows.filter_map(Result::ok).collect())
   }
 
-  pub fn query_range(&self, first: i64, last: i64) -> ShResult<Vec<(i64, HistEntry)>> {
+  pub(crate) fn query_range(&self, first: i64, last: i64) -> ShResult<Vec<(i64, HistEntry)>> {
     let where_clause = r"
 			WHERE id BETWEEN ?1 AND ?2
 			ORDER BY id ASC
@@ -691,7 +691,7 @@ impl History {
     self.query(&where_clause, rusqlite::params![first, last])
   }
 
-  pub fn query_by_prefix(&self, prefix: &str) -> ShResult<Option<(i64, HistEntry)>> {
+  pub(crate) fn query_by_prefix(&self, prefix: &str) -> ShResult<Option<(i64, HistEntry)>> {
     let where_clause = r"
 			WHERE command LIKE ?1 || '%'
 			ORDER BY id DESC
@@ -707,11 +707,11 @@ impl History {
   }
 
   #[cfg_attr(not(test), allow(dead_code))]
-  pub fn push_entry(&self, entry: HistEntry) -> ShResult<bool> {
+  pub(crate) fn push_entry(&self, entry: HistEntry) -> ShResult<bool> {
     Self::push_entry_conn(&self.lock(), &self.table, entry)
   }
 
-  pub fn push_with(&self, conn: &Connection, entry: HistEntry) -> ShResult<bool> {
+  pub(crate) fn push_with(&self, conn: &Connection, entry: HistEntry) -> ShResult<bool> {
     Self::push_entry_conn(conn, &self.table, entry)
   }
 
@@ -752,7 +752,7 @@ impl History {
     Ok(true)
   }
 
-  pub fn token_exists(conn: &Connection, table: &str, token: Uuid) -> bool {
+  pub(crate) fn token_exists(conn: &Connection, table: &str, token: Uuid) -> bool {
     conn
       .query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE token = ?1)"),
@@ -762,7 +762,7 @@ impl History {
       .unwrap_or(false)
   }
 
-  pub fn update_search_mask(&mut self, prefix: Option<&str>) {
+  pub(crate) fn update_search_mask(&mut self, prefix: Option<&str>) {
     let Some(entries) = HIST_ENTRIES.read().ok() else {
       self.search_mask = vec![];
       return;
@@ -783,19 +783,19 @@ impl History {
       .collect();
   }
 
-  pub fn reset(&mut self) {
+  pub(crate) fn reset(&mut self) {
     self.mask_stale = true;
     self.cursor = self.search_mask.len();
     self.virt_cursor = self.cursor;
   }
 
-  pub fn mark_mask_stale(&mut self) {
+  pub(crate) fn mark_mask_stale(&mut self) {
     self.mask_stale = true;
   }
 
   /// Refresh the search mask from the database if stale. Call before
   /// any operation that reads the mask (history scrolling).
-  pub fn ensure_mask_fresh(&mut self) {
+  pub(crate) fn ensure_mask_fresh(&mut self) {
     if self.mask_stale {
       let prefix = self.pending.as_ref().map(LineBuf::to_string);
       self.constrain_entries(prefix.as_deref());
@@ -803,7 +803,7 @@ impl History {
     }
   }
 
-  pub fn constrain_entries(&mut self, prefix: Option<&str>) {
+  pub(crate) fn constrain_entries(&mut self, prefix: Option<&str>) {
     self.update_search_mask(prefix);
     self.no_matches = self.search_mask.is_empty();
     if self.no_matches {
@@ -815,7 +815,7 @@ impl History {
     self.mask_stale = false;
   }
 
-  pub fn resolve_hist_token(&self, token: &str) -> Option<String> {
+  pub(crate) fn resolve_hist_token(&self, token: &str) -> Option<String> {
     let token = token.strip_prefix('!').unwrap_or(token).to_string();
 
     // !! → last command verbatim
@@ -880,7 +880,7 @@ impl History {
     }
   }
 
-  pub fn row_to_entry(row: &rusqlite::Row) -> Result<HistEntry, rusqlite::Error> {
+  pub(crate) fn row_to_entry(row: &rusqlite::Row) -> Result<HistEntry, rusqlite::Error> {
     Ok(HistEntry {
       command: row.get(0)?,
       timestamp: UNIX_EPOCH + Duration::from_secs(row.get::<_, i64>(1)? as u64),
@@ -891,7 +891,7 @@ impl History {
     })
   }
 
-  pub fn last(&self) -> Option<HistEntry> {
+  pub(crate) fn last(&self) -> Option<HistEntry> {
     self
       .lock()
       .query_row(
@@ -905,7 +905,7 @@ impl History {
       .ok()
   }
 
-  pub fn update_pending_cmd(&mut self, buf: (&str, usize)) {
+  pub(crate) fn update_pending_cmd(&mut self, buf: (&str, usize)) {
     let cmd = buf.0.to_string();
     let cursor_pos = buf.1;
 
@@ -928,11 +928,11 @@ impl History {
     }
   }
 
-  pub fn at_pending(&self) -> bool {
+  pub(crate) fn at_pending(&self) -> bool {
     self.cursor >= self.search_mask.len()
   }
 
-  pub fn reset_to_pending(&mut self) {
+  pub(crate) fn reset_to_pending(&mut self) {
     self.cursor = self.search_mask.len();
     self.virt_cursor = self.cursor;
   }
@@ -1011,7 +1011,7 @@ impl History {
   }
 
   /// Get a hint by scanning the in-memory cache. No database access.
-  pub fn get_hint(&self) -> Option<Hint> {
+  pub(crate) fn get_hint(&self) -> Option<Hint> {
     if !self.at_pending() {
       return None;
     }
@@ -1028,7 +1028,7 @@ impl History {
       .map(|e| Hint::History(Lines::to_lines(e.command())))
   }
 
-  pub fn refresh_hist_entries(&self) -> usize {
+  pub(crate) fn refresh_hist_entries(&self) -> usize {
     let num_entries_before = num_entries(&self.table);
     let entries = query_masked(None, &self.lock(), &self.table);
     let max_ts = entries
@@ -1075,11 +1075,11 @@ impl History {
       .collect()
   }
 
-  pub fn is_virtual_scrolling(&self) -> bool {
+  pub(crate) fn is_virtual_scrolling(&self) -> bool {
     self.virt_cursor != self.cursor
   }
 
-  pub fn virtual_scroll_direction(&self) -> Option<Direction> {
+  pub(crate) fn virtual_scroll_direction(&self) -> Option<Direction> {
     match self.virt_cursor.cmp(&self.cursor) {
       Ordering::Greater => Some(Direction::Forward),
       Ordering::Equal => None,
@@ -1087,11 +1087,11 @@ impl History {
     }
   }
 
-  pub fn stop_virtual_scroll(&mut self) {
+  pub(crate) fn stop_virtual_scroll(&mut self) {
     self.virt_cursor = self.cursor;
   }
 
-  pub fn scroll(&mut self, offset: isize) -> Option<&HistEntry> {
+  pub(crate) fn scroll(&mut self, offset: isize) -> Option<&HistEntry> {
     self.ensure_mask_fresh();
     self.cursor = self
       .cursor
@@ -1102,7 +1102,7 @@ impl History {
     self.search_mask.get(self.cursor)
   }
 
-  pub fn scroll_to(&mut self, idx: usize) -> Option<&HistEntry> {
+  pub(crate) fn scroll_to(&mut self, idx: usize) -> Option<&HistEntry> {
     self.ensure_mask_fresh();
     self.cursor = idx.clamp(0, self.search_mask.len());
     self.virt_cursor = self.cursor;
@@ -1110,11 +1110,11 @@ impl History {
     self.search_mask.get(self.cursor)
   }
 
-  pub fn search_mask_count(&self) -> usize {
+  pub(crate) fn search_mask_count(&self) -> usize {
     self.search_mask.len()
   }
 
-  pub fn virt_scroll(&mut self, offset: isize) -> Option<&HistEntry> {
+  pub(crate) fn virt_scroll(&mut self, offset: isize) -> Option<&HistEntry> {
     let before = self.virt_cursor;
     if self.is_virtual_scrolling() {
       self.virt_cursor = self
@@ -1147,7 +1147,7 @@ impl History {
     self.search_mask.get(self.virt_cursor)
   }
 
-  pub fn merge_search_entries(&mut self) {
+  pub(crate) fn merge_search_entries(&mut self) {
     let search = SEARCH_ENTRIES
       .read()
       .ok()
@@ -1195,7 +1195,7 @@ impl History {
     }
   }
 
-  pub fn start_search(&mut self, initial: &str) -> Option<String> {
+  pub(crate) fn start_search(&mut self, initial: &str) -> Option<String> {
     self.sync_search_entries();
 
     let all_entries = SEARCH_ENTRIES
@@ -1225,7 +1225,7 @@ impl History {
     None
   }
 
-  pub fn stop_search(&mut self) {
+  pub(crate) fn stop_search(&mut self) {
     self.fuzzy_finder = None;
   }
 

@@ -21,16 +21,16 @@ use super::{ast::NodeId, lex::Tk, two_way_display};
 use bitflags::bitflags;
 
 #[derive(Clone, Debug, Default)]
-pub struct LabelCtx(Rc<VecDeque<LabelBuilder>>);
+pub(crate) struct LabelCtx(Rc<VecDeque<LabelBuilder>>);
 
 impl LabelCtx {
-  pub fn iter(&self) -> impl Iterator<Item = &LabelBuilder> {
+  pub(crate) fn iter(&self) -> impl Iterator<Item = &LabelBuilder> {
     self.0.iter()
   }
-  pub fn is_empty(&self) -> bool {
+  pub(crate) fn is_empty(&self) -> bool {
     self.0.is_empty()
   }
-  pub fn into_iter(self) -> impl Iterator<Item = LabelBuilder> {
+  pub(crate) fn into_iter(self) -> impl Iterator<Item = LabelBuilder> {
     Rc::try_unwrap(self.0)
       .unwrap_or_else(|rc| (*rc).clone())
       .into_iter()
@@ -53,7 +53,7 @@ pub(crate) struct Node {
 }
 
 impl Node {
-  pub fn get_command(&self) -> Option<TkId> {
+  pub(crate) fn get_command(&self) -> Option<TkId> {
     let NdRule::Command {
       assignments: _,
       argv,
@@ -63,23 +63,23 @@ impl Node {
     };
     argv.first()
   }
-  pub fn redirs_empty(&self) -> bool {
+  pub(crate) fn redirs_empty(&self) -> bool {
     self.redirs.is_none_or(RedirRange::is_empty)
   }
   /// Mark this node as exempt from `set -e`
   ///
   /// Unless it is already marked as `IS_ERR`, in which case do nothing
-  pub fn not_err(&mut self) {
+  pub(crate) fn not_err(&mut self) {
     if !self.flags.contains(NdFlags::IS_ERR) {
       self.flags.insert(NdFlags::NOT_ERR);
     }
   }
-  pub fn is_err(&mut self) {
+  pub(crate) fn is_err(&mut self) {
     if !self.flags.contains(NdFlags::NOT_ERR) {
       self.flags.insert(NdFlags::IS_ERR);
     }
   }
-  pub fn get_span(&self) -> SpanId {
+  pub(crate) fn get_span(&self) -> SpanId {
     self.span
   }
 }
@@ -179,7 +179,7 @@ pub(crate) enum NdKind {
 }
 
 impl NdRule {
-  pub fn as_nd_kind(&self) -> NdKind {
+  pub(crate) fn as_nd_kind(&self) -> NdKind {
     match self {
       Self::List { .. } => NdKind::List,
       Self::Negate { .. } => NdKind::Negate,

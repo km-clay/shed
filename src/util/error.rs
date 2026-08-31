@@ -19,9 +19,9 @@ use crate::{
 
 use super::FdWriter;
 
-pub type ShResult<T> = Result<T, ShErr>;
+pub(crate) type ShResult<T> = Result<T, ShErr>;
 
-pub struct ColorRng {
+pub(crate) struct ColorRng {
   last_color: Option<Color>,
 }
 
@@ -50,7 +50,7 @@ impl ColorRng {
     ]
   }
 
-  pub fn last_color(&mut self) -> Color {
+  pub(crate) fn last_color(&mut self) -> Color {
     if let Some(color) = self.last_color.take() {
       color
     } else {
@@ -87,7 +87,7 @@ pub(crate) fn last_color() -> Color {
   COLOR_RNG.with(|rng| rng.borrow_mut().last_color())
 }
 
-pub fn get_context(msg: impl Into<LabelMsg>, span: &Span) -> LabelBuilder {
+pub(crate) fn get_context(msg: impl Into<LabelMsg>, span: &Span) -> LabelBuilder {
   let color = last_color();
   LabelBuilder::new(span.clone())
     .with_color(color)
@@ -162,7 +162,7 @@ fn related_by_containment(a: &Span, b: &Span) -> bool {
   a_contains_b || b_contains_a
 }
 
-pub trait ShResultExt {
+pub(crate) trait ShResultExt {
   fn try_blame(self, span: Span) -> Self;
   /// If the value is `Err()`, attach a span to it
   fn promote_err(self, span: Span) -> Self;
@@ -211,7 +211,7 @@ impl LabelMsg {
     }
   }
 
-  pub fn lazy(f: impl Fn() -> VarStr + 'static) -> Self {
+  pub(crate) fn lazy(f: impl Fn() -> VarStr + 'static) -> Self {
     LabelMsg::Lazy(Rc::new(f))
   }
 }
@@ -248,22 +248,22 @@ pub(crate) struct LabelBuilder {
 }
 
 impl LabelBuilder {
-  pub fn new(span: Span) -> Self {
+  pub(crate) fn new(span: Span) -> Self {
     Self {
       span,
       message: None,
       color: None,
     }
   }
-  pub fn with_message(mut self, message: impl Into<LabelMsg>) -> Self {
+  pub(crate) fn with_message(mut self, message: impl Into<LabelMsg>) -> Self {
     self.message = Some(message.into());
     self
   }
-  pub fn with_color(mut self, color: Color) -> Self {
+  pub(crate) fn with_color(mut self, color: Color) -> Self {
     self.color = Some(color);
     self
   }
-  pub fn span(&self) -> Span {
+  pub(crate) fn span(&self) -> Span {
     self.span.clone()
   }
 }
@@ -297,7 +297,7 @@ pub(crate) struct ShErr {
 }
 
 impl ShErr {
-  pub fn new(kind: ShErrKind, span: Span) -> Self {
+  pub(crate) fn new(kind: ShErrKind, span: Span) -> Self {
     Self {
       kind,
       src_span: Some(span),
@@ -306,7 +306,7 @@ impl ShErr {
       io_guards: vec![],
     }
   }
-  pub fn simple(kind: ShErrKind, msg: VarStr) -> Self {
+  pub(crate) fn simple(kind: ShErrKind, msg: VarStr) -> Self {
     Self {
       kind,
       src_span: None,
@@ -315,19 +315,19 @@ impl ShErr {
       io_guards: vec![],
     }
   }
-  pub fn loop_break(code: i32) -> Self {
+  pub(crate) fn loop_break(code: i32) -> Self {
     Self::simple(
       ShErrKind::LoopContinue(code),
       varstr!("'continue' found outside of loop"),
     )
   }
-  pub fn loop_continue(code: i32) -> Self {
+  pub(crate) fn loop_continue(code: i32) -> Self {
     Self::simple(
       ShErrKind::LoopBreak(code),
       varstr!("'break' found outside of loop"),
     )
   }
-  pub fn is_flow_control(&self) -> bool {
+  pub(crate) fn is_flow_control(&self) -> bool {
     self.kind.is_flow_control()
   }
   /// Test-only: the messages of every label attached to this error, in
@@ -345,18 +345,18 @@ impl ShErr {
       })
       .collect()
   }
-  pub fn option_promote(self, span: Option<Span>) -> Self {
+  pub(crate) fn option_promote(self, span: Option<Span>) -> Self {
     match span {
       Some(span) => self.promote(span),
       None => self,
     }
   }
   /// Promotes a shell error from a simple error to an error that blames a span
-  pub fn promote(self, span: Span) -> Self {
+  pub(crate) fn promote(self, span: Span) -> Self {
     self.promote_inner(span, Self::try_blame)
   }
 
-  pub fn force_promote(self, span: Span) -> Self {
+  pub(crate) fn force_promote(self, span: Span) -> Self {
     self.promote_inner(span, Self::blame)
   }
 
@@ -364,7 +364,7 @@ impl ShErr {
   ///
   /// Takes the span of the outer-most label, and the message/color of the inner-most label
   /// and combines them into one, discarding all intermediate labels.
-  pub fn collapse_context(self) -> Self {
+  pub(crate) fn collapse_context(self) -> Self {
     if self.labels.is_empty() {
       return self;
     }
@@ -400,38 +400,38 @@ impl ShErr {
   /// Persist all io guards, closing saved fds without restoring them.
   /// Use this when an error is being converted to a control flow signal
   /// (like `ErrInterrupt`) that will propagate past the redirect scope.
-  pub fn persist_redirs(&mut self) {
+  pub(crate) fn persist_redirs(&mut self) {
     for guard in self.io_guards.drain(..) {
       guard.persist();
     }
   }
   /// Give a redirguard to this error so that it remains alive
   /// This allows redirguards to move their guarded context upwards
-  pub fn with_redirs(mut self, guard: Option<RedirGuard>) -> Self {
+  pub(crate) fn with_redirs(mut self, guard: Option<RedirGuard>) -> Self {
     if let Some(guard) = guard {
       self.io_guards.push(guard);
     }
     self
   }
-  pub fn at(kind: ShErrKind, span: Span, msg: VarStr) -> Self {
+  pub(crate) fn at(kind: ShErrKind, span: Span, msg: VarStr) -> Self {
     let color = last_color();
     let label = LabelBuilder::new(span.clone())
       .with_message(msg)
       .with_color(color);
     Self::new(kind, span.clone()).with_label(label)
   }
-  pub fn labeled(self, span: Span, msg: VarStr) -> Self {
+  pub(crate) fn labeled(self, span: Span, msg: VarStr) -> Self {
     let color = last_color();
     let label = LabelBuilder::new(span.clone())
       .with_message(msg)
       .with_color(color);
     self.with_label(label)
   }
-  pub fn blame(mut self, span: Span) -> Self {
+  pub(crate) fn blame(mut self, span: Span) -> Self {
     self.src_span = Some(span);
     self
   }
-  pub fn try_blame(self, span: Span) -> Self {
+  pub(crate) fn try_blame(self, span: Span) -> Self {
     match self {
       ShErr { src_span: None, .. } => Self {
         src_span: Some(span),
@@ -440,31 +440,31 @@ impl ShErr {
       _ => self,
     }
   }
-  pub fn kind(&self) -> &ShErrKind {
+  pub(crate) fn kind(&self) -> &ShErrKind {
     &self.kind
   }
-  pub fn kind_mut(&mut self) -> &mut ShErrKind {
+  pub(crate) fn kind_mut(&mut self) -> &mut ShErrKind {
     &mut self.kind
   }
-  pub fn set_kind(&mut self, kind: ShErrKind) {
+  pub(crate) fn set_kind(&mut self, kind: ShErrKind) {
     self.kind = kind;
   }
-  pub fn with_label(mut self, label: LabelBuilder) -> Self {
+  pub(crate) fn with_label(mut self, label: LabelBuilder) -> Self {
     self.labels.push(label);
     self
   }
-  pub fn with_context<'a>(mut self, ctx: impl Iterator<Item = &'a LabelBuilder>) -> Self {
+  pub(crate) fn with_context<'a>(mut self, ctx: impl Iterator<Item = &'a LabelBuilder>) -> Self {
     self.labels.extend(ctx.cloned());
     self
   }
-  pub fn with_note(mut self, note: VarStr) -> Self {
+  pub(crate) fn with_note(mut self, note: VarStr) -> Self {
     self.notes.push(note);
     self
   }
-  pub fn src_span(&self) -> Option<&Span> {
+  pub(crate) fn src_span(&self) -> Option<&Span> {
     self.src_span.as_ref()
   }
-  pub fn build_report(&self) -> Option<Report<'_, Span>> {
+  pub(crate) fn build_report(&self) -> Option<Report<'_, Span>> {
     let span = self.src_span.as_ref()?;
     let kind = if self.kind().is_warning() {
       ReportKind::Warning
@@ -532,7 +532,7 @@ impl ShErr {
       self.default_write(fd);
     }
   }
-  pub fn print_error(self) {
+  pub(crate) fn print_error(self) {
     // retrieve and attach the active call-frame traceback context, if any
     let frames = crate::state::Shed::call_context();
     let with_frames = if frames.is_empty() {
@@ -592,7 +592,7 @@ impl From<Errno> for ShErr {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum ShErrKind {
+pub(crate) enum ShErrKind {
   IoErr(std::io::ErrorKind),
   Custom(VarStr, i32), // message, error code
   InvalidOpt,
@@ -628,7 +628,7 @@ pub enum ShErrKind {
 }
 
 impl ShErrKind {
-  pub fn is_flow_control(&self) -> bool {
+  pub(crate) fn is_flow_control(&self) -> bool {
     matches!(
       self,
       Self::CleanExit(_)
@@ -638,7 +638,7 @@ impl ShErrKind {
         | Self::Interrupt
     )
   }
-  pub fn is_warning(&self) -> bool {
+  pub(crate) fn is_warning(&self) -> bool {
     matches!(self, Self::DeprecationWarning)
   }
 }

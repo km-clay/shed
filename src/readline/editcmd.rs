@@ -38,34 +38,34 @@ pub(crate) struct EditCmd {
 }
 
 impl EditCmd {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub fn set_motion(&mut self, motion: Cmd<Motion>) {
+  pub(crate) fn set_motion(&mut self, motion: Cmd<Motion>) {
     self.motion = Some(motion);
   }
-  pub fn set_verb(&mut self, verb: Cmd<Verb>) {
+  pub(crate) fn set_verb(&mut self, verb: Cmd<Verb>) {
     self.verb = Some(verb);
   }
-  pub fn new_with_verb(&self, verb: Option<Cmd<Verb>>) -> Self {
+  pub(crate) fn new_with_verb(&self, verb: Option<Cmd<Verb>>) -> Self {
     Self {
       verb,
       ..self.clone()
     }
   }
-  pub fn verb_is(&self, verb: &Verb) -> bool {
+  pub(crate) fn verb_is(&self, verb: &Verb) -> bool {
     self.verb().is_some_and(|v| v.1 == *verb)
   }
-  pub fn motion_is(&self, motion: &Motion) -> bool {
+  pub(crate) fn motion_is(&self, motion: &Motion) -> bool {
     self.motion().is_some_and(|m| m.1 == *motion)
   }
-  pub fn new_with_motion(&self, motion: Option<Cmd<Motion>>) -> Self {
+  pub(crate) fn new_with_motion(&self, motion: Option<Cmd<Motion>>) -> Self {
     Self {
       motion,
       ..self.clone()
     }
   }
-  pub fn history_scroll_offset(&self) -> Option<isize> {
+  pub(crate) fn history_scroll_offset(&self) -> Option<isize> {
     if matches!(
       self.verb().map(|v| &v.1),
       Some(Verb::HistoryUp | Verb::HistoryDown)
@@ -92,19 +92,19 @@ impl EditCmd {
       None
     }
   }
-  pub fn verb(&self) -> Option<&Cmd<Verb>> {
+  pub(crate) fn verb(&self) -> Option<&Cmd<Verb>> {
     self.verb.as_ref()
   }
-  pub fn verb_mut(&mut self) -> Option<&mut Cmd<Verb>> {
+  pub(crate) fn verb_mut(&mut self) -> Option<&mut Cmd<Verb>> {
     self.verb.as_mut()
   }
-  pub fn motion(&self) -> Option<&Cmd<Motion>> {
+  pub(crate) fn motion(&self) -> Option<&Cmd<Motion>> {
     self.motion.as_ref()
   }
-  pub fn verb_count(&self) -> usize {
+  pub(crate) fn verb_count(&self) -> usize {
     self.verb.as_ref().map_or(1, |v| v.0)
   }
-  pub fn normalize_counts(&mut self) {
+  pub(crate) fn normalize_counts(&mut self) {
     let Some(verb) = self.verb.as_mut() else {
       return;
     };
@@ -117,19 +117,19 @@ impl EditCmd {
     verb.0 = 1;
     motion.0 = product;
   }
-  pub fn is_repeatable(&self) -> bool {
+  pub(crate) fn is_repeatable(&self) -> bool {
     self.verb.as_ref().is_some_and(|v| v.1.is_repeatable())
   }
-  pub fn is_edit(&self) -> bool {
+  pub(crate) fn is_edit(&self) -> bool {
     self.verb.as_ref().is_some_and(|v| v.1.is_edit())
   }
-  pub fn is_cmd_repeat(&self) -> bool {
+  pub(crate) fn is_cmd_repeat(&self) -> bool {
     self
       .verb
       .as_ref()
       .is_some_and(|v| matches!(v.1, Verb::RepeatLast))
   }
-  pub fn is_virtual_scroll(&self) -> bool {
+  pub(crate) fn is_virtual_scroll(&self) -> bool {
     self.verb.as_ref().is_none()
       && self
         .motion
@@ -139,19 +139,19 @@ impl EditCmd {
         .flags
         .intersects(CmdFlags::HAS_SHIFT | CmdFlags::HAS_CTRL)
   }
-  pub fn is_motion_repeat(&self) -> bool {
+  pub(crate) fn is_motion_repeat(&self) -> bool {
     self
       .motion
       .as_ref()
       .is_some_and(|m| matches!(m.1, Motion::RepeatMotion | Motion::RepeatMotionRev))
   }
-  pub fn is_char_search(&self) -> bool {
+  pub(crate) fn is_char_search(&self) -> bool {
     self
       .motion
       .as_ref()
       .is_some_and(|m| matches!(m.1, Motion::CharSearch(..)))
   }
-  pub fn is_separator_insert(&self) -> bool {
+  pub(crate) fn is_separator_insert(&self) -> bool {
     self.verb.as_ref().is_some_and(|v| {
       let mut ifs = try_var!("IFS").unwrap_or(" \t\n".into()).to_string();
       ifs.push(';');
@@ -163,14 +163,14 @@ impl EditCmd {
       }
     })
   }
-  pub fn try_get_normal_seq(&self) -> Option<(&str, bool)> {
+  pub(crate) fn try_get_normal_seq(&self) -> Option<(&str, bool)> {
     let Some(Cmd(_, Verb::ExCmd(node))) = self.verb.as_ref() else {
       return None;
     };
     find_normal_seq(node)
   }
   /// Constructs a plain `:w` command, which is used as the default write command for `:x` and `:wq`
-  pub fn plain_write() -> Self {
+  pub(crate) fn plain_write() -> Self {
     EditCmd {
       register: RegisterName::default(),
       verb: Some(verb!(Verb::ExCmd(ExNode {
@@ -196,7 +196,7 @@ fn find_normal_seq(node: &ExNode) -> Option<(&str, bool)> {
 }
 
 impl EditCmd {
-  pub fn is_quit(&self) -> bool {
+  pub(crate) fn is_quit(&self) -> bool {
     matches!(
       self.verb.as_ref(),
       Some(Cmd(
@@ -209,7 +209,7 @@ impl EditCmd {
       ))
     )
   }
-  pub fn is_write_quit(&self) -> bool {
+  pub(crate) fn is_write_quit(&self) -> bool {
     matches!(
       self.verb.as_ref(),
       Some(Cmd(
@@ -222,7 +222,7 @@ impl EditCmd {
       ))
     )
   }
-  pub fn is_shell_cmd(&self) -> bool {
+  pub(crate) fn is_shell_cmd(&self) -> bool {
     matches!(
       self.verb.as_ref(),
       Some(Cmd(
@@ -235,27 +235,27 @@ impl EditCmd {
       ))
     )
   }
-  pub fn is_submit_action(&self) -> bool {
+  pub(crate) fn is_submit_action(&self) -> bool {
     self
       .verb
       .as_ref()
       .is_some_and(|v| matches!(v.1, Verb::AcceptLineOrNewline))
       || self.flags.contains(CmdFlags::IS_SUBMIT)
   }
-  pub fn is_undo_op(&self) -> bool {
+  pub(crate) fn is_undo_op(&self) -> bool {
     self
       .verb
       .as_ref()
       .is_some_and(|v| matches!(v.1, Verb::Undo | Verb::Redo))
   }
-  pub fn is_line_motion(&self) -> bool {
+  pub(crate) fn is_line_motion(&self) -> bool {
     self
       .motion
       .as_ref()
       .is_some_and(|m| matches!(m.1, Motion::LineUp | Motion::LineDown))
   }
   /// If a `EditCmd` has a linewise motion, but no verb, we change it to charwise
-  pub fn is_mode_transition(&self) -> bool {
+  pub(crate) fn is_mode_transition(&self) -> bool {
     self.verb.as_ref().is_some_and(|v| {
       matches!(
         v.1,
@@ -277,9 +277,9 @@ impl EditCmd {
 }
 
 #[derive(Clone, Debug)]
-pub struct Cmd<T>(pub usize, pub T);
+pub(crate) struct Cmd<T>(pub usize, pub T);
 
-pub fn invert_char_motion(motion: Cmd<Motion>) -> Cmd<Motion> {
+pub(super) fn invert_char_motion(motion: Cmd<Motion>) -> Cmd<Motion> {
   let Cmd(count, Motion::CharSearch(dir, dest, ch)) = motion else {
     return motion;
   };
@@ -291,13 +291,13 @@ pub fn invert_char_motion(motion: Cmd<Motion>) -> Cmd<Motion> {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum StashListArg {
+pub(crate) enum StashListArg {
   Stack,
   Named,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum StashArgs {
+pub(crate) enum StashArgs {
   Push(Option<VarStr>),
   Pop(Option<VarStr>),
   Drop(Option<VarStr>),
@@ -309,7 +309,7 @@ pub enum StashArgs {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum Verb {
+pub(crate) enum Verb {
   // misc stuff
   HistoryUp,
   HistoryDown,
@@ -375,7 +375,7 @@ pub enum Verb {
 }
 
 impl Verb {
-  pub fn is_repeatable(&self) -> bool {
+  pub(crate) fn is_repeatable(&self) -> bool {
     matches!(
       self,
       Self::Delete
@@ -404,7 +404,7 @@ impl Verb {
         | Self::Equalize
     )
   }
-  pub fn is_edit(&self) -> bool {
+  pub(crate) fn is_edit(&self) -> bool {
     matches!(
       self,
       Self::Delete
@@ -433,13 +433,13 @@ impl Verb {
         | Self::DecrementNumber(_)
     )
   }
-  pub fn is_char_insert(&self) -> bool {
+  pub(crate) fn is_char_insert(&self) -> bool {
     matches!(self, Self::InsertChar(_) | Self::ReplaceChar(_))
   }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord)]
-pub enum LineAddr {
+pub(crate) enum LineAddr {
   Number(usize),
   Current,
   Last,
@@ -451,7 +451,7 @@ pub enum LineAddr {
 
 #[expect(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Motion {
+pub(crate) enum Motion {
   WholeLine,
   TextObj(TextObj),
   EndOfLastWord,
@@ -491,7 +491,7 @@ impl Motion {
   /// Builds a `Motion::WordMotion` from the given characters
   /// takes a slice because of the 'ge' case.
   /// Only works for w, W, b, B, e, and E, and 'ge'
-  pub fn word_motion(chars: &[char]) -> Option<Self> {
+  pub(crate) fn word_motion(chars: &[char]) -> Option<Self> {
     match chars.first()? {
       'w' => Some(Motion::WordMotion(
         To::Start,
@@ -533,12 +533,12 @@ impl Motion {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum Anchor {
+pub(crate) enum Anchor {
   After,
   Before,
 }
 #[derive(Copy, Debug, Clone, Eq, PartialEq)]
-pub enum TextObj {
+pub(crate) enum TextObj {
   /// `iw`, `aw` - inner word, around word
   Word(Word, Bound),
 
@@ -568,24 +568,24 @@ pub enum TextObj {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum Word {
+pub(crate) enum Word {
   Big,
   Normal,
 }
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum Bound {
+pub(crate) enum Bound {
   Inside,
   Around,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum Dest {
+pub(crate) enum Dest {
   On,
   Before,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum To {
+pub(crate) enum To {
   Start,
   End,
 }
@@ -593,13 +593,13 @@ pub enum To {
 // Ex-mode types
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum ReadSrc {
+pub(crate) enum ReadSrc {
   File(PathBuf),
   Cmd(VarStr),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum WriteDest {
+pub(crate) enum WriteDest {
   File(Option<PathBuf>),
   FileAppend(Option<PathBuf>),
   Cmd(VarStr),

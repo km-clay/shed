@@ -11,7 +11,7 @@ impl ParseStream {
     assert!(self.cursor + num_consumed <= self.tokens.len());
     self.cursor += num_consumed;
   }
-  pub fn last_consumed_was_sep(&self) -> bool {
+  pub(super) fn last_consumed_was_sep(&self) -> bool {
     self
       .tokens
       .get(self.cursor.wrapping_sub(1))

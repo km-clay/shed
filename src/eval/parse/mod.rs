@@ -52,7 +52,7 @@ pub(crate) struct ParsedSrc {
 }
 
 impl ParsedSrc {
-  pub fn new(src: VarStr) -> Self {
+  pub(crate) fn new(src: VarStr) -> Self {
     let src = if src.contains_slice(b"\\\n") || src.contains(&b'\r') {
       clean_input(&src)
     } else {
@@ -67,19 +67,19 @@ impl ParsedSrc {
       context: VecDeque::new().into(),
     }
   }
-  pub fn with_name(mut self, name: VarStr) -> Self {
+  pub(crate) fn with_name(mut self, name: VarStr) -> Self {
     self.name = name;
     self
   }
-  pub fn with_lex_flags(mut self, flags: LexFlags) -> Self {
+  pub(crate) fn with_lex_flags(mut self, flags: LexFlags) -> Self {
     self.lex_flags = flags;
     self
   }
-  pub fn with_parse_flags(mut self, flags: ParseFlags) -> Self {
+  pub(crate) fn with_parse_flags(mut self, flags: ParseFlags) -> Self {
     self.parse_flags = flags;
     self
   }
-  pub fn parse_src(&mut self) -> Result<(), Vec<ShErr>> {
+  pub(crate) fn parse_src(&mut self) -> Result<(), Vec<ShErr>> {
     let mut tokens = vec![];
     let mut errors = vec![];
     let mut stream = LexStream::new(&self.src, self.lex_flags).with_name(self.name.clone());
@@ -123,7 +123,7 @@ impl ParsedSrc {
     self.ast = parser.tree;
     Ok(())
   }
-  pub fn into_ast(self) -> Ast {
+  pub(crate) fn into_ast(self) -> Ast {
     self.ast
   }
 }
@@ -154,7 +154,7 @@ impl Debug for ParseStream {
 }
 
 impl ParseStream {
-  pub fn new(mut tokens: Vec<Tk>, context: LabelCtx) -> Self {
+  pub(crate) fn new(mut tokens: Vec<Tk>, context: LabelCtx) -> Self {
     tokens.retain(|tk| tk.class != TkRule::Comment);
 
     let tree = Ast::with_capacity(tokens.len());
@@ -166,7 +166,7 @@ impl ParseStream {
       flags: ParseFlags::empty(),
     }
   }
-  pub fn with_flags(mut self, flags: ParseFlags) -> Self {
+  pub(crate) fn with_flags(mut self, flags: ParseFlags) -> Self {
     self.flags = flags;
     self
   }

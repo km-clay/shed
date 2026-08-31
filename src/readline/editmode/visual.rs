@@ -14,7 +14,7 @@ use super::{
 };
 
 #[derive(Debug)]
-pub struct ViVisual {
+pub(crate) struct ViVisual {
   pending_seq: String,
   parser: ViParser,
   cmds: Vec<EditCmd>,
@@ -22,7 +22,7 @@ pub struct ViVisual {
 }
 
 impl ViVisual {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       pending_seq: String::new(),
       parser: Self::parser(),
@@ -30,13 +30,13 @@ impl ViVisual {
       repeat_count: 0,
     }
   }
-  pub fn clear_cmd(&mut self) {
+  pub(crate) fn clear_cmd(&mut self) {
     self.pending_seq = String::new();
   }
-  pub fn take_cmd(&mut self) -> String {
+  pub(crate) fn take_cmd(&mut self) -> String {
     std::mem::take(&mut self.pending_seq)
   }
-  pub fn register_cmd(&mut self, cmd: &EditCmd) {
+  pub(crate) fn register_cmd(&mut self, cmd: &EditCmd) {
     self.cmds.push(cmd.clone());
   }
 
@@ -58,7 +58,7 @@ impl ViVisual {
       CmdState::Complete
     }
   }
-  pub fn parse_count(chars: &mut Peekable<Chars<'_>>) -> Option<usize> {
+  pub(crate) fn parse_count(chars: &mut Peekable<Chars<'_>>) -> Option<usize> {
     let mut count = String::new();
     let Some(_digit @ '1'..='9') = chars.peek() else {
       return None;
@@ -77,7 +77,10 @@ impl ViVisual {
     ViParser::new(None, Some(Self::parse_verb), Self::validate_combination)
   }
   #[expect(clippy::too_many_lines)]
-  pub fn parse_verb(chars: &mut Peekable<Chars<'_>>, count: usize) -> CallbackResult<Cmd<Verb>> {
+  pub(crate) fn parse_verb(
+    chars: &mut Peekable<Chars<'_>>,
+    count: usize,
+  ) -> CallbackResult<Cmd<Verb>> {
     use CallbackResult as C;
     let register = RegisterName::default();
 

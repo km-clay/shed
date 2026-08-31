@@ -55,7 +55,7 @@ use shed_macros::styled_format;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Run a closure, catching and handling `ShErrKind::CleanExit(code)` if it is returned.
-pub fn catch_exit<F: FnMut() -> ShResult<()>, E: FnMut(i32)>(mut f: F, mut on_exit: E) {
+pub(crate) fn catch_exit<F: FnMut() -> ShResult<()>, E: FnMut(i32)>(mut f: F, mut on_exit: E) {
   if let Err(e) = f() {
     if let ShErrKind::CleanExit(code) = e.kind() {
       on_exit(*code);
@@ -65,11 +65,11 @@ pub fn catch_exit<F: FnMut() -> ShResult<()>, E: FnMut(i32)>(mut f: F, mut on_ex
   }
 }
 
-pub fn exit_with(code: i32) {
+pub(crate) fn exit_with(code: i32) {
   lifecycle::exit_shed(true, code);
 }
 
-pub fn in_cd_path(name: &Tk) -> bool {
+pub(crate) fn in_cd_path(name: &Tk) -> bool {
   let Ok(expanded) = name.expand_no_side_effects() else {
     return false;
   };
@@ -91,7 +91,7 @@ pub fn in_cd_path(name: &Tk) -> bool {
   false
 }
 
-pub fn is_in_path(name: &Tk) -> bool {
+pub(crate) fn is_in_path(name: &Tk) -> bool {
   let Ok(expanded) = name.expand_no_side_effects() else {
     return false;
   };
@@ -133,7 +133,7 @@ pub fn is_in_path(name: &Tk) -> bool {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum AssignBehavior {
+pub(crate) enum AssignBehavior {
   Export,
   Set,
 }
@@ -225,32 +225,32 @@ pub(crate) fn dispatch_deferred_cmd(cmd: DeferredAst) -> bool {
 }
 
 /// Arguments to the execvpe function
-pub struct ExecArgs {
+pub(crate) struct ExecArgs {
   pub cmd: (CString, Span),
   pub argv: Rc<[CString]>,
   pub envp: Rc<[CString]>,
 }
 
 impl ExecArgs {
-  pub fn from_expanded(argv: Vec<(VarStr, Span)>) -> Self {
+  pub(crate) fn from_expanded(argv: Vec<(VarStr, Span)>) -> Self {
     let cmd = Self::get_cmd(&argv);
     let argv = Self::get_argv(argv);
     let envp = Self::get_envp();
     Self { cmd, argv, envp }
   }
-  pub fn get_cmd(argv: &[(VarStr, Span)]) -> (CString, Span) {
+  pub(crate) fn get_cmd(argv: &[(VarStr, Span)]) -> (CString, Span) {
     let cmd = argv[0].0.as_bytes();
     let span = argv[0].1.clone();
     (CString::new(cmd).unwrap(), span)
   }
-  pub fn get_argv(argv: Vec<(VarStr, Span)>) -> Rc<[CString]> {
+  pub(crate) fn get_argv(argv: Vec<(VarStr, Span)>) -> Rc<[CString]> {
     argv
       .into_iter()
       .map(|s| CString::new(s.0).unwrap())
       .collect::<Vec<CString>>()
       .into()
   }
-  pub fn get_envp() -> Rc<[CString]> {
+  pub(crate) fn get_envp() -> Rc<[CString]> {
     Shed::meta_mut(MetaTab::get_envp)
   }
 }
@@ -258,7 +258,7 @@ impl ExecArgs {
 /// Execute a `-c` command string, optimizing single simple commands to exec
 /// directly without forking. This avoids process group issues where grandchild
 /// processes (e.g. nvim spawning opencode) lose their controlling terminal.
-pub fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
+pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
   fn single_command_id(ast: &Ast, root: NodeId) -> Option<NodeId> {
     let mut id = root;
     loop {
@@ -335,13 +335,13 @@ pub fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
 ///
 /// Used in the main loop and other places that are guaranteed to be interacting with a tty somehow.
 /// This controls whether or not the shell passes terminal control to child processes.
-pub fn exec_int(input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
+pub(crate) fn exec_int(input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
   let _guard = Shed::term_mut(|t| t.interactive_guard(true));
   exec_input(input, source_name)
 }
 
 /// Execute non-interactively
-pub fn exec_nonint(input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
+pub(crate) fn exec_nonint(input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
   let _guard = Shed::term_mut(|t| t.interactive_guard(false));
   exec_input(input, source_name)
 }
@@ -350,7 +350,7 @@ pub fn exec_nonint(input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
 ///
 /// This should only be called directly if you wish to inherit
 /// the caller's interactive status.
-pub fn exec_input(mut input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
+pub(crate) fn exec_input(mut input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
   let interactive = Shed::term(Terminal::interactive);
 
   if !interactive || !Shed::shopts(|o| o.prompt.expand_aliases) {
@@ -377,7 +377,7 @@ pub fn exec_input(mut input: VarStr, source_name: Option<VarStr>) -> ShResult<()
   dispatcher.begin_dispatch(&parser.ast)
 }
 
-pub struct Dispatcher {
+pub(crate) struct Dispatcher {
   source_name: VarStr,
   pub job_stack: JobStack,
   timer_stack: Vec<Option<CmdTimer>>,
@@ -389,7 +389,7 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
-  pub fn new(source_name: VarStr) -> Self {
+  pub(crate) fn new(source_name: VarStr) -> Self {
     Self {
       source_name,
       job_stack: JobStack::new(),
@@ -398,14 +398,14 @@ impl Dispatcher {
       fork_close_fd: None,
     }
   }
-  pub fn begin_dispatch(&mut self, tree: &Ast) -> ShResult<()> {
+  pub(crate) fn begin_dispatch(&mut self, tree: &Ast) -> ShResult<()> {
     for &root in tree.roots() {
       let blame = tree.span_for(root);
       self.dispatch_node(tree, root).try_blame(blame)?;
     }
     Ok(())
   }
-  pub fn dispatch_node(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
+  pub(crate) fn dispatch_node(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
     stacker::maybe_grow(64 * 1024, 1024 * 1024, || {
       let _guard = Shed::meta_mut(MetaTab::push_procsub_frame);
 
@@ -444,7 +444,7 @@ impl Dispatcher {
       }
     })
   }
-  pub fn exec_list(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
+  pub(crate) fn exec_list(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
     let NdRule::List { commands } = &tree[node].class else {
       unreachable!()
     };
@@ -455,7 +455,7 @@ impl Dispatcher {
 
     Ok(())
   }
-  pub fn dispatch_cmd(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
+  pub(crate) fn dispatch_cmd(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
     let (line, _) = tree.span_for(node).clone().line_and_col();
     Shed::vars_mut(|v| v.set_var("LINENO", VarKind::Int((line + 1) as i32), VarFlags::empty()))?;
 
@@ -510,7 +510,7 @@ impl Dispatcher {
       self.exec_cmd(tree, node)
     }
   }
-  pub fn exec_defer(tree: &Ast, node: NodeId) -> ShResult<()> {
+  pub(crate) fn exec_defer(tree: &Ast, node: NodeId) -> ShResult<()> {
     let NdRule::DeferNode { body, ctx } = &tree[node].class else {
       unreachable!()
     };
@@ -541,7 +541,7 @@ impl Dispatcher {
     Shed::vars_mut(|v| v.cur_scope_mut().defer_cmd(body, tree[*ctx].clone()));
     Ok(())
   }
-  pub fn exec_try(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
+  pub(crate) fn exec_try(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
     let try_blame = tree.span_for(node);
     let NdRule::TryNode {
       body,
@@ -603,7 +603,7 @@ impl Dispatcher {
       }
     }
   }
-  pub fn exec_negated(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
+  pub(crate) fn exec_negated(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
     let NdRule::Negate { cmd } = &tree[node].class else {
       unreachable!()
     };
@@ -613,7 +613,7 @@ impl Dispatcher {
 
     Ok(())
   }
-  pub fn exec_timed(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
+  pub(crate) fn exec_timed(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
     let NdRule::Timed { cmd } = &tree[node].class else {
       unreachable!();
     };
@@ -623,7 +623,7 @@ impl Dispatcher {
     self.timer_stack.pop();
     res
   }
-  pub fn exec_conjunction(&mut self, tree: &Ast, conj: NodeId) -> ShResult<()> {
+  pub(crate) fn exec_conjunction(&mut self, tree: &Ast, conj: NodeId) -> ShResult<()> {
     let span = tree.span_for(conj);
     let NdRule::Conjunction { elements } = &tree[conj].class else {
       unreachable!()
@@ -660,7 +660,7 @@ impl Dispatcher {
     Shed::set_status_from_bool(val != 0.0);
     Ok(())
   }
-  pub fn exec_func_def(tree: &Ast, func_def: NodeId) -> ShResult<()> {
+  pub(crate) fn exec_func_def(tree: &Ast, func_def: NodeId) -> ShResult<()> {
     let blame = tree.span_for(func_def);
     let NdRule::FuncDef { name, body, ctx } = &tree[func_def].class else {
       unreachable!()
@@ -1599,7 +1599,7 @@ impl Dispatcher {
     }
   }
   #[expect(clippy::too_many_lines)]
-  pub fn exec_cmd(&mut self, tree: &Ast, cmd_id: NodeId) -> ShResult<()> {
+  pub(crate) fn exec_cmd(&mut self, tree: &Ast, cmd_id: NodeId) -> ShResult<()> {
     let cmd = &tree[cmd_id];
     let context = &cmd.context;
     let NdRule::Command { assignments, argv } = &cmd.class else {
@@ -1882,11 +1882,11 @@ impl Dispatcher {
       }
     }
   }
-  pub fn take_timer(&mut self) -> Option<CmdTimer> {
+  pub(crate) fn take_timer(&mut self) -> Option<CmdTimer> {
     self.timer_stack.last_mut().and_then(Option::take)
   }
   #[expect(clippy::too_many_lines)]
-  pub fn set_assignments(
+  pub(crate) fn set_assignments(
     tree: &Ast,
     assigns: &[NodeId],
     behavior: AssignBehavior,
@@ -2188,7 +2188,7 @@ impl Dispatcher {
   }
 }
 
-pub fn prepare_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
+pub(crate) fn prepare_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
   prepare_argv_with(argv, false)
 }
 
@@ -2196,7 +2196,7 @@ pub fn prepare_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
 /// `no_split` is set by `parse_cmd` for `[[`/`]]` commands so operands like
 /// `$unset` survive expansion as the empty string instead of vanishing
 /// from argv (bash `[[ ]]` semantics).
-pub fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(VarStr, Span)>> {
+pub(crate) fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(VarStr, Span)>> {
   let mut out = Vec::with_capacity(argv.len());
 
   for arg in argv {
@@ -2221,21 +2221,21 @@ pub fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(VarStr, S
   Ok(out)
 }
 
-pub fn is_func_node(cmd: NodeId, tree: &Ast) -> bool {
+pub(crate) fn is_func_node(cmd: NodeId, tree: &Ast) -> bool {
   tree
     .command_for(cmd)
     .is_some_and(|cmd_word| is_func(&cmd_word.to_str_lossy()))
 }
 
-pub fn is_func(name: &str) -> bool {
+pub(crate) fn is_func(name: &str) -> bool {
   Shed::logic(|l| l.has_command_func(name))
 }
 
-pub fn is_arith(tk: &Tk) -> bool {
+pub(crate) fn is_arith(tk: &Tk) -> bool {
   tk.flags.contains(TkFlags::IS_ARITH)
 }
 
-pub fn can_autocd(cmd: &Tk) -> bool {
+pub(crate) fn can_autocd(cmd: &Tk) -> bool {
   shopt!(core.autocd) && in_cd_path(cmd) && !is_in_path(cmd)
 }
 
@@ -2250,7 +2250,7 @@ pub(crate) fn is_builtin(cmd: NodeId, tree: &Ast) -> bool {
 }
 
 /// Checks if a command will fork on its own or not
-pub fn runs_inline(cmd: &Node, tree: &Ast) -> bool {
+pub(crate) fn runs_inline(cmd: &Node, tree: &Ast) -> bool {
   match &cmd.class {
     NdRule::Command { argv, .. } => {
       if argv.is_empty() {
@@ -2279,7 +2279,7 @@ pub fn runs_inline(cmd: &Node, tree: &Ast) -> bool {
   }
 }
 
-pub fn will_fork(cmd: &Node, tree: &Ast) -> bool {
+pub(crate) fn will_fork(cmd: &Node, tree: &Ast) -> bool {
   match &cmd.class {
     NdRule::Subshell { .. } => true,
     NdRule::Command { argv, .. } if !argv.is_empty() => {
@@ -2291,7 +2291,7 @@ pub fn will_fork(cmd: &Node, tree: &Ast) -> bool {
   }
 }
 
-pub fn pipefail_span(spans: &[Span]) -> Option<Span> {
+pub(crate) fn pipefail_span(spans: &[Span]) -> Option<Span> {
   let pipestatus = Shed::vars(|v| v.try_get_arr_elems("PIPESTATUS")).ok()?;
   for (i, status) in pipestatus.into_iter().enumerate().rev() {
     let status = status.to_str_lossy().parse::<usize>().ok()?;
@@ -2302,7 +2302,7 @@ pub fn pipefail_span(spans: &[Span]) -> Option<Span> {
   None
 }
 
-pub fn check_err(
+pub(crate) fn check_err(
   flags: NdFlags,
   err: Option<ShErr>,
   span: Option<Span>,

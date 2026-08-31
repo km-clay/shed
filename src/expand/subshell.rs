@@ -20,7 +20,7 @@ use nix::errno::Errno;
 use nix::sys::wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid};
 use nix::unistd::{ForkResult, fork};
 
-pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
+pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
   let (rpipe, wpipe) = procio::pipes_high_no_cloexec()?;
   let rpipe_raw = rpipe.as_raw_fd();
   let wpipe_raw = wpipe.as_raw_fd();
@@ -91,7 +91,7 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
   }
 }
 
-pub fn is_internal(raw: &str) -> bool {
+pub(crate) fn is_internal(raw: &str) -> bool {
   let mut parser = ParsedSrc::new(raw.into()).with_name("is_internal check".into());
 
   if parser.parse_src().is_err() {
@@ -116,7 +116,7 @@ pub fn is_internal(raw: &str) -> bool {
   true
 }
 
-pub fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
+pub(crate) fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
   let sink_scope = SinkScope::new();
   let _ceiling = guards::isolation_guard(None);
 
@@ -141,7 +141,7 @@ pub fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
 }
 
 /// Get the command output of a given command input as a String
-pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
+pub(crate) fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
   if raw.starts_with('(') && raw.ends_with(')') {
     return arithmetic::expand_arithmetic_wrapped(raw.as_bytes());
   }

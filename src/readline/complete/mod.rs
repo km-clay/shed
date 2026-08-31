@@ -112,7 +112,7 @@ enum CompStrat {
 }
 
 impl CompStrat {
-  pub fn resolve(tks: &[CtxTk], cursor_pos: usize) -> (Self, Span, usize) {
+  pub(crate) fn resolve(tks: &[CtxTk], cursor_pos: usize) -> (Self, Span, usize) {
     // first check to see if it is a redirect target
     // if it is, we complete files.
     if let Some((idx, tok)) = tks
@@ -483,7 +483,7 @@ impl std::ops::Deref for Candidate {
 }
 
 impl Candidate {
-  pub fn is_match(&self, other: &str) -> bool {
+  pub(crate) fn is_match(&self, other: &str) -> bool {
     let ignore_case = shopt!(prompt.completion_ignore_case);
     if ignore_case {
       let other_lower = other.to_lowercase();
@@ -493,30 +493,30 @@ impl Candidate {
       self.content.starts_with(other)
     }
   }
-  pub fn content(&self) -> &str {
+  pub(crate) fn content(&self) -> &str {
     &self.content
   }
-  pub fn desc(&self) -> Option<&str> {
+  pub(crate) fn desc(&self) -> Option<&str> {
     self.desc.as_deref()
   }
-  pub fn id(&self) -> Option<usize> {
+  pub(crate) fn id(&self) -> Option<usize> {
     self.id
   }
-  pub fn weight(&self) -> i32 {
+  pub(crate) fn weight(&self) -> i32 {
     self.weight
   }
-  pub fn as_str(&self) -> &str {
+  pub(crate) fn as_str(&self) -> &str {
     &self.content
   }
-  pub fn with_desc(mut self, desc: &VarStr) -> Self {
+  pub(crate) fn with_desc(mut self, desc: &VarStr) -> Self {
     self.desc = Some(desc.to_str_lossy().into_owned());
     self
   }
-  pub fn with_weight(mut self, weight: i32) -> Self {
+  pub(crate) fn with_weight(mut self, weight: i32) -> Self {
     self.weight = weight;
     self
   }
-  pub fn display(&self) -> String {
+  pub(crate) fn display(&self) -> String {
     let mut out = String::with_capacity(self.content.len());
     let mut chars = self.content.chars();
     while let Some(ch) = chars.next() {
@@ -531,7 +531,7 @@ impl Candidate {
     out
   }
 
-  pub fn strip_prefix(&self, prefix: &str) -> Option<String> {
+  pub(crate) fn strip_prefix(&self, prefix: &str) -> Option<String> {
     let ignore_case = shopt!(prompt.completion_ignore_case);
     if ignore_case {
       let old_len = self.content.len();
@@ -899,18 +899,18 @@ pub(crate) struct BashCompSpec {
 
 #[allow(dead_code)]
 impl BashCompSpec {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub fn with_func(mut self, func: VarStr) -> Self {
+  pub(crate) fn with_func(mut self, func: VarStr) -> Self {
     self.function = Some(func);
     self
   }
-  pub fn with_wordlist(mut self, wordlist: Vec<VarStr>) -> Self {
+  pub(crate) fn with_wordlist(mut self, wordlist: Vec<VarStr>) -> Self {
     self.wordlist = Some(wordlist);
     self
   }
-  pub fn with_source(mut self, source: VarStr) -> Self {
+  pub(crate) fn with_source(mut self, source: VarStr) -> Self {
     self.source = source;
     self
   }
@@ -926,34 +926,34 @@ impl BashCompSpec {
       ..self
     }
   }
-  pub fn files(self, enable: bool) -> Self {
+  pub(crate) fn files(self, enable: bool) -> Self {
     self.toggle_flag(CompFlags::FILES, enable)
   }
-  pub fn dirs(self, enable: bool) -> Self {
+  pub(crate) fn dirs(self, enable: bool) -> Self {
     self.toggle_flag(CompFlags::DIRS, enable)
   }
-  pub fn commands(self, enable: bool) -> Self {
+  pub(crate) fn commands(self, enable: bool) -> Self {
     self.toggle_flag(CompFlags::CMDS, enable)
   }
-  pub fn users(self, enable: bool) -> Self {
+  pub(crate) fn users(self, enable: bool) -> Self {
     self.toggle_flag(CompFlags::USERS, enable)
   }
-  pub fn vars(self, enable: bool) -> Self {
+  pub(crate) fn vars(self, enable: bool) -> Self {
     self.toggle_flag(CompFlags::VARS, enable)
   }
-  pub fn signals(self, enable: bool) -> Self {
+  pub(crate) fn signals(self, enable: bool) -> Self {
     self.toggle_flag(CompFlags::SIGNALS, enable)
   }
-  pub fn jobs(self, enable: bool) -> Self {
+  pub(crate) fn jobs(self, enable: bool) -> Self {
     self.toggle_flag(CompFlags::JOBS, enable)
   }
-  pub fn aliases(self, enable: bool) -> Self {
+  pub(crate) fn aliases(self, enable: bool) -> Self {
     self.toggle_flag(CompFlags::ALIAS, enable)
   }
-  pub fn builtins(self, enable: bool) -> Self {
+  pub(crate) fn builtins(self, enable: bool) -> Self {
     self.toggle_flag(CompFlags::BUILTINS, enable)
   }
-  pub fn from_comp_opts(opts: CompOpts) -> Self {
+  pub(crate) fn from_comp_opts(opts: CompOpts) -> Self {
     let CompOpts {
       func,
       wordlist,
@@ -969,7 +969,7 @@ impl BashCompSpec {
       source: VarStr::default(),
     }
   }
-  pub fn exec_comp_func(&self, ctx: &CompContext) -> ShResult<Vec<Candidate>> {
+  pub(crate) fn exec_comp_func(&self, ctx: &CompContext) -> ShResult<Vec<Candidate>> {
     let mut vars_to_unset = HashSet::default();
     for var in [
       "COMP_WORDS",
@@ -1194,7 +1194,7 @@ pub(crate) struct CompContext {
 }
 
 impl CompContext {
-  pub fn cmd(&self) -> Option<&str> {
+  pub(crate) fn cmd(&self) -> Option<&str> {
     self.words.first().map(String::as_str)
   }
 }
@@ -1207,7 +1207,7 @@ pub(crate) enum CompResult {
 }
 
 impl CompResult {
-  pub fn from_candidates(mut candidates: Vec<Candidate>) -> Self {
+  pub(super) fn from_candidates(mut candidates: Vec<Candidate>) -> Self {
     if candidates.is_empty() {
       Self::NoMatch
     } else if candidates.len() == 1 {
@@ -1219,7 +1219,7 @@ impl CompResult {
     }
   }
 
-  pub fn try_collapse_by_prefix(self, typed: &str) -> Self {
+  pub(super) fn try_collapse_by_prefix(self, typed: &str) -> Self {
     let Self::Many { candidates } = self else {
       return self;
     };
@@ -1270,7 +1270,7 @@ pub(crate) enum CompMatch {
 }
 
 impl CompMatch {
-  pub fn into_line(self) -> String {
+  pub(crate) fn into_line(self) -> String {
     match self {
       Self::Exact { line } | Self::CommonPrefix { line } | Self::Cycled { line } => line,
     }
@@ -1279,7 +1279,7 @@ impl CompMatch {
   /// for outer completers that wrap `SimpleCompleter`: they want to preserve
   /// the match-kind their inner completer determined, but the line they emit
   /// is built from their own splicing logic.
-  pub fn with_line(self, line: String) -> Self {
+  pub(crate) fn with_line(self, line: String) -> Self {
     match self {
       Self::Exact { .. } => Self::Exact { line },
       Self::CommonPrefix { .. } => Self::CommonPrefix { line },
@@ -1409,7 +1409,7 @@ impl Completer for SimpleCompleter {
 }
 
 impl SimpleCompleter {
-  pub fn cycle_completion(&mut self, direction: i32) -> String {
+  pub(super) fn cycle_completion(&mut self, direction: i32) -> String {
     if self.candidates.is_empty() {
       return self.original_input.clone();
     }
@@ -1420,7 +1420,7 @@ impl SimpleCompleter {
     self.get_completed_line()
   }
 
-  pub fn add_spaces(&mut self) {
+  pub(super) fn add_spaces(&mut self) {
     if self.add_space {
       self.candidates = std::mem::take(&mut self.candidates)
         .into_iter()
@@ -1439,7 +1439,7 @@ impl SimpleCompleter {
     }
   }
 
-  pub fn start_completion(
+  pub(super) fn start_completion(
     &mut self,
     line: String,
     cursor_pos: usize,
@@ -1485,7 +1485,7 @@ impl SimpleCompleter {
     }
   }
 
-  pub fn get_completed_line(&self) -> String {
+  pub(super) fn get_completed_line(&self) -> String {
     if self.candidates.is_empty() {
       return self.original_input.clone();
     }
@@ -1499,7 +1499,7 @@ impl SimpleCompleter {
     )
   }
 
-  pub fn build_comp_ctx(tks: &[CtxTk], line: &str, cursor_pos: usize) -> CompContext {
+  pub(super) fn build_comp_ctx(tks: &[CtxTk], line: &str, cursor_pos: usize) -> CompContext {
     let mut ctx = CompContext {
       words: vec![],
       cword: 0,
@@ -1574,7 +1574,7 @@ impl SimpleCompleter {
     }
   }
 
-  pub fn try_comp_spec(ctx: &CompContext) -> ShResult<CompSpecResult> {
+  pub(super) fn try_comp_spec(ctx: &CompContext) -> ShResult<CompSpecResult> {
     let Some(cmd) = ctx.cmd() else {
       return Ok(CompSpecResult::NoSpec);
     };
@@ -1593,7 +1593,7 @@ impl SimpleCompleter {
     Ok(CompSpecResult::NoSpec)
   }
 
-  pub fn get_candidates(
+  pub(super) fn get_candidates(
     &mut self,
     line: &str,
     cursor_pos: usize,

@@ -48,14 +48,14 @@ struct SearchQuery {
 }
 
 impl SearchQuery {
-  pub fn reset(&mut self) {
+  pub(crate) fn reset(&mut self) {
     self.active = false;
     self.editor.buf.clear_buffer();
     self.results.clear();
     self.active_result_idx1 = 0;
   }
 
-  pub fn is_empty(&self) -> bool {
+  pub(crate) fn is_empty(&self) -> bool {
     self.editor.buf.is_empty()
   }
 }
@@ -66,10 +66,10 @@ struct CrossRef {
 }
 
 impl CrossRef {
-  pub fn span(&self) -> &MarkedSpan {
+  pub(crate) fn span(&self) -> &MarkedSpan {
     &self.span
   }
-  pub fn resolve_target(&self, content: &str) -> String {
+  pub(crate) fn resolve_target(&self, content: &str) -> String {
     self
       .target
       .clone()
@@ -105,7 +105,7 @@ pub(super) struct HelpPager {
 }
 
 impl HelpPager {
-  pub fn new(content: &str, scroll_offset: usize, filename: Option<String>) -> Option<Self> {
+  pub(super) fn new(content: &str, scroll_offset: usize, filename: Option<String>) -> Option<Self> {
     if !unistd::isatty(procio::stdout_fileno()).unwrap_or(false) {
       // If we're not in a terminal, just print the content and exit
       // Someone could be piping the output, like `help | grep foo`
@@ -133,11 +133,11 @@ impl HelpPager {
       cross_refs,
     })
   }
-  pub fn content(&self) -> &str {
+  pub(super) fn content(&self) -> &str {
     self.content.content()
   }
 
-  pub fn cross_refs_in_viewport(&self) -> Vec<usize> {
+  pub(super) fn cross_refs_in_viewport(&self) -> Vec<usize> {
     let top = self.scroll_offset;
     let t_rows = Shed::term(Terminal::t_rows).saturating_sub(1);
     let bottom = top + t_rows;
@@ -158,7 +158,7 @@ impl HelpPager {
     }
   }
 
-  pub fn display(&mut self) -> ShResult<()> {
+  pub(super) fn display(&mut self) -> ShResult<()> {
     queue_term!(TermCtl::Cursor(Home))?;
     let height = Shed::term(Terminal::t_rows).saturating_sub(1);
 
@@ -267,7 +267,7 @@ impl HelpPager {
     Ok(())
   }
 
-  pub fn handle_input(&mut self) -> ShResult<PagerEvent> {
+  pub(super) fn handle_input(&mut self) -> ShResult<PagerEvent> {
     Shed::term_mut(Terminal::read)?;
     let keys = Shed::term_mut(Terminal::drain_keys);
 
@@ -280,7 +280,7 @@ impl HelpPager {
   }
 
   #[expect(clippy::unnested_or_patterns)]
-  pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<PagerEvent> {
+  pub(super) fn handle_key(&mut self, key: KeyEvent) -> ShResult<PagerEvent> {
     let cmd = match key {
       key!(Tab) => {
         if self.ref_keys.is_empty() {
@@ -401,12 +401,12 @@ impl HelpPager {
     Ok(PagerEvent::Continue)
   }
 
-  pub fn max_scroll(&self) -> usize {
+  pub(super) fn max_scroll(&self) -> usize {
     let content_rows = Shed::term(Terminal::t_rows).saturating_sub(1);
     self.content().lines().count().saturating_sub(content_rows)
   }
 
-  pub fn search(&mut self, jump: bool) {
+  pub(super) fn search(&mut self, jump: bool) {
     if self.search.editor.buf.to_string().is_empty() || !self.search.active {
       return;
     }
@@ -472,7 +472,7 @@ impl HelpPager {
     }
   }
 
-  pub fn jump_to_match(&mut self, dir: Direction) {
+  pub(super) fn jump_to_match(&mut self, dir: Direction) {
     if self.search.results.is_empty() {
       return;
     }
@@ -553,7 +553,7 @@ impl HelpPager {
     }
   }
 
-  pub fn enter_hint_mode(&mut self) {
+  pub(super) fn enter_hint_mode(&mut self) {
     if self.search.active {
       self.search.reset();
     }
@@ -604,7 +604,7 @@ impl HelpPager {
     PagerEvent::Continue
   }
 
-  pub fn exec_cmd(&mut self, cmd: PagerCmd) {
+  pub(super) fn exec_cmd(&mut self, cmd: PagerCmd) {
     match cmd {
       PagerCmd::Scroll(n) => {
         self.scroll_offset = self
@@ -645,7 +645,7 @@ struct HintChars {
 }
 
 impl HintChars {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       seq: "MNBVCXZPOIUYTREWQLKJHGFDSAmnbvcxzpoiuytrewqlkjhgfdsa".into(),
     }

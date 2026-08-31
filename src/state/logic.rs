@@ -26,13 +26,13 @@ pub(crate) struct ShAlias {
 }
 
 impl ShAlias {
-  pub fn new(body: VarStr, source: Span) -> Self {
+  pub(crate) fn new(body: VarStr, source: Span) -> Self {
     Self { body, source }
   }
-  pub fn body(&self) -> VarStr {
+  pub(crate) fn body(&self) -> VarStr {
     self.body.clone()
   }
-  pub fn source(&self) -> &Span {
+  pub(crate) fn source(&self) -> &Span {
     &self.source
   }
 }
@@ -62,7 +62,7 @@ pub(crate) enum IsInternal {
 /// * `Defined`, which holds the actual parsed AST and source
 /// * `Autoload`, which holds info for parsing and loading the function lazily
 #[derive(Clone, Debug)]
-pub enum ShFunc {
+pub(crate) enum ShFunc {
   Defined {
     logic: Rc<Ast>, // immutable
     source: Span,
@@ -73,7 +73,7 @@ pub enum ShFunc {
 }
 
 impl ShFunc {
-  pub fn defined(logic: Ast, source: Span) -> Self {
+  pub(crate) fn defined(logic: Ast, source: Span) -> Self {
     Self::Defined {
       logic: Rc::new(logic),
       source,
@@ -81,7 +81,7 @@ impl ShFunc {
       is_internal: None,
     }
   }
-  pub fn with_ctx(mut self, ctx: LabelBuilder) -> Self {
+  pub(crate) fn with_ctx(mut self, ctx: LabelBuilder) -> Self {
     match &mut self {
       Self::Defined { ctx: c, .. } => {
         *c = Some(ctx);
@@ -91,31 +91,31 @@ impl ShFunc {
     self
   }
   #[allow(dead_code)]
-  pub fn autoload_src(&self) -> Option<&AutoloadSrc> {
+  pub(crate) fn autoload_src(&self) -> Option<&AutoloadSrc> {
     match self {
       Self::Autoload(src) => Some(src),
       Self::Defined { .. } => None,
     }
   }
   #[allow(dead_code)]
-  pub fn source(&self) -> Option<&Span> {
+  pub(crate) fn source(&self) -> Option<&Span> {
     match self {
       Self::Defined { source, .. } => Some(source),
       Self::Autoload(_) => None,
     }
   }
   #[allow(dead_code)]
-  pub fn logic(&self) -> Option<&Ast> {
+  pub(crate) fn logic(&self) -> Option<&Ast> {
     match self {
       Self::Defined { logic, .. } => Some(&**logic),
       Self::Autoload(_) => None,
     }
   }
   #[allow(dead_code)]
-  pub fn is_defined(&self) -> bool {
+  pub(crate) fn is_defined(&self) -> bool {
     matches!(self, Self::Defined { .. })
   }
-  pub fn set_is_internal(&mut self, is_internal: IsInternal) -> ShResult<()> {
+  pub(crate) fn set_is_internal(&mut self, is_internal: IsInternal) -> ShResult<()> {
     match self {
       Self::Defined { is_internal: i, .. } => {
         *i = Some(is_internal);
@@ -153,7 +153,7 @@ pub(crate) enum AutoCmdKind {
 }
 
 impl AutoCmdKind {
-  pub fn iter() -> impl Iterator<Item = Self> {
+  pub(crate) fn iter() -> impl Iterator<Item = Self> {
     [
       Self::PreCmd,
       Self::PostCmd,
@@ -208,10 +208,10 @@ pub(crate) struct AutoCmd {
 }
 
 impl AutoCmd {
-  pub fn new(kind: AutoCmdKind, command: VarStr) -> Self {
+  pub(crate) fn new(kind: AutoCmdKind, command: VarStr) -> Self {
     Self { kind, command }
   }
-  pub fn command(&self) -> VarStr {
+  pub(crate) fn command(&self) -> VarStr {
     self.command.clone()
   }
 }
@@ -273,7 +273,7 @@ pub(crate) struct LogTab {
 }
 
 impl LogTab {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     let mut new = Self::default();
     new.register_autoload_funcs();
     new
@@ -283,10 +283,10 @@ impl LogTab {
       self.functions.insert(name, ShFunc::Autoload(src));
     }
   }
-  pub fn register_autoload_comps(&mut self) {
+  pub(crate) fn register_autoload_comps(&mut self) {
     self.comp_autoloads = autoload::CompLoader.bundled();
   }
-  pub fn get_autoload_func_names(&self) -> Vec<String> {
+  pub(crate) fn get_autoload_func_names(&self) -> Vec<String> {
     let mut names: Vec<String> = self
       .functions
       .iter()
@@ -298,7 +298,7 @@ impl LogTab {
     names.sort();
     names
   }
-  pub fn get_autoload_comp_names(&self) -> Vec<String> {
+  pub(crate) fn get_autoload_comp_names(&self) -> Vec<String> {
     let mut names: Vec<String> = self
       .comp_autoloads
       .iter()
@@ -310,36 +310,36 @@ impl LogTab {
     names.sort();
     names
   }
-  pub fn insert_comp_autoload(&mut self, name: &str, src: AutoloadSrc) {
+  pub(crate) fn insert_comp_autoload(&mut self, name: &str, src: AutoloadSrc) {
     self.comp_autoloads.insert(name.into(), src);
   }
-  pub fn insert_autocmd(&mut self, cmd: AutoCmd) {
+  pub(crate) fn insert_autocmd(&mut self, cmd: AutoCmd) {
     let entry = self.autocmds.entry(cmd.kind).or_default();
     if entry.contains(&cmd) {
       return;
     }
     entry.push(cmd);
   }
-  pub fn get_autocmds(&self, kind: AutoCmdKind) -> Vec<AutoCmd> {
+  pub(crate) fn get_autocmds(&self, kind: AutoCmdKind) -> Vec<AutoCmd> {
     self.autocmds.get(&kind).cloned().unwrap_or_default()
   }
   /// Iterate every registered autocmd in `(kind, command)` order. Skips
   /// the `notify_autocmd` side effect that `get_autocmds` performs, since
   /// dumping for `genrc` shouldn't mark autocmds as fired.
-  pub fn iter_autocmds(&self) -> impl Iterator<Item = &AutoCmd> {
+  pub(crate) fn iter_autocmds(&self) -> impl Iterator<Item = &AutoCmd> {
     let mut kinds: Vec<&AutoCmdKind> = self.autocmds.keys().collect();
     kinds.sort_by_key(ToString::to_string);
     kinds
       .into_iter()
       .flat_map(move |k| self.autocmds.get(k).map(|v| v.iter()).into_iter().flatten())
   }
-  pub fn keymaps(&self) -> &[KeyMap] {
+  pub(crate) fn keymaps(&self) -> &[KeyMap] {
     &self.keymaps
   }
-  pub fn clear_autocmds(&mut self, kind: AutoCmdKind) -> Option<Vec<AutoCmd>> {
+  pub(crate) fn clear_autocmds(&mut self, kind: AutoCmdKind) -> Option<Vec<AutoCmd>> {
     self.autocmds.remove(&kind)
   }
-  pub fn insert_keymap(&mut self, keymap: KeyMap) {
+  pub(crate) fn insert_keymap(&mut self, keymap: KeyMap) {
     for map in &mut self.keymaps {
       if map.keys == keymap.keys {
         map.flags.remove(keymap.flags);
@@ -348,7 +348,7 @@ impl LogTab {
     self.keymaps.retain(|km| !km.flags.is_empty());
     self.keymaps.push(keymap);
   }
-  pub fn remove_keymap(&mut self, keys: &str, flags: KeyMapFlags) {
+  pub(crate) fn remove_keymap(&mut self, keys: &str, flags: KeyMapFlags) {
     for km in &mut self.keymaps {
       if km.keys == keys {
         km.flags.remove(flags);
@@ -356,7 +356,7 @@ impl LogTab {
     }
     self.keymaps.retain(|km| !km.flags.is_empty());
   }
-  pub fn keymaps_filtered(&self, flags: KeyMapFlags, pending: &[KeyEvent]) -> Vec<KeyMap> {
+  pub(crate) fn keymaps_filtered(&self, flags: KeyMapFlags, pending: &[KeyEvent]) -> Vec<KeyMap> {
     self
       .keymaps
       .iter()
@@ -364,82 +364,82 @@ impl LogTab {
       .cloned()
       .collect()
   }
-  pub fn invalidate_internal_cache(&mut self) {
+  pub(crate) fn invalidate_internal_cache(&mut self) {
     for func in self.functions.values_mut() {
       if let ShFunc::Defined { is_internal, .. } = func {
         *is_internal = None;
       }
     }
   }
-  pub fn insert_func(&mut self, name: &str, src: ShFunc) {
+  pub(crate) fn insert_func(&mut self, name: &str, src: ShFunc) {
     self.functions.insert(name.into(), src);
     self.invalidate_internal_cache();
   }
-  pub fn insert_trap(&mut self, target: TrapTarget, command: VarStr) {
+  pub(crate) fn insert_trap(&mut self, target: TrapTarget, command: VarStr) {
     self.traps.insert(target, command);
   }
-  pub fn get_trap(&self, target: TrapTarget) -> Option<VarStr> {
+  pub(crate) fn get_trap(&self, target: TrapTarget) -> Option<VarStr> {
     self.traps.get(&target).cloned()
   }
-  pub fn remove_trap(&mut self, target: TrapTarget) -> Option<VarStr> {
+  pub(crate) fn remove_trap(&mut self, target: TrapTarget) -> Option<VarStr> {
     self.traps.remove(&target)
   }
-  pub fn reset_caught_traps(&mut self) {
+  pub(crate) fn reset_caught_traps(&mut self) {
     self.traps.retain(|_, command| command.is_empty());
   }
-  pub fn traps(&self) -> &HashMap<TrapTarget, VarStr> {
+  pub(crate) fn traps(&self) -> &HashMap<TrapTarget, VarStr> {
     &self.traps
   }
-  pub fn has_command_func(&self, name: &str) -> bool {
+  pub(crate) fn has_command_func(&self, name: &str) -> bool {
     self.functions.contains_key(name)
   }
-  pub fn get_func(&self, name: &str) -> Option<ShFunc> {
+  pub(crate) fn get_func(&self, name: &str) -> Option<ShFunc> {
     self.functions.get(name).cloned()
   }
-  pub fn get_func_ref(&self, name: &str) -> Option<&ShFunc> {
+  pub(crate) fn get_func_ref(&self, name: &str) -> Option<&ShFunc> {
     self.functions.get(name)
   }
-  pub fn get_func_mut(&mut self, name: &str) -> Option<&mut ShFunc> {
+  pub(crate) fn get_func_mut(&mut self, name: &str) -> Option<&mut ShFunc> {
     self.functions.get_mut(name)
   }
-  pub fn funcs(&self) -> &HashMap<String, ShFunc> {
+  pub(crate) fn funcs(&self) -> &HashMap<String, ShFunc> {
     &self.functions
   }
-  pub fn remove_func(&mut self, name: &str) -> Option<ShFunc> {
+  pub(crate) fn remove_func(&mut self, name: &str) -> Option<ShFunc> {
     let func = self.functions.remove(name);
     self.invalidate_internal_cache();
     func
   }
-  pub fn take_comp_autoload(&mut self, name: &str) -> Option<AutoloadSrc> {
+  pub(crate) fn take_comp_autoload(&mut self, name: &str) -> Option<AutoloadSrc> {
     self.comp_autoloads.remove(name)
   }
-  pub fn aliases(&self) -> &HashMap<String, ShAlias> {
+  pub(crate) fn aliases(&self) -> &HashMap<String, ShAlias> {
     &self.aliases
   }
-  pub fn insert_alias(&mut self, name: &str, body: &VarStr, source: Span) {
+  pub(crate) fn insert_alias(&mut self, name: &str, body: &VarStr, source: Span) {
     self
       .aliases
       .insert(name.into(), ShAlias::new(body.clone(), source));
   }
-  pub fn get_alias(&self, name: &str) -> Option<ShAlias> {
+  pub(crate) fn get_alias(&self, name: &str) -> Option<ShAlias> {
     self.aliases.get(name).cloned()
   }
-  pub fn remove_alias(&mut self, name: &str) {
+  pub(crate) fn remove_alias(&mut self, name: &str) {
     self.aliases.remove(name);
   }
 
-  pub fn insert_ex_alias(&mut self, name: &str, body: &VarStr, source: Span) {
+  pub(crate) fn insert_ex_alias(&mut self, name: &str, body: &VarStr, source: Span) {
     self
       .ex_aliases
       .insert(name.into(), ShAlias::new(body.clone(), source));
   }
-  pub fn remove_ex_alias(&mut self, name: &str) {
+  pub(crate) fn remove_ex_alias(&mut self, name: &str) {
     self.ex_aliases.remove(name);
   }
-  pub fn get_ex_alias(&self, name: &str) -> Option<ShAlias> {
+  pub(crate) fn get_ex_alias(&self, name: &str) -> Option<ShAlias> {
     self.ex_aliases.get(name).cloned()
   }
-  pub fn ex_aliases(&self) -> &HashMap<String, ShAlias> {
+  pub(crate) fn ex_aliases(&self) -> &HashMap<String, ShAlias> {
     &self.ex_aliases
   }
 }

@@ -30,7 +30,7 @@ use super::{
   vars::ShellParam,
 };
 
-pub const SIG_EXIT_OFFSET: i32 = 128;
+pub(crate) const SIG_EXIT_OFFSET: i32 = 128;
 
 bitflags! {
   #[derive(Debug, Copy, Clone)]
@@ -45,7 +45,7 @@ bitflags! {
 }
 
 #[derive(Debug)]
-pub struct DisplayWaitStatus(pub WtStat);
+pub(crate) struct DisplayWaitStatus(pub WtStat);
 
 impl fmt::Display for DisplayWaitStatus {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -78,7 +78,7 @@ impl fmt::Display for DisplayWaitStatus {
   }
 }
 
-pub fn code_from_status(stat: &WtStat) -> Option<i32> {
+pub(crate) fn code_from_status(stat: &WtStat) -> Option<i32> {
   match stat {
     WtStat::Exited(_, exit_code) => Some(*exit_code),
     WtStat::Stopped(_, sig) | WtStat::Signaled(_, sig, _) => Some(SIG_EXIT_OFFSET + *sig as i32),
@@ -87,7 +87,7 @@ pub fn code_from_status(stat: &WtStat) -> Option<i32> {
 }
 
 #[derive(Clone, Debug)]
-pub enum JobID {
+pub(crate) enum JobID {
   Pgid(Pid),
   Pid(Pid),
   TableID(usize),
@@ -95,7 +95,7 @@ pub enum JobID {
 }
 
 #[derive(Debug)]
-pub struct ChildProc {
+pub(crate) struct ChildProc {
   pgid: Pid,
   pid: Pid,
   command: Option<VarStr>,
@@ -105,7 +105,12 @@ pub struct ChildProc {
 
 #[expect(clippy::similar_names)]
 impl ChildProc {
-  pub fn new(pid: Pid, command: Option<&[u8]>, pgid: Option<Pid>, timer: Option<CmdTimer>) -> Self {
+  pub(crate) fn new(
+    pid: Pid,
+    command: Option<&[u8]>,
+    pgid: Option<Pid>,
+    timer: Option<CmdTimer>,
+  ) -> Self {
     let command = command.map(VarStr::from);
     let stat = if kill(pid, None).is_ok() {
       WtStat::StillAlive
@@ -124,37 +129,37 @@ impl ChildProc {
     }
     child
   }
-  pub fn pid(&self) -> Pid {
+  pub(crate) fn pid(&self) -> Pid {
     self.pid
   }
-  pub fn take_timer(&mut self) -> Option<CmdTimer> {
+  pub(crate) fn take_timer(&mut self) -> Option<CmdTimer> {
     self.timer.take()
   }
-  pub fn cmd(&self) -> Option<VarStr> {
+  pub(crate) fn cmd(&self) -> Option<VarStr> {
     self.command.clone()
   }
-  pub fn stat(&self) -> WtStat {
+  pub(crate) fn stat(&self) -> WtStat {
     self.stat
   }
-  pub fn wait(&mut self, flags: Option<WtFlag>) -> Result<WtStat, Errno> {
+  pub(crate) fn wait(&mut self, flags: Option<WtFlag>) -> Result<WtStat, Errno> {
     let result = waitpid(self.pid, flags);
     if let Ok(stat) = result {
       self.stat = stat;
     }
     result
   }
-  pub fn set_pgid(&mut self, pgid: Pid) -> ShResult<()> {
+  pub(crate) fn set_pgid(&mut self, pgid: Pid) -> ShResult<()> {
     setpgid(self.pid, pgid)?;
     self.pgid = pgid;
     Ok(())
   }
-  pub fn set_stat(&mut self, stat: WtStat) {
+  pub(crate) fn set_stat(&mut self, stat: WtStat) {
     self.stat = stat;
   }
-  pub fn exited(&self) -> bool {
+  pub(crate) fn exited(&self) -> bool {
     matches!(self.stat, WtStat::Exited(..))
   }
-  pub fn terminated(&self) -> bool {
+  pub(crate) fn terminated(&self) -> bool {
     matches!(self.stat, WtStat::Exited(..) | WtStat::Signaled(..))
   }
 }
@@ -172,7 +177,7 @@ impl Clone for ChildProc {
 }
 
 #[derive(Debug)]
-pub struct JobBldr {
+pub(crate) struct JobBldr {
   table_id: Option<usize>,
   pgid: Option<Pid>,
   children: Vec<ChildProc>,
@@ -186,7 +191,7 @@ impl Default for JobBldr {
 }
 
 impl JobBldr {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       table_id: None,
       pgid: None,
@@ -194,16 +199,16 @@ impl JobBldr {
       send_hup: true,
     }
   }
-  pub fn push_child(&mut self, child: ChildProc) {
+  pub(crate) fn push_child(&mut self, child: ChildProc) {
     self.children.push(child);
   }
-  pub fn set_pgid(&mut self, pgid: Pid) {
+  pub(crate) fn set_pgid(&mut self, pgid: Pid) {
     self.pgid = Some(pgid);
   }
-  pub fn pgid(&self) -> Option<Pid> {
+  pub(crate) fn pgid(&self) -> Option<Pid> {
     self.pgid
   }
-  pub fn build(self) -> Job {
+  pub(crate) fn build(self) -> Job {
     Job {
       table_id: self.table_id,
       pgid: self.pgid.unwrap_or(Pid::from_raw(0)),
@@ -216,25 +221,25 @@ impl JobBldr {
 
 /// A wrapper around Vec<JobBldr> with some job-specific methods
 #[derive(Default, Debug)]
-pub struct JobStack(Vec<JobBldr>);
+pub(crate) struct JobStack(Vec<JobBldr>);
 
 impl JobStack {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub fn new_job(&mut self) {
+  pub(crate) fn new_job(&mut self) {
     self.0.push(JobBldr::new());
   }
-  pub fn curr_job_mut(&mut self) -> Option<&mut JobBldr> {
+  pub(crate) fn curr_job_mut(&mut self) -> Option<&mut JobBldr> {
     self.0.last_mut()
   }
-  pub fn finalize_job(&mut self) -> Option<Job> {
+  pub(crate) fn finalize_job(&mut self) -> Option<Job> {
     self.0.pop().map(JobBldr::build)
   }
 }
 
 #[derive(Debug)]
-pub struct JobData {
+pub(crate) struct JobData {
   pub table_id: VarStr,
   pub notify: bool,
   pub stats: Vec<WtStat>,
@@ -244,7 +249,7 @@ pub struct JobData {
 }
 
 #[derive(Debug)]
-pub struct Job {
+pub(crate) struct Job {
   table_id: Option<usize>,
   pgid: Pid,
   children: Vec<ChildProc>,
@@ -253,38 +258,38 @@ pub struct Job {
 }
 
 impl Job {
-  pub fn set_tabid(&mut self, id: usize) {
+  pub(crate) fn set_tabid(&mut self, id: usize) {
     self.table_id = Some(id);
   }
-  pub fn no_hup(&mut self) {
+  pub(crate) fn no_hup(&mut self) {
     self.send_hup = false;
   }
-  pub fn send_hup(&self) -> bool {
+  pub(crate) fn send_hup(&self) -> bool {
     self.send_hup
   }
-  pub fn set_notify(&mut self, notify: bool) {
+  pub(crate) fn set_notify(&mut self, notify: bool) {
     self.notify = notify;
   }
-  pub fn notify(&self) -> bool {
+  pub(crate) fn notify(&self) -> bool {
     self.notify
   }
-  pub fn running(&self) -> bool {
+  pub(crate) fn running(&self) -> bool {
     !self.children.iter().all(ChildProc::terminated)
   }
-  pub fn tabid(&self) -> Option<usize> {
+  pub(crate) fn tabid(&self) -> Option<usize> {
     self.table_id
   }
-  pub fn pgid(&self) -> Pid {
+  pub(crate) fn pgid(&self) -> Pid {
     self.pgid
   }
-  pub fn get_cmds(&self) -> Vec<VarStr> {
+  pub(crate) fn get_cmds(&self) -> Vec<VarStr> {
     self
       .children
       .iter()
       .map(|c| c.cmd().unwrap_or_default())
       .collect()
   }
-  pub fn take_job_data(&mut self, job_order: &[usize], pid: Option<Pid>) -> JobData {
+  pub(crate) fn take_job_data(&mut self, job_order: &[usize], pid: Option<Pid>) -> JobData {
     JobData {
       table_id: varstr!("{}", self.tabid().unwrap_or_default()),
       notify: self.notify(),
@@ -300,18 +305,18 @@ impl Job {
       }),
     }
   }
-  pub fn get_cmd_line(&self) -> VarStr {
+  pub(crate) fn get_cmd_line(&self) -> VarStr {
     self.get_cmds().join_with(" | ")
   }
-  pub fn set_stats(&mut self, stat: WtStat) {
+  pub(crate) fn set_stats(&mut self, stat: WtStat) {
     for child in &mut self.children {
       child.set_stat(stat);
     }
   }
-  pub fn get_stats(&self) -> Vec<WtStat> {
+  pub(crate) fn get_stats(&self) -> Vec<WtStat> {
     self.children.iter().map(ChildProc::stat).collect()
   }
-  pub fn pipe_status(stats: &[WtStat]) -> Option<Vec<i32>> {
+  pub(crate) fn pipe_status(stats: &[WtStat]) -> Option<Vec<i32>> {
     if stats.iter().any(|stat| {
       if let WtStat::StillAlive | WtStat::Continued(_) = stat {
         return true;
@@ -343,25 +348,25 @@ impl Job {
         .collect(),
     )
   }
-  pub fn get_pids(&self) -> Vec<Pid> {
+  pub(crate) fn get_pids(&self) -> Vec<Pid> {
     self
       .children
       .iter()
       .map(ChildProc::pid)
       .collect::<Vec<Pid>>()
   }
-  pub fn children(&self) -> &[ChildProc] {
+  pub(crate) fn children(&self) -> &[ChildProc] {
     &self.children
   }
-  pub fn children_mut(&mut self) -> &mut Vec<ChildProc> {
+  pub(crate) fn children_mut(&mut self) -> &mut Vec<ChildProc> {
     &mut self.children
   }
-  pub fn is_done(&self) -> bool {
+  pub(crate) fn is_done(&self) -> bool {
     self.children.iter().all(|chld| {
       chld.exited() || chld.stat() == WtStat::Signaled(chld.pid(), Signal::SIGHUP, true)
     })
   }
-  pub fn killpg(&mut self, sig: Signal) -> ShResult<()> {
+  pub(crate) fn killpg(&mut self, sig: Signal) -> ShResult<()> {
     let stat = match sig {
       Signal::SIGTSTP => WtStat::Stopped(self.pgid, Signal::SIGTSTP),
       Signal::SIGCONT => WtStat::Continued(self.pgid),
@@ -379,7 +384,7 @@ impl Job {
       Ok(killpg(self.pgid, sig)?)
     }
   }
-  pub fn wait_pgrp(&mut self) -> ShResult<Vec<WtStat>> {
+  pub(crate) fn wait_pgrp(&mut self) -> ShResult<Vec<WtStat>> {
     let mut stats = vec![];
     for child in &mut self.children {
       if child.pid == Pid::this() {
@@ -410,7 +415,7 @@ impl Job {
     }
     Ok(stats)
   }
-  pub fn update_by_id(&mut self, id: JobID, stat: WtStat) {
+  pub(crate) fn update_by_id(&mut self, id: JobID, stat: WtStat) {
     match id {
       JobID::Pid(pid) => {
         let query_result = self.children.iter_mut().find(|chld| chld.pid == pid);
@@ -444,20 +449,20 @@ impl Job {
       }
     }
   }
-  pub fn name(&self) -> Option<VarStr> {
+  pub(crate) fn name(&self) -> Option<VarStr> {
     self.children().first().and_then(ChildProc::cmd)
   }
   /// Lossy `String` rendering for UI/notification paths (system messages, the
   /// stored `JobData.display` field). For the `jobs` builtin's actual stdout,
   /// use [`Job::display_bytes`], which preserves non-UTF-8 command bytes.
-  pub fn display(&self, job_order: &[usize], flags: JobCmdFlags) -> String {
+  pub(crate) fn display(&self, job_order: &[usize], flags: JobCmdFlags) -> String {
     String::from_utf8_lossy(&self.display_bytes(job_order, flags)).into_owned()
   }
 
   /// Byte-native counterpart to [`Job::display`]: a job's command line may hold
   /// arbitrary bytes, so this returns raw bytes (with the color escapes) rather
   /// than laundering the command through `String`.
-  pub fn display_bytes(&self, job_order: &[usize], flags: JobCmdFlags) -> Vec<u8> {
+  pub(crate) fn display_bytes(&self, job_order: &[usize], flags: JobCmdFlags) -> Vec<u8> {
     let long = flags.contains(JobCmdFlags::LONG);
     let init = flags.contains(JobCmdFlags::INIT);
     let pids = flags.contains(JobCmdFlags::PIDS);
@@ -544,13 +549,13 @@ fn fg_color_codes(color: Color) -> (Vec<u8>, Vec<u8>) {
 
 /// Calls `attach_tty()` on the shell's process group to retake control of the
 /// terminal
-pub fn take_term() -> ShResult<()> {
+pub(crate) fn take_term() -> ShResult<()> {
   Shed::term_mut(|t| t.attach(getpgrp()))?;
   killpg(getpgrp(), Signal::SIGWINCH)?;
   Ok(())
 }
 
-pub fn wait_bg(id: &JobID) -> ShResult<()> {
+pub(crate) fn wait_bg(id: &JobID) -> ShResult<()> {
   disable_reaping();
   defer! {
     enable_reaping();
@@ -611,7 +616,7 @@ pub fn wait_bg(id: &JobID) -> ShResult<()> {
   Ok(())
 }
 
-pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
+pub(crate) fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
   if job.children().is_empty() {
     return Ok(());
   }
@@ -667,7 +672,7 @@ pub fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
   Ok(())
 }
 
-pub fn dispatch_job(mut job: Job, is_bg: bool, interactive: bool) -> ShResult<()> {
+pub(crate) fn dispatch_job(mut job: Job, is_bg: bool, interactive: bool) -> ShResult<()> {
   if interactive {
     job.set_notify(true);
   }
@@ -680,7 +685,7 @@ pub fn dispatch_job(mut job: Job, is_bg: bool, interactive: bool) -> ShResult<()
 }
 
 #[derive(Default, Debug)]
-pub struct JobTab {
+pub(crate) struct JobTab {
   fg: Option<Job>,
   order: Vec<usize>,
   new_updates: Vec<usize>,
@@ -688,10 +693,10 @@ pub struct JobTab {
 }
 
 impl JobTab {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub fn take_fg(&mut self) -> Option<Job> {
+  pub(crate) fn take_fg(&mut self) -> Option<Job> {
     self.fg.take()
   }
   fn next_open_pos(&self) -> usize {
@@ -701,13 +706,13 @@ impl JobTab {
       self.jobs.len()
     }
   }
-  pub fn jobs(&self) -> &Vec<Option<Job>> {
+  pub(crate) fn jobs(&self) -> &Vec<Option<Job>> {
     &self.jobs
   }
-  pub fn jobs_mut(&mut self) -> &mut Vec<Option<Job>> {
+  pub(crate) fn jobs_mut(&mut self) -> &mut Vec<Option<Job>> {
     &mut self.jobs
   }
-  pub fn curr_job(&self) -> Option<usize> {
+  pub(crate) fn curr_job(&self) -> Option<usize> {
     self
       .order
       .iter()
@@ -715,7 +720,7 @@ impl JobTab {
       .find(|&&id| self.jobs.get(id).is_some_and(Option::is_some))
       .copied()
   }
-  pub fn marker_order(&self) -> Vec<usize> {
+  pub(crate) fn marker_order(&self) -> Vec<usize> {
     let mut out: Vec<usize> = Vec::new();
     for &id in self.order.iter().rev() {
       let live = self.jobs.get(id).is_some_and(Option::is_some);
@@ -735,7 +740,7 @@ impl JobTab {
       }
     }
   }
-  pub fn insert_job(&mut self, mut job: Job, silent: bool) -> usize {
+  pub(crate) fn insert_job(&mut self, mut job: Job, silent: bool) -> usize {
     self.prune_jobs();
     let tab_pos = if let Some(id) = job.tabid() {
       id
@@ -765,10 +770,10 @@ impl JobTab {
 
     tab_pos
   }
-  pub fn order(&self) -> &[usize] {
+  pub(crate) fn order(&self) -> &[usize] {
     &self.order
   }
-  pub fn query(&self, identifier: JobID) -> Option<&Job> {
+  pub(crate) fn query(&self, identifier: JobID) -> Option<&Job> {
     match identifier {
       JobID::Pgid(pgid) => self
         .jobs
@@ -792,7 +797,7 @@ impl JobTab {
       }),
     }
   }
-  pub fn update_by_id(&mut self, id: &JobID, stat: WtStat) {
+  pub(crate) fn update_by_id(&mut self, id: &JobID, stat: WtStat) {
     let Some(job) = self.query_mut(id.clone()) else {
       return;
     };
@@ -808,7 +813,7 @@ impl JobTab {
       }
     }
   }
-  pub fn query_mut(&mut self, identifier: JobID) -> Option<&mut Job> {
+  pub(crate) fn query_mut(&mut self, identifier: JobID) -> Option<&mut Job> {
     match identifier {
       JobID::Pgid(pgid) => self
         .jobs
@@ -832,18 +837,18 @@ impl JobTab {
       }),
     }
   }
-  pub fn get_fg(&self) -> Option<&Job> {
+  pub(crate) fn get_fg(&self) -> Option<&Job> {
     self.fg.as_ref()
   }
-  pub fn get_fg_mut(&mut self) -> Option<&mut Job> {
+  pub(crate) fn get_fg_mut(&mut self) -> Option<&mut Job> {
     self.fg.as_mut()
   }
-  pub fn new_fg(&mut self, job: Job) -> ShResult<Vec<WtStat>> {
+  pub(crate) fn new_fg(&mut self, job: Job) -> ShResult<Vec<WtStat>> {
     self.fg = Some(job);
     let statuses = self.fg.as_mut().unwrap().wait_pgrp()?;
     Ok(statuses)
   }
-  pub fn fg_to_bg(&mut self, stat: WtStat) -> ShResult<()> {
+  pub(crate) fn fg_to_bg(&mut self, stat: WtStat) -> ShResult<()> {
     if self.fg.is_none() {
       return Ok(());
     }
@@ -855,7 +860,7 @@ impl JobTab {
     }
     Ok(())
   }
-  pub fn wait_all_bg(&mut self) -> ShResult<()> {
+  pub(crate) fn wait_all_bg(&mut self) -> ShResult<()> {
     disable_reaping();
     defer! {
       enable_reaping();
@@ -869,7 +874,7 @@ impl JobTab {
     Shed::set_status(code);
     Ok(())
   }
-  pub fn remove_job(&mut self, id: JobID) -> Option<Job> {
+  pub(crate) fn remove_job(&mut self, id: JobID) -> Option<Job> {
     let tabid = self.query(id).map(|job| job.tabid().unwrap());
     if let Some(tabid) = tabid {
       self.jobs.get_mut(tabid).and_then(Option::take)
@@ -877,7 +882,7 @@ impl JobTab {
       None
     }
   }
-  pub fn print_jobs(&mut self, flags: JobCmdFlags) -> ShResult<()> {
+  pub(crate) fn print_jobs(&mut self, flags: JobCmdFlags) -> ShResult<()> {
     let marker_order = self.marker_order();
     let jobs = if flags.contains(JobCmdFlags::NEW_ONLY) {
       &self
@@ -930,7 +935,7 @@ impl JobTab {
     Ok(())
   }
 
-  pub fn hang_up(&mut self) {
+  pub(crate) fn hang_up(&mut self) {
     for job in self.jobs_mut().iter_mut().flatten() {
       if job.send_hup() {
         job.killpg(Signal::SIGHUP).ok();
@@ -938,7 +943,7 @@ impl JobTab {
     }
   }
 
-  pub fn disown(&mut self, id: JobID, nohup: bool) {
+  pub(crate) fn disown(&mut self, id: JobID, nohup: bool) {
     if let Some(job) = self.query_mut(id.clone()) {
       if nohup {
         job.no_hup();
@@ -948,7 +953,7 @@ impl JobTab {
     }
   }
 
-  pub fn disown_all(&mut self, nohup: bool) {
+  pub(crate) fn disown_all(&mut self, nohup: bool) {
     let mut ids_to_remove = vec![];
     for job in self.jobs_mut().iter_mut().flatten() {
       if nohup {

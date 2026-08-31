@@ -30,7 +30,7 @@ struct RLimits {
 }
 
 impl RLimits {
-  pub fn from_opts(opts: &[Opt]) -> ShResult<Self> {
+  pub(crate) fn from_opts(opts: &[Opt]) -> ShResult<Self> {
     let mut fds = None;
     let mut procs = None;
     let mut stack = None;

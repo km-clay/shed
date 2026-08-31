@@ -59,7 +59,7 @@ pub(crate) struct Ast {
 }
 
 impl Ast {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       id: AST_GENERATION.fetch_add(1, Ordering::SeqCst),
       ..Default::default()
@@ -83,42 +83,42 @@ impl Ast {
   /// Create a new [`Ast`] that sizes its arenas to hold `size` tokens.
   /// This is actually an important step for performance, juggling resize
   /// for 9 different arenas is expensive, so we try to size them all up front.
-  pub fn with_capacity(size: usize) -> Self {
+  pub(crate) fn with_capacity(size: usize) -> Self {
     let mut new = Self::new();
     new.reserve(size);
     new
   }
-  pub fn alloc<T: ArenaMember>(&mut self, value: T) -> T::Id {
+  pub(crate) fn alloc<T: ArenaMember>(&mut self, value: T) -> T::Id {
     value.alloc_in(self)
   }
-  pub fn mark_root(&mut self, id: NodeId) {
+  pub(crate) fn mark_root(&mut self, id: NodeId) {
     if !self.roots.contains(&id) {
       self.roots.push(id);
     }
   }
-  pub fn span_for_range(&self, range: NodeRange) -> Span {
+  pub(crate) fn span_for_range(&self, range: NodeRange) -> Span {
     let first = self[range.first().unwrap()].get_span();
     let last = self[range.last().unwrap()].get_span();
     let start = self[first].range().start;
     let end = self[last].range().end;
     Span::new(start..end, self[first].source().content())
   }
-  pub fn span_for(&self, node: NodeId) -> Span {
+  pub(crate) fn span_for(&self, node: NodeId) -> Span {
     self[self[node].get_span()].clone()
   }
-  pub fn command_for(&self, node: NodeId) -> Option<&Tk> {
+  pub(crate) fn command_for(&self, node: NodeId) -> Option<&Tk> {
     self[node].get_command().map(|tk| &self[tk])
   }
-  pub fn context_for(&self, node: NodeId) -> &[LabelBuilder] {
+  pub(crate) fn context_for(&self, node: NodeId) -> &[LabelBuilder] {
     &self[self[node].context]
   }
-  pub fn roots(&self) -> &[NodeId] {
+  pub(crate) fn roots(&self) -> &[NodeId] {
     &self.roots
   }
-  pub fn get_root(&self) -> Option<NodeId> {
+  pub(crate) fn get_root(&self) -> Option<NodeId> {
     self.roots.first().copied()
   }
-  pub fn break_off(&self, id: NodeId) -> Self {
+  pub(crate) fn break_off(&self, id: NodeId) -> Self {
     let mut new = Self::new();
     let root = self.copy_into(id, &mut new);
     new.mark_root(root);
@@ -291,7 +291,7 @@ impl Ast {
       .collect();
     dst.alloc_conjuncts(mapped)
   }
-  pub fn child_ids(&self, id: NodeId) -> SmallVec<[NodeId; 4]> {
+  pub(crate) fn child_ids(&self, id: NodeId) -> SmallVec<[NodeId; 4]> {
     let mut out: SmallVec<[NodeId; 4]> = SmallVec::new();
     match &self[id].class {
       NdRule::List { commands } => out.extend_from_slice(&self[*commands]),
@@ -339,21 +339,21 @@ impl Ast {
     }
     out
   }
-  pub fn walk_tree<F: FnMut(NodeId, &Self)>(&self, id: NodeId, f: &mut F) {
+  pub(crate) fn walk_tree<F: FnMut(NodeId, &Self)>(&self, id: NodeId, f: &mut F) {
     f(id, self);
     let children = self.child_ids(id);
     for child in children {
       self.walk_tree(child, f);
     }
   }
-  pub fn walk_tree_mut<F: FnMut(NodeId, &mut Self)>(&mut self, id: NodeId, f: &mut F) {
+  pub(crate) fn walk_tree_mut<F: FnMut(NodeId, &mut Self)>(&mut self, id: NodeId, f: &mut F) {
     f(id, self);
     let children = self.child_ids(id);
     for child in children {
       self.walk_tree_mut(child, f);
     }
   }
-  pub fn eager_expand(&mut self, id: NodeId) -> ShResult<()> {
+  pub(crate) fn eager_expand(&mut self, id: NodeId) -> ShResult<()> {
     let tk_ids: SmallVec<[TkId; 4]> = match &self[id].class {
       NdRule::Command { argv: tks, .. } | NdRule::ForNode { arr: tks, .. } => tks.ids().collect(),
       NdRule::Assignment { val: tk, .. }
@@ -372,7 +372,7 @@ impl Ast {
 /// A trait for types that can be allocated in an [`Ast`].
 ///
 /// This trait is implemented for all types that can be stored in an [`Ast`]'s arenas. It provides a method to allocate the value in the given [`Ast`] and return its corresponding `Id` type.
-pub trait ArenaMember {
+pub(crate) trait ArenaMember {
   type Id;
   fn alloc_in(self, ast: &mut Ast) -> Self::Id;
 }

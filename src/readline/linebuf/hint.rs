@@ -24,22 +24,22 @@ pub(crate) enum Hint {
 }
 
 impl Hint {
-  pub fn lines(&self) -> &Lines {
+  pub(crate) fn lines(&self) -> &Lines {
     match self {
       Self::Override(lines) | Self::History(lines) | Self::Completion { lines, .. } => lines,
     }
   }
-  pub fn raw(&self) -> String {
+  pub(crate) fn raw(&self) -> String {
     self.lines().join()
   }
-  pub fn take_lines(&mut self) -> Lines {
+  pub(crate) fn take_lines(&mut self) -> Lines {
     match self {
       Self::Override(lines) | Self::History(lines) | Self::Completion { lines, .. } => {
         std::mem::take(lines)
       }
     }
   }
-  pub fn display(&self, prefix: Option<&str>) -> String {
+  pub(crate) fn display(&self, prefix: Option<&str>) -> String {
     let mut text = self.raw();
     if let Some(prefix) = prefix
       && let Some(rest) = text.strip_prefix(prefix)
@@ -49,7 +49,7 @@ impl Hint {
 
     format!("\x1b[90m{text}\x1b[0m").replace('\n', "\n\x1b[90m")
   }
-  pub fn is_empty(&self) -> bool {
+  pub(crate) fn is_empty(&self) -> bool {
     self.lines().is_empty() || (self.lines().len() == 1 && self.lines()[0].is_empty())
   }
 }
@@ -102,7 +102,7 @@ impl super::LineBuf {
   ///
   /// Notes:
   /// * The size of the hint can never grow as a result of this function. It will only ever stay the same size or shrink.
-  pub fn with_hint<F, T>(&mut self, f: F) -> T
+  pub(crate) fn with_hint<F, T>(&mut self, f: F) -> T
   where
     F: FnOnce(&mut Self) -> T,
   {
@@ -162,11 +162,11 @@ impl super::LineBuf {
     result
   }
 
-  pub fn clear_hint(&mut self) {
+  pub(crate) fn clear_hint(&mut self) {
     self.hint = None;
   }
 
-  pub fn set_hint(&mut self, hint: Option<Hint>) {
+  pub(crate) fn set_hint(&mut self, hint: Option<Hint>) {
     let is_override = matches!(&hint, Some(Hint::Override(_)));
 
     // Override hints are explicit (typically socket-driven), so they
@@ -211,29 +211,29 @@ impl super::LineBuf {
     self.hint = (!hint.is_empty()).then_some(hint);
   }
 
-  pub fn has_hint(&self) -> bool {
+  pub(crate) fn has_hint(&self) -> bool {
     self
       .hint
       .as_ref()
       .is_some_and(|h| !h.lines().is_empty() && h.lines().iter().any(|l| !l.is_empty()))
   }
 
-  pub fn get_hint_text(&self) -> String {
+  pub(crate) fn get_hint_text(&self) -> String {
     self.try_get_hint_text().unwrap_or_default()
   }
 
-  pub fn try_get_hint_text(&self) -> Option<String> {
+  pub(crate) fn try_get_hint_text(&self) -> Option<String> {
     self
       .hint
       .as_ref()
       .map(|h| h.display(Some(&self.to_string())))
   }
 
-  pub fn try_join_hint(&self) -> Option<String> {
+  pub(crate) fn try_join_hint(&self) -> Option<String> {
     self.hint.as_ref().map(Hint::raw)
   }
 
-  pub fn accept_hint(&mut self) {
+  pub(crate) fn accept_hint(&mut self) {
     let Some(mut hint) = self.hint.take() else {
       return;
     };

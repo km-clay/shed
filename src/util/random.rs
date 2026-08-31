@@ -49,7 +49,7 @@ pub(crate) trait OsRandom {
   fn get_os_random() -> Self;
 }
 
-pub fn os_random<T: OsRandom>() -> T {
+pub(crate) fn os_random<T: OsRandom>() -> T {
   T::get_os_random()
 }
 
@@ -182,7 +182,7 @@ impl Random for bool {
 pub(crate) struct Uuid([u8; 16]);
 
 impl Uuid {
-  pub fn new_v4() -> Self {
+  pub(crate) fn new_v4() -> Self {
     Self::get_os_random()
   }
 }

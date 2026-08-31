@@ -122,20 +122,20 @@ enum StateSet {
 }
 
 impl StateSet {
-  pub fn new(len: usize) -> Self {
+  pub(crate) fn new(len: usize) -> Self {
     if len < 64 {
       Self::Bitset(0)
     } else {
       Self::Vector(vec![false; len])
     }
   }
-  pub fn get(&self, idx: usize) -> Option<bool> {
+  pub(crate) fn get(&self, idx: usize) -> Option<bool> {
     match self {
       StateSet::Bitset(set) => (idx < 64).then(|| set & (1 << idx) != 0),
       StateSet::Vector(set) => set.get(idx).copied(),
     }
   }
-  pub fn set(&mut self, idx: usize, val: bool) {
+  pub(crate) fn set(&mut self, idx: usize, val: bool) {
     match self {
       StateSet::Bitset(set) => {
         if idx < 64 {
@@ -153,7 +153,7 @@ impl StateSet {
       }
     }
   }
-  pub fn fill(&mut self, val: bool) {
+  pub(crate) fn fill(&mut self, val: bool) {
     match self {
       StateSet::Bitset(set) => {
         *set = if val { u64::MAX } else { 0 };
@@ -331,18 +331,18 @@ pub(crate) struct GlobOpts {
 }
 
 impl GlobOpts {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
 
   /// If true, the glob will match case-insensitively.
-  pub fn no_case(mut self, ci: bool) -> Self {
+  pub(crate) fn no_case(mut self, ci: bool) -> Self {
     self.no_case = ci;
     self
   }
 
   /// If true, the glob will expand to nothing if no matches are found, instead of returning the original pattern.
-  pub fn null_glob(mut self, null_glob: bool) -> Self {
+  pub(crate) fn null_glob(mut self, null_glob: bool) -> Self {
     self.null_glob = null_glob;
     self
   }
@@ -358,7 +358,7 @@ pub(crate) struct Pattern {
 }
 
 impl Pattern {
-  pub fn compile(pattern: &[u8], opts: GlobOpts) -> Self {
+  pub(crate) fn compile(pattern: &[u8], opts: GlobOpts) -> Self {
     let atoms = Atom::tokenize(pattern);
     let literal = Self::compile_literal(&atoms, opts);
     Self {
@@ -384,11 +384,11 @@ impl Pattern {
     })
   }
 
-  pub fn orig(&self) -> Rc<[u8]> {
+  pub(crate) fn orig(&self) -> Rc<[u8]> {
     self.orig.clone()
   }
 
-  pub fn is_match(&self, other: &[u8]) -> bool {
+  pub(crate) fn is_match(&self, other: &[u8]) -> bool {
     if let Some(lit) = &self.literal {
       lit.as_ref() == other
     } else {
@@ -396,11 +396,11 @@ impl Pattern {
     }
   }
 
-  pub fn match_shortest_prefix(&self, text: &[u8]) -> Option<usize> {
+  pub(crate) fn match_shortest_prefix(&self, text: &[u8]) -> Option<usize> {
     self.match_prefix(text, false)
   }
 
-  pub fn match_longest_prefix(&self, text: &[u8]) -> Option<usize> {
+  pub(crate) fn match_longest_prefix(&self, text: &[u8]) -> Option<usize> {
     self.match_prefix(text, true)
   }
 
@@ -412,11 +412,11 @@ impl Pattern {
     }
   }
 
-  pub fn match_shortest_suffix(&self, text: &[u8]) -> Option<usize> {
+  pub(crate) fn match_shortest_suffix(&self, text: &[u8]) -> Option<usize> {
     self.match_suffix(text, false)
   }
 
-  pub fn match_longest_suffix(&self, text: &[u8]) -> Option<usize> {
+  pub(crate) fn match_longest_suffix(&self, text: &[u8]) -> Option<usize> {
     self.match_suffix(text, true)
   }
 
@@ -428,7 +428,7 @@ impl Pattern {
     }
   }
 
-  pub fn find(&self, text: &[u8], from: usize) -> Option<(usize, usize)> {
+  pub(crate) fn find(&self, text: &[u8], from: usize) -> Option<(usize, usize)> {
     if let Some(lit) = &self.literal {
       return text[from..]
         .find(lit.as_ref())
@@ -594,7 +594,7 @@ pub(super) fn might_be_glob(s: &[u8]) -> bool {
   false
 }
 
-pub fn normalize_dir<P: AsRef<Path>>(path: &P) -> &Path {
+pub(crate) fn normalize_dir<P: AsRef<Path>>(path: &P) -> &Path {
   let path = path.as_ref();
   if path.as_os_str().is_empty() {
     Path::new(".")
@@ -610,7 +610,7 @@ enum PathSeg {
 }
 
 impl PathSeg {
-  pub fn compile_segments(pattern: &[u8], opts: GlobOpts) -> Vec<Self> {
+  pub(crate) fn compile_segments(pattern: &[u8], opts: GlobOpts) -> Vec<Self> {
     pattern
       .split(|&b| b == b'/')
       .filter(|s| !s.is_empty())
@@ -631,11 +631,11 @@ impl PathSeg {
   }
 }
 
-pub fn expand_glob(pattern: &[u8]) -> Vec<Vec<u8>> {
+pub(crate) fn expand_glob(pattern: &[u8]) -> Vec<Vec<u8>> {
   expand_glob_with(pattern, GlobOpts::default())
 }
 
-pub fn expand_glob_with(pattern: &[u8], opts: GlobOpts) -> Vec<Vec<u8>> {
+pub(crate) fn expand_glob_with(pattern: &[u8], opts: GlobOpts) -> Vec<Vec<u8>> {
   if !might_be_glob(pattern) || shopt!(set.noglob) {
     return vec![pattern.to_vec()];
   }

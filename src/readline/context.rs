@@ -46,7 +46,7 @@ use crate::{
 use super::editmode::{ExCommand, ExLineAddr, ExTk, ExTkRule};
 
 /// Turn raw shell input into `CtxTks`
-pub fn get_context_tokens(input: &str) -> Vec<CtxTk> {
+pub(super) fn get_context_tokens(input: &str) -> Vec<CtxTk> {
   let out: Vec<CtxTk> = LexStream::new(input.as_bytes(), LexFlags::LEX_UNFINISHED)
     .filter_map(Result::ok)
     .filter(Tk::filter_meta)
@@ -56,7 +56,7 @@ pub fn get_context_tokens(input: &str) -> Vec<CtxTk> {
   process_ctx_tokens(out)
 }
 
-pub fn get_ex_context_tokens(input: &str) -> Vec<CtxTk> {
+pub(super) fn get_ex_context_tokens(input: &str) -> Vec<CtxTk> {
   let out: Vec<CtxTk> = super::editmode::ExLexer::new(input)
     .lex()
     .into_iter()
@@ -275,20 +275,20 @@ bitflags! {
 
 impl ScanCtx {
   // useful constants
-  pub const TOP_LEVEL: Self = Self::all();
+  pub(super) const TOP_LEVEL: Self = Self::all();
 
-  pub const DOUBLE_QUOTE: Self = Self::VAR_SUB
+  pub(super) const DOUBLE_QUOTE: Self = Self::VAR_SUB
     .union(Self::CMD_SUB)
     .union(Self::ARITHMETIC)
     .union(Self::HIST_EXP)
     .union(Self::ESCAPE)
     .union(Self::BACKTICK_SUB);
 
-  pub const DOLLAR_QUOTE: Self = Self::ESCAPE;
+  pub(super) const DOLLAR_QUOTE: Self = Self::ESCAPE;
 
-  pub const SINGLE_QUOTE: Self = Self::empty();
+  pub(super) const SINGLE_QUOTE: Self = Self::empty();
 
-  pub const ARITH: Self = Self::VAR_SUB
+  pub(super) const ARITH: Self = Self::VAR_SUB
     .union(Self::CMD_SUB)
     .union(Self::ARITHMETIC)
     .union(Self::ESCAPE)
@@ -308,7 +308,7 @@ enum TerminatorCtx {
 }
 
 impl TerminatorCtx {
-  pub fn is_closer(self, ch: char, chars: &mut Peekable<CharIndices>) -> bool {
+  pub(crate) fn is_closer(self, ch: char, chars: &mut Peekable<CharIndices>) -> bool {
     let next_is =
       |chars: &mut Peekable<CharIndices>, c: char| chars.peek().is_some_and(|(_, ch)| *ch == c);
     match self {
@@ -323,7 +323,7 @@ impl TerminatorCtx {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum CtxTkRule {
+pub(super) enum CtxTkRule {
   ValidCommand(CmdKind),
   InvalidCommand,
   Argument,
@@ -377,7 +377,7 @@ pub enum CtxTkRule {
 }
 
 impl CtxTkRule {
-  pub fn is_ex_tk(self) -> bool {
+  pub(super) fn is_ex_tk(self) -> bool {
     matches!(
       self,
       Self::ValidExCommand
@@ -398,45 +398,45 @@ impl CtxTkRule {
 ///
 /// This nesting of 'subtokens' allows for entire trees to be created in cases of heavily nested expressions.
 #[derive(Debug, Clone)]
-pub struct CtxTk {
+pub(super) struct CtxTk {
   span: Span,
   class: CtxTkRule,
   sub_tokens: Vec<CtxTk>,
 }
 
 impl CtxTk {
-  pub fn span(&self) -> &Span {
+  pub(super) fn span(&self) -> &Span {
     &self.span
   }
-  pub fn class(&self) -> &CtxTkRule {
+  pub(super) fn class(&self) -> &CtxTkRule {
     &self.class
   }
-  pub fn sub_tokens(&self) -> &[CtxTk] {
+  pub(super) fn sub_tokens(&self) -> &[CtxTk] {
     &self.sub_tokens
   }
-  pub fn range(&self) -> std::ops::Range<usize> {
+  pub(super) fn range(&self) -> std::ops::Range<usize> {
     self.span.range()
   }
-  pub fn range_inclusive(&self) -> std::ops::RangeInclusive<usize> {
+  pub(super) fn range_inclusive(&self) -> std::ops::RangeInclusive<usize> {
     let r = self.span.range();
     r.start..=r.end
   }
 
-  pub fn shift_by(&mut self, delta: isize) {
+  pub(super) fn shift_by(&mut self, delta: isize) {
     self.span.shift_by(delta);
     for sub in &mut self.sub_tokens {
       sub.shift_by(delta);
     }
   }
 
-  pub fn rebase_into(&mut self, outer_span: &Span, offset: usize) {
+  pub(super) fn rebase_into(&mut self, outer_span: &Span, offset: usize) {
     self.span.rebase_into(outer_span, offset);
     for sub in &mut self.sub_tokens {
       sub.rebase_into(outer_span, offset);
     }
   }
 
-  pub fn rule_for(class: &TkRule) -> Option<CtxTkRule> {
+  pub(super) fn rule_for(class: &TkRule) -> Option<CtxTkRule> {
     match class {
       TkRule::Pipe
       | TkRule::Bang
@@ -519,7 +519,7 @@ impl CtxTk {
   /// and do not fall within any of its subtokens' spans.
   ///
   /// This is used to determine if we can split a token at a given position without breaking any nested structures.
-  pub fn can_split_at(&self, at: usize) -> bool {
+  pub(super) fn can_split_at(&self, at: usize) -> bool {
     let r = self.span.range();
     if !(r.start..r.end).contains(&at) {
       return false;
@@ -534,7 +534,7 @@ impl CtxTk {
   ///
   /// The split point must be a valid split point as defined by `can_split_at`.
   /// Panics if the split point is invalid.
-  pub fn split_at(self, at: usize) -> (CtxTk, CtxTk) {
+  pub(super) fn split_at(self, at: usize) -> (CtxTk, CtxTk) {
     assert!(
       self.can_split_at(at),
       "split point falls inside of child token span"
@@ -576,20 +576,20 @@ impl CtxTk {
   /// Get the position of the cursor relative to the start of this token, if it falls within the token's span
   ///
   /// Returns None if the cursor is outside the token's span
-  pub fn relative_cursor_pos(&self, at: usize) -> Option<usize> {
+  pub(super) fn relative_cursor_pos(&self, at: usize) -> Option<usize> {
     if !self.range_inclusive().contains(&at) {
       return None;
     }
     Some(at - self.span.range().start)
   }
 
-  pub fn split_str_at(&self, at: usize) -> Option<(&[u8], &[u8])> {
+  pub(super) fn split_str_at(&self, at: usize) -> Option<(&[u8], &[u8])> {
     let cursor_pos = self.relative_cursor_pos(at)?;
 
     self.span().as_bytes().split_at_checked(cursor_pos)
   }
 
-  pub fn prefix_from(&self, at: usize) -> Option<&[u8]> {
+  pub(super) fn prefix_from(&self, at: usize) -> Option<&[u8]> {
     self.split_str_at(at).map(|(prefix, _)| prefix)
   }
 
@@ -598,10 +598,10 @@ impl CtxTk {
   /// Sorted by depth, deepest are at the end.
   /// Calling `.pop()` on the result will give you the most specific token under the cursor,
   /// and the rest of the vector will be its parents up to the root.
-  pub fn get_branch(&self, cursor_pos: usize) -> Vec<&CtxTk> {
+  pub(super) fn get_branch(&self, cursor_pos: usize) -> Vec<&CtxTk> {
     self.get_branch_inner(cursor_pos, vec![])
   }
-  pub fn get_branch_inner<'a>(
+  pub(super) fn get_branch_inner<'a>(
     &'a self,
     cursor_pos: usize,
     mut nodes: Vec<&'a CtxTk>,
@@ -620,7 +620,7 @@ impl CtxTk {
     nodes
   }
 
-  pub fn find_nodes<F: Fn(&CtxTk) -> bool>(&self, pred: F) -> Vec<&CtxTk> {
+  pub(super) fn find_nodes<F: Fn(&CtxTk) -> bool>(&self, pred: F) -> Vec<&CtxTk> {
     let mut found = vec![];
     let mut work: VecDeque<&CtxTk> = self.sub_tokens().iter().collect();
 
@@ -636,7 +636,7 @@ impl CtxTk {
     found
   }
 
-  pub fn leaf(span: Span, class: CtxTkRule) -> Self {
+  pub(super) fn leaf(span: Span, class: CtxTkRule) -> Self {
     Self {
       span,
       class,
@@ -644,7 +644,7 @@ impl CtxTk {
     }
   }
 
-  pub fn from_ex_tk(tk: ExTk) -> Vec<Self> {
+  pub(super) fn from_ex_tk(tk: ExTk) -> Vec<Self> {
     let (class, span) = tk.unpack();
     match class {
       ExTkRule::Bang => vec![Self::leaf(span, CtxTkRule::ExBang)],
@@ -683,7 +683,7 @@ impl CtxTk {
   /// Create a `CtxTk` from a Tk
   ///
   /// returns a Vec<CtxTk> because this is used to recursively classify child tokens as well
-  pub fn from_tk(value: &Tk) -> Vec<CtxTk> {
+  pub(super) fn from_tk(value: &Tk) -> Vec<CtxTk> {
     let Tk { class, span, flags } = value;
     if let Some(class) = Self::rule_for(class) {
       return vec![Self {

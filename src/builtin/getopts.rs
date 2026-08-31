@@ -36,7 +36,7 @@ struct GetOptsSpec {
 }
 
 impl GetOptsSpec {
-  pub fn matches(&self, ch: char) -> OptMatch {
+  pub(crate) fn matches(&self, ch: char) -> OptMatch {
     match self.opts.iter().find(|(c, _)| *c == ch) {
       Some((_, true)) => OptMatch::WantsArg,
       Some((_, false)) => OptMatch::IsMatch,

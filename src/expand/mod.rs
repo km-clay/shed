@@ -29,7 +29,7 @@ pub(crate) const PARAMETERS: [char; 8] = ['-', '@', '*', '#', '$', '?', '!', '0'
 
 impl Tk {
   /// Create a new expanded token
-  pub fn expand(&self) -> ShResult<Self> {
+  pub(crate) fn expand(&self) -> ShResult<Self> {
     if let TkRule::Expanded { .. } = self.class {
       return Ok(self.clone());
     }
@@ -48,7 +48,7 @@ impl Tk {
     let class = TkRule::Expanded { exp: exp.into() };
     Ok(Self { class, span, flags })
   }
-  pub fn expand_to_words(&self) -> ShResult<Rc<[VarStr]>> {
+  pub(crate) fn expand_to_words(&self) -> ShResult<Rc<[VarStr]>> {
     if let TkRule::Expanded { exp } = &self.class {
       return Ok(exp.clone());
     }
@@ -61,7 +61,7 @@ impl Tk {
       .map(Into::into)
       .promote_err(span)
   }
-  pub fn expand_no_side_effects(&self) -> ShResult<Self> {
+  pub(crate) fn expand_no_side_effects(&self) -> ShResult<Self> {
     if let TkRule::Expanded { .. } = self.class {
       return Ok(self.clone());
     }
@@ -83,7 +83,7 @@ impl Tk {
     let class = TkRule::Expanded { exp: [exp].into() };
     Ok(Self { class, span, flags })
   }
-  pub fn expand_no_split(&self) -> ShResult<VarStr> {
+  pub(crate) fn expand_no_split(&self) -> ShResult<VarStr> {
     if let TkRule::Expanded { exp } = &self.class {
       return Ok(exp.join_with(" "));
     }
@@ -100,19 +100,19 @@ impl Tk {
     Ok(exp)
   }
   /// Perform word splitting
-  pub fn get_words(&self) -> Rc<[VarStr]> {
+  pub(crate) fn get_words(&self) -> Rc<[VarStr]> {
     match &self.class {
       TkRule::Expanded { exp } => exp.clone(),
       _ => [self.as_bytes().into()].into(),
     }
   }
 
-  pub fn get_first_word(&self) -> Option<VarStr> {
+  pub(crate) fn get_first_word(&self) -> Option<VarStr> {
     self.get_words().iter().next().cloned()
   }
 }
 
-pub struct Expander {
+pub(crate) struct Expander {
   flags: TkFlags,
   noglob: bool,
   nosplit: bool,
@@ -121,11 +121,11 @@ pub struct Expander {
 }
 
 impl Expander {
-  pub fn new(raw: &Tk) -> Self {
+  pub(crate) fn new(raw: &Tk) -> Self {
     let tk_raw = raw.span.as_bytes();
     Self::from_raw(tk_raw, raw.flags)
   }
-  pub fn from_raw(raw: &[u8], flags: TkFlags) -> Self {
+  pub(crate) fn from_raw(raw: &[u8], flags: TkFlags) -> Self {
     let raw = if raw.contains(&b'{') {
       brace::expand_braces_full(raw).join_with(" ")
     } else {
@@ -142,11 +142,11 @@ impl Expander {
   /// replacement (`${var#pat}`, `${var%pat}`, `${var/pat/rep}`): a bare `(` is
   /// literal, not a subshell. The operand was carved out of an already-unescaped
   /// `${...}` body, so it arrives as a `SegStream` (markers preserved).
-  pub fn from_raw_pattern(operand: stream::SegStream, flags: TkFlags) -> Self {
+  pub(crate) fn from_raw_pattern(operand: stream::SegStream, flags: TkFlags) -> Self {
     Self::from_segs(escape::unescape_pattern(operand), flags)
   }
   /// Brace-free variant of `from_raw_pattern`.
-  pub fn from_raw_no_brace_pattern(operand: stream::SegStream, flags: TkFlags) -> Self {
+  pub(crate) fn from_raw_no_brace_pattern(operand: stream::SegStream, flags: TkFlags) -> Self {
     Self::from_segs(escape::unescape_pattern(operand), flags)
   }
   fn from_segs(raw: stream::SegStream, flags: TkFlags) -> Self {
@@ -158,19 +158,19 @@ impl Expander {
       flags,
     }
   }
-  pub fn no_glob(self) -> Self {
+  pub(crate) fn no_glob(self) -> Self {
     Self {
       noglob: true,
       ..self
     }
   }
-  pub fn no_split(self) -> Self {
+  pub(crate) fn no_split(self) -> Self {
     Self {
       nosplit: true,
       ..self
     }
   }
-  pub fn expand(self) -> ShResult<Vec<VarStr>> {
+  pub(crate) fn expand(self) -> ShResult<Vec<VarStr>> {
     let noglob = self.noglob || shopt!(set.noglob);
     if let Some(b) = self.raw.as_plain_bytes() {
       // single literal byte string, so no splitting is needed
@@ -220,16 +220,16 @@ impl Expander {
 
     Ok(glob_words)
   }
-  pub fn expand_no_side_effects(mut self) -> ShResult<VarStr> {
+  pub(crate) fn expand_no_side_effects(mut self) -> ShResult<VarStr> {
     self.allow_side_effects = false;
     let raw = self.expand_inner(false)?;
     Ok(raw.into_bytes().into())
   }
-  pub fn expand_no_split(self) -> ShResult<VarStr> {
+  pub(crate) fn expand_no_split(self) -> ShResult<VarStr> {
     let raw = self.expand_inner(false)?;
     Ok(raw.into_bytes().into())
   }
-  pub fn expand_keep_quotes(self) -> ShResult<VarStr> {
+  pub(crate) fn expand_keep_quotes(self) -> ShResult<VarStr> {
     let raw = self.expand_inner(false)?;
     let mut out: Vec<u8> = Vec::new();
     let mut cursor = raw.cursor();
@@ -243,11 +243,11 @@ impl Expander {
     }
     Ok(out.into())
   }
-  pub fn expand_for_glob(self) -> ShResult<VarStr> {
+  pub(crate) fn expand_for_glob(self) -> ShResult<VarStr> {
     let raw = self.expand_inner(false)?;
     Ok(escape::markers_to_glob_escapes(&raw).into())
   }
-  pub fn expand_inner(self, mark_split: bool) -> ShResult<stream::SegStream> {
+  pub(crate) fn expand_inner(self, mark_split: bool) -> ShResult<stream::SegStream> {
     let mut cursor = self.raw.cursor();
     let raw = var::expand_raw_inner(&mut cursor, self.allow_side_effects, mark_split)?;
 
@@ -257,7 +257,7 @@ impl Expander {
   ///
   /// Resolves escapes and the special `$@`/`$*` cases, and performs IFS field
   /// splitting, but only inside `EXPAND_START`/`EXPAND_END` runs.
-  pub fn split_words(raw: &stream::SegStream) -> Vec<stream::SegStream> {
+  pub(crate) fn split_words(raw: &stream::SegStream) -> Vec<stream::SegStream> {
     use stream::{Marker, SegStream, StreamSeg, Unit};
     let mut words: Vec<SegStream> = vec![];
     let mut cursor = raw.cursor();

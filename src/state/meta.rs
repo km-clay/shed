@@ -51,7 +51,7 @@ pub(crate) struct CmdTimer {
 }
 
 impl CmdTimer {
-  pub fn new() -> ShResult<Self> {
+  pub(crate) fn new() -> ShResult<Self> {
     let (self_usage_start, child_usage_start) = (
       Some(resource::getrusage(UsageWho::RUSAGE_SELF)?),
       Some(resource::getrusage(UsageWho::RUSAGE_CHILDREN)?),
@@ -66,7 +66,7 @@ impl CmdTimer {
     })
   }
 
-  pub fn stop(&mut self) -> ShResult<()> {
+  pub(crate) fn stop(&mut self) -> ShResult<()> {
     self.wall_end = Some(self.wall_start.elapsed());
     self.self_usage_end = Some(resource::getrusage(UsageWho::RUSAGE_SELF)?);
     self.child_usage_end = Some(resource::getrusage(UsageWho::RUSAGE_CHILDREN)?);
@@ -74,11 +74,11 @@ impl CmdTimer {
     Ok(())
   }
 
-  pub fn still_running(&self) -> bool {
+  pub(crate) fn still_running(&self) -> bool {
     self.wall_end.is_none() && self.self_usage_end.is_none() && self.child_usage_end.is_none()
   }
 
-  pub fn cpu_pct(&self) -> ShResult<f64> {
+  pub(crate) fn cpu_pct(&self) -> ShResult<f64> {
     if self.still_running() {
       return Err(sherr!(
         InternalErr,
@@ -96,7 +96,7 @@ impl CmdTimer {
     }
   }
 
-  pub fn max_rss(&self) -> ShResult<i64> {
+  pub(crate) fn max_rss(&self) -> ShResult<i64> {
     if self.still_running() {
       return Err(sherr!(
         InternalErr,
@@ -108,7 +108,7 @@ impl CmdTimer {
     Ok(self_r_maxrss.max(child_r_maxrss))
   }
 
-  pub fn total_wall_ms(&self) -> ShResult<i64> {
+  pub(crate) fn total_wall_ms(&self) -> ShResult<i64> {
     if self.still_running() {
       return Err(sherr!(
         InternalErr,
@@ -118,7 +118,7 @@ impl CmdTimer {
     Ok(self.wall_end.unwrap().as_millis() as i64)
   }
 
-  pub fn total_user_ms(&self) -> ShResult<i64> {
+  pub(crate) fn total_user_ms(&self) -> ShResult<i64> {
     if self.still_running() {
       return Err(sherr!(
         InternalErr,
@@ -132,7 +132,7 @@ impl CmdTimer {
     Ok(Self::tv_to_ms(self_user_delta) + Self::tv_to_ms(child_user_delta))
   }
 
-  pub fn total_sys_ms(&self) -> ShResult<i64> {
+  pub(crate) fn total_sys_ms(&self) -> ShResult<i64> {
     if self.still_running() {
       return Err(sherr!(
         InternalErr,
@@ -146,21 +146,21 @@ impl CmdTimer {
     Ok(Self::tv_to_ms(self_sys_delta) + Self::tv_to_ms(child_sys_delta))
   }
 
-  pub fn total_user_secs(&self) -> ShResult<f64> {
+  pub(crate) fn total_user_secs(&self) -> ShResult<f64> {
     let ms = self.total_user_ms()?;
     let seconds = ms as f64 / 1000.0;
 
     Ok(seconds)
   }
 
-  pub fn total_sys_secs(&self) -> ShResult<f64> {
+  pub(crate) fn total_sys_secs(&self) -> ShResult<f64> {
     let ms = self.total_sys_ms()?;
     let seconds = ms as f64 / 1000.0;
 
     Ok(seconds)
   }
 
-  pub fn tv_to_ms(tv: TimeVal) -> i64 {
+  pub(crate) fn tv_to_ms(tv: TimeVal) -> i64 {
     let sec_millis = (tv.tv_sec() * 1000) as time_t;
     let usec_millis = (tv.tv_usec() / 1000) as time_t;
     sec_millis + usec_millis
@@ -183,7 +183,7 @@ impl CmdTimer {
     result
   }
 
-  pub fn total_wall_formatted(&self) -> ShResult<String> {
+  pub(crate) fn total_wall_formatted(&self) -> ShResult<String> {
     if self.still_running() {
       return Err(sherr!(
         InternalErr,
@@ -193,7 +193,7 @@ impl CmdTimer {
     let total_ms = self.total_wall_ms()?;
     Ok(Self::format_ms(total_ms))
   }
-  pub fn total_user_formatted(&self) -> ShResult<String> {
+  pub(crate) fn total_user_formatted(&self) -> ShResult<String> {
     if self.still_running() {
       return Err(sherr!(
         InternalErr,
@@ -203,7 +203,7 @@ impl CmdTimer {
     let total_ms = self.total_user_ms()?;
     Ok(Self::format_ms(total_ms))
   }
-  pub fn total_sys_formatted(&self) -> ShResult<String> {
+  pub(crate) fn total_sys_formatted(&self) -> ShResult<String> {
     if self.still_running() {
       return Err(sherr!(
         InternalErr,
@@ -215,7 +215,7 @@ impl CmdTimer {
   }
 
   #[expect(clippy::too_many_lines)]
-  pub fn format_report(&self, fmt_str: &str) -> ShResult<String> {
+  pub(crate) fn format_report(&self, fmt_str: &str) -> ShResult<String> {
     if self.still_running() {
       return Err(sherr!(
         InternalErr,
@@ -382,40 +382,40 @@ pub(crate) struct Utility {
 }
 
 impl Utility {
-  pub fn alias(name: VarStr) -> Self {
+  pub(crate) fn alias(name: VarStr) -> Self {
     Self {
       name,
       kind: UtilKind::Alias,
     }
   }
-  pub fn function(name: VarStr) -> Self {
+  pub(crate) fn function(name: VarStr) -> Self {
     Self {
       name,
       kind: UtilKind::Function,
     }
   }
-  pub fn builtin(name: VarStr) -> Self {
+  pub(crate) fn builtin(name: VarStr) -> Self {
     Self {
       name,
       kind: UtilKind::Builtin,
     }
   }
-  pub fn command(name: VarStr, path: PathBuf) -> Self {
+  pub(crate) fn command(name: VarStr, path: PathBuf) -> Self {
     Self {
       name,
       kind: UtilKind::Command(path),
     }
   }
-  pub fn file(name: VarStr, path: PathBuf) -> Self {
+  pub(crate) fn file(name: VarStr, path: PathBuf) -> Self {
     Self {
       name,
       kind: UtilKind::File(path),
     }
   }
-  pub fn name(&self) -> VarStr {
+  pub(crate) fn name(&self) -> VarStr {
     self.name.clone()
   }
-  pub fn kind(&self) -> &UtilKind {
+  pub(crate) fn kind(&self) -> &UtilKind {
     &self.kind
   }
 }
@@ -426,10 +426,10 @@ pub(crate) struct PathTable {
 }
 
 impl PathTable {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub fn hash_path_list(&mut self, path_list: &str) {
+  pub(crate) fn hash_path_list(&mut self, path_list: &str) {
     self.index.clear();
     for entry in paths::path_list_entries(path_list) {
       if !paths::is_executable_file(&entry) {
@@ -441,16 +441,16 @@ impl PathTable {
       self.index.entry(name).or_insert_with(|| entry.path());
     }
   }
-  pub fn lookup(&self, cmd: &str) -> Option<&Path> {
+  pub(crate) fn lookup(&self, cmd: &str) -> Option<&Path> {
     self.index.get(cmd).map(PathBuf::as_path)
   }
-  pub fn insert(&mut self, name: String, path: PathBuf) {
+  pub(crate) fn insert(&mut self, name: String, path: PathBuf) {
     self.index.insert(name, path);
   }
-  pub fn entries(&self) -> impl Iterator<Item = (&String, &PathBuf)> {
+  pub(crate) fn entries(&self) -> impl Iterator<Item = (&String, &PathBuf)> {
     self.index.iter()
   }
-  pub fn clear(&mut self) {
+  pub(crate) fn clear(&mut self) {
     self.index.clear();
   }
 }
@@ -496,10 +496,10 @@ struct RegexCache {
 }
 
 impl RegexCache {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub fn get_regex(&mut self, pat: &str) -> Result<Rc<Regex>, String> {
+  pub(crate) fn get_regex(&mut self, pat: &str) -> Result<Rc<Regex>, String> {
     if let Some(rx) = self.regexes.get(pat) {
       return Ok(Rc::clone(rx));
     }
@@ -507,7 +507,7 @@ impl RegexCache {
     self.regexes.insert(pat.to_string(), Rc::clone(&rx));
     Ok(rx)
   }
-  pub fn get_glob(&mut self, pat: &[u8]) -> Rc<Pattern> {
+  pub(crate) fn get_glob(&mut self, pat: &[u8]) -> Rc<Pattern> {
     if let Some(p) = self.globs.get(pat) {
       return p.clone();
     }
@@ -653,7 +653,7 @@ impl Drop for ProcSubGuard {
 }
 
 impl MetaTab {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
 
@@ -662,50 +662,50 @@ impl MetaTab {
   /// This is used mainly for managing status message lifetimes.
   /// If a status message is showing below the prompt, the timeout
   /// will trigger a redraw and clear it.
-  pub fn set_poll_timeout(&mut self, timeout: Option<PollTimeout>) {
+  pub(crate) fn set_poll_timeout(&mut self, timeout: Option<PollTimeout>) {
     self.main_loop_timeout = timeout;
   }
-  pub fn take_poll_timeout(&mut self) -> Option<PollTimeout> {
+  pub(crate) fn take_poll_timeout(&mut self) -> Option<PollTimeout> {
     self.main_loop_timeout.take()
   }
 
-  pub fn set_last_cmdsub_status(&mut self, status: i32) {
+  pub(crate) fn set_last_cmdsub_status(&mut self, status: i32) {
     self.last_cmdsub_status = Some(status);
   }
 
-  pub fn take_last_cmdsub_status(&mut self) -> Option<i32> {
+  pub(crate) fn take_last_cmdsub_status(&mut self) -> Option<i32> {
     self.last_cmdsub_status.take()
   }
 
-  pub fn last_cmdsub_status(&self) -> Option<i32> {
+  pub(crate) fn last_cmdsub_status(&self) -> Option<i32> {
     self.last_cmdsub_status
   }
 
-  pub fn push_procsub_frame(&mut self) -> ProcSubGuard {
+  pub(crate) fn push_procsub_frame(&mut self) -> ProcSubGuard {
     self.procsub_stack.push(vec![]);
     ProcSubGuard
   }
-  pub fn set_no_hist_save(&mut self) {
+  pub(crate) fn set_no_hist_save(&mut self) {
     self.ignore_hist = true;
   }
 
-  pub fn set_current_cmd_recorded(&mut self, recorded: bool) {
+  pub(crate) fn set_current_cmd_recorded(&mut self, recorded: bool) {
     self.current_cmd_recorded = recorded;
   }
 
-  pub fn current_cmd_recorded(&self) -> bool {
+  pub(crate) fn current_cmd_recorded(&self) -> bool {
     self.current_cmd_recorded
   }
 
-  pub fn no_hist_save(&mut self) -> bool {
+  pub(crate) fn no_hist_save(&mut self) -> bool {
     std::mem::take(&mut self.ignore_hist)
   }
 
-  pub fn pop_procsub_frame(&mut self) {
+  pub(crate) fn pop_procsub_frame(&mut self) {
     self.procsub_stack.pop();
   }
 
-  pub fn save_procsub_fd(&mut self, fd: OwnedFd) {
+  pub(crate) fn save_procsub_fd(&mut self, fd: OwnedFd) {
     if self.procsub_stack.is_empty() {
       self.procsub_stack.push(vec![]);
     }
@@ -714,10 +714,10 @@ impl MetaTab {
     }
   }
 
-  pub fn shell_time(&self) -> Instant {
+  pub(crate) fn shell_time(&self) -> Instant {
     self.shell_time
   }
-  pub fn ensure_meta_table() -> ShResult<()> {
+  pub(crate) fn ensure_meta_table() -> ShResult<()> {
     db::query_db(|conn| {
       conn.execute(
         "CREATE TABLE IF NOT EXISTS meta (
@@ -730,7 +730,7 @@ impl MetaTab {
     })?;
     Ok(())
   }
-  pub fn disable_welcome_message() -> ShResult<()> {
+  pub(crate) fn disable_welcome_message() -> ShResult<()> {
     db::query_db(|conn| {
       conn.execute(
         "INSERT INTO meta (key, value) VALUES ('show_welcome', '0')
@@ -741,27 +741,27 @@ impl MetaTab {
     })?;
     Ok(())
   }
-  pub fn enter_loop(&mut self) -> LoopGuard {
+  pub(crate) fn enter_loop(&mut self) -> LoopGuard {
     self.loop_depth += 1;
 
     LoopGuard
   }
-  pub fn xtrace_descend(&mut self) -> XtraceGuard {
+  pub(crate) fn xtrace_descend(&mut self) -> XtraceGuard {
     self.xtrace_depth += 1;
 
     XtraceGuard
   }
-  pub fn take_fork(&mut self) -> bool {
+  pub(crate) fn take_fork(&mut self) -> bool {
     std::mem::take(&mut self.fork_builtins)
   }
-  pub fn enter_fork(&mut self, fork: bool) -> ForkGuard {
+  pub(crate) fn enter_fork(&mut self, fork: bool) -> ForkGuard {
     let prev = std::mem::replace(&mut self.fork_builtins, fork);
     ForkGuard(prev)
   }
-  pub fn restore_fork(&mut self, prev: bool) {
+  pub(crate) fn restore_fork(&mut self, prev: bool) {
     self.fork_builtins = prev;
   }
-  pub fn enter_func(&mut self) -> FuncGuard {
+  pub(crate) fn enter_func(&mut self) -> FuncGuard {
     self.func_depth += 1;
 
     FuncGuard
@@ -783,22 +783,22 @@ impl MetaTab {
       self.func_depth -= 1;
     }
   }
-  pub fn xtrace_depth(&self) -> usize {
+  pub(crate) fn xtrace_depth(&self) -> usize {
     self.xtrace_depth
   }
-  pub fn in_loop(&self) -> bool {
+  pub(crate) fn in_loop(&self) -> bool {
     self.loop_depth > 0
   }
-  pub fn loop_depth(&self) -> usize {
+  pub(crate) fn loop_depth(&self) -> usize {
     self.loop_depth
   }
-  pub fn in_func(&self) -> bool {
+  pub(crate) fn in_func(&self) -> bool {
     self.func_depth > 0
   }
-  pub fn func_depth(&self) -> usize {
+  pub(crate) fn func_depth(&self) -> usize {
     self.func_depth
   }
-  pub fn welcome_message(force: bool) -> Option<String> {
+  pub(crate) fn welcome_message(force: bool) -> Option<String> {
     let res = db::query_db(|conn| {
       let result = conn.query_row(
         "SELECT value FROM meta WHERE key='show_welcome'",
@@ -867,61 +867,61 @@ impl MetaTab {
 
     Some(buf)
   }
-  pub fn set_pending_widget_keys(&mut self, keys: &str) {
+  pub(crate) fn set_pending_widget_keys(&mut self, keys: &str) {
     let exp = alias::expand_keymap(keys);
     self.pending_widget_keys = exp;
   }
-  pub fn get_regex(&mut self, pat: &str) -> Result<Rc<Regex>, String> {
+  pub(crate) fn get_regex(&mut self, pat: &str) -> Result<Rc<Regex>, String> {
     self.regexes.get_regex(pat)
   }
-  pub fn get_glob(&mut self, pat: &[u8]) -> Rc<Pattern> {
+  pub(crate) fn get_glob(&mut self, pat: &[u8]) -> Rc<Pattern> {
     self.regexes.get_glob(pat)
   }
-  pub fn take_pending_widget_keys(&mut self) -> Option<Vec<KeyEvent>> {
+  pub(crate) fn take_pending_widget_keys(&mut self) -> Option<Vec<KeyEvent>> {
     if self.pending_widget_keys.is_empty() {
       None
     } else {
       Some(std::mem::take(&mut self.pending_widget_keys))
     }
   }
-  pub fn set_last_job(&mut self, job: Option<Job>) {
+  pub(crate) fn set_last_job(&mut self, job: Option<Job>) {
     self.last_job = job;
   }
-  pub fn last_job(&self) -> Option<&Job> {
+  pub(crate) fn last_job(&self) -> Option<&Job> {
     self.last_job.as_ref()
   }
-  pub fn getopts_char_offset(&self) -> usize {
+  pub(crate) fn getopts_char_offset(&self) -> usize {
     self.getopts_offset
   }
-  pub fn inc_getopts_char_offset(&mut self) -> usize {
+  pub(crate) fn inc_getopts_char_offset(&mut self) -> usize {
     let offset = self.getopts_offset;
     self.getopts_offset += 1;
     offset
   }
-  pub fn reset_getopts_char_offset(&mut self) {
+  pub(crate) fn reset_getopts_char_offset(&mut self) {
     self.getopts_offset = 0;
   }
-  pub fn comp_specs(&self) -> &HashMap<VarStr, Box<dyn CompSpec>> {
+  pub(crate) fn comp_specs(&self) -> &HashMap<VarStr, Box<dyn CompSpec>> {
     &self.comp_specs
   }
-  pub fn get_comp_spec(&self, cmd: &str) -> Option<Box<dyn CompSpec>> {
+  pub(crate) fn get_comp_spec(&self, cmd: &str) -> Option<Box<dyn CompSpec>> {
     let var_str = VarStr::from(cmd);
     self.comp_specs.get(&var_str).cloned()
   }
-  pub fn set_comp_spec(&mut self, cmd: VarStr, spec: Box<dyn CompSpec>) {
+  pub(crate) fn set_comp_spec(&mut self, cmd: VarStr, spec: Box<dyn CompSpec>) {
     self.comp_specs.insert(cmd, spec);
   }
-  pub fn remove_comp_spec(&mut self, cmd: &str) -> bool {
+  pub(crate) fn remove_comp_spec(&mut self, cmd: &str) -> bool {
     let var_str = VarStr::from(cmd);
     self.comp_specs.remove(&var_str).is_some()
   }
-  pub fn set_last_was_func_def(&mut self, was_func_def: bool) {
+  pub(crate) fn set_last_was_func_def(&mut self, was_func_def: bool) {
     self.last_was_func_def = was_func_def;
   }
-  pub fn take_last_was_func_def(&mut self) -> bool {
+  pub(crate) fn take_last_was_func_def(&mut self) -> bool {
     std::mem::take(&mut self.last_was_func_def)
   }
-  pub fn get_exec_files_in_cwd() -> Vec<Rc<Utility>> {
+  pub(crate) fn get_exec_files_in_cwd() -> Vec<Rc<Utility>> {
     let cwd = var!("PWD");
     let mut files = vec![];
     if let Ok(entries) = Path::new(&cwd).read_dir() {
@@ -936,10 +936,10 @@ impl MetaTab {
     }
     files
   }
-  pub fn clear_envp(&mut self) {
+  pub(crate) fn clear_envp(&mut self) {
     self.envp_cache = None;
   }
-  pub fn get_envp(&mut self) -> Rc<[CString]> {
+  pub(crate) fn get_envp(&mut self) -> Rc<[CString]> {
     if let Some(envp) = &self.envp_cache {
       return Rc::clone(envp);
     }
@@ -979,33 +979,33 @@ impl MetaTab {
   /// Look up an external command in the PATH cache. Returns `None` for a
   /// cache miss; callers that want to populate the cache on miss should
   /// call [`try_rehash_path_cache`](Self::try_rehash_path_cache) first.
-  pub fn lookup_cached_cmd(&self, cmd: &str) -> Option<&Path> {
+  pub(crate) fn lookup_cached_cmd(&self, cmd: &str) -> Option<&Path> {
     self.path_cache.lookup(cmd)
   }
 
-  pub fn path_cache(&self) -> &PathTable {
+  pub(crate) fn path_cache(&self) -> &PathTable {
     &self.path_cache
   }
 
-  pub fn rehash_path_cache(&mut self) {
+  pub(crate) fn rehash_path_cache(&mut self) {
     let path = var!("PATH");
     self.old_path = Some(path.clone());
     self.path_cache.hash_path_list(&path.to_str_lossy());
   }
 
-  pub fn clear_path_cache(&mut self) {
+  pub(crate) fn clear_path_cache(&mut self) {
     self.old_path = None;
     self.path_cache.clear();
   }
 
-  pub fn try_rehash_path_cache(&mut self) {
+  pub(crate) fn try_rehash_path_cache(&mut self) {
     let path = var!("PATH");
     if self.old_path.as_ref().is_none_or(|old| *old != path) {
       self.old_path = Some(path.clone());
       self.path_cache.hash_path_list(&path.to_str_lossy());
     }
   }
-  pub fn invalidate_path_cache_if_stale(&mut self) {
+  pub(crate) fn invalidate_path_cache_if_stale(&mut self) {
     let path = var!("PATH");
     if self.old_path.as_ref().is_none_or(|old| *old != path) {
       self.old_path = Some(path);
@@ -1013,49 +1013,49 @@ impl MetaTab {
     }
   }
 
-  pub fn cache_cmd(&mut self, name: String, path: PathBuf) {
+  pub(crate) fn cache_cmd(&mut self, name: String, path: PathBuf) {
     self.path_cache.insert(name, path);
   }
-  pub fn start_timer(&mut self) {
+  pub(crate) fn start_timer(&mut self) {
     self.runtime_start = Some(Instant::now());
   }
-  pub fn stop_timer(&mut self) -> Option<Duration> {
+  pub(crate) fn stop_timer(&mut self) -> Option<Duration> {
     self.runtime_stop = Some(Instant::now());
     self.get_time()
   }
-  pub fn get_time(&self) -> Option<Duration> {
+  pub(crate) fn get_time(&self) -> Option<Duration> {
     if let (Some(start), Some(stop)) = (self.runtime_start, self.runtime_stop) {
       Some(stop.duration_since(start))
     } else {
       None
     }
   }
-  pub fn comp_add(&mut self, candidate: Candidate) {
+  pub(crate) fn comp_add(&mut self, candidate: Candidate) {
     self.comp_add_candidates.push(candidate);
   }
-  pub fn take_comp_candidates(&mut self) -> Vec<Candidate> {
+  pub(crate) fn take_comp_candidates(&mut self) -> Vec<Candidate> {
     std::mem::take(&mut self.comp_add_candidates)
   }
-  pub fn set_interactive_shell(&mut self, interactive: bool) {
+  pub(crate) fn set_interactive_shell(&mut self, interactive: bool) {
     self.interactive_shell = interactive;
   }
   /// Returns true if the shell started in interactive mode
-  pub fn interactive_shell(&self) -> bool {
+  pub(crate) fn interactive_shell(&self) -> bool {
     self.interactive_shell
   }
-  pub fn push_dir(&mut self, path: PathBuf) {
+  pub(crate) fn push_dir(&mut self, path: PathBuf) {
     self.dir_stack.push_front(path);
   }
-  pub fn pop_dir(&mut self) -> Option<PathBuf> {
+  pub(crate) fn pop_dir(&mut self) -> Option<PathBuf> {
     self.dir_stack.pop_front()
   }
-  pub fn dirs(&self) -> &VecDeque<PathBuf> {
+  pub(crate) fn dirs(&self) -> &VecDeque<PathBuf> {
     &self.dir_stack
   }
-  pub fn dirs_mut(&mut self) -> &mut VecDeque<PathBuf> {
+  pub(crate) fn dirs_mut(&mut self) -> &mut VecDeque<PathBuf> {
     &mut self.dir_stack
   }
-  pub fn get_cmds_in_path() -> Vec<Rc<Utility>> {
+  pub(crate) fn get_cmds_in_path() -> Vec<Rc<Utility>> {
     let path = var!("PATH");
     let path = path.to_str_lossy();
     let paths = paths::path_list_entries(&path);

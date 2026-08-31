@@ -7,7 +7,7 @@ use std::{
 };
 
 mod termios;
-use crate::util::ui::{ColorMode, calc_str_width};
+use crate::util::ui::ColorMode;
 pub(crate) use termios::get_win_size;
 use termios::{enable_cooked_mode, enable_raw_mode};
 
@@ -142,7 +142,7 @@ const COOKED_TEARDOWN: [TermCtl; 3] = [
 ];
 
 impl Terminal {
-  pub fn execute_control(&mut self, ctl: &TermCtl) -> ShResult<()> {
+  pub(crate) fn execute_control(&mut self, ctl: &TermCtl) -> ShResult<()> {
     use TermCtl as Ctl;
     match ctl {
       Ctl::Scroll(Scroll::SetRegion(top, bot)) => {
@@ -220,7 +220,7 @@ impl Terminal {
     Ok(())
   }
 
-  pub fn color_mode(&self) -> Option<ColorMode> {
+  pub(crate) fn color_mode(&self) -> Option<ColorMode> {
     // NO_COLOR semantics: disable color iff the var is set AND
     // non-empty. The previous version used `try_var!("NO_COLOR")?`
     // which propagated None when the var was unset — making the
@@ -269,7 +269,7 @@ impl Terminal {
     true
   }
 
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     let tty: Option<RawFd> = TTY_FILENO
       .as_ref()
       .filter(|fd| unistd::isatty(fd.as_fd()).unwrap_or(false))
@@ -301,7 +301,7 @@ impl Terminal {
     }
   }
 
-  pub fn reset_last_input(&mut self) {
+  pub(crate) fn reset_last_input(&mut self) {
     if shopt!(prompt.idle_timeout).is_zero() {
       self.last_input = None;
     } else {
@@ -309,7 +309,7 @@ impl Terminal {
     }
   }
 
-  pub fn last_input_elapsed(&mut self) -> Duration {
+  pub(crate) fn last_input_elapsed(&mut self) -> Duration {
     if let Some(instant) = self.last_input {
       instant.elapsed()
     } else {
@@ -319,13 +319,13 @@ impl Terminal {
   }
 
   /// Access the underlying tty file descriptor.
-  pub fn tty(&self) -> Option<BorrowedFd<'static>> {
+  pub(crate) fn tty(&self) -> Option<BorrowedFd<'static>> {
     let raw = self.tty?;
     let borrowed = unsafe { BorrowedFd::borrow_raw(raw) };
     Some(borrowed)
   }
 
-  pub fn tty_checked(&self) -> ShResult<BorrowedFd<'static>> {
+  pub(crate) fn tty_checked(&self) -> ShResult<BorrowedFd<'static>> {
     let tty = self
       .tty()
       .ok_or_else(|| sherr!(InternalErr, "Not attached to a terminal"))?;
@@ -358,7 +358,7 @@ impl Terminal {
       .map(|opt| opt.map(|fd| fd.as_raw_fd()))
   }
 
-  pub fn isatty(&self) -> bool {
+  pub(crate) fn isatty(&self) -> bool {
     self.tty.is_some_and(|raw| {
       let borrowed = unsafe { BorrowedFd::borrow_raw(raw) };
       unistd::isatty(borrowed).unwrap_or(false)
@@ -369,11 +369,11 @@ impl Terminal {
   ///
   /// This returns false for things like subshells, commands inside of functions,
   /// or backgrounded commands
-  pub fn interactive(&self) -> bool {
+  pub(crate) fn interactive(&self) -> bool {
     self.interactive
   }
 
-  pub fn interactive_guard(&mut self, on: bool) -> TermGuard {
+  pub(crate) fn interactive_guard(&mut self, on: bool) -> TermGuard {
     let old = self.interactive;
     self.interactive = on;
 
@@ -381,7 +381,7 @@ impl Terminal {
     guard.activate()
   }
 
-  pub fn mouse_support_guard(&mut self, toggle: Toggle) -> TermGuard {
+  pub(crate) fn mouse_support_guard(&mut self, toggle: Toggle) -> TermGuard {
     let guard = TermGuard::new().with_mouse_support(self.mouse_enabled);
     self
       .execute_control(&TermCtl::SetAttr(Attr::MouseTracking(toggle)))
@@ -389,7 +389,7 @@ impl Terminal {
     guard.activate()
   }
 
-  pub fn setup_terminal(&mut self) -> ShResult<TermGuard> {
+  pub(crate) fn setup_terminal(&mut self) -> ShResult<TermGuard> {
     let guard = self.save_state();
     self.edit_termios(enable_raw_mode)?;
 
@@ -415,7 +415,7 @@ impl Terminal {
     Ok(guard.activate())
   }
 
-  pub fn query_term_caps(&mut self) -> ShResult<()> {
+  pub(crate) fn query_term_caps(&mut self) -> ShResult<()> {
     if self.test_mode {
       return Ok(());
     }
@@ -479,7 +479,7 @@ impl Terminal {
     Ok(())
   }
 
-  pub fn term_caps(&self) -> TermCap {
+  pub(crate) fn term_caps(&self) -> TermCap {
     self.term_caps
   }
 
@@ -499,7 +499,7 @@ impl Terminal {
     Snapshot::new(guard)
   }
 
-  pub fn yield_terminal(&mut self, clear: bool) -> TermGuard {
+  pub(crate) fn yield_terminal(&mut self, clear: bool) -> TermGuard {
     let guard = TermGuard::new()
       .with_scroll_region(self.scroll_region)
       .with_kitty_proto(self.kitty_kbd_proto);
@@ -518,7 +518,7 @@ impl Terminal {
     guard.activate()
   }
 
-  pub fn load_state(&mut self, guard: &TermGuard) -> ShResult<()> {
+  pub(crate) fn load_state(&mut self, guard: &TermGuard) -> ShResult<()> {
     let Some(_tty) = self.tty() else {
       return Ok(());
     };
@@ -584,11 +584,11 @@ impl Terminal {
     Ok(())
   }
 
-  pub fn reserved_rows() -> u16 {
+  pub(crate) fn reserved_rows() -> u16 {
     if shopt!(statline.enable) { 2 } else { 0 }
   }
 
-  pub fn update_t_dims(&mut self) {
+  pub(crate) fn update_t_dims(&mut self) {
     let Some(tty) = self.tty() else { return };
     let (cols, rows) = get_win_size(tty.as_raw_fd());
     self.t_cols = cols as usize;
@@ -606,11 +606,11 @@ impl Terminal {
     }
   }
 
-  pub fn reader_has_pending(&self) -> bool {
+  pub(crate) fn reader_has_pending(&self) -> bool {
     self.reader.has_pending()
   }
 
-  pub fn poll(&mut self, timeout: PollTimeout) -> ShResult<i32> {
+  pub(crate) fn poll(&mut self, timeout: PollTimeout) -> ShResult<i32> {
     let Some(tty) = self.tty() else { return Ok(0) };
 
     loop {
@@ -624,7 +624,7 @@ impl Terminal {
     }
   }
 
-  pub fn get_cursor_pos(&mut self) -> ShResult<Option<(Rows, Cols)>> {
+  pub(crate) fn get_cursor_pos(&mut self) -> ShResult<Option<(Rows, Cols)>> {
     use std::io::Write;
     if self.test_mode {
       return Ok(None);
@@ -660,7 +660,7 @@ impl Terminal {
   ///
   /// Note: the scroll region actually has to be unset here. this is called after
   /// `yield_terminal` unsets it, before it gets reset.
-  pub fn fix_cursor_row(&mut self, bottom: u16) -> ShResult<()> {
+  pub(crate) fn fix_cursor_row(&mut self, bottom: u16) -> ShResult<()> {
     if !shopt!(statline.enable) {
       return Ok(());
     }
@@ -689,7 +689,7 @@ impl Terminal {
   /// Called before the prompt is drawn. If we are not on column 1, push a vid-inverted '%' and then a '\n\r'.
   ///
   /// Aping zsh with this but it's a nice feature.
-  pub fn fix_cursor_column(&mut self, full: bool) -> ShResult<()> {
+  pub(crate) fn fix_cursor_column(&mut self, full: bool) -> ShResult<()> {
     if full {
       let Some((_, c)) = self.get_cursor_pos()? else {
         return Ok(());
@@ -705,7 +705,7 @@ impl Terminal {
     Ok(())
   }
 
-  pub fn emit_osc_copy(&mut self, primary: bool, buf: &str) -> ShResult<()> {
+  pub(crate) fn emit_osc_copy(&mut self, primary: bool, buf: &str) -> ShResult<()> {
     let sel = if primary { "p" } else { "c" };
     let encoded = util::base64_encode(buf.as_bytes());
 
@@ -724,7 +724,7 @@ impl Terminal {
     Ok(())
   }
 
-  pub fn calc_cursor_movement(&mut self, old: Pos, new: Pos) -> ShResult<()> {
+  pub(crate) fn calc_cursor_movement(&mut self, old: Pos, new: Pos) -> ShResult<()> {
     let err = |_| sherr!(InternalErr, "Failed to write to cursor movement buffer");
 
     match new.row.cmp(&old.row) {
@@ -766,29 +766,29 @@ impl Terminal {
     Ok(())
   }
 
-  pub fn t_cols(&self) -> usize {
+  pub(crate) fn t_cols(&self) -> usize {
     self.t_cols
   }
 
   /// The cursor style the terminal currently tracks, for save/restore around
   /// transient style changes (e.g. the fuzzy picker's beam cursor).
-  pub fn cursor_style(&self) -> CursorStyle {
+  pub(crate) fn cursor_style(&self) -> CursorStyle {
     self.cursor_style
   }
 
-  pub fn t_rows(&self) -> usize {
+  pub(crate) fn t_rows(&self) -> usize {
     self.t_rows
   }
 
-  pub fn buf_ends_with_newline(&self) -> bool {
+  pub(crate) fn buf_ends_with_newline(&self) -> bool {
     self.input_buf.ends_with('\n')
   }
 
-  pub fn verbatim_single(&mut self, on: bool) {
+  pub(crate) fn verbatim_single(&mut self, on: bool) {
     self.reader.verbatim_single = on;
   }
 
-  pub fn send_bell(&mut self) -> ShResult<()> {
+  pub(crate) fn send_bell(&mut self) -> ShResult<()> {
     if shopt!(core.bell_enabled) {
       // we use a cooldown because I don't like having my ears assaulted by 1 million bells
       // whenever i finish clearing the line using backspace.
@@ -809,12 +809,12 @@ impl Terminal {
     Ok(())
   }
 
-  pub fn controller(&self) -> Option<Pid> {
+  pub(crate) fn controller(&self) -> Option<Pid> {
     let tty = self.tty()?;
     nix::unistd::tcgetpgrp(tty).ok()
   }
 
-  pub fn attach(&mut self, pgid: Pid) -> ShResult<()> {
+  pub(crate) fn attach(&mut self, pgid: Pid) -> ShResult<()> {
     let Some(tty) = self.tty() else {
       return Ok(());
     };
@@ -854,12 +854,12 @@ impl Terminal {
     Ok(())
   }
 
-  pub fn read(&mut self) -> ShResult<usize> {
+  pub(crate) fn read(&mut self) -> ShResult<usize> {
     let Some(tty) = self.tty() else { return Ok(0) };
     self.reader.read(tty)
   }
 
-  pub fn drain_keys(&mut self) -> Vec<KeyEvent> {
+  pub(crate) fn drain_keys(&mut self) -> Vec<KeyEvent> {
     let mut keys = vec![];
     while let Some(key) = self.reader.readkey() {
       keys.push(key);
@@ -876,7 +876,7 @@ impl Terminal {
     keys
   }
 
-  pub fn cooked_mode_guard(&mut self) -> ShResult<TermGuard> {
+  pub(crate) fn cooked_mode_guard(&mut self) -> ShResult<TermGuard> {
     let guard = self.save_state();
     for action in COOKED_TEARDOWN {
       self.execute_control(&action)?;
@@ -885,7 +885,7 @@ impl Terminal {
     Ok(guard.activate())
   }
 
-  pub fn cooked_no_echo_guard(&mut self) -> ShResult<TermGuard> {
+  pub(crate) fn cooked_no_echo_guard(&mut self) -> ShResult<TermGuard> {
     let guard = self.save_state();
     for action in COOKED_TEARDOWN {
       self.execute_control(&action)?;
@@ -897,7 +897,7 @@ impl Terminal {
     Ok(guard.activate())
   }
 
-  pub fn prepare_for_pager(&mut self) -> ShResult<TermGuard> {
+  pub(crate) fn prepare_for_pager(&mut self) -> ShResult<TermGuard> {
     let guard = self.save_state();
     let actions = [
       TermCtl::SetAttr(Attr::BracketPaste(Toggle::Off)),
@@ -918,7 +918,7 @@ impl Terminal {
     Ok(guard.activate())
   }
 
-  pub fn prepare_for_exec(&mut self) -> ShResult<TermGuard> {
+  pub(crate) fn prepare_for_exec(&mut self) -> ShResult<TermGuard> {
     let guard = self.save_state();
     let actions = [
       TermCtl::SetAttr(Attr::BracketPaste(Toggle::Off)),
@@ -951,7 +951,7 @@ impl Terminal {
     Ok(guard.activate())
   }
 
-  pub fn raw_mode_guard(&mut self) -> ShResult<TermGuard> {
+  pub(crate) fn raw_mode_guard(&mut self) -> ShResult<TermGuard> {
     let guard = self.save_state();
     self.edit_termios(enable_raw_mode)?;
     Ok(guard.activate())
@@ -981,7 +981,7 @@ impl Terminal {
   /// the tty in cooked mode. We follow zsh's mitigation here: just re-apply
   /// raw mode at the start of every readline iteration. Cheap (one ioctl)
   /// and resilient to any late tcsetattr from orphaned descendants.
-  pub fn enforce_raw_mode(&mut self) -> ShResult<()> {
+  pub(crate) fn enforce_raw_mode(&mut self) -> ShResult<()> {
     // we propagate the error for this one so that the interactive loop
     // breaks correctly on EIO
     let tty_raw = self.tty_raw_checked()?;
@@ -993,7 +993,7 @@ impl Terminal {
     Ok(())
   }
 
-  pub fn edit_termios<F: FnOnce(&mut Termios)>(&mut self, f: F) -> ShResult<()> {
+  pub(crate) fn edit_termios<F: FnOnce(&mut Termios)>(&mut self, f: F) -> ShResult<()> {
     let Some(tty) = self.tty_raw_checked_or_hangup()? else {
       return Ok(());
     };
@@ -1011,7 +1011,7 @@ impl Terminal {
     Ok(())
   }
 
-  pub fn write_direct(&mut self, buf: &str) -> ShResult<()> {
+  pub(crate) fn write_direct(&mut self, buf: &str) -> ShResult<()> {
     let Some(tty) = self.tty() else {
       return Ok(());
     };
@@ -1027,7 +1027,7 @@ impl Terminal {
   }
 
   /// Perform an operation and restore the cursor's original position afterwards.
-  pub fn with_saved_cursor<T>(&mut self, f: impl Fn(&mut Self) -> T) -> T {
+  pub(crate) fn with_saved_cursor<T>(&mut self, f: impl Fn(&mut Self) -> T) -> T {
     self
       .execute_control(&TermCtl::Cursor(CursorCtl::SavePos))
       .ok();
@@ -1038,7 +1038,7 @@ impl Terminal {
     res
   }
 
-  pub fn reserve_status_rows(&mut self) -> ShResult<()> {
+  pub(crate) fn reserve_status_rows(&mut self) -> ShResult<()> {
     if !shopt!(statline.enable) {
       return Ok(());
     }
@@ -1049,7 +1049,7 @@ impl Terminal {
   }
 
   /// Render the status line at the bottom row of the terminal.
-  pub fn draw_status_line(&mut self, content: &str) {
+  pub(crate) fn draw_status_line(&mut self, content: &str) {
     let row = self.t_rows as u16;
     self.with_saved_cursor(|this| {
       this
@@ -1063,7 +1063,7 @@ impl Terminal {
   }
 
   /// Render an ephemeral status message on the row directly above the status line (`t_rows - 1`).
-  pub fn draw_status_message(&mut self, content: &str) {
+  pub(crate) fn draw_status_message(&mut self, content: &str) {
     let row = if shopt!(statline.enable) {
       (self.t_rows as u16).saturating_sub(1)
     } else {
@@ -1085,7 +1085,7 @@ impl Terminal {
   /// children whose stdout is redirected (e.g., command substitutions) to
   /// prevent any terminal-control escape sequences they might emit from
   /// reaching the parent's TTY through the shared fd.
-  pub fn detach_tty(&mut self) {
+  pub(crate) fn detach_tty(&mut self) {
     self.input_buf.clear();
     self.tty = None;
   }
@@ -1100,7 +1100,7 @@ impl Terminal {
     self.reader.feed_bytes(bytes);
   }
 
-  pub fn reset_for_exit(&mut self) {
+  pub(crate) fn reset_for_exit(&mut self) {
     let Some(_tty) = self.tty() else { return };
 
     let actions = [
@@ -1126,7 +1126,7 @@ impl Terminal {
     }
   }
 
-  pub fn test_mode(&self) -> bool {
+  pub(crate) fn test_mode(&self) -> bool {
     self.test_mode
   }
 }

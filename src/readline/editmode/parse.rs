@@ -10,32 +10,32 @@ use super::{
 };
 
 /// The result of a single `ViParser` run
-pub enum ParseResult {
+pub(crate) enum ParseResult {
   Complete(Box<EditCmd>),
   Pending,
   Invalid,
 }
 
-pub enum CallbackResult<T> {
+pub(crate) enum CallbackResult<T> {
   Complete(ParseResult),
   Partial(T),
   NoMatch,
 }
 
 impl<T> CallbackResult<T> {
-  pub fn complete(cmd: EditCmd) -> Self {
+  pub(crate) fn complete(cmd: EditCmd) -> Self {
     CallbackResult::Complete(ParseResult::Complete(Box::new(cmd)))
   }
-  pub const fn pending() -> Self {
+  pub(crate) const fn pending() -> Self {
     CallbackResult::Complete(ParseResult::Pending)
   }
-  pub const fn invalid() -> Self {
+  pub(crate) const fn invalid() -> Self {
     CallbackResult::Complete(ParseResult::Invalid)
   }
-  pub const fn no_match() -> Self {
+  pub(crate) const fn no_match() -> Self {
     CallbackResult::NoMatch
   }
-  pub fn partial(cmd: T) -> Self {
+  pub(crate) fn partial(cmd: T) -> Self {
     CallbackResult::Partial(cmd)
   }
 }
@@ -46,14 +46,14 @@ type VerbCallback = fn(&mut Peekable<Chars<'_>>, usize) -> CallbackResult<Cmd<Ve
 type Validator = fn(Option<&Verb>, Option<&Motion>) -> CmdState;
 
 #[derive(Clone, Debug)]
-pub struct ViParser {
+pub(crate) struct ViParser {
   motion_callback: Option<MotionCallback>,
   verb_callback: Option<VerbCallback>,
   validator: Validator,
 }
 
 impl ViParser {
-  pub fn new(
+  pub(crate) fn new(
     motion_callback: Option<MotionCallback>,
     verb_callback: Option<VerbCallback>,
     validator: Validator,
@@ -64,7 +64,7 @@ impl ViParser {
       validator,
     }
   }
-  pub fn try_parse(&self, pending_seq: &str) -> ParseResult {
+  pub(crate) fn try_parse(&self, pending_seq: &str) -> ParseResult {
     use CallbackResult as C;
     use ParseResult as P;
     let mut chars = pending_seq.chars().peekable();

@@ -44,7 +44,7 @@ impl SegStream {
     out
   }
 
-  pub fn as_plain_bytes(&self) -> Option<&[u8]> {
+  pub(crate) fn as_plain_bytes(&self) -> Option<&[u8]> {
     if self.0.len() == 1
       && let StreamSeg::Bytes(ref b) = self.0[0]
     {
@@ -54,7 +54,7 @@ impl SegStream {
     }
   }
 
-  pub fn has_meta(&self) -> bool {
+  pub(crate) fn has_meta(&self) -> bool {
     self.0.iter().any(|seg| match seg {
       StreamSeg::Bytes(b) => b.iter().any(|&c| {
         matches!(
@@ -104,30 +104,30 @@ impl From<VarStr> for SegStream {
   }
 }
 impl SegStream {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self(vec![])
   }
-  pub fn with_capacity(cap: usize) -> Self {
+  pub(crate) fn with_capacity(cap: usize) -> Self {
     Self(Vec::with_capacity(cap))
   }
-  pub fn from_bytes(b: &[u8]) -> Self {
+  pub(crate) fn from_bytes(b: &[u8]) -> Self {
     let mut s = Self::with_capacity(b.len());
     s.push_bytes(b);
     s
   }
-  pub fn stream(&self) -> &[StreamSeg] {
+  pub(crate) fn stream(&self) -> &[StreamSeg] {
     &self.0
   }
-  pub fn push(&mut self, unit: Unit) {
+  pub(crate) fn push(&mut self, unit: Unit) {
     match unit {
       Unit::Byte(b) => self.push_byte(b),
       Unit::Mark(m) => self.push_marker(m),
     }
   }
-  pub fn push_byte(&mut self, b: u8) {
+  pub(crate) fn push_byte(&mut self, b: u8) {
     self.push_bytes(&[b]);
   }
-  pub fn push_bytes(&mut self, bytes: &[u8]) {
+  pub(crate) fn push_bytes(&mut self, bytes: &[u8]) {
     if bytes.is_empty() {
       return;
     }
@@ -136,12 +136,12 @@ impl SegStream {
       _ => self.0.push(StreamSeg::Bytes(SmallVec::from_slice(bytes))),
     }
   }
-  pub fn push_marker(&mut self, marker: Marker) {
+  pub(crate) fn push_marker(&mut self, marker: Marker) {
     self.0.push(StreamSeg::Mark(marker));
   }
   /// Append another stream onto this one, preserving markers and coalescing
   /// byte runs across the seam.
-  pub fn append(&mut self, other: SegStream) {
+  pub(crate) fn append(&mut self, other: SegStream) {
     for seg in other.0 {
       match seg {
         StreamSeg::Bytes(b) => self.push_bytes(&b),
@@ -149,26 +149,26 @@ impl SegStream {
       }
     }
   }
-  pub fn is_empty(&self) -> bool {
+  pub(crate) fn is_empty(&self) -> bool {
     self.0.is_empty()
   }
 
   /// Check if this word has glob characters
-  pub fn has_glob_meta(&self) -> bool {
+  pub(crate) fn has_glob_meta(&self) -> bool {
     self.0.iter().any(|seg| match seg {
       StreamSeg::Bytes(b) => b.iter().any(|c| matches!(c, b'*' | b'?' | b'[')),
       StreamSeg::Mark(_) => false,
     })
   }
   /// The leading run of literal bytes, up to the first marker
-  pub fn leading_bytes(&self) -> &[u8] {
+  pub(crate) fn leading_bytes(&self) -> &[u8] {
     match self.0.first() {
       Some(StreamSeg::Bytes(b)) => b,
       _ => &[],
     }
   }
   /// A copy of this stream with every occurrence of `marker` removed.
-  pub fn without_marker(&self, marker: Marker) -> SegStream {
+  pub(crate) fn without_marker(&self, marker: Marker) -> SegStream {
     let mut out = SegStream::new();
     for seg in &self.0 {
       match seg {
@@ -182,7 +182,7 @@ impl SegStream {
   /// Split at the first `sep` byte that is not escaped (preceded by an `Escape`
   /// marker) and not inside a quote region, returning `(before, after)` with
   /// the separator consumed. `None` if no such separator exists.
-  pub fn split_once_unescaped(&self, sep: u8) -> Option<(SegStream, SegStream)> {
+  pub(crate) fn split_once_unescaped(&self, sep: u8) -> Option<(SegStream, SegStream)> {
     let mut before = SegStream::new();
     let mut cursor = self.cursor();
     let mut qt = QuoteState::default();
@@ -217,7 +217,7 @@ impl SegStream {
   /// Peel `n` leading bytes off the front (markers before that point stay with
   /// the left half), returning `(front_bytes, remainder)`. Used to strip an
   /// ASCII operator prefix off a parameter-expansion operand.
-  pub fn split_off_front(&self, n: usize) -> (Vec<u8>, SegStream) {
+  pub(crate) fn split_off_front(&self, n: usize) -> (Vec<u8>, SegStream) {
     let mut front = Vec::new();
     let mut rest = SegStream::new();
     let mut cursor = self.cursor();
@@ -230,7 +230,7 @@ impl SegStream {
     (front, rest)
   }
   /// Collect the byte content (dropping markers) without consuming the stream.
-  pub fn to_bytes(&self) -> Vec<u8> {
+  pub(crate) fn to_bytes(&self) -> Vec<u8> {
     let mut out = vec![];
     for seg in &self.0 {
       if let StreamSeg::Bytes(bytes) = seg {
@@ -239,7 +239,7 @@ impl SegStream {
     }
     out
   }
-  pub fn into_bytes(self) -> Vec<u8> {
+  pub(crate) fn into_bytes(self) -> Vec<u8> {
     let mut out = vec![];
 
     for seg in self.0 {
@@ -250,7 +250,7 @@ impl SegStream {
 
     out
   }
-  pub fn cursor(&self) -> SegCursor<'_> {
+  pub(crate) fn cursor(&self) -> SegCursor<'_> {
     SegCursor::new(self.stream())
   }
 }
@@ -263,20 +263,20 @@ pub(crate) struct SegCursor<'a> {
 }
 
 impl<'a> SegCursor<'a> {
-  pub fn new(stream: &'a [StreamSeg]) -> Self {
+  pub(crate) fn new(stream: &'a [StreamSeg]) -> Self {
     Self {
       stream,
       pos: 0,
       off: 0,
     }
   }
-  pub fn peek(&self) -> Option<Unit> {
+  pub(crate) fn peek(&self) -> Option<Unit> {
     match self.stream.get(self.pos)? {
       StreamSeg::Bytes(b) => Some(Unit::Byte(*b.get(self.off)?)),
       StreamSeg::Mark(m) => Some(Unit::Mark(*m)),
     }
   }
-  pub fn peek_byte(&self) -> Option<u8> {
+  pub(crate) fn peek_byte(&self) -> Option<u8> {
     match self.peek()? {
       Unit::Byte(b) => Some(b),
       Unit::Mark(_) => None,
@@ -284,7 +284,7 @@ impl<'a> SegCursor<'a> {
   }
   /// Consume and return the next unit's byte, but only if it is a byte.
   /// A marker (or end of stream) leaves the cursor untouched and returns None.
-  pub fn next_byte(&mut self) -> Option<u8> {
+  pub(crate) fn next_byte(&mut self) -> Option<u8> {
     match self.peek()? {
       Unit::Byte(b) => {
         self.next();
@@ -293,7 +293,7 @@ impl<'a> SegCursor<'a> {
       Unit::Mark(_) => None,
     }
   }
-  pub fn next(&mut self) -> Option<Unit> {
+  pub(crate) fn next(&mut self) -> Option<Unit> {
     let u = self.peek()?;
 
     match self.stream.get(self.pos) {
@@ -306,17 +306,17 @@ impl<'a> SegCursor<'a> {
 
     Some(u)
   }
-  pub fn eat(&mut self, u: Unit) -> bool {
+  pub(crate) fn eat(&mut self, u: Unit) -> bool {
     let is_match = self.peek() == Some(u);
     if is_match {
       self.next();
     }
     is_match
   }
-  pub fn eat_byte(&mut self, b: u8) -> bool {
+  pub(crate) fn eat_byte(&mut self, b: u8) -> bool {
     self.eat(Unit::Byte(b))
   }
-  pub fn bump(&mut self) {
+  pub(crate) fn bump(&mut self) {
     self.next();
   }
 }

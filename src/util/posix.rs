@@ -5,7 +5,11 @@ use std::ffi::{CStr, CString};
 
 use crate::state::Shed;
 
-pub fn execvpe(filename: &CStr, args: &[CString], env: &[CString]) -> nix::Result<Infallible> {
+pub(crate) fn execvpe(
+  filename: &CStr,
+  args: &[CString],
+  env: &[CString],
+) -> nix::Result<Infallible> {
   // for nix::unistd::execve
   let mut envp = env.to_vec();
 

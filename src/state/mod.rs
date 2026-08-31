@@ -22,7 +22,6 @@ use super::{
   state::vars::{VarFlags, VarKind},
   system_msg, try_var, two_way_display,
   util::{
-    self,
     error::{LabelBuilder, ShErr, ShErrKind, ShResult},
     pos::Pos,
   },
@@ -32,14 +31,14 @@ use super::{
 pub(super) mod cmd;
 pub(super) mod cwd;
 pub(super) mod db;
-pub mod jobs;
+pub(crate) mod jobs;
 pub(super) mod logic;
 pub(super) mod meta;
 pub(super) mod params;
 pub(super) mod paths;
 pub(super) mod rc;
 pub(super) mod scopes;
-pub mod shopt;
+pub(crate) mod shopt;
 pub(super) mod terminal;
 pub(super) mod vars;
 
@@ -70,13 +69,13 @@ pub(super) struct Message {
 }
 
 impl Message {
-  pub fn new(what: String) -> Self {
+  pub(crate) fn new(what: String) -> Self {
     Self {
       when: SystemTime::now(),
       what,
     }
   }
-  pub fn with_timestamp(&self) -> String {
+  pub(crate) fn with_timestamp(&self) -> String {
     let time: DateTime<Local> = (self.when).into();
     let formatted = time.format("[%H:%M:%S]").to_string();
     let msg = self.what.trim().replace('\n', "\n\t\t"); // aligns multiline messages
@@ -172,7 +171,7 @@ pub(super) struct Shed {
 }
 
 impl Shed {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       jobs: RefCell::new(jobs::JobTab::new()),
       var_scopes: RefCell::new(scopes::ScopeStack::new()),
@@ -228,7 +227,7 @@ impl Shed {
 
   /// Access the I/O sinks
   #[track_caller]
-  pub fn sinks<T, F>(f: F) -> T
+  pub(crate) fn sinks<T, F>(f: F) -> T
   where
     F: FnOnce(&mut procio::Sinks) -> T,
   {
@@ -237,7 +236,7 @@ impl Shed {
 
   /// Read from the job table
   #[track_caller]
-  pub fn jobs<T, F>(f: F) -> T
+  pub(crate) fn jobs<T, F>(f: F) -> T
   where
     F: FnOnce(&jobs::JobTab) -> T,
   {
@@ -245,7 +244,7 @@ impl Shed {
   }
   /// Mutate the job table
   #[track_caller]
-  pub fn jobs_mut<T, F>(f: F) -> T
+  pub(crate) fn jobs_mut<T, F>(f: F) -> T
   where
     F: FnOnce(&mut jobs::JobTab) -> T,
   {
@@ -253,7 +252,7 @@ impl Shed {
   }
 
   /// Attempt hanging up running jobs.
-  pub fn try_hang_up() {
+  pub(crate) fn try_hang_up() {
     SHED.with(|shed| {
       if let Ok(mut jobs) = shed.jobs.try_borrow_mut() {
         jobs.hang_up();
@@ -263,7 +262,7 @@ impl Shed {
 
   /// Read from the var scope stack
   #[track_caller]
-  pub fn vars<T, F>(f: F) -> T
+  pub(crate) fn vars<T, F>(f: F) -> T
   where
     F: FnOnce(&scopes::ScopeStack) -> T,
   {
@@ -271,7 +270,7 @@ impl Shed {
   }
   /// Mutate the var scope stack
   #[track_caller]
-  pub fn vars_mut<T, F>(f: F) -> T
+  pub(crate) fn vars_mut<T, F>(f: F) -> T
   where
     F: FnOnce(&mut scopes::ScopeStack) -> T,
   {
@@ -280,7 +279,7 @@ impl Shed {
 
   /// Read from the metadata table
   #[track_caller]
-  pub fn meta<T, F>(f: F) -> T
+  pub(crate) fn meta<T, F>(f: F) -> T
   where
     F: FnOnce(&meta::MetaTab) -> T,
   {
@@ -288,7 +287,7 @@ impl Shed {
   }
   /// Mutate the metadata table
   #[track_caller]
-  pub fn meta_mut<T, F>(f: F) -> T
+  pub(crate) fn meta_mut<T, F>(f: F) -> T
   where
     F: FnOnce(&mut meta::MetaTab) -> T,
   {
@@ -297,7 +296,7 @@ impl Shed {
 
   /// Read from the logic table
   #[track_caller]
-  pub fn logic<T, F>(f: F) -> T
+  pub(crate) fn logic<T, F>(f: F) -> T
   where
     F: FnOnce(&logic::LogTab) -> T,
   {
@@ -305,7 +304,7 @@ impl Shed {
   }
   /// Mutate the logic table
   #[track_caller]
-  pub fn logic_mut<T, F>(f: F) -> T
+  pub(crate) fn logic_mut<T, F>(f: F) -> T
   where
     F: FnOnce(&mut logic::LogTab) -> T,
   {
@@ -314,7 +313,7 @@ impl Shed {
 
   /// Read from the shell options
   #[track_caller]
-  pub fn shopts<T, F>(f: F) -> T
+  pub(crate) fn shopts<T, F>(f: F) -> T
   where
     F: FnOnce(&shopt::ShOpts) -> T,
   {
@@ -322,7 +321,7 @@ impl Shed {
   }
   /// Mutate the shell options
   #[track_caller]
-  pub fn shopts_mut<T, F>(f: F) -> T
+  pub(crate) fn shopts_mut<T, F>(f: F) -> T
   where
     F: FnOnce(&mut shopt::ShOpts) -> T,
   {
@@ -331,7 +330,7 @@ impl Shed {
 
   /// Read from the terminal state
   #[track_caller]
-  pub fn term<T, F>(f: F) -> T
+  pub(crate) fn term<T, F>(f: F) -> T
   where
     F: FnOnce(&terminal::Terminal) -> T,
   {
@@ -339,7 +338,7 @@ impl Shed {
   }
   /// Mutate the terminal state
   #[track_caller]
-  pub fn term_mut<T, F>(f: F) -> T
+  pub(crate) fn term_mut<T, F>(f: F) -> T
   where
     F: FnOnce(&mut terminal::Terminal) -> T,
   {
@@ -365,24 +364,24 @@ impl Shed {
     });
   }
 
-  pub fn system_msg_pending() -> bool {
+  pub(crate) fn system_msg_pending() -> bool {
     SHED.with(|shed| !shed.system_msg_queue.borrow().is_empty())
   }
 
-  pub fn post_status_msg(msg: String) {
+  pub(crate) fn post_status_msg(msg: String) {
     SHED.with(|shed| {
       let msg = Message::new(msg);
       shed.status_msg_queue.borrow_mut().push_back(msg);
     });
   }
-  pub fn pop_status_msg() -> Option<String> {
+  pub(crate) fn pop_status_msg() -> Option<String> {
     SHED.with(|shed| {
       let mut queue = shed.status_msg_queue.borrow_mut();
       let mut hist = shed.status_msg_hist.borrow_mut();
       Self::pop_msg(&mut queue, &mut hist)
     })
   }
-  pub fn post_system_msg(msg: String) {
+  pub(crate) fn post_system_msg(msg: String) {
     if Self::meta(meta::MetaTab::interactive_shell) {
       SHED.with(|shed| {
         let msg = Message::new(msg);
@@ -392,7 +391,7 @@ impl Shed {
       errln!("{msg}");
     }
   }
-  pub fn pop_system_msg() -> Option<String> {
+  pub(crate) fn pop_system_msg() -> Option<String> {
     SHED.with(|shed| {
       let mut queue = shed.system_msg_queue.borrow_mut();
       let mut hist = shed.system_msg_hist.borrow_mut();
@@ -410,18 +409,18 @@ impl Shed {
     Some(msg.to_string())
   }
 
-  pub fn create_socket() -> ShResult<()> {
+  pub(crate) fn create_socket() -> ShResult<()> {
     let sock = socket::ShedSocket::new()?;
     SHED.with(|shed| {
       *shed.socket.borrow_mut() = Some(sock.into());
     });
     Ok(())
   }
-  pub fn get_socket() -> Option<Arc<socket::ShedSocket>> {
+  pub(crate) fn get_socket() -> Option<Arc<socket::ShedSocket>> {
     SHED.with(|shed| shed.socket.borrow().clone())
   }
   /// Read all pending requests from the IPC socket, returning a vector of (connection, request) tuples.
-  pub fn read_socket() -> Vec<(UnixStream, socket::SocketRequest)> {
+  pub(crate) fn read_socket() -> Vec<(UnixStream, socket::SocketRequest)> {
     let mut requests = vec![];
     let Some(listener) = Self::get_socket() else {
       return requests;
@@ -435,7 +434,7 @@ impl Shed {
 
     requests
   }
-  pub fn read_request(conn: &UnixStream) -> Option<socket::SocketRequest> {
+  pub(crate) fn read_request(conn: &UnixStream) -> Option<socket::SocketRequest> {
     use nix::{
       errno::Errno,
       unistd::{read, write},
@@ -487,17 +486,17 @@ impl Shed {
 
     Some(request)
   }
-  pub fn push_subscriber(subscriber: UnixStream) {
+  pub(crate) fn push_subscriber(subscriber: UnixStream) {
     SHED.with(|shed| {
       shed.subscribers.borrow_mut().push(Arc::new(subscriber));
     });
   }
-  pub fn num_subscribers() -> usize {
+  pub(crate) fn num_subscribers() -> usize {
     SHED.with(|shed| shed.subscribers.borrow().len())
   }
   /// Push a call frame's traceback labels; the returned guard pops them when
   /// the frame exits (restoring the stack to its prior length).
-  pub fn push_call_frame(labels: Vec<LabelBuilder>) -> CallFrameGuard {
+  pub(crate) fn push_call_frame(labels: Vec<LabelBuilder>) -> CallFrameGuard {
     let restore = SHED.with(|shed| {
       let mut cc = shed.call_context.borrow_mut();
       let restore = cc.len();
@@ -508,11 +507,11 @@ impl Shed {
   }
   /// Snapshot the active traceback-context stack, for attaching to an error
   /// as it is printed.
-  pub fn call_context() -> Vec<LabelBuilder> {
+  pub(crate) fn call_context() -> Vec<LabelBuilder> {
     SHED.with(|shed| shed.call_context.borrow().clone())
   }
   /// Broadcast a message to all subscribers of the IPC socket.
-  pub fn broadcast_msg(msg: &str) {
+  pub(crate) fn broadcast_msg(msg: &str) {
     let payload = msg
       .lines()
       .map(|l| format!("msg>>{l}"))
@@ -522,11 +521,11 @@ impl Shed {
     Self::broadcast(|sub| writefd!(sub, "{payload}\n"));
   }
   /// Broadcast an autocmd event to all subscribers of the IPC socket.
-  pub fn notify_autocmd(kind: logic::AutoCmdKind) {
+  pub(crate) fn notify_autocmd(kind: logic::AutoCmdKind) {
     Self::broadcast(|sub| writefd!(sub, "autocmd_event>>{kind}\n"));
   }
   /// Broadcast a job completion event to all subscribers of the IPC socket.
-  pub fn notify_job_complete(job: &jobs::Job) {
+  pub(crate) fn notify_job_complete(job: &jobs::Job) {
     use itertools::izip;
     use std::fmt::Write as _;
 
@@ -551,7 +550,7 @@ impl Shed {
     });
   }
   /// Broadcast a line edit event to all subscribers of the IPC socket.
-  pub fn notify_line_edit(data: readline::LineData) {
+  pub(crate) fn notify_line_edit(data: readline::LineData) {
     use nix::unistd::write;
     use std::fmt::Write as _;
 
@@ -580,7 +579,7 @@ impl Shed {
     });
   }
   /// Broadcast a key event to all subscribers of the IPC socket.
-  pub fn notify_key_event(event: &keys::KeyEvent) {
+  pub(crate) fn notify_key_event(event: &keys::KeyEvent) {
     use nix::unistd::write;
 
     let seq = event.as_vim_seq();
@@ -591,7 +590,7 @@ impl Shed {
       Ok(())
     });
   }
-  pub fn status_msg_hist() -> Vec<Message> {
+  pub(crate) fn status_msg_hist() -> Vec<Message> {
     SHED.with(|shed| {
       shed
         .status_msg_hist
@@ -601,7 +600,7 @@ impl Shed {
         .collect::<Vec<Message>>()
     })
   }
-  pub fn system_msg_hist() -> Vec<Message> {
+  pub(crate) fn system_msg_hist() -> Vec<Message> {
     SHED.with(|shed| {
       shed
         .system_msg_hist
@@ -615,18 +614,18 @@ impl Shed {
   /// Get the last exit status code, used by `$?`.
   ///
   /// The value is masked to 8 bits to match bash behavior.
-  pub fn get_status() -> i32 {
+  pub(crate) fn get_status() -> i32 {
     SHED.with(|shed| shed.status_code.load(Ordering::Relaxed)) & 255
   }
   /// Set the last exit status code, used by `$?`.
-  pub fn set_status(code: i32) {
+  pub(crate) fn set_status(code: i32) {
     SHED.with(|shed| shed.status_code.store(code, Ordering::Relaxed));
   }
   /// Set the last exit status code from a boolean value, where `true` is success (0) and `false` is failure (1).
-  pub fn set_status_from_bool(code: bool) {
+  pub(crate) fn set_status_from_bool(code: bool) {
     Self::set_status(i32::from(!code));
   }
-  pub fn set_pipe_status(stats: &[WtStat]) -> ShResult<()> {
+  pub(crate) fn set_pipe_status(stats: &[WtStat]) -> ShResult<()> {
     if let Some(pipe_status) = jobs::Job::pipe_status(stats) {
       let pipe_status = pipe_status
         .into_iter()

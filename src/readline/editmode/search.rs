@@ -45,13 +45,13 @@ trait SearchMode {
   fn report_search_mode(&self) -> ModeReport;
 }
 
-pub struct ViSearch {
+pub(crate) struct ViSearch {
   query: SimpleEditor,
   count: usize,
 }
 
 impl ViSearch {
-  pub fn new(count: usize) -> Self {
+  pub(crate) fn new(count: usize) -> Self {
     Self {
       query: SimpleEditor::new(Some("search_history")),
       count,
@@ -65,13 +65,13 @@ impl Default for ViSearch {
   }
 }
 
-pub struct ViSearchRev {
+pub(crate) struct ViSearchRev {
   query: SimpleEditor,
   count: usize,
 }
 
 impl ViSearchRev {
-  pub fn new(count: usize) -> Self {
+  pub(crate) fn new(count: usize) -> Self {
     Self {
       query: SimpleEditor::new(Some("search_history")),
       count,

@@ -288,7 +288,7 @@ fn build_source(args: &BuiltinArgs) -> VarStr {
   parts.join_with(" ")
 }
 
-pub fn get_comp_opts<'a>(opts: impl Iterator<Item = &'a Opt>) -> ShResult<CompOpts> {
+pub(super) fn get_comp_opts<'a>(opts: impl Iterator<Item = &'a Opt>) -> ShResult<CompOpts> {
   let mut comp_opts = CompOpts::default();
   comp_opts.opt_flags |= CompOptFlags::SPACE;
 

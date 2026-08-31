@@ -815,7 +815,7 @@ impl super::LineBuf {
   /// - Global nodes resolve their pattern within the node's address scope.
   /// - Nested Globals INTERSECT: `:g/A/g/B/cmd` operates on lines matching A AND B.
   ///   Each layer of Global narrows the set.
-  pub fn lines_for_ex_node(&self, node: &ExNode) -> ShResult<Vec<usize>> {
+  pub(crate) fn lines_for_ex_node(&self, node: &ExNode) -> ShResult<Vec<usize>> {
     match &node.kind {
       ExNdRule::Global { pat, nested } => {
         let range = node.address.clone().unwrap_or_else(AddressRange::all_lines);
@@ -841,7 +841,7 @@ impl super::LineBuf {
     }
   }
 
-  pub fn lines_for_address(&self, addr: Option<&AddressRange>) -> ShResult<Vec<usize>> {
+  pub(crate) fn lines_for_address(&self, addr: Option<&AddressRange>) -> ShResult<Vec<usize>> {
     match addr {
       None => Ok(vec![self.row()]),
       Some(AddressRange::Single(a)) => {

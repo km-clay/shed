@@ -47,7 +47,7 @@ bitflags! {
 }
 
 impl SetFlags {
-  pub fn get_shopt_fields(self) -> Vec<String> {
+  pub(crate) fn get_shopt_fields(self) -> Vec<String> {
     let mut fields = vec![];
     for flag in self {
       let opt = match flag {
@@ -74,7 +74,7 @@ impl SetFlags {
     fields
   }
 
-  pub fn as_char(self) -> Option<char> {
+  pub(crate) fn as_char(self) -> Option<char> {
     match self {
       _ if self == Self::ALLEXPORT => Some('a'),
       _ if self == Self::NOTIFY => Some('b'),
@@ -139,7 +139,7 @@ impl FromStr for SetFlags {
   }
 }
 
-pub fn build_set_call(readable: bool) -> String {
+pub(crate) fn build_set_call(readable: bool) -> String {
   // I hope you like iterators :)
 
   let opts = Shed::shopts_mut(|o| o.query("set").unwrap().unwrap());

@@ -52,7 +52,7 @@ trait VarCmd: super::Builtin {
   }
 }
 
-pub fn is_array_literal_assignment(raw: &[u8]) -> bool {
+pub(super) fn is_array_literal_assignment(raw: &[u8]) -> bool {
   strops::split_at_unescaped(raw, b"=")
     .map(|(eq, len)| &raw[eq + len..])
     .is_some_and(|rhs| rhs.starts_with(b"(") && strops::ends_with_unescaped(rhs, b")"))
@@ -63,7 +63,7 @@ pub fn is_array_literal_assignment(raw: &[u8]) -> bool {
 /// which treats `(` as a subshell opener and strips parens, breaking array
 /// assignment via `local`/`readonly`/`export`. Tokens that look like array
 /// literals are passed through verbatim so `arr_from_raw` can parse them.
-pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
+pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
   let mut out = vec![];
   for tk in argv {
     let raw = tk.span.as_bytes();
@@ -108,7 +108,7 @@ fn assignment_value(val: &[u8], src: &[u8]) -> VarKind {
 }
 
 /// Split `name=value`, building the value's `VarKind` from the raw source token
-pub fn split_assignment<'a>(arg: &'a [u8], src: &[u8]) -> (&'a [u8], Option<VarKind>) {
+pub(super) fn split_assignment<'a>(arg: &'a [u8], src: &[u8]) -> (&'a [u8], Option<VarKind>) {
   let (var, val) = strops::split_assignment_raw(arg);
   (var, val.map(|v| assignment_value(v, src)))
 }

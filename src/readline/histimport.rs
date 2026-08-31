@@ -14,7 +14,7 @@ use super::{
   util::{error::ShResult, strops},
 };
 
-pub fn import_history<P: AsRef<Path>>(path: P) -> ShResult<Vec<HistEntry>> {
+pub(crate) fn import_history<P: AsRef<Path>>(path: P) -> ShResult<Vec<HistEntry>> {
   let path = path.as_ref();
   let content = std::fs::read(path)
     .map(bytes_to_string)

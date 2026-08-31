@@ -11,7 +11,7 @@ use super::{CharClass, Pos};
 /// A single grapheme. Graphemes can be composed of multiple chars, but are always treated as a single unit for display and editing purposes.
 /// The common single-codepoint case stays inline in `Single`; only true multi-codepoint clusters take a heap allocation via `Cluster`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Grapheme {
+pub(crate) enum Grapheme {
   Single(char),
   Cluster(Box<str>),
 }
@@ -21,7 +21,7 @@ impl Grapheme {
   /// than `\n` and `\t`) and DEL render as 2-column caret notation (`^[`,
   /// `^M`, `^?`, etc.) in the highlighter, so their width must match.
   /// Other unprintable codepoints fall back to 0.
-  pub fn width(&self) -> usize {
+  pub(crate) fn width(&self) -> usize {
     match self {
       Grapheme::Single(ch) => {
         if Self::is_visualized_control(*ch) {
@@ -46,29 +46,29 @@ impl Grapheme {
   fn is_visualized_control(c: char) -> bool {
     matches!(c, '\x00'..='\x08' | '\x0b'..='\x1f' | '\x7f')
   }
-  pub fn len_utf8(&self) -> usize {
+  pub(crate) fn len_utf8(&self) -> usize {
     match self {
       Grapheme::Single(ch) => ch.len_utf8(),
       Grapheme::Cluster(cluster) => cluster.chars().map(char::len_utf8).sum(),
     }
   }
   /// Returns true if the Grapheme is wrapping a linefeed ('\n')
-  pub fn is_lf(&self) -> bool {
+  pub(crate) fn is_lf(&self) -> bool {
     self.is_char('\n')
   }
   /// Returns true if the Grapheme consists of exactly one char and that char is equal to `c`
-  pub fn is_char(&self, c: char) -> bool {
+  pub(crate) fn is_char(&self, c: char) -> bool {
     self.as_char().is_some_and(|ch| ch == c)
   }
   /// Returns the `CharClass` of the Grapheme, which is determined by the properties of its chars
   /// Used for things like word motions
-  pub fn class(&self) -> CharClass {
+  pub(crate) fn class(&self) -> CharClass {
     CharClass::from(self)
   }
 
   /// If the Grapheme consists of exactly one char, returns that char. Otherwise, returns None.
   /// All callsites that use this method operate on ascii, so never returning anything for multibyte sequences is fine.
-  pub fn as_char(&self) -> Option<char> {
+  pub(crate) fn as_char(&self) -> Option<char> {
     match self {
       Grapheme::Single(ch) => Some(*ch),
       Grapheme::Cluster(_) => None,
@@ -76,7 +76,7 @@ impl Grapheme {
   }
 
   /// Returns true if the Grapheme is classified as whitespace
-  pub fn is_ws(&self) -> bool {
+  pub(crate) fn is_ws(&self) -> bool {
     self.class() == CharClass::Whitespace
   }
 }
@@ -118,39 +118,39 @@ impl Display for Grapheme {
   }
 }
 
-pub fn to_graphemes(s: &str) -> Vec<Grapheme> {
+pub(super) fn to_graphemes(s: &str) -> Vec<Grapheme> {
   let s = s.to_string();
   s.graphemes(true).map(Grapheme::from).collect()
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd)]
-pub struct Line(pub(super) Vec<Grapheme>);
+pub(crate) struct Line(pub(super) Vec<Grapheme>);
 
 impl Line {
-  pub fn graphemes(&self) -> &[Grapheme] {
+  pub(crate) fn graphemes(&self) -> &[Grapheme] {
     &self.0
   }
-  pub fn len(&self) -> usize {
+  pub(crate) fn len(&self) -> usize {
     self.0.len()
   }
-  pub fn is_empty(&self) -> bool {
+  pub(crate) fn is_empty(&self) -> bool {
     self.len() == 0
   }
-  pub fn push_str(&mut self, s: &str) {
+  pub(crate) fn push_str(&mut self, s: &str) {
     for g in s.graphemes(true) {
       self.0.push(Grapheme::from(g));
     }
   }
-  pub fn split_off(&mut self, at: usize) -> Line {
+  pub(crate) fn split_off(&mut self, at: usize) -> Line {
     if at > self.0.len() {
       return Line::default();
     }
     Line(self.0.split_off(at))
   }
-  pub fn append(&mut self, other: &mut Line) {
+  pub(crate) fn append(&mut self, other: &mut Line) {
     self.0.append(&mut other.0);
   }
-  pub fn insert_str(&mut self, at: usize, other: &str) {
+  pub(crate) fn insert_str(&mut self, at: usize, other: &str) {
     if other.contains('\n') {
       log::warn!(
         "Inserting string with newlines into a single line. Newlines will be treated as literal characters."
@@ -161,15 +161,15 @@ impl Line {
       self.0.insert(at, Grapheme::from(g));
     }
   }
-  pub fn insert_char(&mut self, at: usize, c: char) {
+  pub(crate) fn insert_char(&mut self, at: usize, c: char) {
     let at = at.min(self.0.len());
     self.0.insert(at, Grapheme::from(c));
   }
-  pub fn insert(&mut self, at: usize, g: Grapheme) {
+  pub(crate) fn insert(&mut self, at: usize, g: Grapheme) {
     let at = at.min(self.0.len());
     self.0.insert(at, g);
   }
-  pub fn trim_start(&mut self) -> Line {
+  pub(crate) fn trim_start(&mut self) -> Line {
     let mut clone = self.clone();
     while clone.0.first().is_some_and(Grapheme::is_ws) {
       clone.0.remove(0);
@@ -207,12 +207,12 @@ impl Display for Line {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Lines(pub(super) Vec<Line>);
+pub(crate) struct Lines(pub(super) Vec<Line>);
 impl Lines {
-  pub fn into_vec(self) -> Vec<Line> {
+  pub(crate) fn into_vec(self) -> Vec<Line> {
     self.0
   }
-  pub fn to_lines(s: &str) -> Lines {
+  pub(crate) fn to_lines(s: &str) -> Lines {
     let s = s.to_string();
     let mut new: Lines = s.split('\n').map(to_graphemes).map(Line::from).collect();
     new.push_empty();
@@ -226,7 +226,7 @@ impl Lines {
     }
   }
 
-  pub fn join(&self) -> String {
+  pub(crate) fn join(&self) -> String {
     self
       .0
       .iter()
@@ -235,7 +235,7 @@ impl Lines {
       .join("\n")
   }
 
-  pub fn split_lines_at(&mut self, pos: Pos) -> Lines {
+  pub(crate) fn split_lines_at(&mut self, pos: Pos) -> Lines {
     let tail = self[pos.row].split_off(pos.col);
     let mut rest: Lines = self.drain(pos.row + 1..).collect();
     rest.insert(0, tail);
@@ -243,7 +243,7 @@ impl Lines {
     rest
   }
 
-  pub fn split_lines(mut self, pos: Pos) -> (Lines, Lines) {
+  pub(crate) fn split_lines(mut self, pos: Pos) -> (Lines, Lines) {
     let tail = self[pos.row].split_off(pos.col);
     let mut rest: Lines = self.drain(pos.row + 1..).collect();
     self.push_empty();
@@ -251,7 +251,7 @@ impl Lines {
     (self, rest)
   }
 
-  pub fn attach_lines(&mut self, other: &mut Lines) {
+  pub(crate) fn attach_lines(&mut self, other: &mut Lines) {
     if other.is_empty() {
       return;
     }
@@ -268,7 +268,7 @@ impl Lines {
     self.push_empty();
   }
 
-  pub fn is_prefix_lines(&self, other: &Lines) -> bool {
+  pub(crate) fn is_prefix_lines(&self, other: &Lines) -> bool {
     if self.is_empty() {
       return false;
     }
@@ -292,7 +292,7 @@ impl Lines {
       && this_line.iter().zip(other_line.iter()).all(|(l, r)| l == r)
   }
 
-  pub fn strip_prefix_lines(mut self, other: &Lines) -> Option<Lines> {
+  pub(crate) fn strip_prefix_lines(mut self, other: &Lines) -> Option<Lines> {
     if self.is_empty() {
       return None;
     }
@@ -336,7 +336,7 @@ impl Lines {
     }
   }
 
-  pub fn byte_len(&self) -> usize {
+  pub(crate) fn byte_len(&self) -> usize {
     self
       .0
       .iter()

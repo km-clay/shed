@@ -85,7 +85,7 @@ mod varcmds;
 mod vice;
 mod width;
 
-pub use argv::{BuiltinArgs, join_raw_arg_iter, join_raw_args};
+pub(crate) use argv::{BuiltinArgs, join_raw_args};
 pub(crate) use help::HELP_PAGE_INSTALL_DIR;
 use opt::{OptSpec, Parsed};
 
@@ -731,7 +731,7 @@ fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
 /// The `command` builtin, which runs a command while bypassing any shell functions or aliases that may shadow it.
 ///
 /// This is a special builtin that always forks, because it needs to run the command in a new process to avoid shadowing.
-pub struct CommandBuiltin;
+pub(crate) struct CommandBuiltin;
 impl Builtin for CommandBuiltin {
   fn always_forks(&self) -> bool {
     true

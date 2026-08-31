@@ -93,14 +93,14 @@ pub(crate) enum XtVersion {
 
 #[expect(dead_code)]
 impl XtVersion {
-  pub fn parse(raw: &str) -> Self {
+  pub(super) fn parse(raw: &str) -> Self {
     Self::parse_iterm2(raw)
       .or_else(|| Self::parse_tmux(raw))
       .or_else(|| Self::parse_wezterm(raw))
       .unwrap_or_else(|| Self::Unknown(raw.to_string()))
   }
 
-  pub fn has_broken_kitty_kbd(&self) -> bool {
+  pub(super) fn has_broken_kitty_kbd(&self) -> bool {
     let Self::Iterm2(ver) = self else {
       return false;
     };
@@ -108,11 +108,11 @@ impl XtVersion {
     *ver < semver!(3, 5, 12)
   }
 
-  pub fn needs_wezterm_workaround(&self) -> bool {
+  pub(super) fn needs_wezterm_workaround(&self) -> bool {
     matches!(self, Self::WezTerm)
   }
 
-  pub fn supports_color_theme_reporting(&self) -> bool {
+  pub(super) fn supports_color_theme_reporting(&self) -> bool {
     let Self::Tmux(ver) = self else { return true };
 
     *ver >= semver!(3, 7)
@@ -169,7 +169,7 @@ struct EventParser {
 }
 
 impl EventParser {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       events: VecDeque::new(),
       ss3_pending: false,
@@ -180,15 +180,15 @@ impl EventParser {
     }
   }
 
-  pub fn push(&mut self, event: TermEvent) {
+  pub(crate) fn push(&mut self, event: TermEvent) {
     self.events.push_back(event);
   }
 
-  pub fn pop(&mut self) -> Option<TermEvent> {
+  pub(crate) fn pop(&mut self) -> Option<TermEvent> {
     self.events.pop_front()
   }
 
-  pub fn parse_term_cap(&mut self) {
+  pub(crate) fn parse_term_cap(&mut self) {
     let Some(buf) = self.dcs_buf.take() else {
       return;
     };
@@ -216,7 +216,7 @@ impl EventParser {
     });
   }
 
-  pub fn parse_xtversion(&mut self) {
+  pub(crate) fn parse_xtversion(&mut self) {
     let Some(buf) = self.dcs_buf.take() else {
       return;
     };
@@ -225,7 +225,7 @@ impl EventParser {
     self.push(TermEvent::XtVersion(xtver));
   }
 
-  pub fn decode_hex(hex: &str) -> Option<String> {
+  pub(crate) fn decode_hex(hex: &str) -> Option<String> {
     if !hex.len().is_multiple_of(2) {
       return None; // Invalid hex string
     }
@@ -561,7 +561,7 @@ impl Debug for PollReader {
 }
 
 impl PollReader {
-  pub fn new() -> Self {
+  pub(super) fn new() -> Self {
     Self {
       parser: vte::Parser::new(),
       collector: EventParser::new(),
@@ -571,7 +571,7 @@ impl PollReader {
     }
   }
 
-  pub fn read_one_verbatim(&mut self) -> Option<KeyEvent> {
+  pub(super) fn read_one_verbatim(&mut self) -> Option<KeyEvent> {
     if self.byte_buf.is_empty() {
       return None;
     }
@@ -583,11 +583,11 @@ impl PollReader {
     ))
   }
 
-  pub fn feed_bytes(&mut self, bytes: &[u8]) {
+  pub(super) fn feed_bytes(&mut self, bytes: &[u8]) {
     self.byte_buf.extend(bytes);
   }
 
-  pub fn read(&mut self, fd: BorrowedFd) -> ShResult<usize> {
+  pub(super) fn read(&mut self, fd: BorrowedFd) -> ShResult<usize> {
     let mut buffer = [0u8; 1024];
     match read(fd, &mut buffer) {
       Ok(0) => {
@@ -606,7 +606,7 @@ impl PollReader {
     }
   }
 
-  pub fn readkey(&mut self) -> Option<KeyEvent> {
+  pub(super) fn readkey(&mut self) -> Option<KeyEvent> {
     match_loop!(self.read_event() => ev, {
       TermEvent::Key(event) => return Some(event),
       TermEvent::FocusGained => {

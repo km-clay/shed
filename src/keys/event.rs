@@ -6,11 +6,11 @@ use crate::{util, varstr};
 // Credit to Rustyline for the design ideas in this module
 // https://github.com/kkawakam/rustyline
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct KeyEvent(pub KeyCode, pub ModKeys);
+pub(crate) struct KeyEvent(pub KeyCode, pub ModKeys);
 
 impl KeyEvent {
   #[expect(clippy::too_many_lines)]
-  pub fn as_vim_seq(&self) -> VarStr {
+  pub(crate) fn as_vim_seq(&self) -> VarStr {
     let mut seq = util::scratch_buf();
     let KeyEvent(event, mods) = self;
     let mut needs_angle_bracket = false;
@@ -139,13 +139,13 @@ impl KeyEvent {
     }
   }
 
-  pub fn code(&self) -> &KeyCode {
+  pub(crate) fn code(&self) -> &KeyCode {
     &self.0
   }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub enum KeyCode {
+pub(crate) enum KeyCode {
   Backspace,
   Char(char),
   Verbatim(Arc<str>), // For sequences that should be treated as literal input, not parsed into a KeyCode
@@ -179,7 +179,7 @@ pub enum KeyCode {
 }
 
 impl KeyCode {
-  pub fn is_keyboard_key(&self) -> bool {
+  pub(crate) fn is_keyboard_key(&self) -> bool {
     !matches!(
       self,
       KeyCode::ScrollUp

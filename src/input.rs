@@ -21,7 +21,7 @@ use crate::{
 /// Dispatch input handling based on the given [`lifecycle::ShedArgs`]
 ///
 /// Executes `-c` commands, reads from stdin, runs scripts, or falls back to interactive mode.
-pub fn dispatch_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
+pub(crate) fn dispatch_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
   if args.edit_script {
     // in this arm, we interpret the input we are given as a sequence of keys
     // for the line editor to consume and execute

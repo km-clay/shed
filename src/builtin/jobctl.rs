@@ -76,7 +76,7 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
   }
 }
 
-pub enum JobBehavior {
+pub(super) enum JobBehavior {
   Foregound,
   Background,
 }
@@ -95,7 +95,7 @@ impl super::Builtin for Bg {
   }
 }
 
-pub fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResult<()> {
+pub(super) fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResult<()> {
   let span = args.span();
   let mut arg_vec = args.arguments();
 

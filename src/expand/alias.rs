@@ -82,15 +82,15 @@ impl AliasExpander {
 ///
 /// Walks command-position words left to right, expanding each alias and
 /// re-expanding the result within a per-position recursion guard.
-pub fn expand_aliases(input: &str) -> String {
+pub(crate) fn expand_aliases(input: &str) -> String {
   AliasExpander::new(input.to_string()).expand().0
 }
 
-pub fn expand_alias_with_pos(input: String) -> (String, Option<usize>) {
+pub(crate) fn expand_alias_with_pos(input: String) -> (String, Option<usize>) {
   AliasExpander::new(input).expand()
 }
 
-pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
+pub(crate) fn expand_keymap(s: &str) -> Vec<KeyEvent> {
   let mut keys = Vec::new();
   let mut chars = s.chars().collect::<VecDeque<char>>();
   while let Some(ch) = chars.pop_front() {
@@ -134,7 +134,7 @@ pub fn expand_keymap(s: &str) -> Vec<KeyEvent> {
   keys
 }
 
-pub fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
+pub(crate) fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
   let parts: Vec<&str> = alias.split('-').collect();
   let (mods_parts, key_name) = parts.split_at(parts.len() - 1);
   let mut mods = ModKeys::NONE;

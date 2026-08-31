@@ -8,14 +8,14 @@ use super::{
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SelectMode {
+pub(crate) enum SelectMode {
   Char(Pos),
   Line(Pos),
   Block(Pos),
 }
 
 impl SelectMode {
-  pub fn shape(&self, other: Pos) -> SelectShape {
+  pub(crate) fn shape(&self, other: Pos) -> SelectShape {
     match self {
       SelectMode::Char(pos) => {
         let (s, e) = util::ordered(*pos, other);
@@ -35,20 +35,20 @@ impl SelectMode {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SelectShape {
+pub(crate) enum SelectShape {
   Char(SignedPos),
   Line(SignedPos),
   Block(SignedPos),
 }
 
 impl SelectShape {
-  pub fn pos(&self) -> SignedPos {
+  pub(crate) fn pos(&self) -> SignedPos {
     match self {
       SelectShape::Char(pos) | SelectShape::Line(pos) | SelectShape::Block(pos) => *pos,
     }
   }
 
-  pub fn into_select_mode(self, resolved: Pos) -> SelectMode {
+  pub(crate) fn into_select_mode(self, resolved: Pos) -> SelectMode {
     match self {
       SelectShape::Char(_) => SelectMode::Char(resolved),
       SelectShape::Line(_) => SelectMode::Line(resolved),
@@ -58,15 +58,15 @@ impl SelectShape {
 }
 
 impl super::LineBuf {
-  pub fn start_char_select(&mut self) {
+  pub(crate) fn start_char_select(&mut self) {
     self.select_mode = Some(SelectMode::Char(self.cursor.pos));
   }
 
-  pub fn start_line_select(&mut self) {
+  pub(crate) fn start_line_select(&mut self) {
     self.select_mode = Some(SelectMode::Line(self.cursor.pos));
   }
 
-  pub fn set_select_anchor(&mut self, pos: Pos) {
+  pub(crate) fn set_select_anchor(&mut self, pos: Pos) {
     if let Some(mode) = self.select_mode.as_mut() {
       match mode {
         SelectMode::Char(a) | SelectMode::Line(a) | SelectMode::Block(a) => *a = pos,
@@ -74,7 +74,7 @@ impl super::LineBuf {
     }
   }
 
-  pub fn stop_selecting(&mut self) {
+  pub(crate) fn stop_selecting(&mut self) {
     if self.select_mode.is_some() {
       self.last_selection = self.select_mode.map(|m| {
         let anchor = match m {
@@ -86,12 +86,12 @@ impl super::LineBuf {
     self.select_mode = None;
   }
 
-  pub fn select_range(&self) -> Option<Motion> {
+  pub(crate) fn select_range(&self) -> Option<Motion> {
     let mode = self.select_mode.as_ref()?;
     Some(self.evaluate_selection(mode))
   }
 
-  pub fn selection_str(&self) -> Option<String> {
+  pub(crate) fn selection_str(&self) -> Option<String> {
     let (start, end) = match self.select_range()? {
       Motion::CharRange(s, e) => {
         let (s, e) = util::ordered(s, e);
@@ -124,7 +124,7 @@ impl super::LineBuf {
     Some(self.pos_slice_exclusive(start, end))
   }
 
-  pub fn select_range_byte_pos(&mut self) -> Option<Range<usize>> {
+  pub(crate) fn select_range_byte_pos(&mut self) -> Option<Range<usize>> {
     match self.select_range()? {
       Motion::CharRange(s, e) => {
         let (s, e) = util::ordered(s, e);
@@ -153,7 +153,7 @@ impl super::LineBuf {
     }
   }
 
-  pub fn evaluate_selection(&self, mode: &SelectMode) -> Motion {
+  pub(crate) fn evaluate_selection(&self, mode: &SelectMode) -> Motion {
     match mode {
       SelectMode::Char(pos) => {
         let (s, e) = util::ordered(self.cursor.pos, *pos);
@@ -170,7 +170,7 @@ impl super::LineBuf {
     }
   }
 
-  pub fn evaluate_select_shape(&self, shape: &SelectShape) -> Motion {
+  pub(crate) fn evaluate_select_shape(&self, shape: &SelectShape) -> Motion {
     let offset = shape.pos();
     let anchor = self.cursor.pos.add_signed(offset);
     assert!(anchor > self.cursor.pos);
@@ -178,14 +178,14 @@ impl super::LineBuf {
     self.evaluate_selection(&mode)
   }
 
-  pub fn select_mode(&self) -> Option<Motion> {
+  pub(crate) fn select_mode(&self) -> Option<Motion> {
     self
       .select_mode
       .as_ref()
       .map(|m| Motion::Selection(m.shape(self.cursor.pos)))
   }
 
-  pub fn is_selecting(&self) -> bool {
+  pub(crate) fn is_selecting(&self) -> bool {
     self.select_mode.is_some()
   }
 }

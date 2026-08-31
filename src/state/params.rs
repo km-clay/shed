@@ -22,7 +22,7 @@ use super::{
 };
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
-pub fn parse_arr_bracket(var_name: &[u8]) -> Option<(VarStr, VarStr)> {
+pub(crate) fn parse_arr_bracket(var_name: &[u8]) -> Option<(VarStr, VarStr)> {
   if !var_name.contains(&b'[') {
     return None;
   }
@@ -65,7 +65,7 @@ pub fn parse_arr_bracket(var_name: &[u8]) -> Option<(VarStr, VarStr)> {
 }
 
 /// Expand the raw index expression and parse it into an `ArrIndex`.
-pub fn expand_arr_index(idx_raw: &[u8], allow_side_effects: bool) -> ShResult<ArrIndex> {
+pub(crate) fn expand_arr_index(idx_raw: &[u8], allow_side_effects: bool) -> ShResult<ArrIndex> {
   let expanded = LexStream::new(idx_raw, LexFlags::empty())
     .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
     .try_fold(vec![], |mut acc, wrds| {
@@ -105,7 +105,7 @@ pub fn expand_arr_index(idx_raw: &[u8], allow_side_effects: bool) -> ShResult<Ar
 /// * Ok(None) means "there's no database connection"
 /// * Err(e) is your function's `ShErr`
 /// * Ok(Some(T)) means the connection exists and your function succeeded.
-pub fn with_vars<F, H, V, T>(vars: H, f: F) -> T
+pub(crate) fn with_vars<F, H, V, T>(vars: H, f: F) -> T
 where
   F: FnOnce() -> T,
   H: IntoIterator<Item = (VarStr, V)>,
@@ -148,14 +148,14 @@ where
   f()
 }
 
-pub fn get_comp_wordbreaks() -> VarStr {
+pub(crate) fn get_comp_wordbreaks() -> VarStr {
   try_var!("COMP_WORDBREAKS").unwrap_or_else(|| "\"'><;|=&(:".into())
 }
 
 /// Get the first char of IFS
 ///
 /// Used mainly for joining strings
-pub fn get_separator() -> VarStr {
+pub(crate) fn get_separator() -> VarStr {
   let separators = get_separators();
   separators
     .to_str_lossy()
@@ -168,11 +168,11 @@ pub fn get_separator() -> VarStr {
 /// Get the entire IFS variable
 ///
 /// Used mainly for splitting strings
-pub fn get_separators() -> VarStr {
+pub(crate) fn get_separators() -> VarStr {
   try_var!("IFS").unwrap_or_else(|| " \t\n".into())
 }
 
-pub fn get_ps4() -> VarStr {
+pub(crate) fn get_ps4() -> VarStr {
   try_var!("PS4")
     .and_then(|ps4| {
       Expander::from_raw(&ps4, TkFlags::empty())
@@ -182,11 +182,11 @@ pub fn get_ps4() -> VarStr {
     .unwrap_or_else(|| varstr!("+ "))
 }
 
-pub fn get_time_fmt() -> VarStr {
+pub(crate) fn get_time_fmt() -> VarStr {
   try_var!("TIMEFMT").unwrap_or_else(|| "\nreal\t%*E\nuser\t%*U\nsys\t%*S".into())
 }
 
-pub fn set_ver_info() -> ShResult<()> {
+pub(crate) fn set_ver_info() -> ShResult<()> {
   let version = env!("CARGO_PKG_VERSION");
   let mut semver = version.split('.');
   let major = semver.next().unwrap_or("0");
@@ -218,7 +218,7 @@ pub fn set_ver_info() -> ShResult<()> {
   Ok(())
 }
 
-pub fn set_sh_lvl() -> ShResult<()> {
+pub(crate) fn set_sh_lvl() -> ShResult<()> {
   // Increment SHLVL, or set to 1 if not present or invalid.
   // This var represents how many nested shell instances we're in
   if let Some(var) = try_var!("SHLVL")
@@ -247,7 +247,7 @@ pub fn get_default_path() -> Option<String> {
 }
 
 #[cfg(not(target_os = "android"))]
-pub fn get_default_path() -> Option<String> {
+pub(crate) fn get_default_path() -> Option<String> {
   unsafe {
     let needed = libc::confstr(libc::_CS_PATH, std::ptr::null_mut(), 0);
     if needed == 0 {
@@ -271,7 +271,7 @@ pub fn get_default_path() -> Option<String> {
   }
 }
 
-pub fn get_exec_wrappers() -> Vec<VarStr> {
+pub(crate) fn get_exec_wrappers() -> Vec<VarStr> {
   let mut wrappers = vec![
     "sudo".into(),
     "doas".into(),

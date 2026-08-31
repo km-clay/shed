@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
-pub fn lookup_cmd(cmd: &str) -> Option<PathBuf> {
+pub(crate) fn lookup_cmd(cmd: &str) -> Option<PathBuf> {
   if cmd.contains('/') {
     let p = PathBuf::from(cmd);
     return p.is_file().then_some(p);
@@ -35,7 +35,7 @@ pub fn lookup_cmd(cmd: &str) -> Option<PathBuf> {
   Some(resolved)
 }
 
-pub fn which_util(name: &str) -> Option<Rc<Utility>> {
+pub(crate) fn which_util(name: &str) -> Option<Rc<Utility>> {
   if Shed::logic(|l| l.get_alias(name).is_some()) {
     return Some(Rc::new(Utility::alias(name.into())));
   }
@@ -54,7 +54,7 @@ pub fn which_util(name: &str) -> Option<Rc<Utility>> {
     .find(|u| u.name() == name)
 }
 
-pub fn try_hash() {
+pub(crate) fn try_hash() {
   if Shed::shopts(|o| o.set.hashall) {
     Shed::meta_mut(MetaTab::try_rehash_path_cache);
   }

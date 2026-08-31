@@ -41,15 +41,15 @@ use crate::{
 
 /// Minimum fd number for shell-internal file descriptors.
 /// User-visible fds (0-9) are kept clear so `exec 3>&-` etc. work as expected.
-pub const MIN_INTERNAL_FD: RawFd = 10;
+pub(crate) const MIN_INTERNAL_FD: RawFd = 10;
 
 /// The status code returned when a builtin command's output is truncated
 /// due to exceeding the maximum size of the `OutputSink`
-pub const SINK_TRUNCATED_STATUS: i32 = 122;
+pub(crate) const SINK_TRUNCATED_STATUS: i32 = 122;
 
 /// Like `dup()`, but places the new fd at `MIN_INTERNAL_FD` or above so it
 /// doesn't collide with user-managed fds.
-pub fn dup_high(fd: BorrowedFd) -> nix::Result<OwnedFd> {
+pub(crate) fn dup_high(fd: BorrowedFd) -> nix::Result<OwnedFd> {
   let fd = fcntl(fd, FcntlArg::F_DUPFD_CLOEXEC(MIN_INTERNAL_FD))?;
   unsafe { Ok(OwnedFd::from_raw_fd(fd)) }
 }
@@ -63,13 +63,13 @@ fn dup_high_no_cloexec(fd: BorrowedFd) -> nix::Result<OwnedFd> {
 
 #[expect(clippy::needless_pass_by_value)]
 /// Like `dup_high()` but takes and closes an existing `OwnedFd`.
-pub fn move_high(fd: OwnedFd) -> nix::Result<OwnedFd> {
+pub(crate) fn move_high(fd: OwnedFd) -> nix::Result<OwnedFd> {
   let new_fd = dup_high(fd.as_fd())?;
   Ok(new_fd)
 } // fd is closed here
 
 #[expect(clippy::needless_pass_by_value)]
-pub fn move_high_no_cloexec(fd: OwnedFd) -> nix::Result<OwnedFd> {
+pub(crate) fn move_high_no_cloexec(fd: OwnedFd) -> nix::Result<OwnedFd> {
   let new_fd = dup_high_no_cloexec(fd.as_fd())?;
   Ok(new_fd)
 }
@@ -81,7 +81,10 @@ pub fn move_high_no_cloexec(fd: OwnedFd) -> nix::Result<OwnedFd> {
 ///
 /// Later on we will probably have to do something like using a custom sqlite VFS
 /// to limit the fd numbers it can use, but for now this will do. I guess.
-pub fn do_something_that_opens_fds_that_we_cant_access_hack<F, T>(min_fd: RawFd, something: F) -> T
+pub(crate) fn do_something_that_opens_fds_that_we_cant_access_hack<F, T>(
+  min_fd: RawFd,
+  something: F,
+) -> T
 where
   F: FnOnce() -> T,
 {
@@ -103,12 +106,12 @@ where
 }
 
 /// Creates pipes outside of the userspace range of FDs
-pub fn pipes_high() -> nix::Result<(OwnedFd, OwnedFd)> {
+pub(crate) fn pipes_high() -> nix::Result<(OwnedFd, OwnedFd)> {
   let (r, w) = nix::unistd::pipe()?;
   Ok((move_high(r)?, move_high(w)?))
 }
 
-pub fn pipes_high_no_cloexec() -> nix::Result<(OwnedFd, OwnedFd)> {
+pub(crate) fn pipes_high_no_cloexec() -> nix::Result<(OwnedFd, OwnedFd)> {
   let (r, w) = nix::unistd::pipe()?;
   Ok((move_high_no_cloexec(r)?, move_high_no_cloexec(w)?))
 }
@@ -117,24 +120,24 @@ pub fn pipes_high_no_cloexec() -> nix::Result<(OwnedFd, OwnedFd)> {
 ///
 /// If constructed using `Redir::close()`, this will close the target fd when applied.
 #[derive(Debug)]
-pub struct Redir {
+pub(crate) struct Redir {
   fd: RawFd,
   from: Option<OwnedFd>,
 }
 
 impl Redir {
-  pub fn new(fd: RawFd, from: OwnedFd) -> Self {
+  pub(crate) fn new(fd: RawFd, from: OwnedFd) -> Self {
     Self {
       fd,
       from: Some(from),
     }
   }
-  pub fn close(fd: RawFd) -> Self {
+  pub(crate) fn close(fd: RawFd) -> Self {
     Self { fd, from: None }
   }
   /// Trigger the redirection by calling [`nix::libc::dup2`] or closing the target fd.
   /// Returns an error if the redirection fails.
-  pub fn apply(&mut self) -> ShResult<()> {
+  pub(crate) fn apply(&mut self) -> ShResult<()> {
     if let Some(from) = &self.from {
       let ret = unsafe { nix::libc::dup2(from.as_raw_fd(), self.fd) };
       if ret < 0 {
@@ -167,40 +170,40 @@ pub(super) struct RedirBldr {
 }
 
 impl RedirBldr {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     RedirBldr::default()
   }
-  pub fn with_fd(self, fd: RawFd) -> Self {
+  pub(crate) fn with_fd(self, fd: RawFd) -> Self {
     Self {
       fd: Some(fd),
       ..self
     }
   }
-  pub fn with_class(self, class: RedirType) -> Self {
+  pub(crate) fn with_class(self, class: RedirType) -> Self {
     Self {
       class: Some(class),
       ..self
     }
   }
-  pub fn with_target(self, target: RedirTarget) -> Self {
+  pub(crate) fn with_target(self, target: RedirTarget) -> Self {
     Self {
       target: Some(target),
       ..self
     }
   }
-  pub fn with_span(self, span: Span) -> Self {
+  pub(crate) fn with_span(self, span: Span) -> Self {
     Self {
       span: Some(span),
       ..self
     }
   }
-  pub fn with_dup_from_word(self) -> Self {
+  pub(crate) fn with_dup_from_word(self) -> Self {
     Self {
       dup_from_word: true,
       ..self
     }
   }
-  pub fn build(self) -> ShResult<RedirSpec> {
+  pub(crate) fn build(self) -> ShResult<RedirSpec> {
     let Some(fd) = self.fd else {
       return Err(sherr!(ParseErr, "Redirection missing target fd").option_promote(self.span));
     };
@@ -255,7 +258,7 @@ impl RedirBldr {
 impl RedirBldr {
   /// Attempt parsing a redirection operator from a byte slice.
   /// Returns a `RedirBldr` with the parsed components, or an error if the input is invalid.
-  pub fn parse(bytes: &[u8]) -> ShResult<Self> {
+  pub(crate) fn parse(bytes: &[u8]) -> ShResult<Self> {
     let mut cur = SliceCursor::new(bytes);
     let mut src_fd = util::scratch_buf();
     let mut tgt_fd = util::scratch_buf();
@@ -372,20 +375,20 @@ pub(super) enum RedirType {
 }
 
 impl RedirType {
-  pub fn is_input(self) -> bool {
+  pub(crate) fn is_input(self) -> bool {
     matches!(
       self,
       RedirType::Input | RedirType::HereDoc | RedirType::HereString | RedirType::ReadWrite
     )
   }
-  pub fn is_output(self) -> bool {
+  pub(crate) fn is_output(self) -> bool {
     matches!(
       self,
       RedirType::Output | RedirType::OutputForce | RedirType::Append | RedirType::ReadWrite
     )
   }
   /// Returns true if this redirection type is a file operation (i.e. not a dup or close).
-  pub fn is_file_op(self) -> bool {
+  pub(crate) fn is_file_op(self) -> bool {
     matches!(
       self,
       RedirType::Output
@@ -395,7 +398,7 @@ impl RedirType {
         | RedirType::ReadWrite
     )
   }
-  pub fn is_dup_op(self) -> bool {
+  pub(crate) fn is_dup_op(self) -> bool {
     matches!(self, RedirType::Output | RedirType::Input)
   }
 }
@@ -444,10 +447,10 @@ pub(super) enum RedirSpec {
 }
 
 impl RedirSpec {
-  pub fn file(fd: RawFd, path: Tk, mode: RedirType) -> Self {
+  pub(crate) fn file(fd: RawFd, path: Tk, mode: RedirType) -> Self {
     Self::File { fd, path, mode }
   }
-  pub fn dup(from: RawFd, to: RawFd, mode: RedirType) -> Self {
+  pub(crate) fn dup(from: RawFd, to: RawFd, mode: RedirType) -> Self {
     Self::Dup {
       from,
       to,
@@ -455,7 +458,7 @@ impl RedirSpec {
       span: None,
     }
   }
-  pub fn dup_spanned(from: RawFd, to: RawFd, mode: RedirType, span: Option<Span>) -> Self {
+  pub(crate) fn dup_spanned(from: RawFd, to: RawFd, mode: RedirType, span: Option<Span>) -> Self {
     Self::Dup {
       from,
       to,
@@ -463,15 +466,15 @@ impl RedirSpec {
       span,
     }
   }
-  pub fn dup_expr(word: Tk, to: RawFd, mode: RedirType) -> Self {
+  pub(crate) fn dup_expr(word: Tk, to: RawFd, mode: RedirType) -> Self {
     Self::DupExpr { word, to, mode }
   }
-  pub fn close(fd: RawFd, span: Option<Span>) -> Self {
+  pub(crate) fn close(fd: RawFd, span: Option<Span>) -> Self {
     Self::Close { fd, span }
   }
   /// The span of the redirection operator, if this spec carries one. Used to
   /// point errors at the offending redirect.
-  pub fn span(&self) -> Option<Span> {
+  pub(crate) fn span(&self) -> Option<Span> {
     match self {
       RedirSpec::File { path, .. } => Some(path.span.clone()),
       RedirSpec::DupExpr { word, .. } => Some(word.span.clone()),
@@ -479,10 +482,10 @@ impl RedirSpec {
       RedirSpec::Buffer { .. } => None,
     }
   }
-  pub fn buffer(fd: RawFd, buf: VarStr, flags: TkFlags) -> Self {
+  pub(crate) fn buffer(fd: RawFd, buf: VarStr, flags: TkFlags) -> Self {
     Self::Buffer { fd, buf, flags }
   }
-  pub fn target_fd(&self) -> RawFd {
+  pub(crate) fn target_fd(&self) -> RawFd {
     match self {
       RedirSpec::Dup { to, .. } | RedirSpec::DupExpr { to, .. } => *to,
       RedirSpec::File { fd, .. } | RedirSpec::Close { fd, .. } | RedirSpec::Buffer { fd, .. } => {
@@ -490,7 +493,7 @@ impl RedirSpec {
       }
     }
   }
-  pub fn mode(&self) -> RedirType {
+  pub(crate) fn mode(&self) -> RedirType {
     match self {
       RedirSpec::File { mode, .. }
       | RedirSpec::Dup { mode, .. }
@@ -499,7 +502,7 @@ impl RedirSpec {
       RedirSpec::Buffer { .. } => RedirType::HereDoc,
     }
   }
-  pub fn into_redir(self) -> ShResult<Redir> {
+  pub(crate) fn into_redir(self) -> ShResult<Redir> {
     match self {
       RedirSpec::File { fd, path, mode } => {
         let span = path.span.clone();
@@ -616,7 +619,7 @@ impl RedirResult {
   /// Collapse into a plain result, propagating any error. For callers where a
   /// redirection failure is fatal (the pre-non-fatal default). Callers that can
   /// continue should instead match the variants and handle [`Self::Skipped`].
-  pub fn or_fatal(self) -> ShResult<Option<RedirGuard>> {
+  pub(crate) fn or_fatal(self) -> ShResult<Option<RedirGuard>> {
     match self {
       RedirResult::Applied(guard) => Ok(Some(guard)),
       // `apply()` never yields `Skipped`; proceed defensively if it somehow does.
@@ -631,7 +634,7 @@ impl RedirResult {
 pub(super) struct RedirSet(pub Vec<RedirSpec>);
 
 impl RedirSet {
-  pub fn apply_persistent(self) -> ShResult<()> {
+  pub(crate) fn apply_persistent(self) -> ShResult<()> {
     for spec in self.0 {
       let mut redir = spec.into_redir()?;
       redir.apply()?;
@@ -642,7 +645,7 @@ impl RedirSet {
   /// `fatal` is false, a failure is reported (printed + `$?` set) and turned
   /// into [`RedirResult::Skipped`] so the caller can skip the command and
   /// continue; when `fatal` is true, the error is left to propagate.
-  pub fn try_apply(self, fatal: bool) -> RedirResult {
+  pub(crate) fn try_apply(self, fatal: bool) -> RedirResult {
     match self.apply() {
       RedirResult::Error(e) if !fatal => {
         e.print_error();
@@ -654,7 +657,7 @@ impl RedirSet {
     }
   }
   /// Apply the redirections, returning a guard that will restore the original fds when dropped.
-  pub fn apply(self) -> RedirResult {
+  pub(crate) fn apply(self) -> RedirResult {
     if self.0.is_empty() {
       return RedirResult::NoRedirs;
     }
@@ -687,7 +690,7 @@ impl RedirSet {
   /// Separate input redirs and output redirs into two separate `RedirSet`s
   ///
   /// Returns (`in_redirs`, `out_redirs`)
-  pub fn split_by_channel(self) -> (RedirSet, RedirSet) {
+  pub(crate) fn split_by_channel(self) -> (RedirSet, RedirSet) {
     let mut in_redirs = vec![];
     let mut out_redirs = vec![];
     for spec in self.0 {
@@ -731,17 +734,17 @@ pub(super) struct RedirGuard {
 }
 
 impl RedirGuard {
-  pub fn new(targets: &BTreeSet<RawFd>) -> ShResult<Self> {
+  pub(crate) fn new(targets: &BTreeSet<RawFd>) -> ShResult<Self> {
     let saved = Some(IoGroup::capture_targets(targets)?);
     Ok(Self { saved })
   }
   /// Create a `RedirGuard` that captures the current state of stdin, stdout, and stderr (fd 0, 1, 2).
-  pub fn stdio() -> ShResult<Self> {
+  pub(crate) fn stdio() -> ShResult<Self> {
     let stdio_fds = [0, 1, 2].iter().copied().collect();
     Self::new(&stdio_fds)
   }
   /// Persist the redirections, preventing the guard from restoring the original fds when dropped.
-  pub fn persist(mut self) {
+  pub(crate) fn persist(mut self) {
     use std::mem::{drop, take};
     drop(take(&mut self.saved));
   }
@@ -762,7 +765,7 @@ pub(super) struct IoGroup(BTreeMap<RawFd, Option<OwnedFd>>);
 
 impl IoGroup {
   /// Capture the current state of the given file descriptors, saving them for later restoration.
-  pub fn capture_targets(targets: &BTreeSet<RawFd>) -> ShResult<Self> {
+  pub(crate) fn capture_targets(targets: &BTreeSet<RawFd>) -> ShResult<Self> {
     let mut saved = BTreeMap::new();
 
     for &fd in targets {
@@ -776,7 +779,7 @@ impl IoGroup {
 
     Ok(Self(saved))
   }
-  pub fn restore(&self) -> ShResult<()> {
+  pub(crate) fn restore(&self) -> ShResult<()> {
     for (&fd, saved) in &self.0 {
       match saved {
         Some(owned) => {
@@ -805,7 +808,7 @@ pub(super) struct PipeGenerator {
 }
 
 impl PipeGenerator {
-  pub fn new(num_cmds: usize) -> Self {
+  pub(crate) fn new(num_cmds: usize) -> Self {
     Self {
       num_cmds,
       cursor: 0,
@@ -868,15 +871,15 @@ impl OutputSink {
     Self::default()
   }
 
-  pub fn limit(&self) -> ReadLimit {
+  pub(crate) fn limit(&self) -> ReadLimit {
     self.limit
   }
 
-  pub fn was_truncated(&self) -> bool {
+  pub(crate) fn was_truncated(&self) -> bool {
     self.truncated
   }
 
-  pub fn into_buf(self) -> Vec<u8> {
+  pub(crate) fn into_buf(self) -> Vec<u8> {
     self.buf
   }
 }
@@ -933,7 +936,7 @@ pub(crate) struct Sinks {
 }
 
 impl Sinks {
-  pub const fn new() -> Self {
+  pub(crate) const fn new() -> Self {
     Self {
       output_sinks: Vec::new(),
       input_sinks: Vec::new(),
@@ -1033,12 +1036,12 @@ pub(crate) struct SinkScope {
   taken: bool,
 }
 impl SinkScope {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Shed::sinks(Sinks::push_output);
     Self { taken: false }
   }
 
-  pub fn take(mut self) -> OutputSink {
+  pub(crate) fn take(mut self) -> OutputSink {
     self.taken = true;
     Shed::sinks(Sinks::pop_output).expect("SinkScope should have an out sink")
   }
@@ -1055,7 +1058,7 @@ impl Drop for SinkScope {
 /// A guard struct that pushes an input sink onto the `Shed` stack and pops it when dropped.
 pub(crate) struct StdinScope;
 impl StdinScope {
-  pub fn push(sink: OutputSink) -> Self {
+  pub(crate) fn push(sink: OutputSink) -> Self {
     Shed::sinks(|s| s.push_input(sink));
     Self
   }

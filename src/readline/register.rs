@@ -60,7 +60,7 @@ pub(crate) struct RegisterName {
 }
 
 impl RegisterName {
-  pub fn new(name: Option<char>) -> Self {
+  pub(crate) fn new(name: Option<char>) -> Self {
     let Some(ch) = name else {
       return Self::default();
     };
@@ -72,10 +72,10 @@ impl RegisterName {
       append,
     }
   }
-  pub fn name(self) -> Option<char> {
+  pub(crate) fn name(self) -> Option<char> {
     self.name
   }
-  pub fn display(self) -> Option<char> {
+  pub(crate) fn display(self) -> Option<char> {
     let name = self.name?;
     if self.append {
       Some(name.to_ascii_uppercase())
@@ -83,17 +83,17 @@ impl RegisterName {
       Some(name)
     }
   }
-  pub fn is_none(self) -> bool {
+  pub(crate) fn is_none(self) -> bool {
     self.name.is_none()
   }
-  pub fn write_to_register(self, buf: RegisterContent) {
+  pub(crate) fn write_to_register(self, buf: RegisterContent) {
     if self.append {
       append_register(self.name, buf);
     } else {
       write_register(self.name, buf);
     }
   }
-  pub fn read_from_register(self) -> Option<RegisterContent> {
+  pub(crate) fn read_from_register(self) -> Option<RegisterContent> {
     read_register(self.name)
   }
 }
@@ -123,7 +123,7 @@ pub(crate) enum RegisterContent {
   Empty,
 }
 impl RegisterContent {
-  pub fn from_extracted(content: Lines, motion: &MotionKind) -> Self {
+  pub(crate) fn from_extracted(content: Lines, motion: &MotionKind) -> Self {
     match motion {
       MotionKind::Char { .. } => RegisterContent::Span(content.into_vec()),
       MotionKind::Line { .. } => RegisterContent::Line(content.into_vec()),
@@ -205,7 +205,7 @@ fn exists(cmd: &str) -> bool {
 }
 
 impl ClipboardProvider {
-  pub fn detect() -> Self {
+  pub(super) fn detect() -> Self {
     if exists("pbcopy") {
       return Self::PbCopy;
     }
@@ -239,7 +239,7 @@ impl ClipboardProvider {
     Self::Osc52
   }
 
-  pub fn copy(self, sel: Selection, content: &RegisterContent) {
+  pub(super) fn copy(self, sel: Selection, content: &RegisterContent) {
     let text = content.to_string();
     match self.copy_argv(sel) {
       Some(argv) => {
@@ -262,7 +262,7 @@ impl ClipboardProvider {
     }
   }
 
-  pub fn paste(self, sel: Selection) -> Option<RegisterContent> {
+  pub(super) fn paste(self, sel: Selection) -> Option<RegisterContent> {
     let argv = self.paste_argv(sel)?;
     let out = util::with_saved_status(|| {
       procio::capture_command(argv.as_bytes(), None, Some(&("clipboard paste".into()))).ok()
@@ -271,7 +271,7 @@ impl ClipboardProvider {
     Some(RegisterContent::Span(Lines::to_lines(&out).into_vec()))
   }
 
-  pub fn copy_argv(self, sel: Selection) -> Option<&'static str> {
+  pub(super) fn copy_argv(self, sel: Selection) -> Option<&'static str> {
     Some(match (self, sel) {
       (Self::WlCopy, Selection::Clipboard) => "wl-copy",
       (Self::WlCopy, Selection::Primary) => "wl-copy --primary",
@@ -288,7 +288,7 @@ impl ClipboardProvider {
     })
   }
 
-  pub fn paste_argv(self, sel: Selection) -> Option<&'static str> {
+  pub(super) fn paste_argv(self, sel: Selection) -> Option<&'static str> {
     Some(match (self, sel) {
       (Self::WlCopy, Selection::Clipboard) => "wl-paste",
       (Self::WlCopy, Selection::Primary) => "wl-paste --primary",
@@ -306,13 +306,13 @@ impl ClipboardProvider {
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct Registers {
+pub(super) struct Registers {
   registers: HashMap<char, Register>,
   clipboard: ClipboardProvider,
 }
 
 impl Registers {
-  pub fn new() -> Self {
+  pub(super) fn new() -> Self {
     let mut regs = HashMap::default();
     for c in 'a'..='z' {
       regs.insert(c, Register::default());
@@ -325,7 +325,7 @@ impl Registers {
       clipboard: ClipboardProvider::default(),
     }
   }
-  pub fn resolve_key(key: Option<char>) -> Option<char> {
+  pub(super) fn resolve_key(key: Option<char>) -> Option<char> {
     match key.unwrap_or('"') {
       '"' => Some('"'),
       '+' => Some('+'),
@@ -334,7 +334,7 @@ impl Registers {
       _ => None,
     }
   }
-  pub fn read(&self, name: Option<char>) -> Option<RegisterContent> {
+  pub(super) fn read(&self, name: Option<char>) -> Option<RegisterContent> {
     let key = Self::resolve_key(name)?;
     if let Ok(sel) = Selection::try_from(key)
       && let Some(content) = self.clipboard.paste(sel)
@@ -344,13 +344,13 @@ impl Registers {
 
     self.registers.get(&key).map(|r| r.content().clone())
   }
-  pub fn write(&mut self, name: Option<char>, buf: RegisterContent) {
+  pub(super) fn write(&mut self, name: Option<char>, buf: RegisterContent) {
     self.write_inner(name, buf, false);
   }
-  pub fn append(&mut self, name: Option<char>, buf: RegisterContent) {
+  pub(super) fn append(&mut self, name: Option<char>, buf: RegisterContent) {
     self.write_inner(name, buf, true);
   }
-  pub fn write_inner(&mut self, name: Option<char>, buf: RegisterContent, append: bool) {
+  pub(super) fn write_inner(&mut self, name: Option<char>, buf: RegisterContent, append: bool) {
     let Some(key) = Self::resolve_key(name) else {
       return;
     };
@@ -369,18 +369,18 @@ impl Registers {
 }
 
 #[derive(Clone, Default, Debug)]
-pub struct Register {
+pub(super) struct Register {
   content: RegisterContent,
 }
 
 impl Register {
-  pub fn content(&self) -> &RegisterContent {
+  pub(super) fn content(&self) -> &RegisterContent {
     &self.content
   }
-  pub fn write(&mut self, buf: RegisterContent) {
+  pub(super) fn write(&mut self, buf: RegisterContent) {
     self.content = buf;
   }
-  pub fn append(&mut self, buf: RegisterContent) {
+  pub(super) fn append(&mut self, buf: RegisterContent) {
     use RegisterContent as C;
     if matches!(buf, RegisterContent::Empty) {
       return;

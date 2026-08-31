@@ -19,7 +19,7 @@ use super::{
 use super::char_class::{CharClassIter, CharClassIterRev};
 use super::edit::extract_range_contiguous;
 
-pub fn rot13_char(c: char) -> char {
+pub(crate) fn rot13_char(c: char) -> char {
   let offset = if c.is_ascii_lowercase() {
     b'a'
   } else if c.is_ascii_uppercase() {
@@ -30,7 +30,7 @@ pub fn rot13_char(c: char) -> char {
   (((c as u8 - offset + 13) % 26) + offset) as char
 }
 
-pub fn toggle_case_char(c: char) -> char {
+pub(crate) fn toggle_case_char(c: char) -> char {
   if c.is_ascii_lowercase() {
     c.to_ascii_uppercase()
   } else if c.is_ascii_uppercase() {
@@ -47,11 +47,11 @@ pub(super) struct Diff {
 }
 
 impl super::LineBuf {
-  pub fn mark_insert_mode_start_pos(&mut self) {
+  pub(crate) fn mark_insert_mode_start_pos(&mut self) {
     self.insert_mode_start_pos = Some(self.cursor.pos);
   }
 
-  pub fn clear_insert_mode_start_pos(&mut self) {
+  pub(crate) fn clear_insert_mode_start_pos(&mut self) {
     self.insert_mode_start_pos = None;
   }
 
@@ -70,11 +70,11 @@ impl super::LineBuf {
     self.insert_str(new);
     content
   }
-  pub fn set_viewport_cap(&mut self, cap: Option<usize>) {
+  pub(crate) fn set_viewport_cap(&mut self, cap: Option<usize>) {
     self.viewport_cap = cap;
   }
 
-  pub fn get_viewport_height(&self) -> usize {
+  pub(crate) fn get_viewport_height(&self) -> usize {
     let raw = Shed::shopts(|o| {
       let height = o.line.viewport_height.as_str();
       if let Ok(num) = height.parse::<usize>() {
@@ -111,7 +111,7 @@ impl super::LineBuf {
     }
     out.max(1)
   }
-  pub fn update_scroll_offset(&mut self) {
+  pub(crate) fn update_scroll_offset(&mut self) {
     let height = self.get_viewport_height();
     let scrolloff = shopt!(line.scroll_offset);
     if self.cursor.pos.row < self.scroll_offset + scrolloff {
@@ -259,7 +259,7 @@ impl super::LineBuf {
     Some(cache)
   }
 
-  pub fn display_window_joined(&mut self) -> String {
+  pub(crate) fn display_window_joined(&mut self) -> String {
     use std::fmt::Write;
     let mut joined = String::with_capacity(self.lines().byte_len());
     write!(joined, "{self}").ok();
@@ -300,7 +300,7 @@ impl super::LineBuf {
 
     Lines(mid.to_vec()).join()
   }
-  pub fn trim_range(&mut self, range: AddressRange, trim_leading: bool) -> ShResult<()> {
+  pub(crate) fn trim_range(&mut self, range: AddressRange, trim_leading: bool) -> ShResult<()> {
     let (start, end) = match range {
       AddressRange::Single(line_addr) => {
         let Some(addr) = self.resolve_line_addr(&line_addr)? else {
@@ -384,7 +384,7 @@ impl super::LineBuf {
 
     Ok(())
   }
-  pub fn trim(&mut self) {
+  pub(crate) fn trim(&mut self) {
     // trim empty lines
     while self.lines.first().is_some_and(|l| l.0.is_empty()) {
       self.lines.remove(0);
@@ -413,7 +413,7 @@ impl super::LineBuf {
       self.lines.pop();
     }
   }
-  pub fn window_slice_to_cursor(&self) -> String {
+  pub(crate) fn window_slice_to_cursor(&self) -> String {
     let mut result = String::new();
     let start_row = self.scroll_offset;
 
@@ -551,7 +551,7 @@ impl super::LineBuf {
     }
     self.indent_cache = None;
   }
-  pub fn pop_left(&mut self) -> bool {
+  pub(crate) fn pop_left(&mut self) -> bool {
     let Some(pos) = self.concat_points.pop_front() else {
       return false;
     };
@@ -559,7 +559,7 @@ impl super::LineBuf {
     self.fix_cursor();
     true
   }
-  pub fn pop_right(&mut self) -> bool {
+  pub(crate) fn pop_right(&mut self) -> bool {
     let Some(pos) = self.concat_points.pop_back() else {
       return false;
     };
@@ -567,11 +567,11 @@ impl super::LineBuf {
     self.fix_cursor();
     true
   }
-  pub fn clear_concats(&mut self) {
+  pub(crate) fn clear_concats(&mut self) {
     self.concat_points.clear();
   }
   /// Concatenate a string onto the left side of the buffer with a separator
-  pub fn concat_left(&mut self, sep: &str, other: &str) {
+  pub(crate) fn concat_left(&mut self, sep: &str, other: &str) {
     if self.is_empty() {
       self.lines = Lines::to_lines(other);
       return;
@@ -609,7 +609,7 @@ impl super::LineBuf {
     self.concat_points.push_front(splice_pos);
   }
   /// Concatenate a string onto the right side of the buffer with a separator
-  pub fn concat_right(&mut self, sep: &str, other: &str) {
+  pub(crate) fn concat_right(&mut self, sep: &str, other: &str) {
     if self.is_empty() {
       self.lines = Lines::to_lines(other);
       return;
@@ -642,7 +642,7 @@ impl super::LineBuf {
     self.lines.extend(new_lines.0);
     self.concat_points.push_back(splice_pos);
   }
-  pub fn cursor_in_leading_ws(&self) -> bool {
+  pub(crate) fn cursor_in_leading_ws(&self) -> bool {
     let line = self.line(self.row());
     let col = self.col();
 
@@ -661,7 +661,7 @@ impl super::LineBuf {
       .is_none_or(|grs| grs.iter().all(Grapheme::is_ws))
   }
 
-  pub fn cursor_is_escaped(&self) -> bool {
+  pub(crate) fn cursor_is_escaped(&self) -> bool {
     if self.cursor.pos.col == 0 {
       return false;
     }
@@ -675,7 +675,7 @@ impl super::LineBuf {
       .is_some_and(|g| g.is_char('\\'))
   }
 
-  pub fn take_buf(&mut self) -> String {
+  pub(crate) fn take_buf(&mut self) -> String {
     let result = self.to_string();
     self.lines = Lines::default();
     self.cursor.pos = Pos { row: 0, col: 0 };
@@ -719,11 +719,11 @@ impl super::LineBuf {
     }
   }
 
-  pub fn cursor_to_flat(&self) -> usize {
+  pub(crate) fn cursor_to_flat(&self) -> usize {
     self.pos_to_flat(self.cursor.pos)
   }
 
-  pub fn anchor_to_flat(&self) -> Option<usize> {
+  pub(crate) fn anchor_to_flat(&self) -> Option<usize> {
     self.select_mode.map(|r| match r {
       SelectMode::Char(pos) | SelectMode::Block(pos) | SelectMode::Line(pos) => {
         self.pos_to_flat(pos)
@@ -731,15 +731,15 @@ impl super::LineBuf {
     })
   }
 
-  pub fn set_cursor_from_flat(&mut self, flat: usize) {
+  pub(crate) fn set_cursor_from_flat(&mut self, flat: usize) {
     self.cursor.pos = self.pos_from_flat(flat);
     self.fix_cursor();
   }
-  pub fn set_anchor_from_flat(&mut self, flat: usize) {
+  pub(crate) fn set_anchor_from_flat(&mut self, flat: usize) {
     let new_pos = self.pos_from_flat(flat);
     self.set_anchor(new_pos);
   }
-  pub fn set_anchor(&mut self, new_pos: Pos) {
+  pub(crate) fn set_anchor(&mut self, new_pos: Pos) {
     match self.select_mode.as_mut() {
       Some(SelectMode::Line(pos) | SelectMode::Block(pos) | SelectMode::Char(pos)) => {
         *pos = new_pos;
@@ -748,7 +748,7 @@ impl super::LineBuf {
     }
   }
 
-  pub fn with_initial(mut self, s: &str, cursor_pos: usize) -> Self {
+  pub(crate) fn with_initial(mut self, s: &str, cursor_pos: usize) -> Self {
     self.set_buffer(s);
     // In the flat model, cursor_pos was a flat offset. Map to col on row .
     self.cursor.pos = Pos {
@@ -758,11 +758,11 @@ impl super::LineBuf {
     self
   }
 
-  pub fn move_cursor_to_end(&mut self) {
+  pub(crate) fn move_cursor_to_end(&mut self) {
     self.set_cursor(Pos::MAX);
   }
 
-  pub fn cursor_max(&self) -> usize {
+  pub(crate) fn cursor_max(&self) -> usize {
     // In single-line mode this is the length of the first line
     // In multi-line mode this returns total grapheme count (for flat compat)
     if self.lines.len() == 1 {
@@ -772,7 +772,7 @@ impl super::LineBuf {
     }
   }
 
-  pub fn cursor_at_max(&self) -> bool {
+  pub(crate) fn cursor_at_max(&self) -> bool {
     let last_row = self.lines.len().saturating_sub(1);
     let max = if self.cursor.exclusive {
       self.lines[last_row].len().saturating_sub(1)
@@ -782,11 +782,11 @@ impl super::LineBuf {
     self.cursor.pos.row == last_row && self.cursor.pos.col >= max
   }
 
-  pub fn set_cursor_clamp(&mut self, exclusive: bool) {
+  pub(crate) fn set_cursor_clamp(&mut self, exclusive: bool) {
     self.cursor.exclusive = exclusive;
   }
 
-  pub fn start_of_line(&self) -> usize {
+  pub(crate) fn start_of_line(&self) -> usize {
     // Return 0-based flat offset of start of current row
     let mut offset = 0;
     for i in 0..self.cursor.pos.row {
@@ -795,12 +795,12 @@ impl super::LineBuf {
     offset
   }
 
-  pub fn on_last_line(&self) -> bool {
+  pub(crate) fn on_last_line(&self) -> bool {
     self.cursor.pos.row == self.lines.len().saturating_sub(1)
       && self.hint.as_ref().is_none_or(|h| h.lines().len() <= 1)
   }
 
-  pub fn cursor_byte_pos(&self) -> usize {
+  pub(crate) fn cursor_byte_pos(&self) -> usize {
     let mut pos = 0;
     for i in 0..self.cursor.pos.row {
       pos += self.lines[i].to_string().len() + 1; // +1 for '\n'
@@ -821,12 +821,12 @@ impl super::LineBuf {
     }
     pos + byte_count
   }
-  pub fn clear_buffer(&mut self) {
+  pub(crate) fn clear_buffer(&mut self) {
     self.lines = Lines::default();
     self.clear_concats();
     self.fix_cursor();
   }
-  pub fn set_buffer(&mut self, s: &str) {
+  pub(crate) fn set_buffer(&mut self, s: &str) {
     self.lines = Lines::to_lines(s);
     if self.lines.is_empty() {
       self.lines.push(Line::default());
@@ -834,7 +834,7 @@ impl super::LineBuf {
     self.clear_concats();
     self.fix_cursor();
   }
-  pub fn fix_cursor(&mut self) {
+  pub(crate) fn fix_cursor(&mut self) {
     // we are now going to enforce some invariants and do some bookkeeping
     if self.lines.is_empty() {
       // self.lines must always have at least one line
@@ -861,17 +861,17 @@ impl super::LineBuf {
     // update viewport scroll offset
     self.update_scroll_offset();
   }
-  pub fn stop_undo_merge(&mut self) {
+  pub(crate) fn stop_undo_merge(&mut self) {
     self.merging_undos = false;
     self.set_top_merging(false);
     // Barrier so the next edit can't fold into the just-closed group.
     self.undo_stack.push(Edit::barrier(self.cursor.pos));
   }
-  pub fn start_undo_merge(&mut self) {
+  pub(crate) fn start_undo_merge(&mut self) {
     self.merging_undos = true;
     self.set_top_merging(true);
   }
-  pub fn equalize_rows(&mut self, line_nums: Vec<usize>) {
+  pub(crate) fn equalize_rows(&mut self, line_nums: Vec<usize>) {
     for row in line_nums {
       let (start, end) = self.indent_levels_for_row(row);
       let num_tabs = start.min(end);
@@ -885,12 +885,12 @@ impl super::LineBuf {
       }
     }
   }
-  pub fn indent_levels_for_row(&mut self, row: usize) -> (usize, usize) {
+  pub(crate) fn indent_levels_for_row(&mut self, row: usize) -> (usize, usize) {
     self.indent_levels().get(row).copied().unwrap_or_default()
   }
   /// Returns (depth-at-cursor, parse-failed). Computed from the prefix
   /// up to the cursor — reflects whether we're inside an open block.
-  pub fn cursor_indent_level(&mut self) -> (usize, bool) {
+  pub(crate) fn cursor_indent_level(&mut self) -> (usize, bool) {
     let (to_cursor, _) = self.lines.clone().split_lines(self.cursor.pos);
     let raw = to_cursor.join();
     let depth = edit::depth_levels_via_ctx(&raw)
@@ -900,7 +900,7 @@ impl super::LineBuf {
       .1;
     (depth, edit::parse_failed_strict(&raw))
   }
-  pub fn indent_levels(&mut self) -> &[(usize, usize)] {
+  pub(crate) fn indent_levels(&mut self) -> &[(usize, usize)] {
     if self.indent_cache.is_none() {
       let joined = self.to_string();
       // Reuse the highlighter's token cache (rebuilt only on a buffer change).
@@ -996,7 +996,7 @@ impl super::LineBuf {
       MotionKind::Block { .. } => unimplemented!(),
     }
   }
-  pub fn get_matching_lines(
+  pub(crate) fn get_matching_lines(
     &self,
     constraint: &Motion,
     re: &str,
@@ -1075,7 +1075,7 @@ impl super::LineBuf {
 
     col
   }
-  pub fn pos_to_byte(&mut self, pos: Pos) -> Option<usize> {
+  pub(crate) fn pos_to_byte(&mut self, pos: Pos) -> Option<usize> {
     if let Some(positions) = &self.byte_positions {
       positions
         .iter()
@@ -1085,7 +1085,7 @@ impl super::LineBuf {
       self.pos_to_byte(pos)
     }
   }
-  pub fn byte_to_pos(&mut self, byte_offset: usize) -> Option<Pos> {
+  pub(crate) fn byte_to_pos(&mut self, byte_offset: usize) -> Option<Pos> {
     if let Some(positions) = &self.byte_positions {
       positions
         .iter()
@@ -1145,7 +1145,7 @@ impl super::LineBuf {
   pub(super) fn get_row(&self, row: usize) -> Option<&Line> {
     self.lines.get(row)
   }
-  pub fn slice_pos(&self, a: Pos, b: Pos) -> String {
+  pub(crate) fn slice_pos(&self, a: Pos, b: Pos) -> String {
     let (lo, hi) = if (a.row, a.col) <= (b.row, b.col) {
       (a, b)
     } else {
@@ -1443,7 +1443,7 @@ impl super::LineBuf {
     let col = pos.col.min(line.len());
     &line[col..]
   }
-  pub fn row(&self) -> usize {
+  pub(crate) fn row(&self) -> usize {
     self.cursor.pos.row
   }
   pub(super) fn offset_row(&self, offset: isize) -> usize {
@@ -1506,7 +1506,7 @@ impl super::LineBuf {
     let col = self.cursor.pos.col;
     line.graphemes().get(col).is_some_and(Grapheme::is_ws)
   }
-  pub fn set_cursor(&mut self, mut pos: Pos) {
+  pub(crate) fn set_cursor(&mut self, mut pos: Pos) {
     pos.clamp_row(&self.lines);
     pos.clamp_col(&self.lines[pos.row].0, self.cursor.exclusive);
     self.cursor.pos = pos;
@@ -1571,16 +1571,16 @@ impl super::LineBuf {
   pub(super) fn cur_line(&self) -> &Line {
     &self.lines[self.cursor.pos.row]
   }
-  pub fn count_graphemes(&self) -> usize {
+  pub(crate) fn count_graphemes(&self) -> usize {
     self.lines.iter().map(Line::len).sum()
   }
-  pub fn is_empty(&self) -> bool {
+  pub(crate) fn is_empty(&self) -> bool {
     self.lines.len() == 0 || (self.lines.len() == 1 && self.count_graphemes() == 0)
   }
-  pub fn clear_pending_search(&mut self) {
+  pub(crate) fn clear_pending_search(&mut self) {
     self.pending_search = None;
   }
-  pub fn update_pending_search(&mut self, new: Option<VarStr>) {
+  pub(crate) fn update_pending_search(&mut self, new: Option<VarStr>) {
     let Some(new) = new else { return };
     self.pending_search = (!new.is_empty()).then_some(new);
   }

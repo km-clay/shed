@@ -83,7 +83,7 @@ pub(super) struct SimpleEditor {
 }
 
 impl SimpleEditor {
-  pub fn new(history_table: Option<&str>) -> Self {
+  pub(crate) fn new(history_table: Option<&str>) -> Self {
     let history = history_table.map(|name| {
       db::get_db_conn()
         .and_then(|conn| History::new(conn, name).ok())
@@ -123,7 +123,7 @@ impl SimpleEditor {
       self.buf = pending;
     }
   }
-  pub fn handle_key(&mut self, key: KeyEvent) -> ShResult<()> {
+  pub(crate) fn handle_key(&mut self, key: KeyEvent) -> ShResult<()> {
     let Some(mut cmd) = self.mode.handle_key(key) else {
       return Ok(());
     };
@@ -177,7 +177,7 @@ pub(super) struct StatusLine {
 }
 
 impl StatusLine {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     let (left_raw, middle_raw, right_raw) = Shed::shopts(|o| {
       let s = &o.statline;
       (
@@ -202,13 +202,13 @@ impl StatusLine {
       dirty: false,
     }
   }
-  pub fn parts(&mut self) -> (&str, &str, &str) {
+  pub(crate) fn parts(&mut self) -> (&str, &str, &str) {
     if self.dirty {
       self.refresh_now();
     }
     (&self.left, &self.middle, &self.right)
   }
-  pub fn render(&mut self, term_width: usize) -> String {
+  pub(crate) fn render(&mut self, term_width: usize) -> String {
     let (left, middle, right) = self.parts();
 
     let lw = ui::calc_str_width(left);
@@ -241,10 +241,10 @@ impl StatusLine {
 
     format!("{left_str}{pad_lm}{middle_str}{pad_mr}{right}")
   }
-  pub fn refresh(&mut self) {
+  pub(crate) fn refresh(&mut self) {
     self.dirty = true;
   }
-  pub fn refresh_now(&mut self) {
+  pub(crate) fn refresh_now(&mut self) {
     *self = Self::new();
   }
 }
@@ -263,7 +263,7 @@ pub(super) struct Prompt {
 
 #[expect(clippy::similar_names)]
 impl Prompt {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     autocmd!(PrePrompt);
 
     let Some(ps1_raw) = try_var!("PS1") else {
@@ -291,7 +291,7 @@ impl Prompt {
     }
   }
 
-  pub fn get_ps1(&mut self) -> &str {
+  pub(crate) fn get_ps1(&mut self) -> &str {
     if self.dirty {
       self.refresh_now();
     }
@@ -301,7 +301,7 @@ impl Prompt {
     *self = util::with_saved_status(Self::new);
   }
 
-  pub fn refresh(&mut self) {
+  pub(crate) fn refresh(&mut self) {
     self.dirty = true;
   }
 }
@@ -334,7 +334,7 @@ enum LineCmd {
 }
 
 impl LineCmd {
-  pub fn switch_to_normal() -> Self {
+  pub(crate) fn switch_to_normal() -> Self {
     Self::Execute(EditCmd {
       register: RegisterName::default(),
       verb: Some(verb!(Verb::NormalMode)),
@@ -353,15 +353,15 @@ enum MacroRecord {
 }
 
 impl MacroRecord {
-  pub fn is_recording(&self) -> bool {
+  pub(crate) fn is_recording(&self) -> bool {
     matches!(self, MacroRecord::Recording(_, _))
   }
-  pub fn feed_key_event(&mut self, event: KeyEvent) {
+  pub(crate) fn feed_key_event(&mut self, event: KeyEvent) {
     if let MacroRecord::Recording(_, keys) = self {
       keys.push(event);
     }
   }
-  pub fn commit_recording(&mut self) -> Option<RegisterName> {
+  pub(crate) fn commit_recording(&mut self) -> Option<RegisterName> {
     if let MacroRecord::Recording(reg, keys) = std::mem::take(self) {
       reg.write_to_register(register::RegisterContent::Macro(keys));
 
@@ -370,10 +370,10 @@ impl MacroRecord {
       None
     }
   }
-  pub fn start_recording(&mut self, reg: RegisterName) {
+  pub(crate) fn start_recording(&mut self, reg: RegisterName) {
     *self = MacroRecord::Recording(reg, vec![]);
   }
-  pub fn status(&self) -> Option<VarStr> {
+  pub(crate) fn status(&self) -> Option<VarStr> {
     match self {
       MacroRecord::Recording(reg, _) => {
         let name = reg.display()?;
@@ -397,7 +397,7 @@ struct HintWorker {
 }
 
 impl HintWorker {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     let (channel, receiver) = mpsc::channel::<CompHintRequest>();
     std::thread::spawn(move || Self::main(&receiver));
     Self {
@@ -406,7 +406,7 @@ impl HintWorker {
       last_sent: None,
     }
   }
-  pub fn dispatch_worker(&mut self, buffer: String, cursor_pos: usize) {
+  pub(crate) fn dispatch_worker(&mut self, buffer: String, cursor_pos: usize) {
     if self
       .last_sent
       .as_ref()
@@ -492,11 +492,11 @@ pub(super) struct ShedLine {
 }
 
 impl ShedLine {
-  pub fn new(prompt: Prompt) -> ShResult<Self> {
+  pub(crate) fn new(prompt: Prompt) -> ShResult<Self> {
     Self::new_private(prompt, true)
   }
 
-  pub fn new_no_hist(prompt: Prompt) -> ShResult<Self> {
+  pub(crate) fn new_no_hist(prompt: Prompt) -> ShResult<Self> {
     Self::new_private(prompt, false)
   }
 
@@ -556,7 +556,7 @@ impl ShedLine {
     Ok(new)
   }
 
-  pub fn get_line_data(&self) -> LineData {
+  pub(crate) fn get_line_data(&self) -> LineData {
     LineData {
       buffer: self.core.editor.to_string().replace('\n', "\\n"),
       cursor: self.core.editor.cursor_to_flat(),
@@ -598,12 +598,12 @@ impl ShedLine {
   }
 
   /// Mark that the display needs to be redrawn (e.g., after SIGWINCH)
-  pub fn mark_dirty(&mut self) {
+  pub(crate) fn mark_dirty(&mut self) {
     self.needs_redraw = true;
     self.refresh_ui();
   }
 
-  pub fn reset_active_widget(&mut self, full_redraw: bool) -> ShResult<()> {
+  pub(crate) fn reset_active_widget(&mut self, full_redraw: bool) -> ShResult<()> {
     if let Some(comp) = self.completer.as_mut() {
       comp.reset_stay_active();
       self.needs_redraw = true;
@@ -618,7 +618,7 @@ impl ShedLine {
   }
 
   /// Reset readline state for a new prompt
-  pub fn reset(&mut self, full_redraw: bool) -> ShResult<()> {
+  pub(crate) fn reset(&mut self, full_redraw: bool) -> ShResult<()> {
     // Clear old display before resetting state - old_layout must survive
     // so print_line can call clear_rows with the full multi-line layout
     self.refresh_ui();
@@ -673,11 +673,11 @@ impl ShedLine {
     self.print_line(false)
   }
 
-  pub fn prompt_mut(&mut self) -> &mut Prompt {
+  pub(crate) fn prompt_mut(&mut self) -> &mut Prompt {
     &mut self.prompt
   }
 
-  pub fn curr_keymap_flags(&self) -> KeyMapFlags {
+  pub(crate) fn curr_keymap_flags(&self) -> KeyMapFlags {
     let mut flags = KeyMapFlags::empty();
     match self.core.mode.report_mode() {
       ModeReport::Insert => flags |= KeyMapFlags::INSERT,
@@ -704,7 +704,7 @@ impl ShedLine {
   }
 
   /// This method ensures that the editing mode (Vi or Emacs) matches the 'vi' option, and switches modes if necessary.
-  pub fn fix_editing_mode(&mut self) {
+  pub(crate) fn fix_editing_mode(&mut self) {
     if shopt!(set.vi) && self.core.mode.report_mode() == ModeReport::Emacs {
       self
         .core
@@ -959,7 +959,7 @@ impl ShedLine {
 
   /// Process any available input and return readline event
   /// This is non-blocking - returns Pending if no complete line yet
-  pub fn process_input(&mut self, keys: Vec<KeyEvent>) -> ShResult<ReadlineEvent> {
+  pub(crate) fn process_input(&mut self, keys: Vec<KeyEvent>) -> ShResult<ReadlineEvent> {
     // Redraw if needed
     if self.needs_redraw {
       self.print_line(false)?;
@@ -1016,7 +1016,7 @@ impl ShedLine {
     }
   }
 
-  pub fn worker_req_gen(&mut self) -> u64 {
+  pub(crate) fn worker_req_gen(&mut self) -> u64 {
     self.worker.req_gen
   }
 
@@ -1050,7 +1050,7 @@ impl ShedLine {
   }
 
   /// Replay a sequence of `KeyEvent`s as if they came from the input stream.
-  pub fn replay_keys(
+  pub(crate) fn replay_keys(
     &mut self,
     keys: Vec<KeyEvent>,
     with_keymaps: bool,
@@ -1554,7 +1554,7 @@ impl ShedLine {
     Ok(None)
   }
 
-  pub fn handle_key(&mut self, key: &KeyEvent) -> ShResult<Option<ReadlineEvent>> {
+  pub(crate) fn handle_key(&mut self, key: &KeyEvent) -> ShResult<Option<ReadlineEvent>> {
     let Some(linecmd) = self.resolve_key(key)? else {
       self.core.update_editor_search();
       self.needs_redraw = true;
@@ -1841,12 +1841,12 @@ impl ShedLine {
         && !cmd.flags.contains(CmdFlags::IS_SUBMIT)
   }
 
-  pub fn needs_redraw(&self) -> bool {
+  pub(crate) fn needs_redraw(&self) -> bool {
     self.needs_redraw
   }
 
   #[expect(clippy::too_many_lines)]
-  pub fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
+  pub(crate) fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
     let _sync = SyncOutputGuard::begin();
     if self.statline.is_some() && !shopt!(statline.enable) {
       self.statline = None;
@@ -2276,7 +2276,7 @@ impl ShedLine {
     Ok(())
   }
 
-  pub fn try_swap_mode_from_str(&mut self, name: &str) -> bool {
+  pub(crate) fn try_swap_mode_from_str(&mut self, name: &str) -> bool {
     self.core.try_swap_mode_from_str(name)
   }
 

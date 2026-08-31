@@ -16,7 +16,7 @@ use super::{
   subshell,
 };
 
-pub fn expand_raw_inner(
+pub(crate) fn expand_raw_inner(
   chars: &mut SegCursor,
   allow_side_effects: bool,
   mark_split: bool,
@@ -116,11 +116,11 @@ pub fn expand_raw_inner(
   Ok(result)
 }
 
-pub fn expand_raw(stream: &mut SegCursor) -> ShResult<SegStream> {
+pub(crate) fn expand_raw(stream: &mut SegCursor) -> ShResult<SegStream> {
   expand_raw_inner(stream, true, false)
 }
 
-pub fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> ShResult<SegStream> {
+pub(crate) fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> ShResult<SegStream> {
   let mut var_name = SegStream::new();
   let mut brace_depth: i32 = 0;
   let mut inner_brace_depth: i32 = 0;
@@ -241,7 +241,7 @@ fn lookup_var(var_name: &SegStream) -> ShResult<SegStream> {
   Ok(val.unwrap_or_default().into())
 }
 
-pub fn is_var_name_ch(ch: char) -> bool {
+pub(crate) fn is_var_name_ch(ch: char) -> bool {
   matches!(ch,
     '@' |
     '*' |

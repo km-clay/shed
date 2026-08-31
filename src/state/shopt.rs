@@ -195,7 +195,7 @@ impl ShOpts {
   /// All rc entries for every shopt group, in stable group order. The
   /// `group` field is the human-readable section header used when
   /// rendering with comments.
-  pub fn rc_entries(&self, source: ShoptSource) -> Vec<ShoptRcEntry> {
+  pub(crate) fn rc_entries(&self, source: ShoptSource) -> Vec<ShoptRcEntry> {
     let to_var_strs = |entries: Vec<(String, String, Option<String>)>| -> RcEntries {
       entries
         .into_iter()
@@ -252,7 +252,7 @@ impl ShOpts {
       .collect()
   }
 
-  pub fn query(&mut self, query: &str) -> ShResult<Option<String>> {
+  pub(crate) fn query(&mut self, query: &str) -> ShResult<Option<String>> {
     if let Some((opt, new_val)) = query.split_once('=') {
       self.set(opt, new_val)?;
       Ok(None)
@@ -261,7 +261,7 @@ impl ShOpts {
     }
   }
 
-  pub fn display_opts(&mut self) -> ShResult<String> {
+  pub(crate) fn display_opts(&mut self) -> ShResult<String> {
     let output = [
       self.query("core")?.unwrap_or_default().clone(),
       self.query("history")?.unwrap_or_default().clone(),
@@ -275,7 +275,7 @@ impl ShOpts {
     Ok(output.join("\n"))
   }
 
-  pub fn set(&mut self, mut opt: &str, val: &str) -> ShResult<()> {
+  pub(crate) fn set(&mut self, mut opt: &str, val: &str) -> ShResult<()> {
     opt = resolve_alias(opt);
 
     let mut query = opt.split('.');
@@ -300,7 +300,7 @@ impl ShOpts {
     Ok(())
   }
 
-  pub fn get(&self, mut query: &str) -> ShResult<Option<String>> {
+  pub(crate) fn get(&self, mut query: &str) -> ShResult<Option<String>> {
     query = resolve_alias(query);
 
     // TODO: handle escapes?
@@ -591,13 +591,13 @@ impl Display for ReadLimit {
 pub(crate) struct IdleTime(Duration);
 
 impl IdleTime {
-  pub fn is_zero(&self) -> bool {
+  pub(crate) fn is_zero(&self) -> bool {
     self.0.is_zero()
   }
-  pub fn duration(&self) -> Duration {
+  pub(crate) fn duration(&self) -> Duration {
     self.0
   }
-  pub fn zero() -> Self {
+  pub(crate) fn zero() -> Self {
     IdleTime(Duration::from_secs(0))
   }
 }

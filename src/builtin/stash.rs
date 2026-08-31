@@ -18,7 +18,7 @@ pub(crate) struct StashOpts {
 }
 
 impl StashOpts {
-  pub fn from_opts(opts: &[Opt]) -> ShResult<Self> {
+  pub(super) fn from_opts(opts: &[Opt]) -> ShResult<Self> {
     let mut new = Self::default();
 
     for opt in opts {

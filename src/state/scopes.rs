@@ -16,7 +16,7 @@ use crate::{
 };
 
 #[derive(Clone, Default, Debug)]
-pub struct ScopeStack {
+pub(crate) struct ScopeStack {
   // ALWAYS keep one scope.
   // The bottom scope is the global variable space.
   // Scopes that come after that are pushed in functions,
@@ -29,7 +29,7 @@ pub struct ScopeStack {
 }
 
 impl ScopeStack {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     let mut new = Self::default();
     new.scopes.push(VarTab::new());
     let shell_name = std::env::args_os()
@@ -38,7 +38,7 @@ impl ScopeStack {
     new.global_params.insert(ShellParam::ShellName, shell_name);
     new
   }
-  pub fn descend(&mut self, argv: Option<Vec<VarStr>>) {
+  pub(crate) fn descend(&mut self, argv: Option<Vec<VarStr>>) {
     let mut new_vars = VarTab::bare();
     if let Some(argv) = argv {
       for arg in argv {
@@ -48,19 +48,19 @@ impl ScopeStack {
     self.scopes.push(new_vars);
     self.depth += 1;
   }
-  pub fn descend_with_ceiling(&mut self, argv: Option<Vec<VarStr>>) {
+  pub(crate) fn descend_with_ceiling(&mut self, argv: Option<Vec<VarStr>>) {
     self.descend(argv);
     if let Some(scope) = self.scopes.last_mut() {
       scope.set_kind(vars::ScopeKind::Ceiling);
     }
   }
-  pub fn descend_into_function(&mut self, argv: Option<Vec<VarStr>>) {
+  pub(crate) fn descend_into_function(&mut self, argv: Option<Vec<VarStr>>) {
     self.descend(argv);
     if let Some(scope) = self.scopes.last_mut() {
       scope.set_kind(vars::ScopeKind::Function);
     }
   }
-  pub fn ascend(&mut self) {
+  pub(crate) fn ascend(&mut self) {
     if self.depth >= 1 {
       let popped = self.scopes.pop();
       // Popped exports may have shadowed an outer binding; invalidate the
@@ -75,13 +75,13 @@ impl ScopeStack {
       self.depth -= 1;
     }
   }
-  pub fn cur_scope(&self) -> &VarTab {
+  pub(crate) fn cur_scope(&self) -> &VarTab {
     self.scopes.last().unwrap()
   }
-  pub fn cur_scope_mut(&mut self) -> &mut VarTab {
+  pub(crate) fn cur_scope_mut(&mut self) -> &mut VarTab {
     self.scopes.last_mut().unwrap()
   }
-  pub fn sh_argv(&self) -> &VecDeque<VarStr> {
+  pub(crate) fn sh_argv(&self) -> &VecDeque<VarStr> {
     for scope in self.scopes_rev() {
       let argv = scope.sh_argv();
       if !argv.is_empty() {
@@ -100,15 +100,15 @@ impl ScopeStack {
   fn local_scope_idx(&self) -> Option<usize> {
     self.find_scope_idx(|s| s.is_function() || s.is_ceiling())
   }
-  pub fn sh_argv_scope_mut(&mut self) -> &mut VarTab {
+  pub(crate) fn sh_argv_scope_mut(&mut self) -> &mut VarTab {
     let idx = self.find_scope_idx(VarTab::is_function).unwrap_or(0);
     self.scopes.get_mut(idx).unwrap()
   }
-  pub fn sh_argv_scope(&self) -> &VarTab {
+  pub(crate) fn sh_argv_scope(&self) -> &VarTab {
     let idx = self.find_scope_idx(VarTab::is_function).unwrap_or(0);
     self.scopes.get(idx).unwrap()
   }
-  pub fn unset_var(&mut self, var_name: &str) -> ShResult<()> {
+  pub(crate) fn unset_var(&mut self, var_name: &str) -> ShResult<()> {
     for scope in self.bounded_scopes_rev_mut() {
       if scope.var_exists(var_name) {
         return scope.unset_var(var_name);
@@ -118,7 +118,7 @@ impl ScopeStack {
   }
   /// Indexed counterpart to `unset_var`: removes a single array element from
   /// the scope that owns the array. `idx` must already be resolved.
-  pub fn unset_index(&mut self, var_name: &str, idx: ArrIndex) -> ShResult<()> {
+  pub(crate) fn unset_index(&mut self, var_name: &str, idx: ArrIndex) -> ShResult<()> {
     for scope in self.bounded_scopes_rev_mut() {
       if scope.var_exists(var_name) {
         return scope.unset_index(var_name, idx);
@@ -126,7 +126,7 @@ impl ScopeStack {
     }
     Ok(())
   }
-  pub fn unexport_var(&mut self, var_name: &str) {
+  pub(crate) fn unexport_var(&mut self, var_name: &str) {
     for scope in self.bounded_scopes_rev_mut() {
       if scope.var_exists(var_name) {
         scope.unexport_var(var_name);
@@ -134,7 +134,7 @@ impl ScopeStack {
       }
     }
   }
-  pub fn var_exists(&self, var_name: &str) -> bool {
+  pub(crate) fn var_exists(&self, var_name: &str) -> bool {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name) {
         return true;
@@ -145,7 +145,7 @@ impl ScopeStack {
     }
     false
   }
-  pub fn flatten_vars(&self) -> HashMap<String, Var> {
+  pub(crate) fn flatten_vars(&self) -> HashMap<String, Var> {
     let mut flat_vars = HashMap::default();
     for scope in &self.scopes {
       for (var_name, var) in scope.vars() {
@@ -164,10 +164,10 @@ impl ScopeStack {
 
     flat_vars
   }
-  pub fn has_deferred_cmds(&self) -> bool {
+  pub(crate) fn has_deferred_cmds(&self) -> bool {
     self.cur_scope().has_deferred_cmds()
   }
-  pub fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
+  pub(crate) fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     if flags.contains(VarFlags::LOCAL) {
       return self.set_var_local(var_name, val, flags);
     }
@@ -186,7 +186,7 @@ impl ScopeStack {
   /// If the target scope already holds the variable, its value is preserved and
   /// only the attribute flags are merged in. A brand-new name is created as
   /// `VarKind::Unset` so `${x+}`/`${x-}` treat it as unset until it is assigned.
-  pub fn declare_var_novalue(&mut self, var_name: &str, flags: VarFlags) -> ShResult<()> {
+  pub(crate) fn declare_var_novalue(&mut self, var_name: &str, flags: VarFlags) -> ShResult<()> {
     if flags.contains(VarFlags::LOCAL) {
       let idx = self.local_scope_idx().unwrap_or(0);
       let Some(scope) = self.scopes.get_mut(idx) else {
@@ -217,7 +217,7 @@ impl ScopeStack {
 
   /// Mutate the value of an existing variable in place, finding it in the
   /// nearest scope that owns it and preserving its existing flags.
-  pub fn update_var(&mut self, var_name: &str, val: VarKind) -> ShResult<()> {
+  pub(crate) fn update_var(&mut self, var_name: &str, val: VarKind) -> ShResult<()> {
     for scope in self.bounded_scopes_rev_mut() {
       if scope.var_exists(var_name) {
         return scope.set_var(var_name, val, VarFlags::empty());
@@ -229,7 +229,12 @@ impl ScopeStack {
   /// Indexed counterpart to `update_var`: writes a single element of an
   /// existing array, in the scope that owns the array. Falls back to
   /// creating in global scope if no binding exists.
-  pub fn update_var_indexed(&mut self, var_name: &str, idx: ArrIndex, val: String) -> ShResult<()> {
+  pub(crate) fn update_var_indexed(
+    &mut self,
+    var_name: &str,
+    idx: ArrIndex,
+    val: String,
+  ) -> ShResult<()> {
     for scope in self.bounded_scopes_rev_mut() {
       if scope.var_exists(var_name) {
         return scope.set_index(var_name, idx, val);
@@ -240,7 +245,7 @@ impl ScopeStack {
     };
     scope.set_index(var_name, idx, val)
   }
-  pub fn set_var_indexed(
+  pub(crate) fn set_var_indexed(
     &mut self,
     var_name: &str,
     idx: ArrIndex,
@@ -292,7 +297,7 @@ impl ScopeStack {
     };
     scope.set_var(var_name, val, flags)
   }
-  pub fn try_get_arr_elems(&self, var_name: &str) -> ShResult<Vec<VarStr>> {
+  pub(crate) fn try_get_arr_elems(&self, var_name: &str) -> ShResult<Vec<VarStr>> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)
@@ -309,10 +314,10 @@ impl ScopeStack {
     }
     Err(sherr!(ExecFail, "Variable '{}' not found", var_name,))
   }
-  pub fn get_arr_elems(&self, var_name: &str) -> Vec<VarStr> {
+  pub(crate) fn get_arr_elems(&self, var_name: &str) -> Vec<VarStr> {
     self.try_get_arr_elems(var_name).unwrap_or_default()
   }
-  pub fn get_arr_mut(&mut self, var_name: &str) -> ShResult<&mut VecDeque<VarStr>> {
+  pub(crate) fn get_arr_mut(&mut self, var_name: &str) -> ShResult<&mut VecDeque<VarStr>> {
     for scope in self.scopes_rev_mut() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars_mut().get_mut(var_name)
@@ -327,12 +332,12 @@ impl ScopeStack {
     }
     Err(sherr!(ExecFail, "Variable '{var_name}' not found"))
   }
-  pub fn index_var(&self, var_name: &str, idx: &ArrIndex) -> ShResult<VarStr> {
+  pub(crate) fn index_var(&self, var_name: &str, idx: &ArrIndex) -> ShResult<VarStr> {
     self.index_var_sliced(var_name, idx, None, None)
   }
 
   #[expect(clippy::too_many_lines)]
-  pub fn index_var_sliced(
+  pub(crate) fn index_var_sliced(
     &self,
     var_name: &str,
     idx: &ArrIndex,
@@ -459,7 +464,7 @@ impl ScopeStack {
     Ok(VarStr::default())
   }
 
-  pub fn get_array_keys(&self, var_name: &str, joined: bool) -> ShResult<VarStr> {
+  pub(crate) fn get_array_keys(&self, var_name: &str, joined: bool) -> ShResult<VarStr> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)
@@ -504,7 +509,7 @@ impl ScopeStack {
     Ok(VarStr::default())
   }
 
-  pub fn bounded_scopes_rev_mut(&mut self) -> impl Iterator<Item = &mut VarTab> {
+  pub(crate) fn bounded_scopes_rev_mut(&mut self) -> impl Iterator<Item = &mut VarTab> {
     let skip = self
       .scopes
       .iter()
@@ -516,21 +521,21 @@ impl ScopeStack {
   /// Reverse walk that ignores ceilings. Use for reads that should fall
   /// through subshell barriers (e.g. `$HOME` inside `$(...)`); for writes
   /// use `bounded_scopes_rev_mut` instead so subshell mutations stay local.
-  pub fn scopes_rev(&self) -> impl Iterator<Item = &VarTab> {
+  pub(crate) fn scopes_rev(&self) -> impl Iterator<Item = &VarTab> {
     self.scopes.iter().rev()
   }
 
-  pub fn scopes_rev_mut(&mut self) -> impl Iterator<Item = &mut VarTab> {
+  pub(crate) fn scopes_rev_mut(&mut self) -> impl Iterator<Item = &mut VarTab> {
     self.scopes.iter_mut().rev()
   }
 
   /// Forward walk (outermost to innermost). Use when emitting all scope
   /// contents in shadowing order, e.g. building envp.
-  pub fn scopes_iter(&self) -> impl Iterator<Item = &VarTab> {
+  pub(crate) fn scopes_iter(&self) -> impl Iterator<Item = &VarTab> {
     self.scopes.iter()
   }
 
-  pub fn try_get_var(&self, var_name: &str) -> Option<VarStr> {
+  pub(crate) fn try_get_var(&self, var_name: &str) -> Option<VarStr> {
     if let Ok(param) = var_name.parse::<ShellParam>() {
       return self.try_get_param(param);
     }
@@ -549,7 +554,7 @@ impl ScopeStack {
   /// `get_var`/`try_get_var` split for indexing: distinguishes a missing
   /// key/index from a present-but-empty one, which the `${x+y}`/`${x-y}`
   /// set-tests depend on.
-  pub fn index_is_set(&self, var_name: &str, idx: &ArrIndex) -> bool {
+  pub(crate) fn index_is_set(&self, var_name: &str, idx: &ArrIndex) -> bool {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)
@@ -575,7 +580,7 @@ impl ScopeStack {
     }
     false
   }
-  pub fn resolve_var(&self, var: &VarName) -> Option<VarStr> {
+  pub(crate) fn resolve_var(&self, var: &VarName) -> Option<VarStr> {
     if let Some(idx) = var.index() {
       if !self.index_is_set(var.name(), idx) {
         return None;
@@ -587,28 +592,28 @@ impl ScopeStack {
       self.try_get_var(var.name())
     }
   }
-  pub fn try_take_var_meta(&mut self, var_name: &str) -> Option<Var> {
+  pub(crate) fn try_take_var_meta(&mut self, var_name: &str) -> Option<Var> {
     let var = self.try_get_var_meta(var_name)?;
     self.unset_var(var_name).ok();
     Some(var)
   }
-  pub fn try_take_var_kind(&mut self, var_name: &str) -> Option<VarKind> {
+  pub(crate) fn try_take_var_kind(&mut self, var_name: &str) -> Option<VarKind> {
     let var = self.try_take_var_meta(var_name)?;
     self.unset_var(var_name).ok();
     Some(var.into_kind())
   }
-  pub fn take_var(&mut self, var_name: &str) -> VarStr {
+  pub(crate) fn take_var(&mut self, var_name: &str) -> VarStr {
     let var = self.get_var(var_name);
     self.unset_var(var_name).ok();
     var
   }
-  pub fn get_var(&self, var_name: &str) -> VarStr {
+  pub(crate) fn get_var(&self, var_name: &str) -> VarStr {
     self.try_get_var(var_name).unwrap_or_default()
   }
-  pub fn get_var_meta(&self, var_name: &str) -> Var {
+  pub(crate) fn get_var_meta(&self, var_name: &str) -> Var {
     self.try_get_var_meta(var_name).unwrap_or_default()
   }
-  pub fn try_get_var_meta(&self, var_name: &str) -> Option<Var> {
+  pub(crate) fn try_get_var_meta(&self, var_name: &str) -> Option<Var> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name) {
         return scope.try_get_var_meta(var_name);
@@ -629,7 +634,7 @@ impl ScopeStack {
     None
   }
 
-  pub fn try_get_var_kind_tag(&self, var_name: &str) -> Option<VarKindTag> {
+  pub(crate) fn try_get_var_kind_tag(&self, var_name: &str) -> Option<VarKindTag> {
     for scope in self.scopes_rev() {
       if let Some(tag) = scope.try_get_var_kind_tag(var_name) {
         return Some(tag);
@@ -637,7 +642,7 @@ impl ScopeStack {
     }
     None
   }
-  pub fn all_vars(&self) -> HashMap<String, Var> {
+  pub(crate) fn all_vars(&self) -> HashMap<String, Var> {
     let mut vars = HashMap::default();
     for scope in &self.scopes {
       for (k, v) in scope.vars() {
@@ -646,7 +651,7 @@ impl ScopeStack {
     }
     vars
   }
-  pub fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
+  pub(crate) fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name) {
         return scope.get_var_flags(var_name);
@@ -654,7 +659,7 @@ impl ScopeStack {
     }
     None
   }
-  pub fn try_get_param(&self, param: ShellParam) -> Option<VarStr> {
+  pub(crate) fn try_get_param(&self, param: ShellParam) -> Option<VarStr> {
     if param.is_global()
       && let Some(val) = self.global_params.get(&param)
     {
@@ -676,11 +681,11 @@ impl ScopeStack {
 
     None
   }
-  pub fn get_param(&self, param: ShellParam) -> VarStr {
+  pub(crate) fn get_param(&self, param: ShellParam) -> VarStr {
     self.try_get_param(param).unwrap_or_default()
   }
   /// Set a shell parameter
-  pub fn set_param(&mut self, param: ShellParam, val: &str) {
+  pub(crate) fn set_param(&mut self, param: ShellParam, val: &str) {
     match param {
       ShellParam::ShPid | ShellParam::LastJob | ShellParam::ShellName => {
         self.global_params.insert(param, val.into());

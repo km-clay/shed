@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
-pub fn query_db<T, F: FnOnce(&Connection) -> ShResult<T>>(f: F) -> ShResult<Option<T>> {
+pub(crate) fn query_db<T, F: FnOnce(&Connection) -> ShResult<T>>(f: F) -> ShResult<Option<T>> {
   let Some(conn) = get_db_conn() else {
     return Ok(None);
   };
@@ -126,7 +126,7 @@ fn quarantine_db(path: &Path) {
 /// Try to obtain a connection to shed's sqlite database
 ///
 /// Returns `None` in forked child processes
-pub fn get_db_conn() -> Option<Arc<Mutex<Connection>>> {
+pub(crate) fn get_db_conn() -> Option<Arc<Mutex<Connection>>> {
   // A forked child must not use the connection it inherited from the parent.
   if FORKED_CHILD.load(Ordering::Relaxed) {
     return None;
@@ -206,7 +206,7 @@ fn migrate_legacy_history_db(new_path: &Path) {
 /// Move a history DB and its journal/WAL sidecars from `old_path` to `new_path`,
 /// creating `new_path`'s parent. A cross-filesystem `rename` falls back to
 /// copy-then-remove. Best-effort: failures are logged, never fatal.
-pub fn relocate_history_db(old_path: &Path, new_path: &Path) {
+pub(crate) fn relocate_history_db(old_path: &Path, new_path: &Path) {
   if let Some(parent) = new_path.parent()
     && let Err(e) = std::fs::create_dir_all(parent)
   {
@@ -241,7 +241,7 @@ pub fn relocate_history_db(old_path: &Path, new_path: &Path) {
   }
 }
 
-pub fn open_db_conn() -> ShResult<Connection> {
+pub(crate) fn open_db_conn() -> ShResult<Connection> {
   let db_path = history_db_path();
   // Relocate a pre-XDG-state (~/.local/share) history DB before we'd otherwise
   // create a fresh empty one at the new location.
@@ -258,7 +258,7 @@ pub fn open_db_conn() -> ShResult<Connection> {
 /// handle rather than the fenced inherited one, and being read-only it cannot
 /// corrupt the rollback journal. Callers must not rely on it for migrations or
 /// writes (the file is expected to already be migrated by the parent).
-pub fn open_db_conn_readonly() -> ShResult<Connection> {
+pub(crate) fn open_db_conn_readonly() -> ShResult<Connection> {
   let db_path = history_db_path();
   let conn = Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
   conn.busy_timeout(std::time::Duration::from_secs(5)).ok();

@@ -214,7 +214,7 @@ fn unescape_with(stream: SegStream, flags: ExpandFlags) -> SegStream {
 
 /// Full word-context unescape: all substitutions, quote sub-machines, tildes,
 /// process subs, escapes. Used by the main expansion pipeline.
-pub fn unescape_str(raw: &[u8]) -> SegStream {
+pub(crate) fn unescape_str(raw: &[u8]) -> SegStream {
   unescape_with(SegStream::from_bytes(raw), ExpandFlags::WORD)
 }
 
@@ -228,7 +228,7 @@ pub(crate) fn unescape_pattern(raw: SegStream) -> SegStream {
 
 /// Prompt-context unescape: $var, ${var}, $(cmd), backticks. No quote handling,
 /// no tildes, no procsubs, no bare subshells. Used by `prompt.substitute`.
-pub fn unescape_prompt(raw: &str) -> SegStream {
+pub(crate) fn unescape_prompt(raw: &str) -> SegStream {
   unescape_with(SegStream::from_bytes(raw.as_bytes()), ExpandFlags::PROMPT)
 }
 
@@ -383,18 +383,22 @@ fn read_dub_quote(stream: &mut SegCursor, out: &mut SegStream) {
   });
 }
 
-pub fn expand_ansi_c(s: &[u8]) -> Vec<u8> {
+pub(crate) fn expand_ansi_c(s: &[u8]) -> Vec<u8> {
   let input = SegStream::from_bytes(s);
   let mut out = SegStream::new();
   expand_ansi_c_stream(&mut input.cursor(), &mut out, None);
   out.into_bytes()
 }
 
-pub fn expand_dollar_quote(chars: &mut SegCursor, out: &mut SegStream) {
+pub(crate) fn expand_dollar_quote(chars: &mut SegCursor, out: &mut SegStream) {
   expand_ansi_c_stream(chars, out, Some(b'\''));
 }
 
-pub fn expand_ansi_c_stream(stream: &mut SegCursor, out: &mut SegStream, terminator: Option<u8>) {
+pub(crate) fn expand_ansi_c_stream(
+  stream: &mut SegCursor,
+  out: &mut SegStream,
+  terminator: Option<u8>,
+) {
   match_loop!(stream.next() => unit, {
     Unit::Byte(c) if Some(c) == terminator => break,
     Unit::Byte(b'\\') => match stream.next_byte() {
@@ -427,7 +431,7 @@ pub fn expand_ansi_c_stream(stream: &mut SegCursor, out: &mut SegStream, termina
   });
 }
 
-pub fn read_unicode(stream: &mut SegCursor, out: &mut SegStream, marker: u8) {
+pub(crate) fn read_unicode(stream: &mut SegCursor, out: &mut SegStream, marker: u8) {
   let mut hex: Vec<u8> = vec![];
   let max = match marker {
     b'u' => 4,
@@ -460,7 +464,7 @@ pub fn read_unicode(stream: &mut SegCursor, out: &mut SegStream, marker: u8) {
   }
 }
 
-pub fn read_stty_escape(stream: &mut SegCursor, out: &mut SegStream) {
+pub(crate) fn read_stty_escape(stream: &mut SegCursor, out: &mut SegStream) {
   let mut peeker = *stream;
 
   let Some(first) = peeker.next_byte() else {
@@ -496,7 +500,7 @@ pub fn read_stty_escape(stream: &mut SegCursor, out: &mut SegStream) {
   out.push_byte(upper ^ 0x40);
 }
 
-pub fn read_octal(stream: &mut SegCursor, out: &mut SegStream, first: Option<u8>) {
+pub(crate) fn read_octal(stream: &mut SegCursor, out: &mut SegStream, first: Option<u8>) {
   let mut oct: Vec<u8> = vec![];
   if let Some(first) = first {
     oct.push(first);
@@ -521,7 +525,7 @@ pub fn read_octal(stream: &mut SegCursor, out: &mut SegStream, first: Option<u8>
   }
 }
 
-pub fn read_hex(stream: &mut SegCursor, out: &mut SegStream) {
+pub(crate) fn read_hex(stream: &mut SegCursor, out: &mut SegStream) {
   let hex_val = |b: u8| (b as char).to_digit(16);
   let Some(d1) = stream.peek_byte().and_then(hex_val) else {
     out.push_bytes(b"\\x");
@@ -629,11 +633,11 @@ fn read_backtick(stream: &mut SegCursor, out: &mut SegStream, in_dquote: bool) {
 
 /// Heredoc body: $var / ${var} / $(cmd) / backticks only. Quotes, tildes,
 /// globs, process subs, and bare subshells all pass through as literal text.
-pub fn unescape_heredoc(raw: &[u8]) -> SegStream {
+pub(crate) fn unescape_heredoc(raw: &[u8]) -> SegStream {
   unescape_with(SegStream::from_bytes(raw), ExpandFlags::HEREDOC)
 }
 
-pub fn escape_str(raw: &str) -> String {
+pub(crate) fn escape_str(raw: &str) -> String {
   escape_str_bounded(raw, None)
 }
 
@@ -643,7 +647,7 @@ pub fn escape_str(raw: &str) -> String {
 /// if `use_marker` is true, it will check for `markers::ESCAPE` instead of a literal backslash.
 /// if a bound (something like 0..5) is provided, the escaping logic will be limited to those bytes
 /// this is mainly used for escaping the region of text that is changed during completion
-pub fn escape_str_bounded(raw: &str, bound: Option<&Range<usize>>) -> String {
+pub(crate) fn escape_str_bounded(raw: &str, bound: Option<&Range<usize>>) -> String {
   let mut result = String::new();
   let mut chars = raw.char_indices();
 
@@ -674,7 +678,7 @@ pub fn escape_str_bounded(raw: &str, bound: Option<&Range<usize>>) -> String {
   result
 }
 
-pub fn unescape_math(raw: &[u8]) -> ShResult<SegStream> {
+pub(crate) fn unescape_math(raw: &[u8]) -> ShResult<SegStream> {
   let mut cur = SliceCursor::new(raw);
   let mut out = SegStream::new();
   let mut qt_state = QuoteState::default();
@@ -783,16 +787,16 @@ fn quote_fmt(
   }
 }
 
-pub fn xtrace_quote_fmt<W: std::fmt::Write>(s: &str, f: &mut W) -> std::fmt::Result {
+pub(crate) fn xtrace_quote_fmt<W: std::fmt::Write>(s: &str, f: &mut W) -> std::fmt::Result {
   quote_fmt(s, f, r#" !*?$;|&<>(){}[]`'"\"#, false)
 }
 
-pub fn shell_quote_fmt<W: std::fmt::Write>(s: &str, f: &mut W) -> std::fmt::Result {
+pub(crate) fn shell_quote_fmt<W: std::fmt::Write>(s: &str, f: &mut W) -> std::fmt::Result {
   quote_fmt(s, f, r#"\\!#$^*()=|{}[]`<>?~;& "'"#, true)
 }
 
 /// Quotes a string such that it can be round-tripped as shell syntax
-pub fn shell_quote(s: &str) -> String {
+pub(crate) fn shell_quote(s: &str) -> String {
   quote(s, shell_quote_fmt)
 }
 
@@ -800,7 +804,7 @@ pub fn shell_quote(s: &str) -> String {
 /// non-UTF-8 bytes by rendering the value in `$'...'` ANSI-C form, so
 /// `declare`/`set`/`alias` output round-trips raw bytes instead of laundering
 /// them into `U+FFFD`. Valid UTF-8 values take the ordinary `shell_quote` path.
-pub fn shell_quote_bytes(bytes: &[u8]) -> Vec<u8> {
+pub(crate) fn shell_quote_bytes(bytes: &[u8]) -> Vec<u8> {
   if let Ok(s) = std::str::from_utf8(bytes) {
     shell_quote(s).into_bytes()
   } else {
@@ -841,7 +845,7 @@ fn push_ansi_c_escaped(out: &mut Vec<u8>, ch: char) {
 }
 
 /// Quotes an xtrace argument
-pub fn xtrace_quote(s: &str) -> String {
+pub(crate) fn xtrace_quote(s: &str) -> String {
   quote(s, xtrace_quote_fmt)
 }
 

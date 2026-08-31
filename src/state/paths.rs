@@ -77,7 +77,7 @@ fn build_entry(path: &Path) -> EntryCache {
 }
 
 impl PathCache {
-  pub fn new(name: String) -> Self {
+  pub(crate) fn new(name: String) -> Self {
     let path_raw = var!(&name);
     let entries = Self::build_entries(&path_raw.to_str_lossy());
     Self {
@@ -99,7 +99,7 @@ impl PathCache {
   /// Refreshes the cache against current disk state. Returns `true` if
   /// anything changed (var content, any directory's contents, or any file's
   /// mtime); `false` if everything is identical to the cached state.
-  pub fn update_cache(&mut self) -> bool {
+  pub(crate) fn update_cache(&mut self) -> bool {
     let path_raw = var!(&self.name);
     if path_raw != self.path_raw {
       self.path_raw = path_raw;
@@ -143,7 +143,7 @@ impl PathCache {
   }
 }
 
-pub fn resolve_in_path(path_list: &str, cmd: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_in_path(path_list: &str, cmd: &str) -> Option<PathBuf> {
   for dir in split_path_list(path_list) {
     let candidate = dir.join(cmd);
     if let Ok(meta) = std::fs::metadata(&candidate)
@@ -157,7 +157,7 @@ pub fn resolve_in_path(path_list: &str, cmd: &str) -> Option<PathBuf> {
 }
 
 /// Split a POSIX path-list-style string (colon separated paths) into an iterator of `PathBuf`s.
-pub fn split_path_list(path_list: &str) -> impl Iterator<Item = PathBuf> {
+pub(crate) fn split_path_list(path_list: &str) -> impl Iterator<Item = PathBuf> {
   let paths = strops::split_all_with(
     path_list.as_bytes(),
     |paths| strops::split_at_unescaped(paths, b":"),
@@ -167,7 +167,7 @@ pub fn split_path_list(path_list: &str) -> impl Iterator<Item = PathBuf> {
   paths.into_iter().map(PathBuf::from)
 }
 
-pub fn path_entries<P: AsRef<Path>>(path: P) -> impl Iterator<Item = std::fs::DirEntry> {
+pub(crate) fn path_entries<P: AsRef<Path>>(path: P) -> impl Iterator<Item = std::fs::DirEntry> {
   path
     .as_ref()
     .read_dir()
@@ -177,7 +177,7 @@ pub fn path_entries<P: AsRef<Path>>(path: P) -> impl Iterator<Item = std::fs::Di
     .filter_map(Result::ok)
 }
 
-pub fn path_list_entries(path_list: &str) -> impl Iterator<Item = std::fs::DirEntry> {
+pub(crate) fn path_list_entries(path_list: &str) -> impl Iterator<Item = std::fs::DirEntry> {
   let paths = split_path_list(path_list);
 
   paths.flat_map(|p| {
@@ -189,7 +189,7 @@ pub fn path_list_entries(path_list: &str) -> impl Iterator<Item = std::fs::DirEn
   })
 }
 
-pub fn is_executable_file(entry: &std::fs::DirEntry) -> bool {
+pub(crate) fn is_executable_file(entry: &std::fs::DirEntry) -> bool {
   let ft = entry.file_type().ok();
   let is_symlink = ft.is_some_and(|t| t.is_symlink());
   let meta = if is_symlink {
@@ -204,7 +204,7 @@ pub fn is_executable_file(entry: &std::fs::DirEntry) -> bool {
 }
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
-pub fn lex_normalize_path(path: &Path) -> PathBuf {
+pub(crate) fn lex_normalize_path(path: &Path) -> PathBuf {
   use std::path::Component;
   let mut out: Vec<Component> = Vec::new();
   for comp in path.components() {
@@ -228,7 +228,7 @@ pub fn lex_normalize_path(path: &Path) -> PathBuf {
   }
 }
 
-pub fn display_path<P: AsRef<Path>>(path: P) -> String {
+pub(crate) fn display_path<P: AsRef<Path>>(path: P) -> String {
   let s = path.as_ref().to_string_lossy().into_owned();
   if let Some(home) = get_home_str()
     && !home.is_empty()
@@ -240,20 +240,20 @@ pub fn display_path<P: AsRef<Path>>(path: P) -> String {
   }
 }
 
-pub fn display_path_normalized<P: AsRef<Path>>(path: P) -> String {
+pub(crate) fn display_path_normalized<P: AsRef<Path>>(path: P) -> String {
   display_path(lex_normalize_path(path.as_ref()))
 }
 
 /// A filesystem path's exact bytes as a `VarStr`. Unix paths are arbitrary
 /// bytes, so this avoids the lossy UTF-8 step of `display()`/`to_string_lossy`.
-pub fn path_to_varstr(path: &Path) -> VarStr {
+pub(crate) fn path_to_varstr(path: &Path) -> VarStr {
   use std::os::unix::ffi::OsStrExt;
   VarStr::from(path.as_os_str().as_bytes())
 }
 
 /// Byte-native counterpart to [`display_path`]: collapse a leading `$HOME` to
 /// `~`, preserving arbitrary path bytes rather than laundering them.
-pub fn display_path_bytes(path: &Path) -> Vec<u8> {
+pub(crate) fn display_path_bytes(path: &Path) -> Vec<u8> {
   use std::os::unix::ffi::OsStrExt;
   let bytes = path.as_os_str().as_bytes();
   if let Some(home) = get_home()
@@ -298,13 +298,13 @@ pub(crate) fn runtime_dir() -> Option<PathBuf> {
   xdg_dir("XDG_RUNTIME_DIR", Fallback::Var("TMPDIR"))
 }
 
-pub fn get_home() -> Option<PathBuf> {
+pub(crate) fn get_home() -> Option<PathBuf> {
   try_var!("HOME")
     .map(PathBuf::from)
     .or_else(|| User::from_uid(getuid()).ok().flatten().map(|u| u.dir))
 }
 
-pub fn get_home_str() -> Option<VarStr> {
+pub(crate) fn get_home_str() -> Option<VarStr> {
   get_home().map(|h| h.to_string_lossy().into())
 }
 

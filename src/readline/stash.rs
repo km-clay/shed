@@ -18,7 +18,7 @@ pub(crate) struct Stash {
 }
 
 impl Stash {
-  pub fn new() -> ShResult<Self> {
+  pub(crate) fn new() -> ShResult<Self> {
     let conn = db::get_db_conn().ok_or_else(|| sherr!(InternalErr, "database not available"))?;
     Self::init_stash_table(
       &conn
@@ -35,7 +35,7 @@ impl Stash {
       .unwrap_or_else(std::sync::PoisonError::into_inner)
   }
 
-  pub fn init_stash_table(conn: &Connection) -> ShResult<()> {
+  pub(crate) fn init_stash_table(conn: &Connection) -> ShResult<()> {
     conn.execute_batch(
       r"
       CREATE TABLE IF NOT EXISTS stash (
@@ -50,7 +50,7 @@ impl Stash {
     Ok(())
   }
 
-  pub fn stack_len(&self) -> usize {
+  pub(crate) fn stack_len(&self) -> usize {
     self
       .lock()
       .query_row("SELECT COUNT(*) FROM stash WHERE name IS NULL", [], |row| {
@@ -59,7 +59,7 @@ impl Stash {
       .unwrap_or(0i64) as usize
   }
 
-  pub fn list(&self, mut named_only: bool, mut stack_only: bool) -> VarStr {
+  pub(crate) fn list(&self, mut named_only: bool, mut stack_only: bool) -> VarStr {
     if named_only && stack_only {
       named_only = false;
       stack_only = false;
@@ -121,7 +121,7 @@ impl Stash {
 
     output.into()
   }
-  pub fn stash_cmd(&self, cmd: &StashedCmd) -> ShResult<()> {
+  pub(crate) fn stash_cmd(&self, cmd: &StashedCmd) -> ShResult<()> {
     if cmd
       .name
       .as_ref()
@@ -139,7 +139,7 @@ impl Stash {
     )?;
     Ok(())
   }
-  pub fn delete_cmd(&self, cmd: &str) -> ShResult<()> {
+  pub(crate) fn delete_cmd(&self, cmd: &str) -> ShResult<()> {
     let conn = self.lock();
     if let Ok(n) = cmd.parse::<usize>() {
       conn.execute(
@@ -152,7 +152,7 @@ impl Stash {
     Ok(())
   }
 
-  pub fn pop(&self, n: usize) -> ShResult<Option<StashedCmd>> {
+  pub(crate) fn pop(&self, n: usize) -> ShResult<Option<StashedCmd>> {
     let conn = self.lock();
     let mut stmt = conn.prepare("
       SELECT id, buffer, cursor FROM stash WHERE name IS NULL ORDER BY timestamp ASC LIMIT 1 OFFSET ?1
@@ -178,7 +178,12 @@ impl Stash {
     Ok(Some(cmd))
   }
 
-  pub fn push(&self, name: Option<&VarStr>, buffer: &str, cursor: (usize, usize)) -> ShResult<()> {
+  pub(crate) fn push(
+    &self,
+    name: Option<&VarStr>,
+    buffer: &str,
+    cursor: (usize, usize),
+  ) -> ShResult<()> {
     let (row, col) = cursor;
     if name
       .as_ref()
@@ -201,7 +206,7 @@ impl Stash {
     Ok(())
   }
 
-  pub fn get_index(&self, n: usize) -> ShResult<Option<StashedCmd>> {
+  pub(crate) fn get_index(&self, n: usize) -> ShResult<Option<StashedCmd>> {
     let conn = self.lock();
     let mut stmt = conn.prepare(
       "
@@ -225,7 +230,7 @@ impl Stash {
     Ok(Some(cmd))
   }
 
-  pub fn get_named(&self, name: &str) -> ShResult<Option<StashedCmd>> {
+  pub(crate) fn get_named(&self, name: &str) -> ShResult<Option<StashedCmd>> {
     let conn = self.lock();
     let mut stmt = conn.prepare(
       "
@@ -249,7 +254,7 @@ impl Stash {
     Ok(Some(cmd))
   }
 
-  pub fn get(&self, ident: &str) -> ShResult<Option<StashedCmd>> {
+  pub(crate) fn get(&self, ident: &str) -> ShResult<Option<StashedCmd>> {
     if let Ok(n) = ident.parse::<usize>() {
       self.get_index(n)
     } else {

@@ -1,12 +1,12 @@
 pub(crate) mod error;
-pub mod flog;
-pub mod guards;
-pub mod macros;
-pub mod pos;
-pub mod posix;
-pub mod random;
-pub mod strops;
-pub mod ui;
+pub(crate) mod flog;
+pub(crate) mod guards;
+pub(crate) mod macros;
+pub(crate) mod pos;
+pub(crate) mod posix;
+pub(crate) mod random;
+pub(crate) mod strops;
+pub(crate) mod ui;
 
 use std::{os::fd::BorrowedFd, str::FromStr};
 

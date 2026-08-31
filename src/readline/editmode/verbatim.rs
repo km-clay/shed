@@ -9,16 +9,16 @@ use super::{
 };
 
 #[derive(Default, Clone, Debug)]
-pub struct ViVerbatim {
+pub(crate) struct ViVerbatim {
   sent_cmd: Vec<EditCmd>,
   repeat_count: u16,
 }
 
 impl ViVerbatim {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub fn with_count(self, repeat_count: u16) -> Self {
+  pub(crate) fn with_count(self, repeat_count: u16) -> Self {
     Self {
       repeat_count,
       ..self

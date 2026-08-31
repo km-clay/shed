@@ -51,7 +51,7 @@ enum FixMode {
 }
 
 #[derive(Debug, Default)]
-pub struct FixCmdOpts {
+pub(super) struct FixCmdOpts {
   editor: Option<VarStr>,
   replace: Option<(VarStr, VarStr)>,
   first: Option<RangeArg>,
@@ -61,7 +61,7 @@ pub struct FixCmdOpts {
   reverse: bool,
 }
 
-pub fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCmdOpts)> {
+pub(super) fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCmdOpts)> {
   let mut args = args.iter();
   args.next(); // skip "fc" command itself
 

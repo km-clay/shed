@@ -12,7 +12,7 @@ use super::{
   context::{CmdKind, CtxTk, CtxTkRule, get_ex_context_tokens},
 };
 
-pub struct Palette {
+pub(super) struct Palette {
   string: PaletteEntry,
   keyword: PaletteEntry,
   external_command: PaletteEntry,
@@ -31,7 +31,7 @@ pub struct Palette {
 }
 
 impl Palette {
-  pub fn new() -> Self {
+  pub(super) fn new() -> Self {
     let get_color = |desc: &str| -> PaletteEntry {
       ui::style_from_description(desc).unwrap_or_else(|_| PaletteEntry::new())
     };
@@ -74,7 +74,7 @@ impl Palette {
     })
   }
 
-  pub fn style_for(&self, tk: &CtxTk, editor_cursor_pos: usize) -> PaletteEntry {
+  pub(super) fn style_for(&self, tk: &CtxTk, editor_cursor_pos: usize) -> PaletteEntry {
     let class = tk.class();
     match class {
       CtxTkRule::ValidCommand(kind) => {
@@ -146,7 +146,7 @@ impl Default for Palette {
   }
 }
 
-pub fn highlight_ex<W: std::fmt::Write>(
+pub(super) fn highlight_ex<W: std::fmt::Write>(
   out: &mut W,
   input: &str,
   palette: &Palette,
@@ -156,7 +156,7 @@ pub fn highlight_ex<W: std::fmt::Write>(
   highlight(out, input, &tks, palette, editor_cursor_pos, &[])
 }
 
-pub fn highlight<W: std::fmt::Write>(
+pub(super) fn highlight<W: std::fmt::Write>(
   out: &mut W,
   input: &str,
   tks: &[CtxTk],

@@ -20,7 +20,7 @@ use nix::sys::wait::WaitStatus as WtStat;
 use smol_str::format_smolstr;
 
 #[derive(Debug)]
-pub enum PromptTk {
+pub(crate) enum PromptTk {
   AsciiOct(i32),
   Text(VarStr),
   AnsiSeq(VarStr),
@@ -200,7 +200,7 @@ fn tokenize_prompt(raw: &[u8]) -> Vec<PromptTk> {
   tokens
 }
 
-pub fn expand_prompt(raw: &[u8]) -> ShResult<String> {
+pub(crate) fn expand_prompt(raw: &[u8]) -> ShResult<String> {
   let mut tokens = tokenize_prompt(raw).into_iter();
   let mut result = String::new();
 

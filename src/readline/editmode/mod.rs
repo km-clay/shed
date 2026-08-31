@@ -116,7 +116,7 @@ pub(crate) enum CmdReplay {
 }
 
 impl CmdReplay {
-  pub fn mode(cmds: Vec<EditCmd>, repeat: u16) -> Self {
+  pub(crate) fn mode(cmds: Vec<EditCmd>, repeat: u16) -> Self {
     Self::ModeReplay { cmds, repeat }
   }
 }
@@ -152,7 +152,7 @@ pub(crate) trait EditMode {
   fn report_mode(&self) -> ModeReport;
 }
 
-pub fn common_cmds(key: &E) -> Option<EditCmd> {
+pub(super) fn common_cmds(key: &E) -> Option<EditCmd> {
   let mut pending_cmd = EditCmd::new();
   match key {
     key!(Home) => pending_cmd.set_motion(motion!(Motion::StartOfLine)),

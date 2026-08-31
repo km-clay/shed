@@ -12,26 +12,26 @@ use super::{
 };
 
 #[derive(Default, Debug)]
-pub struct ViReplace {
+pub(crate) struct ViReplace {
   cmds: Vec<EditCmd>,
   pending_cmd: EditCmd,
   repeat_count: u16,
 }
 
 impl ViReplace {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub fn register_and_return(&mut self) -> EditCmd {
+  pub(crate) fn register_and_return(&mut self) -> EditCmd {
     let mut cmd = self.take_cmd();
     cmd.normalize_counts();
     self.register_cmd(&cmd);
     cmd
   }
-  pub fn register_cmd(&mut self, cmd: &EditCmd) {
+  pub(crate) fn register_cmd(&mut self, cmd: &EditCmd) {
     self.cmds.push(cmd.clone());
   }
-  pub fn take_cmd(&mut self) -> EditCmd {
+  pub(crate) fn take_cmd(&mut self) -> EditCmd {
     std::mem::take(&mut self.pending_cmd)
   }
 }

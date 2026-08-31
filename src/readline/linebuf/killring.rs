@@ -4,10 +4,10 @@ use crate::util::pos::Pos;
 
 use super::Lines;
 
-pub const MAX_KILL_RING: usize = 60;
+pub(super) const MAX_KILL_RING: usize = 60;
 
 #[derive(Default, Debug, Clone)]
-pub struct KillRing {
+pub(crate) struct KillRing {
   pub kills: VecDeque<Lines>,
   pub merging: bool,
   pub selected: Option<usize>,
@@ -15,7 +15,7 @@ pub struct KillRing {
 }
 
 impl KillRing {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       kills: VecDeque::new(),
       merging: false,
@@ -23,7 +23,7 @@ impl KillRing {
       kill_cycle_span: None,
     }
   }
-  pub fn push_back(&mut self, kill: Lines) {
+  pub(crate) fn push_back(&mut self, kill: Lines) {
     if kill.is_empty() || (kill.len() == 1 && kill[0].is_empty()) {
       return;
     }
@@ -32,13 +32,13 @@ impl KillRing {
       self.kills.pop_front();
     }
   }
-  pub fn pop_front(&mut self) -> Option<Lines> {
+  pub(crate) fn pop_front(&mut self) -> Option<Lines> {
     self.kills.pop_front()
   }
-  pub fn len(&self) -> usize {
+  pub(crate) fn len(&self) -> usize {
     self.kills.len()
   }
-  pub fn next_idx(&mut self) -> usize {
+  pub(crate) fn next_idx(&mut self) -> usize {
     let idx = match self.selected {
       Some(0) | None => self.kills.len(),
       Some(i) => i,
@@ -47,7 +47,7 @@ impl KillRing {
     self.selected = Some(idx);
     idx
   }
-  pub fn reset(&mut self) {
+  pub(crate) fn reset(&mut self) {
     self.selected = None;
     self.kill_cycle_span = None;
   }

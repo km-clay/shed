@@ -507,7 +507,7 @@ fn read_var_as_i64(name: &str) -> ShResult<i64> {
 
 impl ArithTk {
   #[expect(clippy::too_many_lines)]
-  pub fn tokenize(raw: &[u8]) -> ShResult<Vec<Self>> {
+  pub(crate) fn tokenize(raw: &[u8]) -> ShResult<Vec<Self>> {
     let mut tokens = Vec::new();
     let mut cur = SliceCursor::new(raw);
     // Track whether the last emitted token was an operand, to distinguish
@@ -1116,7 +1116,7 @@ impl ArithTk {
   }
 
   #[expect(clippy::too_many_lines)]
-  pub fn eval_rpn(tokens: &[ArithTk]) -> ShResult<i64> {
+  pub(crate) fn eval_rpn(tokens: &[ArithTk]) -> ShResult<i64> {
     let mut stack: Vec<StackVal> = Vec::new();
 
     macro_rules! pop_num {
@@ -1239,7 +1239,7 @@ impl ArithTk {
 
 /// Evaluate an arithmetic expression string, returning the result.
 /// The caller is responsible for stripping any `((...))` or `(...)` wrappers.
-pub fn expand_arithmetic(expr: &[u8]) -> ShResult<VarStr> {
+pub(crate) fn expand_arithmetic(expr: &[u8]) -> ShResult<VarStr> {
   let unescaped = escape::unescape_math(expr)?;
   let expanded = var::expand_raw(&mut unescaped.cursor())?.into_bytes();
   let tokens = ArithTk::tokenize(&expanded)?;
@@ -1250,7 +1250,7 @@ pub fn expand_arithmetic(expr: &[u8]) -> ShResult<VarStr> {
 
 /// Strip `((...))` or `(...)` wrappers and evaluate. Convenience for call sites
 /// that receive the raw token including its delimiters.
-pub fn expand_arithmetic_wrapped(raw: &[u8]) -> ShResult<VarStr> {
+pub(crate) fn expand_arithmetic_wrapped(raw: &[u8]) -> ShResult<VarStr> {
   let mut expr = raw.trim();
   while let Some(inner) = strip_enclosing_parens(expr) {
     expr = inner.trim();

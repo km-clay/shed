@@ -157,7 +157,7 @@ enum UnixAddr {
 }
 
 impl UnixAddr {
-  pub fn connect(self) -> io::Result<OwnedFd> {
+  pub(crate) fn connect(self) -> io::Result<OwnedFd> {
     match self {
       UnixAddr::Abstract(var_str) => connect_abstract(&var_str.to_str_lossy()),
       UnixAddr::Path(path_buf) => UnixStream::connect(&path_buf).map(OwnedFd::from),
@@ -189,7 +189,7 @@ impl UnixAddr {
 
     Ok(poke_result)
   }
-  pub fn bind(self) -> io::Result<OwnedFd> {
+  pub(crate) fn bind(self) -> io::Result<OwnedFd> {
     match self {
       UnixAddr::Abstract(var_str) => bind_abstract(&var_str.to_str_lossy()),
       UnixAddr::Path(ref path_buf) => {

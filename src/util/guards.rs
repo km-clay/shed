@@ -93,7 +93,7 @@ fn guard_drop(_: ()) {
 /// ## Safety
 /// This calls `Shed::meta_mut` internally.
 /// If this is called inside of another `meta()`/`meta_mut()` call, that is a `RefCell` panic.
-pub fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
+pub(crate) fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let ceiling_guard = scope_ceiling_guard(args);
   let cwd_guard = cwd_guard();
   let umask_guard = umask_guard();
@@ -109,7 +109,7 @@ pub fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
 }
 
 /// Snapshot the shell options, restoring them on drop.
-pub fn shopt_guard() -> impl Drop {
+pub(crate) fn shopt_guard() -> impl Drop {
   let saved = Shed::shopts(Clone::clone);
   guard(saved, |saved| {
     Shed::shopts_mut(move |o| *o = saved);
@@ -120,19 +120,19 @@ fn make_arg_vec(args: Option<Vec<(VarStr, Span)>>) -> Option<Vec<VarStr>> {
   args.map(|a| a.into_iter().map(|(s, _)| s).collect::<Vec<_>>())
 }
 
-pub fn scope_ceiling_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
+pub(crate) fn scope_ceiling_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let arg_vec = make_arg_vec(args);
   Shed::vars_mut(|v| v.descend_with_ceiling(arg_vec));
   guard((), guard_drop)
 }
 
-pub fn function_scope_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
+pub(crate) fn function_scope_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let arg_vec = make_arg_vec(args);
   Shed::vars_mut(|v| v.descend_into_function(arg_vec));
   guard((), guard_drop)
 }
 
-pub fn cwd_guard() -> impl Drop {
+pub(crate) fn cwd_guard() -> impl Drop {
   let saved = try_var!("PWD");
   guard(saved, |saved| {
     if let Some(cwd) = saved
@@ -143,7 +143,7 @@ pub fn cwd_guard() -> impl Drop {
   })
 }
 
-pub fn umask_guard() -> impl Drop {
+pub(crate) fn umask_guard() -> impl Drop {
   let saved = try_var!("UMASK");
   guard(saved, |saved| {
     if let Some(umask) = saved
@@ -160,7 +160,7 @@ pub fn umask_guard() -> impl Drop {
 ///
 /// The `local` builtin uses this scope to store its variables.
 /// The `defer` builtin registers commands to run when this drops.
-pub fn shared_scope_guard() -> impl Drop {
+pub(crate) fn shared_scope_guard() -> impl Drop {
   Shed::vars_mut(|v| v.descend(None));
   guard((), guard_drop)
 }
@@ -169,7 +169,7 @@ pub fn shared_scope_guard() -> impl Drop {
 // VarCtxGuard - RAII variable context cleanup
 // ============================================================================
 
-pub fn var_ctx_guard(
+pub(crate) fn var_ctx_guard(
   vars: HashSet<VarStr>,
 ) -> ScopeGuard<HashSet<VarStr>, impl FnOnce(HashSet<VarStr>)> {
   guard(vars, |vars| {
@@ -182,7 +182,7 @@ pub fn var_ctx_guard(
 }
 
 /// Snapshot and restore the variables used in prefix assignment
-pub fn prefix_assign_guard(tree: &Ast, assignments: &[NodeId]) -> impl Drop {
+pub(crate) fn prefix_assign_guard(tree: &Ast, assignments: &[NodeId]) -> impl Drop {
   let saved: Vec<(String, Option<Var>)> = assignments
     .iter()
     .filter_map(|a| match &tree[*a].class {

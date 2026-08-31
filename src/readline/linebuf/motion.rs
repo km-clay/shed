@@ -60,7 +60,7 @@ impl super::LineBuf {
   /// Given a `LineAddr`, resolve it to an absolute line number.
   ///
   /// This is used for commands like `:3` or `:'a` where we need to convert the address into a line number in the buffer.
-  pub fn resolve_line_addr(&self, addr: &LineAddr) -> ShResult<Option<usize>> {
+  pub(crate) fn resolve_line_addr(&self, addr: &LineAddr) -> ShResult<Option<usize>> {
     match addr {
       LineAddr::Number(n) => Ok(Some(
         (n.saturating_sub(1)).min(self.lines.len().saturating_sub(1)),

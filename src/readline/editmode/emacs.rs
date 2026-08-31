@@ -19,7 +19,7 @@ pub(crate) struct Emacs {
 }
 
 impl Emacs {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
   fn reset_cmd(&mut self) {

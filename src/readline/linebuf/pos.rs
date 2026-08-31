@@ -1,7 +1,7 @@
 use super::Pos;
 
 #[derive(Debug, Clone)]
-pub enum MotionKind {
+pub(crate) enum MotionKind {
   /// A flat range from one grapheme position to another
   /// `start` is not necessarily less than `end`. `start` in most cases
   /// is the cursor's position.
@@ -23,7 +23,7 @@ pub enum MotionKind {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Cursor {
+pub(crate) struct Cursor {
   pub pos: Pos,
   pub exclusive: bool,
 }

@@ -13,24 +13,24 @@ use super::{
 };
 
 #[derive(Debug)]
-pub struct ViNormal {
+pub(crate) struct ViNormal {
   parser: ViParser,
   pending_seq: String,
   pending_flags: CmdFlags,
 }
 
 impl ViNormal {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       parser: ViParser::new(None, None, Self::validate_combination),
       pending_seq: String::new(),
       pending_flags: CmdFlags::empty(),
     }
   }
-  pub fn take_cmd(&mut self) -> String {
+  pub(crate) fn take_cmd(&mut self) -> String {
     std::mem::take(&mut self.pending_seq)
   }
-  pub fn flags(&self) -> CmdFlags {
+  pub(crate) fn flags(&self) -> CmdFlags {
     self.pending_flags
   }
   fn validate_combination(verb: Option<&Verb>, motion: Option<&Motion>) -> CmdState {
@@ -57,7 +57,7 @@ impl ViNormal {
       CmdState::Complete
     }
   }
-  pub fn parse_count(chars: &mut Peekable<Chars<'_>>) -> Option<usize> {
+  pub(crate) fn parse_count(chars: &mut Peekable<Chars<'_>>) -> Option<usize> {
     let mut count = String::new();
     let Some(_digit @ '1'..='9') = chars.peek() else {
       return None;

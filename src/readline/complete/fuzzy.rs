@@ -113,22 +113,22 @@ pub(crate) struct ClampedUsize {
 }
 
 impl ClampedUsize {
-  pub fn new(val: usize, max: usize, wrap: bool) -> Self {
+  pub(super) fn new(val: usize, max: usize, wrap: bool) -> Self {
     Self { val, max, wrap }
   }
-  pub fn get(&self) -> usize {
+  pub(super) fn get(&self) -> usize {
     self.val
   }
-  pub fn set(&mut self, val: usize) {
+  pub(super) fn set(&mut self, val: usize) {
     self.val = val.min(self.max.saturating_sub(1));
   }
-  pub fn set_max(&mut self, max: usize) {
+  pub(super) fn set_max(&mut self, max: usize) {
     self.max = max;
     if self.val >= self.max && self.max > 0 {
       self.val = self.max - 1;
     }
   }
-  pub fn wrap_add(&mut self, n: usize) {
+  pub(super) fn wrap_add(&mut self, n: usize) {
     if self.max == 0 {
       return;
     }
@@ -138,7 +138,7 @@ impl ClampedUsize {
       self.val = (self.val + n).min(self.max.saturating_sub(1));
     }
   }
-  pub fn wrap_sub(&mut self, n: usize) {
+  pub(super) fn wrap_sub(&mut self, n: usize) {
     if self.max == 0 {
       return;
     }
@@ -149,10 +149,10 @@ impl ClampedUsize {
     }
   }
 
-  pub fn sub(&mut self, n: usize) {
+  pub(super) fn sub(&mut self, n: usize) {
     self.val = self.val.saturating_sub(n);
   }
-  pub fn add(&mut self, n: usize) {
+  pub(super) fn add(&mut self, n: usize) {
     self.val = self.val.saturating_add(n).min(self.max.saturating_sub(1));
   }
 }
@@ -171,14 +171,14 @@ impl ScoredCandidate {
   const PENALTY_GAP_START: i32 = 3;
   const PENALTY_GAP_EXTEND: i32 = 1;
 
-  pub fn new(candidate: Candidate) -> Self {
+  pub(crate) fn new(candidate: Candidate) -> Self {
     Self {
       candidate,
       score: None,
       penalize_len_diff: false,
     }
   }
-  pub fn with_len_penalty(mut self, enable: bool) -> Self {
+  pub(crate) fn with_len_penalty(mut self, enable: bool) -> Self {
     self.penalize_len_diff = enable;
     self
   }
@@ -189,10 +189,10 @@ impl ScoredCandidate {
       _ => false,
     }
   }
-  pub fn fuzzy_score(&mut self, other: &str) -> i32 {
+  pub(crate) fn fuzzy_score(&mut self, other: &str) -> i32 {
     self.fuzzy_score_with(other, fuzzy_match_score)
   }
-  pub fn fuzzy_score_with(&mut self, other: &str, cb: ScoreCallback) -> i32 {
+  pub(crate) fn fuzzy_score_with(&mut self, other: &str, cb: ScoreCallback) -> i32 {
     let query_chars: Vec<char> = other.chars().collect();
     let score = cb(&self.candidate, &query_chars, self.penalize_len_diff);
     self.score = Some(score);
@@ -389,11 +389,11 @@ pub(crate) struct QueryEditor {
 }
 
 impl QueryEditor {
-  pub fn clear(&mut self) {
+  pub(super) fn clear(&mut self) {
     self.linebuf = LineBuf::new();
     self.mode = Emacs::default();
   }
-  pub fn handle_key(&mut self, key: K) -> ShResult<()> {
+  pub(super) fn handle_key(&mut self, key: K) -> ShResult<()> {
     let Some(cmd) = self.mode.handle_key(key) else {
       return Ok(());
     };
@@ -419,35 +419,35 @@ pub(crate) struct FuzzyBuilder {
 }
 
 impl FuzzyBuilder {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       inline: true,
       ..Default::default()
     }
   }
 
-  pub fn with_inline(mut self, enable: bool) -> Self {
+  pub(crate) fn with_inline(mut self, enable: bool) -> Self {
     self.inline = enable;
     self
   }
 
-  pub fn with_entries(mut self, entries: Vec<(String, i32)>) -> Self {
+  pub(crate) fn with_entries(mut self, entries: Vec<(String, i32)>) -> Self {
     self.entries = entries;
     self
   }
-  pub fn with_placeholder(mut self, placeholder: impl Into<String>) -> Self {
+  pub(crate) fn with_placeholder(mut self, placeholder: impl Into<String>) -> Self {
     self.placeholder = Some(placeholder.into());
     self
   }
-  pub fn with_score_cb(mut self, cb: ScoreCallback) -> Self {
+  pub(crate) fn with_score_cb(mut self, cb: ScoreCallback) -> Self {
     self.score_cb = Some(cb);
     self
   }
-  pub fn with_highlight_cb(mut self, cb: HighlightCallback) -> Self {
+  pub(crate) fn with_highlight_cb(mut self, cb: HighlightCallback) -> Self {
     self.highlight_cb = Some(cb);
     self
   }
-  pub fn pick(self) -> ShResult<Option<String>> {
+  pub(crate) fn pick(self) -> ShResult<Option<String>> {
     if self.entries.is_empty() || Shed::term(Terminal::test_mode) {
       return Ok(None);
     }
@@ -595,7 +595,7 @@ impl FuzzySelector {
   /// Every cell is prefixed with a 2-column leader (`► ` or dim `· `).
   const LEADER_W: usize = 2;
 
-  pub fn new(_title: impl Into<String>) -> Self {
+  pub(crate) fn new(_title: impl Into<String>) -> Self {
     Self {
       query: QueryEditor::default(),
       filtered: vec![],
@@ -616,25 +616,25 @@ impl FuzzySelector {
   }
 
   /// Hint text shown in the empty query box (e.g. for standalone pickers).
-  pub fn set_placeholder(&mut self, text: Option<impl Into<String>>) {
+  pub(crate) fn set_placeholder(&mut self, text: Option<impl Into<String>>) {
     self.placeholder = text.map(Into::into);
   }
 
-  pub fn set_score_cb(&mut self, cb: Option<ScoreCallback>) {
+  pub(crate) fn set_score_cb(&mut self, cb: Option<ScoreCallback>) {
     self.score_cb = cb;
   }
 
-  pub fn set_highlight_cb(&mut self, cb: Option<HighlightCallback>) {
+  pub(crate) fn set_highlight_cb(&mut self, cb: Option<HighlightCallback>) {
     self.highlight_cb = cb;
   }
 
   /// Standalone mode: the query line is the top row, with no prompt line above.
-  pub fn set_inline(&mut self, enable: bool) {
+  pub(crate) fn set_inline(&mut self, enable: bool) {
     self.inline = enable;
   }
 
   /// Column of the query cursor on the query line, past the `► ` leader.
-  pub fn query_cursor_col(&self) -> usize {
+  pub(crate) fn query_cursor_col(&self) -> usize {
     let raw = self.query.linebuf.to_string();
     let flat = self.query.linebuf.cursor_to_flat();
     let before: String = raw.chars().take(flat).collect();
@@ -642,47 +642,47 @@ impl FuzzySelector {
   }
 
   /// Retained for API compatibility; the grid layout doesn't number rows.
-  pub fn number_candidates(self, _enable: bool) -> Self {
+  pub(crate) fn number_candidates(self, _enable: bool) -> Self {
     self
   }
 
-  pub fn candidates(&self) -> &[Candidate] {
+  pub(crate) fn candidates(&self) -> &[Candidate] {
     &self.candidates
   }
 
-  pub fn filtered(&self) -> &[ScoredCandidate] {
+  pub(crate) fn filtered(&self) -> &[ScoredCandidate] {
     &self.filtered
   }
 
-  pub fn activate(&mut self, candidates: Vec<Candidate>) {
+  pub(crate) fn activate(&mut self, candidates: Vec<Candidate>) {
     self.candidates = candidates;
     // New candidate set: `filtered` is stale, so force a full rescan.
     self.last_query.clear();
     self.score_candidates();
   }
 
-  pub fn set_query(&mut self, query: &str) {
+  pub(crate) fn set_query(&mut self, query: &str) {
     self.query.linebuf = LineBuf::new().with_initial(query, query.len());
     self.score_candidates();
   }
 
-  pub fn reset_query(&mut self) {
+  pub(crate) fn reset_query(&mut self) {
     self.query.clear();
     self.score_candidates();
   }
 
-  pub fn selected_candidate(&self) -> Option<Candidate> {
+  pub(crate) fn selected_candidate(&self) -> Option<Candidate> {
     self
       .filtered
       .get(self.cursor.get())
       .map(|c| c.candidate.clone())
   }
 
-  pub fn set_prompt_line_context(&mut self, _line_width: usize, cursor_col: usize) {
+  pub(crate) fn set_prompt_line_context(&mut self, _line_width: usize, cursor_col: usize) {
     self.prompt_cursor_col = cursor_col;
   }
 
-  pub fn score_candidates(&mut self) {
+  pub(crate) fn score_candidates(&mut self) {
     let raw = self.query.linebuf.to_string();
     // Match against the transformed query (e.g. expanded `~`/`$VAR`), while the
     // box still shows the raw text. `extends` stays on the raw text: the transform
@@ -826,7 +826,7 @@ impl FuzzySelector {
     }
   }
 
-  pub fn predicted_rows(&self) -> usize {
+  pub(crate) fn predicted_rows(&self) -> usize {
     if self.candidates.is_empty() && self.filtered.is_empty() {
       return 0;
     }
@@ -852,7 +852,7 @@ impl FuzzySelector {
   }
 
   #[expect(clippy::unnested_or_patterns)]
-  pub fn handle_key(&mut self, key: K) -> ShResult<SelectorResponse> {
+  pub(crate) fn handle_key(&mut self, key: K) -> ShResult<SelectorResponse> {
     match key {
       // Pointer events are consumed but unhandled for now; hit-testing a
       // column-major paged grid needs a cell map we haven't built yet.
@@ -934,7 +934,7 @@ impl FuzzySelector {
     }
   }
 
-  pub fn draw(&mut self) -> usize {
+  pub(crate) fn draw(&mut self) -> usize {
     let t_cols = Shed::term(Terminal::t_cols);
     let underline_color =
       Shed::term(|t| t.term_caps().contains(TermCap::UNDERLINE_STYLES) && t.color_mode().is_some());
@@ -1077,7 +1077,7 @@ impl FuzzySelector {
     rows_drawn
   }
 
-  pub fn clear(&mut self) {
+  pub(crate) fn clear(&mut self) {
     if let Some(layout) = self.old_layout.take() {
       if self.inline {
         // Cursor rests on the first overlay row (the query line); erase it and

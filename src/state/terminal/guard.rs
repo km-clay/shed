@@ -34,7 +34,7 @@ pub(crate) struct TermGuard {
 }
 
 impl TermGuard {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       raw_mode: None,
       bracketed_paste: None,
@@ -50,115 +50,115 @@ impl TermGuard {
       active: false,
     }
   }
-  pub fn with_raw_mode(mut self, raw_mode: bool) -> Self {
+  pub(crate) fn with_raw_mode(mut self, raw_mode: bool) -> Self {
     if self.active {
       return self;
     } // enforce that we can't modify an active guard
     self.raw_mode = Some(raw_mode);
     self
   }
-  pub fn with_bracketed_paste(mut self, bracketed_paste: bool) -> Self {
+  pub(crate) fn with_bracketed_paste(mut self, bracketed_paste: bool) -> Self {
     if self.active {
       return self;
     }
     self.bracketed_paste = Some(bracketed_paste);
     self
   }
-  pub fn with_kitty_proto(mut self, kitty_proto: bool) -> Self {
+  pub(crate) fn with_kitty_proto(mut self, kitty_proto: bool) -> Self {
     if self.active {
       return self;
     }
     self.kitty_proto = Some(kitty_proto);
     self
   }
-  pub fn with_report_focus(mut self, report_focus: bool) -> Self {
+  pub(crate) fn with_report_focus(mut self, report_focus: bool) -> Self {
     if self.active {
       return self;
     }
     self.report_focus = Some(report_focus);
     self
   }
-  pub fn with_alt_buffer(mut self, alt_buffer: bool) -> Self {
+  pub(crate) fn with_alt_buffer(mut self, alt_buffer: bool) -> Self {
     if self.active {
       return self;
     }
     self.alt_buffer = Some(alt_buffer);
     self
   }
-  pub fn with_cursor_style(mut self, cursor_style: CursorStyle) -> Self {
+  pub(crate) fn with_cursor_style(mut self, cursor_style: CursorStyle) -> Self {
     if self.active {
       return self;
     }
     self.cursor_style = Some(cursor_style);
     self
   }
-  pub fn with_cursor_visible(mut self, cursor_visible: bool) -> Self {
+  pub(crate) fn with_cursor_visible(mut self, cursor_visible: bool) -> Self {
     if self.active {
       return self;
     }
     self.cursor_visible = Some(cursor_visible);
     self
   }
-  pub fn with_mouse_support(mut self, mouse_support: bool) -> Self {
+  pub(crate) fn with_mouse_support(mut self, mouse_support: bool) -> Self {
     if self.active {
       return self;
     }
     self.mouse_support = Some(mouse_support);
     self
   }
-  pub fn with_interactive(mut self, interactive: bool) -> Self {
+  pub(crate) fn with_interactive(mut self, interactive: bool) -> Self {
     if self.active {
       return self;
     }
     self.interactive = Some(interactive);
     self
   }
-  pub fn with_termios_depth(mut self, termios_depth: usize) -> Self {
+  pub(crate) fn with_termios_depth(mut self, termios_depth: usize) -> Self {
     if self.active {
       return self;
     }
     self.termios_depth = Some(termios_depth);
     self
   }
-  pub fn with_scroll_region(mut self, scroll_region: super::ScrollRegionState) -> Self {
+  pub(crate) fn with_scroll_region(mut self, scroll_region: super::ScrollRegionState) -> Self {
     if self.active {
       return self;
     }
     self.scroll_region = Some(scroll_region);
     self
   }
-  pub fn bracketed_paste(&self) -> Option<bool> {
+  pub(crate) fn bracketed_paste(&self) -> Option<bool> {
     self.bracketed_paste
   }
-  pub fn kitty_proto(&self) -> Option<bool> {
+  pub(crate) fn kitty_proto(&self) -> Option<bool> {
     self.kitty_proto
   }
-  pub fn report_focus(&self) -> Option<bool> {
+  pub(crate) fn report_focus(&self) -> Option<bool> {
     self.report_focus
   }
-  pub fn alt_buffer(&self) -> Option<bool> {
+  pub(crate) fn alt_buffer(&self) -> Option<bool> {
     self.alt_buffer
   }
-  pub fn cursor_style(&self) -> Option<CursorStyle> {
+  pub(crate) fn cursor_style(&self) -> Option<CursorStyle> {
     self.cursor_style
   }
-  pub fn cursor_visible(&self) -> Option<bool> {
+  pub(crate) fn cursor_visible(&self) -> Option<bool> {
     self.cursor_visible
   }
-  pub fn mouse_support(&self) -> Option<bool> {
+  pub(crate) fn mouse_support(&self) -> Option<bool> {
     self.mouse_support
   }
-  pub fn interactive(&self) -> Option<bool> {
+  pub(crate) fn interactive(&self) -> Option<bool> {
     self.interactive
   }
-  pub fn termios_depth(&self) -> Option<usize> {
+  pub(crate) fn termios_depth(&self) -> Option<usize> {
     self.termios_depth
   }
-  pub fn scroll_region(&self) -> Option<super::ScrollRegionState> {
+  pub(crate) fn scroll_region(&self) -> Option<super::ScrollRegionState> {
     self.scroll_region
   }
 
-  pub fn activate(self) -> Self {
+  pub(crate) fn activate(self) -> Self {
     if self.active {
       return self;
     }
@@ -205,7 +205,7 @@ impl Snapshot {
 pub(crate) struct SyncOutputGuard;
 
 impl SyncOutputGuard {
-  pub fn begin() -> Option<Self> {
+  pub(crate) fn begin() -> Option<Self> {
     let supported = Shed::term(|t| t.term_caps().contains(super::TermCap::SYNC_OUTPUT));
 
     supported.then(|| {

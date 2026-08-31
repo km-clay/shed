@@ -14,11 +14,11 @@ use std::{
 use crate::{
   HashSet,
   autoload::{self, Autoloader},
-  key, keys, opt, outln, procio,
-  readline::{self, ScoredCandidate},
+  opt, outln,
+  readline::ScoredCandidate,
   sherr,
-  state::{self, Shed, meta::MetaTab, paths, terminal::Terminal},
-  util::{Direction, error::ShResult, guards, with_status},
+  state::{Shed, meta::MetaTab, paths, terminal::Terminal},
+  util::{error::ShResult, guards, with_status},
   var,
 };
 
@@ -30,7 +30,7 @@ use nix::{
   poll::{PollFd, PollFlags, PollTimeout, poll},
 };
 
-pub const HELP_PAGE_INSTALL_DIR: Option<&str> = option_env!("SHED_HELP_DIR");
+pub(crate) const HELP_PAGE_INSTALL_DIR: Option<&str> = option_env!("SHED_HELP_DIR");
 
 struct PageStack {
   stack: Vec<HelpPager>,
@@ -180,7 +180,7 @@ fn embedded_pages(shadowed: &HashSet<String>) -> impl Iterator<Item = &'static s
     .filter(move |page| !check_hpath_names(shadowed, page))
 }
 
-pub fn get_all_tags() -> ShResult<Vec<ScoredTag>> {
+pub(super) fn get_all_tags() -> ShResult<Vec<ScoredTag>> {
   let mut tags = vec![];
 
   let hpath = var!("SHED_HPATH");
@@ -209,7 +209,7 @@ pub fn get_all_tags() -> ShResult<Vec<ScoredTag>> {
   Ok(tags)
 }
 
-pub fn open_help_index() -> ShResult<()> {
+pub(super) fn open_help_index() -> ShResult<()> {
   let Some(content) = load_help("help/help.txt") else {
     return Err(sherr!(NotFound, "Help index page not found"));
   };
@@ -217,7 +217,7 @@ pub fn open_help_index() -> ShResult<()> {
   open_help(&content, 0, Some("help/help.txt".to_string()))
 }
 
-pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> {
+pub(super) fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> {
   let path = Path::new(topic);
   if path.is_file()
     && let Ok(contents) = std::fs::read_to_string(path)
@@ -302,7 +302,7 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
   })
 }
 
-pub fn open_help(content: &str, line: usize, filename: Option<String>) -> ShResult<()> {
+pub(super) fn open_help(content: &str, line: usize, filename: Option<String>) -> ShResult<()> {
   if Shed::term(Terminal::test_mode) {
     return with_status(0);
   }
@@ -318,7 +318,7 @@ pub fn open_help(content: &str, line: usize, filename: Option<String>) -> ShResu
 /// Reopen the most recent pager session (`help -` / `:h!`), restoring the page,
 /// scroll position, and back/forward history. Falls back to the index page when
 /// there is nothing to resume.
-pub fn resume_help() -> ShResult<()> {
+pub(super) fn resume_help() -> ShResult<()> {
   if Shed::term(Terminal::test_mode) {
     return with_status(0);
   }
@@ -386,29 +386,29 @@ fn run_pager(mut page_stack: PageStack) -> ShResult<()> {
 }
 
 #[derive(Clone, Debug)]
-pub struct ScoredTag {
+pub(super) struct ScoredTag {
   tag: ScoredCandidate,
   line: usize,
   file: String,
 }
 
 impl ScoredTag {
-  pub fn new(tag: ScoredCandidate, line: usize, file: &str) -> Self {
+  pub(super) fn new(tag: ScoredCandidate, line: usize, file: &str) -> Self {
     Self {
       tag,
       line,
       file: file.to_string(),
     }
   }
-  pub fn fuzzy_score(&mut self, topic: &str) {
+  pub(super) fn fuzzy_score(&mut self, topic: &str) {
     self.tag.fuzzy_score(topic);
   }
-  pub fn get_score(&self) -> i32 {
+  pub(super) fn get_score(&self) -> i32 {
     self.tag.score.unwrap_or(i32::MIN)
   }
 }
 
-pub fn score_matches(topic: &str, tags: &mut Vec<ScoredTag>) {
+pub(super) fn score_matches(topic: &str, tags: &mut Vec<ScoredTag>) {
   for tag in tags.iter_mut() {
     tag.fuzzy_score(topic);
   }
@@ -416,7 +416,7 @@ pub fn score_matches(topic: &str, tags: &mut Vec<ScoredTag>) {
   tags.retain(|c| c.get_score() > i32::MIN);
 }
 
-pub fn read_tags_from_file(path: &Path) -> ShResult<Vec<ScoredTag>> {
+pub(super) fn read_tags_from_file(path: &Path) -> ShResult<Vec<ScoredTag>> {
   let contents = std::fs::read_to_string(path)?;
   // Pass the full path as `name` so that get_help_content's tag-search
   // restore step can re-read the file. The display filename (a bare stem)
@@ -424,7 +424,7 @@ pub fn read_tags_from_file(path: &Path) -> ShResult<Vec<ScoredTag>> {
   Ok(read_tags(&contents, path.to_string_lossy().as_ref()))
 }
 
-pub fn read_tags(content: &str, name: &str) -> Vec<ScoredTag> {
+pub(super) fn read_tags(content: &str, name: &str) -> Vec<ScoredTag> {
   let styled = StyledHelp::new(content);
 
   styled

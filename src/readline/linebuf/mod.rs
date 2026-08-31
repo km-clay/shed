@@ -6,9 +6,9 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{
   eval::lex::{LexFlags, LexStream, TkFlags, TkRule},
   expand::{self, alias},
-  motion, procio, sherr, shopt,
+  motion, shopt,
   state::{
-    self, Shed, paths,
+    Shed, paths,
     vars::{VarFlags, VarKind, VarStr},
   },
   status_msg,
@@ -78,7 +78,7 @@ pub(crate) const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
 /// is what necessitated this design in the first place. In order to have robust support for many of `vim`'s more in-depth
 /// features such as line-addressed ex mode commands, this design was what I landed on.
 #[derive(Debug, Clone)]
-pub struct LineBuf {
+pub(crate) struct LineBuf {
   lines: Lines,
   byte_positions: Option<Vec<(usize, Pos)>>,
   hint: Option<Hint>,
@@ -159,21 +159,21 @@ impl Default for LineBuf {
 
 #[expect(unused_variables)]
 impl LineBuf {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub fn cursor(&self) -> Pos {
+  pub(crate) fn cursor(&self) -> Pos {
     self.cursor.pos
   }
-  pub fn lines(&self) -> &Lines {
+  pub(crate) fn lines(&self) -> &Lines {
     &self.lines
   }
-  pub fn scroll_offset(&self) -> usize {
+  pub(crate) fn scroll_offset(&self) -> usize {
     self.scroll_offset
   }
   /// Whether the most recently executed command was a search-style motion
   /// (`f`/`t`/`;`/`,`/`n`/`N`) that found no target.
-  pub fn search_failed(&self) -> bool {
+  pub(crate) fn search_failed(&self) -> bool {
     self.search_failed
   }
   pub(super) fn exec_cmd(&mut self, cmd: &EditCmd) -> ShResult<()> {
@@ -297,14 +297,14 @@ impl LineBuf {
     res
   }
 
-  pub fn attempt_inline_expansion(&mut self, history: &History) -> bool {
+  pub(crate) fn attempt_inline_expansion(&mut self, history: &History) -> bool {
     let hist_res = self.attempt_history_expansion(history);
     let alias_res = shopt!(prompt.expand_aliases) && self.attempt_alias_expansion();
 
     hist_res || alias_res
   }
 
-  pub fn attempt_alias_expansion_all(&mut self) -> bool {
+  pub(crate) fn attempt_alias_expansion_all(&mut self) -> bool {
     let raw = self.to_string();
     let (result, first_pos) = alias::expand_alias_with_pos(raw);
     if first_pos.is_some() {
@@ -315,7 +315,7 @@ impl LineBuf {
     }
   }
 
-  pub fn attempt_alias_expansion(&mut self) -> bool {
+  pub(crate) fn attempt_alias_expansion(&mut self) -> bool {
     let (to_cursor, mut after_cursor) = self.lines.clone().split_lines(self.cursor.pos);
     let raw = to_cursor.join();
     let mut tokens = LexStream::new(raw.as_bytes(), LexFlags::empty())
@@ -356,7 +356,7 @@ impl LineBuf {
     }
   }
 
-  pub fn attempt_history_expansion(&mut self, history: &History) -> bool {
+  pub(crate) fn attempt_history_expansion(&mut self, history: &History) -> bool {
     let buf = self.to_string();
     let tks = context::get_context_tokens(&buf);
     let mut hist_expansions = vec![];
@@ -402,7 +402,7 @@ impl LineBuf {
     any_changes
   }
 
-  pub fn search_match_spans(&self) -> Vec<Range<usize>> {
+  pub(crate) fn search_match_spans(&self) -> Vec<Range<usize>> {
     if let Some(pat) = self.pending_search.as_ref()
       && !pat.is_empty()
       && let Ok(re) = Shed::meta_mut(|m| m.get_regex(&pat.to_str_lossy()))
@@ -422,7 +422,7 @@ impl LineBuf {
     }
   }
 
-  pub fn open_file(&self) -> Option<VarStr> {
+  pub(crate) fn open_file(&self) -> Option<VarStr> {
     self.open_file.clone()
   }
 }

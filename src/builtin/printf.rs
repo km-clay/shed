@@ -53,10 +53,10 @@ enum DynNum {
   Star,
 }
 
-pub struct PrintFormatter(Box<[Segment]>);
+pub(super) struct PrintFormatter(Box<[Segment]>);
 
 impl PrintFormatter {
-  pub fn parse(fmt_str: &[u8]) -> ShResult<Self> {
+  pub(super) fn parse(fmt_str: &[u8]) -> ShResult<Self> {
     let mut segments = vec![];
     let mut cur = SliceCursor::new(fmt_str);
     let mut literal = util::scratch_buf();
@@ -81,7 +81,7 @@ impl PrintFormatter {
     Ok(Self(segments.into_boxed_slice()))
   }
 
-  pub fn apply_once<I: Iterator<Item = Vec<u8>>>(
+  pub(super) fn apply_once<I: Iterator<Item = Vec<u8>>>(
     &self,
     args: &mut Peekable<I>,
   ) -> ShResult<Rendered> {
@@ -99,7 +99,7 @@ impl PrintFormatter {
     Ok(out)
   }
 
-  pub fn has_specs(&self) -> bool {
+  pub(super) fn has_specs(&self) -> bool {
     self.0.iter().any(|s| matches!(s, Segment::Spec(_)))
   }
 }
@@ -109,7 +109,7 @@ enum Segment {
   Spec(FmtSpec),
 }
 
-pub struct FmtSpec {
+pub(super) struct FmtSpec {
   flags: PrintFlags,
   width: Option<DynNum>,
   precision: Option<DynNum>,
@@ -146,7 +146,7 @@ fn emit_printf_errors(errors: &[PrintfErr]) -> bool {
 }
 
 impl FmtSpec {
-  pub fn parse(cur: &mut SliceCursor) -> ShResult<Self> {
+  pub(super) fn parse(cur: &mut SliceCursor) -> ShResult<Self> {
     Ok(Self {
       flags: Self::parse_flags(cur)?,
       width: Self::parse_width(cur)?,
@@ -155,7 +155,10 @@ impl FmtSpec {
     })
   }
 
-  pub fn apply<I: Iterator<Item = Vec<u8>>>(&self, args: &mut Peekable<I>) -> ShResult<Rendered> {
+  pub(super) fn apply<I: Iterator<Item = Vec<u8>>>(
+    &self,
+    args: &mut Peekable<I>,
+  ) -> ShResult<Rendered> {
     // Resolve dynamic width/precision. Negative width means left-justify
     // with abs(width); negative precision is treated as absent.
     let (flags, width) = self.resolve_width(args)?;
@@ -775,14 +778,14 @@ pub(super) struct Rendered {
 }
 
 impl Rendered {
-  pub fn new(text: Vec<u8>) -> Self {
+  pub(super) fn new(text: Vec<u8>) -> Self {
     Self {
       text,
       errors: vec![],
     }
   }
 
-  pub fn merge_errors(&mut self, other: Self) {
+  pub(super) fn merge_errors(&mut self, other: Self) {
     self.errors.extend(other.errors);
   }
 }

@@ -55,28 +55,28 @@ impl Default for ExEditor {
 }
 
 impl ExEditor {
-  pub fn new(has_select: bool) -> Self {
+  pub(crate) fn new(has_select: bool) -> Self {
     let mut editor = SimpleEditor::new(Some("ex_history"));
     if has_select {
       editor.buf = editor.buf.with_initial("'<,'>", 6);
     }
     Self { editor }
   }
-  pub fn clear(&mut self) {
+  pub(crate) fn clear(&mut self) {
     *self = Self::default();
   }
-  pub fn is_empty(&self) -> bool {
+  pub(crate) fn is_empty(&self) -> bool {
     self.editor.buf.is_empty()
   }
 }
 
 #[derive(Default, Debug)]
-pub struct ViEx {
+pub(crate) struct ViEx {
   pending_cmd: ExEditor,
 }
 
 impl ViEx {
-  pub fn new(has_select: bool) -> Self {
+  pub(crate) fn new(has_select: bool) -> Self {
     Self {
       pending_cmd: ExEditor::new(has_select),
     }
@@ -240,7 +240,7 @@ bitflags! {
 /// It iterates through these to find a prefix of a command.
 /// This means that common ones like `edit`, `read`, and `write`
 /// should be at the top
-pub const COMMANDS: &[(&str, ExCommand)] = &[
+pub(crate) const COMMANDS: &[(&str, ExCommand)] = &[
   ("edit", ExCommand::Edit),
   ("read", ExCommand::Read),
   ("transfer", ExCommand::Transfer),
@@ -264,7 +264,7 @@ pub const COMMANDS: &[(&str, ExCommand)] = &[
 ];
 
 #[derive(Debug, Clone)]
-pub enum ExTkRule {
+pub(crate) enum ExTkRule {
   Bang,
   Append,
   NormalSeq,
@@ -277,17 +277,17 @@ pub enum ExTkRule {
 }
 
 impl ExTkRule {
-  pub fn unwrap_cmd(&self) -> ExCommand {
+  pub(crate) fn unwrap_cmd(&self) -> ExCommand {
     if let ExTkRule::Command(cmd) = self {
       cmd.clone()
     } else {
       panic!("called unwrap_cmd on non-command token")
     }
   }
-  pub fn is_addr(&self) -> bool {
+  pub(crate) fn is_addr(&self) -> bool {
     matches!(self, ExTkRule::Address(_))
   }
-  pub fn unwrap_addr(&self) -> ExLineAddr {
+  pub(crate) fn unwrap_addr(&self) -> ExLineAddr {
     if let ExTkRule::Address(addr) = self {
       *addr
     } else {
@@ -297,7 +297,7 @@ impl ExTkRule {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum ExLineAddr {
+pub(crate) enum ExLineAddr {
   Number,
   Dot,
   Dollar,
@@ -310,7 +310,7 @@ pub enum ExLineAddr {
 }
 
 #[derive(Debug, Clone)]
-pub enum ExCommand {
+pub(crate) enum ExCommand {
   Expand,
   Substitute,
   Global,
@@ -335,13 +335,13 @@ pub enum ExCommand {
 }
 
 #[derive(Debug, Clone)]
-pub struct ExTk {
+pub(crate) struct ExTk {
   class: ExTkRule,
   span: Span,
 }
 
 impl ExTk {
-  pub fn unpack(self) -> (ExTkRule, Span) {
+  pub(crate) fn unpack(self) -> (ExTkRule, Span) {
     (self.class, self.span)
   }
 }
@@ -370,7 +370,7 @@ impl From<PatternEnd> for usize {
   }
 }
 
-pub struct ExLexer<'a> {
+pub(crate) struct ExLexer<'a> {
   input: VarStr,
   chars: Peekable<CharIndices<'a>>,
   tokens: Vec<ExTk>,
@@ -379,7 +379,7 @@ pub struct ExLexer<'a> {
 }
 
 impl<'a> ExLexer<'a> {
-  pub fn new(input: &'a str) -> Self {
+  pub(crate) fn new(input: &'a str) -> Self {
     Self {
       input: input.into(),
       chars: input.char_indices().peekable(),
@@ -387,7 +387,7 @@ impl<'a> ExLexer<'a> {
       flags: ExLexFlags::empty(),
     }
   }
-  pub fn lex(mut self) -> Vec<ExTk> {
+  pub(crate) fn lex(mut self) -> Vec<ExTk> {
     if self.chars.peek().is_none() {
       return self.tokens;
     }
@@ -803,7 +803,7 @@ impl<'a> ExLexer<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ExNdRule {
+pub(crate) enum ExNdRule {
   Delete,
   Yank,
   Put(Anchor),
@@ -841,16 +841,16 @@ pub enum ExNdRule {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AddressRange {
+pub(crate) enum AddressRange {
   Single(LineAddr),
   Range(LineAddr, LineAddr),
 }
 
 impl AddressRange {
-  pub const fn all_lines() -> Self {
+  pub(crate) const fn all_lines() -> Self {
     Self::Range(LineAddr::Number(1), LineAddr::Last)
   }
-  pub fn as_motion(&self) -> Motion {
+  pub(crate) fn as_motion(&self) -> Motion {
     match self {
       AddressRange::Single(line) => Motion::Line(line.clone()),
       AddressRange::Range(s, e) => Motion::LineRange(s.clone(), e.clone()),
@@ -865,13 +865,13 @@ impl Default for AddressRange {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExNode {
+pub(crate) struct ExNode {
   pub address: Option<AddressRange>,
   pub bang: bool,
   pub kind: ExNdRule,
 }
 
-pub enum ExParseResult<T> {
+pub(super) enum ExParseResult<T> {
   Success(T),
   Error(String),
 }
@@ -884,10 +884,10 @@ enum ExInnerParseResult<T> {
 use ExInnerParseResult as ExR;
 
 impl<T> ExInnerParseResult<T> {
-  pub fn success(value: T) -> Self {
+  pub(crate) fn success(value: T) -> Self {
     ExInnerParseResult::Done(ExP::Success(value))
   }
-  pub fn error(msg: String) -> Self {
+  pub(crate) fn error(msg: String) -> Self {
     ExInnerParseResult::Done(ExP::Error(msg))
   }
 }
@@ -899,20 +899,20 @@ enum ExInnerPartialParseResult<T, P> {
 use ExInnerPartialParseResult as ExPR;
 
 #[derive(Debug, Clone)]
-pub struct ExParser {
+pub(super) struct ExParser {
   tokens: Peekable<IntoIter<ExTk>>,
   bang: bool,
 }
 
 impl ExParser {
-  pub fn new(tokens: Vec<ExTk>) -> Self {
+  pub(super) fn new(tokens: Vec<ExTk>) -> Self {
     let tokens = tokens.into_iter().peekable();
     Self {
       tokens,
       bang: false,
     }
   }
-  pub fn parse(mut self) -> ExP<ExNode> {
+  pub(super) fn parse(mut self) -> ExP<ExNode> {
     let address = match self.parse_address() {
       ExR::Done(ExP::Success(addr)) => Some(addr),
       ExR::Done(ExP::Error(msg)) => return ExP::Error(msg),

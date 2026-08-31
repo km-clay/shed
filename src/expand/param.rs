@@ -62,7 +62,7 @@ fn split_search_repl(rest: SegStream) -> (SegStream, SegStream) {
   }
 }
 
-pub fn parse_param_exp(body: &SegStream, allow_side_effects: bool) -> ShResult<ParamExp> {
+pub(crate) fn parse_param_exp(body: &SegStream, allow_side_effects: bool) -> ShResult<ParamExp> {
   use ParamExp as PE;
 
   let parse_err = || Err(sherr!(SyntaxErr, "Invalid parameter expansion",));
@@ -178,7 +178,7 @@ fn parse_signed_component(s: &str, allow_side_effects: bool) -> Option<i64> {
   trimmed.parse::<i64>().ok()
 }
 
-pub fn parse_pos_len(s: &str, allow_side_effects: bool) -> Option<(i64, Option<i64>)> {
+pub(crate) fn parse_pos_len(s: &str, allow_side_effects: bool) -> Option<(i64, Option<i64>)> {
   let raw = s.strip_prefix(':')?;
   if let Some((start, len)) = raw.split_once(':') {
     Some((
@@ -250,7 +250,10 @@ fn expand_body_subscripts(body: &SegStream, allow_side_effects: bool) -> ShResul
   Ok(out)
 }
 
-pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> ShResult<SegStream> {
+pub(crate) fn perform_param_expansion(
+  body: &SegStream,
+  allow_side_effects: bool,
+) -> ShResult<SegStream> {
   // Resolve the array subscript first (`${arr[$i]}`), then parse the name /
   // operator against a lossy string view; the operand (the suffix after the
   // operator) keeps its markers and is sliced back off `body` once we know the

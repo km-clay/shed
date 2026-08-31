@@ -21,23 +21,27 @@ pub(super) fn scan_sgr(bytes: &[u8], pos: usize) -> Option<usize> {
   None
 }
 
-pub const TAG_SEQ: &str = "\x1b[1;33m"; // bold yellow - searchable tags
-pub const REF_SEQ: &str = "\x1b[4;36m"; // underline cyan - cross-references
-pub const RESET_SEQ: &str = "\x1b[0m";
-pub const HEADER_SEQ: &str = "\x1b[1;35m"; // bold magenta - section headers
-pub const CODE_SEQ: &str = "\x1b[32m"; // green - inline code
-pub const KEYWORD_1_SEQ: &str = "\x1b[1;32m"; // bold green - {keyword}
-pub const KEYWORD_2_SEQ: &str = "\x1b[3;37m"; // italic white - [optional]
+pub(super) const TAG_SEQ: &str = "\x1b[1;33m"; // bold yellow - searchable tags
+pub(super) const REF_SEQ: &str = "\x1b[4;36m"; // underline cyan - cross-references
+pub(super) const RESET_SEQ: &str = "\x1b[0m";
+pub(super) const HEADER_SEQ: &str = "\x1b[1;35m"; // bold magenta - section headers
+pub(super) const CODE_SEQ: &str = "\x1b[32m"; // green - inline code
+pub(super) const KEYWORD_1_SEQ: &str = "\x1b[1;32m"; // bold green - {keyword}
+pub(super) const KEYWORD_2_SEQ: &str = "\x1b[3;37m"; // italic white - [optional]
 
 #[derive(Debug)]
-pub struct MarkedSpan {
+pub(super) struct MarkedSpan {
   prefix_seq: Range<usize>,
   content: Range<usize>,
   postfix_seq: Range<usize>,
 }
 
 impl MarkedSpan {
-  pub fn new(prefix_seq: Range<usize>, content: Range<usize>, postfix_seq: Range<usize>) -> Self {
+  pub(super) fn new(
+    prefix_seq: Range<usize>,
+    content: Range<usize>,
+    postfix_seq: Range<usize>,
+  ) -> Self {
     Self {
       prefix_seq,
       content,
@@ -45,26 +49,26 @@ impl MarkedSpan {
     }
   }
 
-  pub fn content_range(&self) -> Range<usize> {
+  pub(super) fn content_range(&self) -> Range<usize> {
     self.content.clone()
   }
-  pub fn content<'a>(&self, source: &'a str) -> &'a str {
+  pub(super) fn content<'a>(&self, source: &'a str) -> &'a str {
     &source[self.content.clone()]
   }
-  pub fn line_no(&self, source: &str) -> usize {
+  pub(super) fn line_no(&self, source: &str) -> usize {
     source[..self.prefix_seq.start]
       .chars()
       .filter(|c| *c == '\n')
       .count()
   }
 
-  pub fn line_start(&self, source: &str) -> usize {
+  pub(super) fn line_start(&self, source: &str) -> usize {
     source[..self.prefix_seq.start]
       .rfind('\n')
       .map_or(0, |pos| pos + 1)
   }
 
-  pub fn rel_to_line(&self, source: &str) -> (Range<usize>, Range<usize>, Range<usize>) {
+  pub(super) fn rel_to_line(&self, source: &str) -> (Range<usize>, Range<usize>, Range<usize>) {
     let offset = self.line_start(source);
     (
       self.prefix_seq.clone().start - offset..self.prefix_seq.clone().end - offset,
@@ -75,7 +79,7 @@ impl MarkedSpan {
 }
 
 #[derive(Debug)]
-pub struct StyledHelp {
+pub(super) struct StyledHelp {
   /// styled help content
   content: String,
   /// visible help content (no ANSI sequences)
@@ -86,7 +90,7 @@ pub struct StyledHelp {
 }
 
 impl StyledHelp {
-  pub fn new(content: &str) -> Self {
+  pub(super) fn new(content: &str) -> Self {
     let baked = style_help_content(content);
     let (visible, visible_to_baked) = strip_sgr(&baked);
     Self {
@@ -96,20 +100,20 @@ impl StyledHelp {
       ref_targets: extract_ref_targets(content),
     }
   }
-  pub fn content(&self) -> &str {
+  pub(super) fn content(&self) -> &str {
     &self.content
   }
-  pub fn visible(&self) -> &str {
+  pub(super) fn visible(&self) -> &str {
     &self.visible
   }
-  pub fn visible_to_baked(&self) -> &[usize] {
+  pub(super) fn visible_to_baked(&self) -> &[usize] {
     &self.visible_to_baked
   }
-  pub fn take_ref_targets(&mut self) -> Vec<Option<String>> {
+  pub(super) fn take_ref_targets(&mut self) -> Vec<Option<String>> {
     std::mem::take(&mut self.ref_targets)
   }
 
-  pub fn find_markers(&self, marker: &str) -> Vec<MarkedSpan> {
+  pub(super) fn find_markers(&self, marker: &str) -> Vec<MarkedSpan> {
     let mut markers = vec![];
     let mut cursor = 0;
 
@@ -137,7 +141,7 @@ impl StyledHelp {
   }
 }
 
-pub fn style_help_content(raw: &str) -> String {
+pub(super) fn style_help_content(raw: &str) -> String {
   expand_help(&unescape_help(raw))
 }
 

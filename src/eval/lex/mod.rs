@@ -32,7 +32,7 @@ use crate::{
   },
 };
 
-pub const KEYWORDS: [&[u8]; 21] = [
+pub(crate) const KEYWORDS: [&[u8]; 21] = [
   b"!",
   b"case",
   b"catch",
@@ -58,11 +58,11 @@ pub const KEYWORDS: [&[u8]; 21] = [
 
 assert_sorted!(KEYWORDS);
 
-pub const MIDDLES: [&str; 3] = ["elif", "else", "catch"];
+pub(crate) const MIDDLES: [&str; 3] = ["elif", "else", "catch"];
 
-pub const CLOSERS: [&str; 6] = ["fi", "done", "esac", "}", ")", ";;"];
+pub(crate) const CLOSERS: [&str; 6] = ["fi", "done", "esac", "}", ")", ";;"];
 
-pub trait TkVecUtils<Tk> {
+pub(crate) trait TkVecUtils<Tk> {
   fn get_span(&self) -> Option<Span>;
 }
 
@@ -102,7 +102,7 @@ macro_rules! lex_err {
 }
 
 #[derive(Clone, PartialEq, Default, Debug, Eq, Hash)]
-pub struct SpanSource {
+pub(crate) struct SpanSource {
   name: VarStr,
   content: VarStr,
 }
@@ -118,16 +118,16 @@ fn stdin_name() -> VarStr {
 }
 
 impl SpanSource {
-  pub fn new(name: VarStr, content: VarStr) -> Self {
+  pub(crate) fn new(name: VarStr, content: VarStr) -> Self {
     Self { name, content }
   }
-  pub fn name(&self) -> VarStr {
+  pub(crate) fn name(&self) -> VarStr {
     self.name.clone()
   }
-  pub fn content(&self) -> VarStr {
+  pub(crate) fn content(&self) -> VarStr {
     self.content.clone()
   }
-  pub fn len(&self) -> usize {
+  pub(crate) fn len(&self) -> usize {
     self.content.len()
   }
 }
@@ -191,7 +191,7 @@ pub(crate) struct Span {
 
 impl Span {
   /// New `Span`. Wraps a range and a string that it refers to.
-  pub fn new(range: Range<usize>, content: VarStr) -> Self {
+  pub(crate) fn new(range: Range<usize>, content: VarStr) -> Self {
     Span {
       range,
       pos: Pos::MIN,
@@ -203,14 +203,14 @@ impl Span {
   }
   /// Like `new`, but reuses an already-built, shared `Rc<SpanSource>` — no
   /// allocation and no per-token rename.
-  pub fn with_source(range: Range<usize>, source: SpanSource) -> Self {
+  pub(crate) fn with_source(range: Range<usize>, source: SpanSource) -> Self {
     Span {
       range,
       pos: Pos::MIN,
       source,
     }
   }
-  pub fn merge_inplace(&mut self, other: &Span) {
+  pub(crate) fn merge_inplace(&mut self, other: &Span) {
     if !VarStr::ptr_eq(&self.source.content, &other.source.content) {
       return;
     }
@@ -221,7 +221,7 @@ impl Span {
     self.range.start = self.range.start.min(other.range.start);
     self.range.end = self.range.end.max(other.range.end);
   }
-  pub fn merge_with(mut self, other: &Span) -> Option<Self> {
+  pub(crate) fn merge_with(mut self, other: &Span) -> Option<Self> {
     // make sure these two spans originate from the same input. See
     // `merge_inplace` for why the `ptr_eq` fast path needs a value fallback.
     if !VarStr::ptr_eq(&self.source.content, &other.source.content)
@@ -237,57 +237,57 @@ impl Span {
     self.range.end = self.range.end.max(other.range.end);
     Some(self)
   }
-  pub fn at(mut self, pos: Pos) -> Self {
+  pub(crate) fn at(mut self, pos: Pos) -> Self {
     self.pos = pos;
     self
   }
-  pub fn rename(&mut self, name: VarStr) {
+  pub(crate) fn rename(&mut self, name: VarStr) {
     // Fork this span's shared source (copy-on-write) so renaming it — e.g. to
     // attribute a function body to its name for error blame — doesn't rename
     // every other span sharing the source.
     self.source.name = name;
   }
-  pub fn line_and_col(&self) -> (usize, usize) {
+  pub(crate) fn line_and_col(&self) -> (usize, usize) {
     (self.pos.row, self.pos.col)
   }
   /// Slice the source string at the wrapped range
-  pub fn to_str_lossy(&self) -> Cow<'_, str> {
+  pub(crate) fn to_str_lossy(&self) -> Cow<'_, str> {
     self.as_bytes().to_str_lossy()
   }
-  pub fn as_var_str(&self) -> VarStr {
+  pub(crate) fn as_var_str(&self) -> VarStr {
     self.as_bytes().into()
   }
-  pub fn as_bytes(&self) -> &[u8] {
+  pub(crate) fn as_bytes(&self) -> &[u8] {
     &self.source.content[self.range().start..self.range().end]
   }
-  pub fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
+  pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
     self.source.content[self.range().start..self.range().end]
       .iter()
       .copied()
   }
-  pub fn get_source(&self) -> VarStr {
+  pub(crate) fn get_source(&self) -> VarStr {
     self.source.content.clone()
   }
-  pub fn span_source(&self) -> &SpanSource {
+  pub(crate) fn span_source(&self) -> &SpanSource {
     &self.source
   }
-  pub fn range(&self) -> Range<usize> {
+  pub(crate) fn range(&self) -> Range<usize> {
     self.range.clone()
   }
   /// With great power comes great responsibility
   /// Only use this in the most dire of circumstances
-  pub fn set_range(&mut self, range: Range<usize>) {
+  pub(crate) fn set_range(&mut self, range: Range<usize>) {
     self.range = range;
   }
 
-  pub fn shift_by(&mut self, delta: isize) {
+  pub(crate) fn shift_by(&mut self, delta: isize) {
     let new_start = self.range.start as isize + delta;
     let new_end = self.range.end as isize + delta;
     debug_assert!(new_start >= 0 && new_end >= 0, "shift_by underflow");
     self.range = (new_start as usize)..(new_end as usize);
   }
 
-  pub fn rebase_into(&mut self, outer_span: &Span, offset: usize) {
+  pub(crate) fn rebase_into(&mut self, outer_span: &Span, offset: usize) {
     self.range = (self.range.start + offset)..(self.range.end + offset);
     self.source = outer_span.source.clone();
   }
@@ -382,7 +382,7 @@ pub(crate) struct Tk {
 }
 
 impl Tk {
-  pub fn new(class: TkRule, span: Span) -> Self {
+  pub(crate) fn new(class: TkRule, span: Span) -> Self {
     Self {
       class,
       span,
@@ -390,23 +390,23 @@ impl Tk {
     }
   }
   /// Returns a new string with the token's span replaced by the given string.
-  pub fn replaced(&self, other: &str) -> String {
+  pub(crate) fn replaced(&self, other: &str) -> String {
     let mut content = self.span.source.content().to_string();
     content.replace_range(self.span.range(), other);
     content
   }
   /// Returns true if the token is a literal string, i.e. it does not contain any special characters that would require quoting or escaping.
-  pub fn is_literal(&self) -> bool {
+  pub(crate) fn is_literal(&self) -> bool {
     self.filter_meta()
       && self
         .span
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || b"-_./".contains(&b))
   }
-  pub fn as_bytes(&self) -> &[u8] {
+  pub(crate) fn as_bytes(&self) -> &[u8] {
     self.span.as_bytes()
   }
-  pub fn to_str_lossy(&self) -> Cow<'_, str> {
+  pub(crate) fn to_str_lossy(&self) -> Cow<'_, str> {
     self.span.to_str_lossy()
   }
   /// The token's effective text as a `VarStr`: the joined expansion for an
@@ -414,20 +414,20 @@ impl Tk {
   /// routing through the formatter.
   ///
   /// Cheap for small tokens, but may allocate for large expanded tokens.
-  pub fn word(&self) -> VarStr {
+  pub(crate) fn word(&self) -> VarStr {
     match &self.class {
       TkRule::Expanded { exp } => exp.join_with(" "),
       _ => self.span.as_bytes().into(),
     }
   }
-  pub fn source(&self) -> VarStr {
+  pub(crate) fn source(&self) -> VarStr {
     self.span.source.content.clone()
   }
-  pub fn mark(&mut self, flag: TkFlags) {
+  pub(crate) fn mark(&mut self, flag: TkFlags) {
     self.flags |= flag;
   }
   /// Used to see if a separator is ';;' for case statements
-  pub fn has_double_semi(&self) -> bool {
+  pub(crate) fn has_double_semi(&self) -> bool {
     let TkRule::Sep = self.class else {
       return false;
     };
@@ -435,12 +435,12 @@ impl Tk {
   }
 
   /// Returns false for tokens that are not part of the actual input, like `TkRule::Soi`, `TkRule::Eoi`, and `TkRule::Null`.
-  pub fn filter_meta(&self) -> bool {
+  pub(crate) fn filter_meta(&self) -> bool {
     !matches!(self.class, TkRule::Soi | TkRule::Eoi | TkRule::Null)
   }
 
   /// used when lexing recursively, to replace the token's span with the original source
-  pub fn rebase_into(mut self, outer_span: &Span, offset: usize) -> Self {
+  pub(crate) fn rebase_into(mut self, outer_span: &Span, offset: usize) -> Self {
     self.span.rebase_into(outer_span, offset);
     self
   }
@@ -449,7 +449,7 @@ impl Tk {
   ///
   /// returns a new `Tk` instead of mutating in-place. Altering spans directly
   /// feels like a potential footgun.
-  pub fn strip_arith_header(&self) -> ShResult<Self> {
+  pub(crate) fn strip_arith_header(&self) -> ShResult<Self> {
     let s = self.as_bytes();
     let trimmed = s.trim();
 
@@ -522,7 +522,7 @@ bitflags! {
 /// Cleans the input string by removing line continuations.
 ///
 /// Honestly kind of a hack, but it works.
-pub fn clean_input(input: &[u8]) -> VarStr {
+pub(crate) fn clean_input(input: &[u8]) -> VarStr {
   // PERF: Profile this function to see if it has any
   // meaningful impact on lex speed.
   let mut bytes = SliceCursor::new(input);
@@ -718,7 +718,7 @@ pub(crate) struct LexStream {
 }
 
 impl LexStream {
-  pub fn new(source: &[u8], flags: LexFlags) -> Self {
+  pub(crate) fn new(source: &[u8], flags: LexFlags) -> Self {
     let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
     let source = SpanSource::new(stdin_name(), source.into());
     Self {
@@ -745,7 +745,7 @@ impl LexStream {
   /// `LexStream.slice(1..=10)`
   /// `LexStream.slice(..10)`
   /// `LexStream.slice(1..)`
-  pub fn slice<R: RangeBounds<usize>>(&self, range: R) -> Option<&[u8]> {
+  pub(crate) fn slice<R: RangeBounds<usize>>(&self, range: R) -> Option<&[u8]> {
     let start = match range.start_bound() {
       Bound::Included(&start) => start,
       Bound::Excluded(&start) => start + 1,
@@ -768,7 +768,7 @@ impl LexStream {
   ///
   /// If the closure returns `Some`, the parse is committed and the result is returned.
   /// If the closure returns `None`, the parse is rolled back and `None` is returned.
-  pub fn attempt<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+  pub(crate) fn attempt<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
     let saved = self.save_state();
     if let Some(thing) = f(self) {
       Some(thing)
@@ -777,7 +777,7 @@ impl LexStream {
       None
     }
   }
-  pub fn with_name(mut self, name: VarStr) -> Self {
+  pub(crate) fn with_name(mut self, name: VarStr) -> Self {
     self.source.name = name;
     self
   }
@@ -785,14 +785,14 @@ impl LexStream {
   fn byte_at(&self, idx: usize) -> Option<u8> {
     self.source.content.as_bytes().get(idx).copied()
   }
-  pub fn in_brc_grp(&self) -> bool {
+  pub(crate) fn in_brc_grp(&self) -> bool {
     self.brc_grp_depth > 0
   }
-  pub fn in_subsh(&self) -> bool {
+  pub(crate) fn in_subsh(&self) -> bool {
     self.subsh_depth > 0
   }
   /// Update the internal `Pos` that tracks the current line and column of the cursor.
-  pub fn update_pos(&mut self) {
+  pub(crate) fn update_pos(&mut self) {
     if self.cursor < self.pos_offset {
       // cursor moved backwards? recompute I guess?
       // I think this only happens in heredocs but idk
@@ -810,43 +810,43 @@ impl LexStream {
     }
     self.pos_offset = self.cursor;
   }
-  pub fn update_cursor(&mut self, new_cursor: usize) {
+  pub(crate) fn update_cursor(&mut self, new_cursor: usize) {
     assert!(new_cursor <= self.source.len());
     self.cursor = new_cursor;
     self.update_pos();
   }
-  pub fn inc_cursor(&mut self, amt: usize) {
+  pub(crate) fn inc_cursor(&mut self, amt: usize) {
     self.update_cursor(self.cursor + amt);
   }
-  pub fn enter_subsh(&mut self) {
+  pub(crate) fn enter_subsh(&mut self) {
     if self.subsh_depth == 0 {
       self.subsh_start = Some(self.cursor);
     }
     self.subsh_depth += 1;
   }
-  pub fn leave_subsh(&mut self) {
+  pub(crate) fn leave_subsh(&mut self) {
     self.subsh_depth -= 1;
     if self.subsh_depth == 0 {
       self.subsh_start = None;
     }
   }
-  pub fn enter_brc_grp(&mut self) {
+  pub(crate) fn enter_brc_grp(&mut self) {
     if self.brc_grp_depth == 0 {
       self.brc_grp_start = Some(self.cursor);
     }
     self.brc_grp_depth += 1;
   }
-  pub fn leave_brc_grp(&mut self) {
+  pub(crate) fn leave_brc_grp(&mut self) {
     self.brc_grp_depth -= 1;
     if self.brc_grp_depth == 0 {
       self.brc_grp_start = None;
     }
   }
-  pub fn next_is_cmd(&self) -> bool {
+  pub(crate) fn next_is_cmd(&self) -> bool {
     self.flags.contains(LexFlags::NEXT_IS_CMD)
   }
   /// Set whether the next string token is a command name
-  pub fn set_next_is_cmd(&mut self, is: bool) {
+  pub(crate) fn set_next_is_cmd(&mut self, is: bool) {
     if is {
       self.flags |= LexFlags::NEXT_IS_CMD;
       self.flags &= !LexFlags::NEXT_IS_REDIR;
@@ -1505,7 +1505,7 @@ impl LexStream {
     None
   }
 
-  pub fn func_paren_lookahead(&mut self) -> Option<()> {
+  pub(crate) fn func_paren_lookahead(&mut self) -> Option<()> {
     // this returns Some(()) if it finds the parens.
     // kind of weird but it makes the function
     // directly usable as an argument to Self::attempt()
@@ -1527,12 +1527,12 @@ impl LexStream {
     });
     None
   }
-  pub fn get_span(&mut self, range: Range<usize>) -> Span {
+  pub(crate) fn get_span(&mut self, range: Range<usize>) -> Span {
     self.update_pos();
     Span::with_source(range, self.source.clone()).at(self.pos)
   }
   /// Slice a token out of the original source input, based on the given range.
-  pub fn get_token(&mut self, range: Range<usize>, class: TkRule) -> Tk {
+  pub(crate) fn get_token(&mut self, range: Range<usize>, class: TkRule) -> Tk {
     let span = self.get_span(range);
     Tk::new(class, span)
   }
@@ -1785,7 +1785,7 @@ impl Iterator for LexStream {
 
 // misc helper functions
 
-pub fn is_assignment(text: &[u8]) -> bool {
+pub(crate) fn is_assignment(text: &[u8]) -> bool {
   let mut bytes = text.bytes();
 
   match_loop!(bytes.next() => b, {
@@ -1799,20 +1799,20 @@ pub fn is_assignment(text: &[u8]) -> bool {
 }
 
 /// Is whitespace or a semicolon
-pub fn is_hard_sep(ch: u8) -> bool {
+pub(crate) fn is_hard_sep(ch: u8) -> bool {
   matches!(ch, b' ' | b'\t' | b'\n' | b';')
 }
 
 /// Is whitespace, but not a newline
-pub fn is_field_sep(ch: u8) -> bool {
+pub(crate) fn is_field_sep(ch: u8) -> bool {
   matches!(ch, b' ' | b'\t')
 }
 
-pub fn is_keyword(slice: &[u8]) -> bool {
+pub(crate) fn is_keyword(slice: &[u8]) -> bool {
   KEYWORDS.binary_search(&slice).is_ok()
 }
 
-pub fn scan_cmd_sub_body(body: &[u8]) -> Option<usize> {
+pub(crate) fn scan_cmd_sub_body(body: &[u8]) -> Option<usize> {
   // Prepend `(` so the lexer enters a subshell context
   let mut prefixed = Vec::with_capacity(body.len() + 1);
   prefixed.push(b'(');
@@ -1832,7 +1832,7 @@ pub fn scan_cmd_sub_body(body: &[u8]) -> Option<usize> {
   None
 }
 
-pub fn is_cmd_sub(slice: &[u8]) -> bool {
+pub(crate) fn is_cmd_sub(slice: &[u8]) -> bool {
   slice.starts_with(b"$(") && strops::ends_with_unescaped(slice, b")")
 }
 

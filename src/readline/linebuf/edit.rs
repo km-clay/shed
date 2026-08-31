@@ -19,7 +19,7 @@ use super::{
 /// only an actively-merging entry keeps full buffer snapshots, and there is at
 /// most one of those at a time (the undo-stack top while a merge is open).
 #[derive(Clone, Debug)]
-pub struct Edit {
+pub(crate) struct Edit {
   pub old_cursor: Pos,
   pub new_cursor: Pos,
   pub merging: bool,
@@ -64,7 +64,7 @@ impl Edit {
   pub(super) fn barrier(cursor: Pos) -> Self {
     Edit::delta(cursor, VarStr::default(), VarStr::default(), cursor, cursor)
   }
-  pub fn is_empty(&self) -> bool {
+  pub(crate) fn is_empty(&self) -> bool {
     match &self.body {
       EditBody::Delta {
         removed, inserted, ..
@@ -160,7 +160,7 @@ impl Edit {
   }
 }
 
-pub struct Diff {
+pub(super) struct Diff {
   start: Pos,
   removed: VarStr,
   inserted: VarStr,
@@ -449,7 +449,7 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
 /// Per-row `(start, end)` block depth from an already-built context-token slice.
 /// `input` is only used for its newline positions (the token spans are absolute
 /// offsets into it).
-pub fn depth_levels_from_tokens(tokens: &[CtxTk], input: &str) -> Vec<(usize, usize)> {
+pub(super) fn depth_levels_from_tokens(tokens: &[CtxTk], input: &str) -> Vec<(usize, usize)> {
   let mut events = Vec::new();
   let mut stack = Vec::new();
   collect_depth_events(tokens, &mut stack, &mut events);
@@ -480,13 +480,13 @@ pub fn depth_levels_from_tokens(tokens: &[CtxTk], input: &str) -> Vec<(usize, us
 
 /// Tokenize `input` and compute its per-row depth. Used where no token cache is
 /// available (a cursor prefix) and by the parity test.
-pub fn depth_levels_via_ctx(input: &str) -> Vec<(usize, usize)> {
+pub(super) fn depth_levels_via_ctx(input: &str) -> Vec<(usize, usize)> {
   let tokens = crate::readline::context::get_context_tokens(input);
   depth_levels_from_tokens(&tokens, input)
 }
 
 /// Strict parse that flags unterminated structures (open quotes, subshells, …).
-pub fn parse_failed_strict(input: &str) -> bool {
+pub(super) fn parse_failed_strict(input: &str) -> bool {
   ParsedSrc::new(input.into())
     .with_lex_flags(LexFlags::LEX_UNFINISHED_STRUCTURES)
     .with_parse_flags(ParseFlags::ERR_RETURN)
@@ -532,7 +532,7 @@ pub(super) fn extract_range_contiguous(buf: &mut Lines, start: Pos, end: Pos) ->
 impl super::LineBuf {
   /// Provides a public interface for editing the buffer in a way that is recognized by the undo system.
   /// Any change made by the provided function will be tracked in the undo stack.
-  pub fn edit<T, F: FnMut(&mut Self) -> T>(&mut self, mut f: F) -> T {
+  pub(crate) fn edit<T, F: FnMut(&mut Self) -> T>(&mut self, mut f: F) -> T {
     let before = self.lines.clone();
     let old_cursor = self.cursor.pos;
 
@@ -547,7 +547,7 @@ impl super::LineBuf {
 
     res
   }
-  pub fn handle_edit(&mut self, old: Lines, new_cursor: Pos, old_cursor: Pos) {
+  pub(crate) fn handle_edit(&mut self, old: Lines, new_cursor: Pos, old_cursor: Pos) {
     self.record_edit(old, old_cursor, new_cursor, self.merging_undos);
   }
   /// Record an edit from `old` (the pre-edit buffer) to the current buffer. An

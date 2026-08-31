@@ -14,7 +14,7 @@ use crate::{
 use super::{ShResult, eval::execute, meta::MetaTab, paths, sherr, shopt::ShoptSource};
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
-pub fn rc_file_path() -> Option<PathBuf> {
+pub(crate) fn rc_file_path() -> Option<PathBuf> {
   if let Some(p) = try_var!("SHED_RC") {
     return Some(PathBuf::from(p));
   }
@@ -34,7 +34,7 @@ pub fn rc_file_path() -> Option<PathBuf> {
 /// autocmds + keymaps, header + per-section comments included.
 #[derive(Clone, Debug)]
 #[expect(clippy::struct_excessive_bools)]
-pub struct GenRcConfig {
+pub(crate) struct GenRcConfig {
   pub source: ShoptSource,
   pub include_comments: bool,
   pub include_shopts: bool,
@@ -61,7 +61,7 @@ impl Default for GenRcConfig {
 }
 
 impl GenRcConfig {
-  pub fn first_run() -> Self {
+  pub(crate) fn first_run() -> Self {
     Self {
       source: ShoptSource::Defaults,
       ..Self::default()
@@ -136,7 +136,7 @@ fn live_keymaps() -> Vec<VarStr> {
 
 /// Render an rc file to a `Vec<VarStr>` per `config`. Pure — no I/O, no
 /// side effects on `Shed` state. Caller decides where the lines go.
-pub fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
+pub(crate) fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
   use ShoptSource::{Current, Defaults};
 
   let comments = config.include_comments;
@@ -292,7 +292,7 @@ pub fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
   lines
 }
 
-pub fn generate_default_rc() -> ShResult<Option<PathBuf>> {
+pub(crate) fn generate_default_rc() -> ShResult<Option<PathBuf>> {
   let rc_path =
     rc_file_path().ok_or_else(|| sherr!(InternalErr, "could not determine rc file path",))?;
   if rc_path.exists() {
@@ -316,7 +316,7 @@ pub fn generate_default_rc() -> ShResult<Option<PathBuf>> {
   Ok(Some(rc_path))
 }
 
-pub fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShResult<()> {
+pub(crate) fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShResult<()> {
   let etc_path = PathBuf::from(varstr!("/etc/shed/{name}"));
   if etc_path.is_file()
     && let Err(e) = source_file(etc_path)
@@ -345,19 +345,19 @@ pub fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShResult<(
   }
 }
 
-pub fn source_rc() -> ShResult<()> {
+pub(crate) fn source_rc() -> ShResult<()> {
   source_runtime_file("shedrc", Some("SHED_RC"))
 }
 
-pub fn source_login() -> ShResult<()> {
+pub(crate) fn source_login() -> ShResult<()> {
   source_runtime_file("shed_profile", Some("SHED_PROFILE"))
 }
 
-pub fn source_env() -> ShResult<()> {
+pub(crate) fn source_env() -> ShResult<()> {
   source_runtime_file("shedenv", Some("SHED_ENV"))
 }
 
-pub fn source_file(path: PathBuf) -> ShResult<()> {
+pub(crate) fn source_file(path: PathBuf) -> ShResult<()> {
   let source_name = path.to_string_lossy().to_string();
   let source_display = paths::display_path_normalized(source_name);
   let mut file = OpenOptions::new().read(true).open(path)?;

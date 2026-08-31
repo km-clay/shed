@@ -385,7 +385,7 @@ pub(super) fn exit_shed(run_trap: bool, code: i32) -> ! {
   std::process::exit(code)
 }
 
-pub fn exit_signaled(sig: Signal) {
+pub(crate) fn exit_signaled(sig: Signal) {
   let dfl = SigAction::new(SigHandler::SigDfl, SaFlags::empty(), SigSet::empty());
   unsafe {
     sigaction(sig, &dfl).ok();

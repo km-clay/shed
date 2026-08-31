@@ -46,16 +46,16 @@ pub(crate) struct Opt {
 }
 
 impl Opt {
-  pub fn args(&self) -> &[(VarStr, Span)] {
+  pub(crate) fn args(&self) -> &[(VarStr, Span)] {
     &self.args
   }
-  pub fn span(&self) -> Span {
+  pub(crate) fn span(&self) -> Span {
     self.span.clone()
   }
-  pub fn key(&self) -> &str {
+  pub(crate) fn key(&self) -> &str {
     self.key.to_str().unwrap_or_default()
   }
-  pub fn value(&self) -> ShResult<&str> {
+  pub(crate) fn value(&self) -> ShResult<&str> {
     if self.args.len() == 1 {
       Ok(self.args[0].0.to_str().unwrap_or_default())
     } else {
@@ -89,7 +89,7 @@ impl Display for Opt {
 }
 
 #[derive(Default, Debug)]
-pub struct OptSpec {
+pub(crate) struct OptSpec {
   short: Option<u8>,    // form like '-a'
   long: Option<VarStr>, // form like '--arg'
   key: VarStr,          // internal name used for matching
@@ -97,46 +97,46 @@ pub struct OptSpec {
 }
 
 impl OptSpec {
-  pub fn new(key: &str) -> Self {
+  pub(crate) fn new(key: &str) -> Self {
     Self {
       key: key.into(),
       ..Default::default()
     }
   }
-  pub fn new_long(key: &str) -> Self {
+  pub(crate) fn new_long(key: &str) -> Self {
     Self {
       key: key.into(),
       long: Some(key.into()),
       ..Default::default()
     }
   }
-  pub fn new_short(key: &str, short: u8) -> Self {
+  pub(crate) fn new_short(key: &str, short: u8) -> Self {
     Self {
       key: key.into(),
       short: Some(short),
       ..Default::default()
     }
   }
-  pub fn short(mut self, short: u8) -> Self {
+  pub(crate) fn short(mut self, short: u8) -> Self {
     self.short = Some(short);
     self
   }
-  pub fn long(mut self, long: &str) -> Self {
+  pub(crate) fn long(mut self, long: &str) -> Self {
     self.long = Some(long.into());
     self
   }
-  pub fn argc(mut self, argc: usize) -> Self {
+  pub(crate) fn argc(mut self, argc: usize) -> Self {
     self.argc = argc;
     self
   }
 
-  pub fn is_long_match(&self, other: &str) -> bool {
+  pub(crate) fn is_long_match(&self, other: &str) -> bool {
     other
       .strip_prefix("--")
       .is_some_and(|name| self.long.as_deref() == Some(name.as_bytes()))
   }
 
-  pub fn is_short_match(&self, other: u8) -> bool {
+  pub(crate) fn is_short_match(&self, other: u8) -> bool {
     if let Some(short) = self.short
       && short == other
     {
@@ -171,14 +171,14 @@ macro_rules! opt {
   };
 }
 
-pub fn parse_opts(tokens: &[Tk], specs: &[OptSpec]) -> ShResult<Parsed> {
+pub(super) fn parse_opts(tokens: &[Tk], specs: &[OptSpec]) -> ShResult<Parsed> {
   parse_opts_inner(tokens, specs, false, false)
 }
 
 /// Like [`parse_opts`], but `keep_double_dash` controls whether `--` acts as an
 /// end-of-options separator (`false`) or is kept as a literal operand (`true`).
 /// `echo`/`printf` have no `--` terminator in operand position and pass `true`.
-pub fn parse_opts_with(
+pub(super) fn parse_opts_with(
   tokens: &[Tk],
   specs: &[OptSpec],
   strict: bool,
@@ -290,7 +290,7 @@ fn parse_opts_inner(
 }
 
 /// Split `tokens` into parsed options and the *raw*, unexpanded operand tokens.
-pub fn parse_opts_raw(tokens: &[Tk], specs: &[OptSpec]) -> (Vec<Opt>, Vec<Tk>) {
+pub(super) fn parse_opts_raw(tokens: &[Tk], specs: &[OptSpec]) -> (Vec<Opt>, Vec<Tk>) {
   let mut opts = vec![];
   let mut operands = vec![];
   let mut end_of_opts = false;

@@ -35,16 +35,16 @@ struct ViceProg {
 }
 
 impl ViceProg {
-  pub fn quoted(&self) -> bool {
+  pub(crate) fn quoted(&self) -> bool {
     self.flags.contains(ViceFlags::QUOTED)
   }
-  pub fn inplace(&self) -> bool {
+  pub(crate) fn inplace(&self) -> bool {
     self.flags.contains(ViceFlags::INPLACE)
   }
-  pub fn lines(&self) -> bool {
+  pub(crate) fn lines(&self) -> bool {
     self.flags.contains(ViceFlags::LINES)
   }
-  pub fn keep_mode(&self) -> bool {
+  pub(crate) fn keep_mode(&self) -> bool {
     self.flags.contains(ViceFlags::KEEP_MODE)
   }
 }
@@ -57,16 +57,16 @@ enum ViceCmd {
 }
 
 impl ViceCmd {
-  pub fn parse_cut(keys: &str) -> Self {
+  pub(crate) fn parse_cut(keys: &str) -> Self {
     let keys = alias::expand_keymap(keys);
     Self::Cut(keys)
   }
-  pub fn parse_move(keys: &str) -> Self {
+  pub(crate) fn parse_move(keys: &str) -> Self {
     let keys = alias::expand_keymap(keys);
     Self::Move(keys)
   }
   /// Parse the shared `<number>:<number>` argument for `-r` / `--repeat`.
-  pub fn parse_repeat(arg: &str) -> ShResult<Self> {
+  pub(crate) fn parse_repeat(arg: &str) -> ShResult<Self> {
     let Some((left, right)) = arg.split_once(':') else {
       return Err(sherr!(
         ParseErr,

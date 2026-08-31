@@ -40,7 +40,7 @@ impl GridLayout {
   pub(crate) const COL_GAP: usize = 2;
   /// Each grid column is this many rows tall; beyond a screenful the selector
   /// scrolls horizontally to keep the cursor visible.
-  pub const MAX_VISIBLE_ROWS: usize = 10;
+  pub(super) const MAX_VISIBLE_ROWS: usize = 10;
 }
 
 /// Greedily pack fixed-height (`rows`-tall) columns, column-major, starting at
@@ -168,14 +168,14 @@ fn common_prefix_len(a: &str, b: &str) -> usize {
 }
 
 impl GridSelector {
-  pub fn new() -> Self {
+  pub(super) fn new() -> Self {
     Self::default()
   }
   fn reset(&mut self) {
     *self = Self::new();
   }
 
-  pub fn activate(&mut self, candidates: Vec<Candidate>) {
+  pub(super) fn activate(&mut self, candidates: Vec<Candidate>) {
     self.cursor = ClampedUsize::new(0, candidates.len(), true);
     self.candidates = candidates;
     self.old_layout = None;
@@ -183,14 +183,14 @@ impl GridSelector {
     self.has_selection = false;
   }
 
-  pub fn selected_candidate(&self) -> Option<Candidate> {
+  pub(super) fn selected_candidate(&self) -> Option<Candidate> {
     if !self.has_selection {
       return None;
     }
     self.candidates.get(self.cursor.get()).cloned()
   }
 
-  pub fn next_candidate(&mut self) {
+  pub(super) fn next_candidate(&mut self) {
     if self.has_selection {
       self.cursor.wrap_add(1);
     } else {
@@ -198,7 +198,7 @@ impl GridSelector {
     }
   }
 
-  pub fn prev_candidate(&mut self) {
+  pub(super) fn prev_candidate(&mut self) {
     if !self.has_selection {
       self.has_selection = true;
     }
@@ -206,7 +206,7 @@ impl GridSelector {
   }
 
   /// Move one column left/right, wrapping at the ends.
-  pub fn move_col(&mut self, right: bool) {
+  pub(super) fn move_col(&mut self, right: bool) {
     if !self.has_selection {
       self.has_selection = true;
       return;
@@ -221,15 +221,15 @@ impl GridSelector {
     self.cursor.set(next);
   }
 
-  pub fn set_prompt_line_context(&mut self, _line_width: usize, cursor_col: usize) {
+  pub(super) fn set_prompt_line_context(&mut self, _line_width: usize, cursor_col: usize) {
     self.prompt_cursor_col = cursor_col;
   }
 
-  pub fn set_prefix(&mut self, prefix: String) {
+  pub(super) fn set_prefix(&mut self, prefix: String) {
     self.prefix = prefix;
   }
 
-  pub fn clear(&mut self) {
+  pub(super) fn clear(&mut self) {
     if let Some(layout) = self.old_layout.take() {
       for _ in 0..layout.rows {
         queue_term!(TermCtl::Cursor(Down(1)), TermCtl::Clear(WholeLine)).ok();
@@ -292,7 +292,7 @@ impl GridSelector {
   }
 
   /// Jump one screenful of columns forward/back, wrapping at the ends.
-  pub fn next_page(&mut self) {
+  pub(super) fn next_page(&mut self) {
     self.has_selection = true;
     if self.candidates.is_empty() {
       return;
@@ -302,7 +302,7 @@ impl GridSelector {
     self.cursor.wrap_add(step);
   }
 
-  pub fn prev_page(&mut self) {
+  pub(super) fn prev_page(&mut self) {
     self.has_selection = true;
     if self.candidates.is_empty() {
       return;
@@ -312,7 +312,7 @@ impl GridSelector {
     self.cursor.wrap_sub(step);
   }
 
-  pub fn draw(&mut self) -> usize {
+  pub(super) fn draw(&mut self) -> usize {
     if self.candidates.is_empty() {
       return 0;
     }
@@ -449,7 +449,7 @@ pub(crate) struct GridCompleter {
 }
 
 impl GridCompleter {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       completer: SimpleCompleter::default(),
       selector: GridSelector::new(),

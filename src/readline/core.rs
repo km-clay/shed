@@ -40,7 +40,7 @@ pub(crate) struct EditorCore {
 }
 
 impl EditorCore {
-  pub fn new(mode: Box<dyn EditMode>) -> Self {
+  pub(crate) fn new(mode: Box<dyn EditMode>) -> Self {
     Self {
       editor: LineBuf::new(),
       mode,
@@ -55,17 +55,17 @@ impl EditorCore {
 
   /// Construct a core seeded with `input`, starting in normal mode. Used by
   /// headless drivers (e.g. the `vicut` builtin).
-  pub fn headless(input: &str) -> Self {
+  pub(crate) fn headless(input: &str) -> Self {
     let mut core = Self::new(Box::new(ViNormal::new()));
     core.editor = LineBuf::new().with_initial(input, 0);
     core
   }
 
-  pub fn empty() -> Self {
+  pub(crate) fn empty() -> Self {
     Self::new(Box::new(ViNormal::new()))
   }
 
-  pub fn set_buffer(&mut self, input: &str) {
+  pub(crate) fn set_buffer(&mut self, input: &str) {
     self.editor.set_buffer(input);
     self.editor.set_cursor_from_flat(0);
   }
@@ -73,7 +73,7 @@ impl EditorCore {
   /// Feed one key: resolve it through the current mode into a command and
   /// execute it. No keymap matching, completion, or history; for headless and
   /// replay use.
-  pub fn feed_key(&mut self, key: KeyEvent) -> ShResult<()> {
+  pub(crate) fn feed_key(&mut self, key: KeyEvent) -> ShResult<()> {
     self.editor.set_cursor_clamp(self.mode.clamp_cursor());
     let Some(cmd) = self.mode.handle_key(key) else {
       return Ok(());
@@ -81,14 +81,14 @@ impl EditorCore {
     self.exec_cmd(cmd, false)
   }
 
-  pub fn feed_keys(&mut self, keys: impl IntoIterator<Item = KeyEvent>) -> ShResult<()> {
+  pub(crate) fn feed_keys(&mut self, keys: impl IntoIterator<Item = KeyEvent>) -> ShResult<()> {
     for key in keys {
       self.feed_key(key)?;
     }
     Ok(())
   }
 
-  pub fn feed_key_fallible(&mut self, key: KeyEvent) -> ShResult<bool> {
+  pub(crate) fn feed_key_fallible(&mut self, key: KeyEvent) -> ShResult<bool> {
     self.editor.set_cursor_clamp(self.mode.clamp_cursor());
     let Some(cmd) = self.mode.handle_key(key) else {
       return Ok(true);
@@ -97,7 +97,10 @@ impl EditorCore {
     Ok(!self.editor.search_failed())
   }
 
-  pub fn feed_keys_fallible(&mut self, keys: impl IntoIterator<Item = KeyEvent>) -> ShResult<bool> {
+  pub(crate) fn feed_keys_fallible(
+    &mut self,
+    keys: impl IntoIterator<Item = KeyEvent>,
+  ) -> ShResult<bool> {
     for key in keys {
       if !self.feed_key_fallible(key)? {
         return Ok(false);
@@ -107,23 +110,23 @@ impl EditorCore {
   }
 
   /// The full buffer contents as a string.
-  pub fn text(&self) -> String {
+  pub(crate) fn text(&self) -> String {
     self.editor.to_string()
   }
 
   /// The text currently selected, if any. Used by headless drivers to capture
   /// the span a motion traversed.
-  pub fn selection(&mut self) -> Option<String> {
+  pub(crate) fn selection(&mut self) -> Option<String> {
     self.editor.selection_str()
   }
 
   /// The editor sub-buffer that currently has focus. Ex mode supplies its own
   /// line buffer; everything else edits the main one.
-  pub fn focused_editor(&mut self) -> &mut LineBuf {
+  pub(crate) fn focused_editor(&mut self) -> &mut LineBuf {
     self.mode.editor().unwrap_or(&mut self.editor)
   }
 
-  pub fn update_editor_search(&mut self) {
+  pub(crate) fn update_editor_search(&mut self) {
     if matches!(
       self.mode.report_mode(),
       ModeReport::RevSearch | ModeReport::Search
@@ -145,7 +148,7 @@ impl EditorCore {
     res
   }
 
-  pub fn try_swap_mode_from_str(&mut self, name: &str) -> bool {
+  pub(crate) fn try_swap_mode_from_str(&mut self, name: &str) -> bool {
     let Ok(mode) = name.parse::<ModeReport>() else {
       return false;
     };
@@ -154,7 +157,7 @@ impl EditorCore {
     true
   }
 
-  pub fn swap_mode(&mut self, mode: &mut Box<dyn EditMode>) {
+  pub(crate) fn swap_mode(&mut self, mode: &mut Box<dyn EditMode>) {
     autocmd!(PreModeChange);
     defer!(autocmd!(PostModeChange));
 
@@ -200,7 +203,7 @@ impl EditorCore {
 
   /// Finalize a pending command-line mode (Ex / Search / `RevSearch`) by feeding
   /// `Enter`, the way pressing it would. No-op in any other mode.
-  pub fn submit_cmdline(&mut self) -> ShResult<()> {
+  pub(crate) fn submit_cmdline(&mut self) -> ShResult<()> {
     if matches!(
       self.mode.report_mode(),
       ModeReport::Ex | ModeReport::Search | ModeReport::RevSearch
@@ -210,7 +213,7 @@ impl EditorCore {
     Ok(())
   }
 
-  pub fn reset_mode(&mut self, submit_pending: bool) -> ShResult<()> {
+  pub(crate) fn reset_mode(&mut self, submit_pending: bool) -> ShResult<()> {
     if submit_pending {
       self.submit_cmdline()?;
     }
@@ -221,7 +224,11 @@ impl EditorCore {
   }
 
   #[expect(clippy::too_many_lines)]
-  pub fn exec_mode_transition(&mut self, mut cmd: EditCmd, from_replay: bool) -> ShResult<()> {
+  pub(crate) fn exec_mode_transition(
+    &mut self,
+    mut cmd: EditCmd,
+    from_replay: bool,
+  ) -> ShResult<()> {
     let mut is_insert_mode = false;
     let count = cmd.verb_count();
 
@@ -441,7 +448,7 @@ impl EditorCore {
     }
   }
 
-  pub fn exec_cmd(&mut self, mut cmd: EditCmd, from_replay: bool) -> ShResult<()> {
+  pub(crate) fn exec_cmd(&mut self, mut cmd: EditCmd, from_replay: bool) -> ShResult<()> {
     // `:normal` runs a key sequence on each addressed line. It needs the mode
     // machine, so it's handled here rather than in LineBuf's ex dispatch (the
     // interactive layer intercepts it earlier; this catches the headless path).
