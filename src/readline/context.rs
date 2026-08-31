@@ -29,7 +29,7 @@ use bitflags::bitflags;
 use crate::{
   builtin::BUILTIN_NAMES,
   eval::{
-    execute::{in_cd_path, is_in_path},
+    execute::classify::{in_cd_path, is_in_path},
     lex::{LexFlags, LexStream, Span, Tk, TkFlags, TkRule},
   },
   expand::{escape, var},

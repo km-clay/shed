@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, rc::Rc};
 
 use super::{
-  super::execute::{is_builtin, is_func_node},
+  super::execute::classify::{is_builtin, is_func_node},
   ast::{
     Ast, CaseNodeRange, ChildRange, CondNodeId, CondNodeRange, ConjunctRange, LabelId, LabelRange,
     RedirRange, SpanId, TkId, TkRange,

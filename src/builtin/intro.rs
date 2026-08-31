@@ -39,7 +39,7 @@ impl super::Builtin for Type {
           UtilKind::Function => Self::display_func(arg, short),
           UtilKind::Builtin => Self::display_builtin(arg, short),
           UtilKind::Command(path_buf) | UtilKind::File(path_buf) => {
-            Self::display_external(arg, path_buf, short)
+            Self::display_external(arg, path_buf, short);
           }
         }
       } else if KEYWORDS.contains(&arg.as_bytes()) {
