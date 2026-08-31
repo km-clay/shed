@@ -4,8 +4,12 @@ use crate::{
   autoload::AutoloadSrc,
   eval::lex::KEYWORDS,
   outln, sherr,
-  state::cmd,
-  state::{Shed, logic::ShFunc, meta::UtilKind, vars::VarKind},
+  state::{
+    Shed, cmd,
+    logic::ShFunc,
+    meta::UtilKind,
+    vars::{Var, VarKind, VarStr},
+  },
   util::{self, error::ShResult},
 };
 
@@ -24,119 +28,24 @@ impl super::Builtin for Type {
     let short = args.options().any(|o| o.key() == "short");
     let terse = args.options().any(|o| o.key() == "terse");
 
-    for (arg, span) in args.arguments() {
-      if terse {
-        let word = if let Some(util) = cmd::which_util(&arg.to_str_lossy()) {
-          match util.kind() {
-            UtilKind::Alias => Some("alias"),
-            UtilKind::Function => Some("function"),
-            UtilKind::Builtin => Some("builtin"),
-            UtilKind::Command(_) | UtilKind::File(_) => Some("file"),
-          }
-        } else if KEYWORDS.contains(&arg.as_bytes()) {
-          Some("keyword")
-        } else {
-          None
-        };
-        match word {
-          Some(w) => outln!("{w}"),
-          None => status = 1,
-        }
-        continue;
-      }
+    if terse {
+      return Self::terse_mode(&args);
+    }
 
+    for (arg, span) in args.arguments() {
       if let Some(util) = cmd::which_util(&arg.to_str_lossy()) {
         match util.kind() {
-          UtilKind::Alias => {
-            let alias = Shed::logic(|v| v.get_alias(&arg.to_str_lossy())).unwrap();
-            let (line, col) = alias.source().line_and_col();
-            let name = alias.source().source().name();
-            if short {
-              outln!("alias");
-            } else {
-              outln!(
-                "{arg} is an alias for '{alias_body}' defined at {name}:{ln}:{co}",
-                ln = line + 1,
-                co = col + 1,
-                alias_body = alias.body(),
-              );
-            }
-          }
-          UtilKind::Function => {
-            let func = Shed::logic(|v| v.get_func(&arg.to_str_lossy())).unwrap();
-            match func {
-              ShFunc::Autoload(src) => {
-                let (origin, location) = match &src {
-                  AutoloadSrc::Path(p) => ("external", p.display().to_string()),
-                  AutoloadSrc::Embedded { name, .. } => {
-                    ("embedded", name.to_str_lossy().to_string())
-                  }
-                };
-                if short {
-                  outln!("{arg} ({origin}) -> {location}");
-                } else {
-                  outln!(
-                    "{arg} is an {origin} autoloading shell function, pointing at '{location}'"
-                  );
-                }
-              }
-              ShFunc::Defined { source, .. } => {
-                let (line, col) = source.line_and_col();
-                let name = source.source().name();
-                if short {
-                  outln!("function");
-                } else {
-                  outln!(
-                    "{arg} is a function defined at {name}:{ln}:{co}",
-                    ln = line + 1,
-                    co = col + 1,
-                    name = name,
-                  );
-                }
-              }
-            }
-          }
-          UtilKind::Builtin => {
-            if short {
-              outln!("builtin");
-            } else {
-              outln!("{arg} is a shell builtin");
-            }
-          }
+          UtilKind::Alias => Self::display_alias(arg, short),
+          UtilKind::Function => Self::display_func(arg, short),
+          UtilKind::Builtin => Self::display_builtin(arg, short),
           UtilKind::Command(path_buf) | UtilKind::File(path_buf) => {
-            if short {
-              outln!("external");
-            } else {
-              outln!("{arg} is {}", path_buf.display());
-            }
+            Self::display_external(arg, path_buf, short)
           }
         }
       } else if KEYWORDS.contains(&arg.as_bytes()) {
-        if short {
-          outln!("keyword");
-        } else {
-          outln!("{arg} is a shell keyword");
-        }
+        Self::display_keyword(arg, short);
       } else if let Some(var) = Shed::vars(|v| v.try_get_var_meta(&arg.to_str_lossy())) {
-        if short {
-          match var.kind() {
-            VarKind::Str(_) => outln!("string"),
-            VarKind::Int(_) => outln!("integer"),
-            VarKind::Arr(_) => outln!("array"),
-            VarKind::AssocArr(_) => outln!("assoc_array"),
-            VarKind::Magic(_) => outln!("magic"),
-            VarKind::Unset => outln!("unset"),
-          }
-        } else {
-          match var.kind() {
-            VarKind::Str(_) => outln!("{arg} is a string variable"),
-            VarKind::Int(_) => outln!("{arg} is an integer variable"),
-            VarKind::Arr(_) => outln!("{arg} is an array variable"),
-            VarKind::AssocArr(_) => outln!("{arg} is an associative array"),
-            VarKind::Magic(_) => outln!("{arg} is a magic variable"),
-            VarKind::Unset => outln!("{arg} is a declared, unset variable"),
-          }
-        }
+        Self::display_variable(arg, &var, short);
       } else {
         sherr!(
           NotFound @ span.clone(),
@@ -149,6 +58,114 @@ impl super::Builtin for Type {
     }
 
     util::with_status(status)
+  }
+}
+
+impl Type {
+  fn terse_mode(args: &super::BuiltinArgs) -> ShResult<()> {
+    let mut status = 0;
+    for (arg, _) in args.arguments() {
+      if let Some(util) = cmd::which_util(&arg.to_str_lossy()) {
+        match util.kind() {
+          UtilKind::Alias => outln!("alias"),
+          UtilKind::Function => outln!("function"),
+          UtilKind::Builtin => outln!("builtin"),
+          UtilKind::Command(_) | UtilKind::File(_) => outln!("file"),
+        }
+      } else if KEYWORDS.contains(&arg.as_bytes()) {
+        outln!("keyword");
+      } else {
+        status = 1;
+      }
+    }
+    util::with_status(status)
+  }
+  fn display_alias(arg: &VarStr, short: bool) {
+    let alias = Shed::logic(|v| v.get_alias(&arg.to_str_lossy())).unwrap();
+    let (line, col) = alias.source().line_and_col();
+    let name = alias.source().source().name();
+    if short {
+      outln!("alias");
+    } else {
+      outln!(
+        "{arg} is an alias for '{alias_body}' defined at {name}:{ln}:{co}",
+        ln = line + 1,
+        co = col + 1,
+        alias_body = alias.body(),
+      );
+    }
+  }
+  fn display_func(arg: &VarStr, short: bool) {
+    let func = Shed::logic(|v| v.get_func(&arg.to_str_lossy())).unwrap();
+    match func {
+      ShFunc::Autoload(src) => {
+        let (origin, location) = match &src {
+          AutoloadSrc::Path(p) => ("external", p.display().to_string()),
+          AutoloadSrc::Embedded { name, .. } => ("embedded", name.to_str_lossy().to_string()),
+        };
+        if short {
+          outln!("{arg} ({origin}) -> {location}");
+        } else {
+          outln!("{arg} is an {origin} autoloading shell function, pointing at '{location}'");
+        }
+      }
+      ShFunc::Defined { source, .. } => {
+        let (line, col) = source.line_and_col();
+        let name = source.source().name();
+        if short {
+          outln!("function");
+        } else {
+          outln!(
+            "{arg} is a function defined at {name}:{ln}:{co}",
+            ln = line + 1,
+            co = col + 1,
+            name = name,
+          );
+        }
+      }
+    }
+  }
+  fn display_builtin(arg: &VarStr, short: bool) {
+    if short {
+      outln!("builtin");
+    } else {
+      outln!("{arg} is a shell builtin");
+    }
+  }
+  fn display_external(arg: &VarStr, path: &std::path::Path, short: bool) {
+    if short {
+      outln!("external");
+    } else {
+      outln!("{arg} is {}", path.display());
+    }
+  }
+  fn display_keyword(arg: &VarStr, short: bool) {
+    if short {
+      outln!("keyword");
+    } else {
+      outln!("{arg} is a shell keyword");
+    }
+  }
+  fn display_variable(arg: &VarStr, var: &Var, short: bool) {
+    if short {
+      match var.kind() {
+        VarKind::Str(_) => outln!("string"),
+        VarKind::Int(_) => outln!("integer"),
+        VarKind::Arr(_) => outln!("array"),
+        VarKind::AssocArr(_) => outln!("assoc_array"),
+        VarKind::Magic(_) => outln!("magic"),
+        VarKind::Unset => outln!("unset"),
+      }
+    } else {
+      match var.kind() {
+        VarKind::Str(_) => outln!("{arg} is a string variable"),
+        VarKind::Int(_) => outln!("{arg} is an integer variable"),
+        VarKind::Arr(_) => outln!("{arg} is an array variable"),
+        VarKind::AssocArr(_) => outln!("{arg} is an associative array"),
+        VarKind::Magic(_) => outln!("{arg} is a magic variable"),
+        VarKind::Unset => outln!("{arg} is a declared, unset variable"),
+      }
+    }
   }
 }
 
