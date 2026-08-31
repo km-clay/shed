@@ -68,8 +68,12 @@ Or your favorite AUR helper (`paru -S shed-sh`, etc).
 
 ### Cargo
 
-Requires Rust (edition 2024).
+`shed` is a published crate on [crates.io](https://crates.io/crates/shed-sh), so it can be installed directly using `cargo`:
+```sh
+cargo install shed-sh
+```
 
+To build from source:
 ```sh
 git clone https://github.com/km-clay/shed.git
 cd shed
