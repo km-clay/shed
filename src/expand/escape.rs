@@ -4,16 +4,18 @@ use bitflags::bitflags;
 
 use crate::{
   eval::lex,
-  expand::stream::{ProcSubKind, SegCursor},
-  util::{ByteCursor, SliceCursor},
+  expand::{
+    stream::{ProcSubKind, SegCursor},
+    var,
+  },
+  match_loop, sherr, try_var,
+  util::{
+    error::ShResult,
+    strops::{ByteCursor, QuoteState, SliceCursor},
+  },
 };
 
-use super::{
-  QuoteState, ShResult, match_loop, sherr,
-  stream::{Marker, Quote, SegStream, Unit},
-  try_var,
-  util::is_var_name_ch,
-};
+use super::stream::{Marker, Quote, SegStream, Unit};
 
 bitflags! {
   #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -233,7 +235,7 @@ pub fn unescape_prompt(raw: &str) -> SegStream {
 fn read_varsub(stream: &mut SegCursor, out: &mut SegStream) -> bool {
   if stream
     .peek_byte()
-    .is_none_or(|b| b != b'$' && b != b'(' && b != b'{' && !is_var_name_ch(b as char))
+    .is_none_or(|b| b != b'$' && b != b'(' && b != b'{' && !var::is_var_name_ch(b as char))
   {
     out.push_byte(b'$');
   } else {

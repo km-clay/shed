@@ -1,14 +1,14 @@
 use itertools::Itertools;
 
 use crate::{
-  ShResult,
   autoload::{self, AutoloadSrc, Autoloader},
-  expand, outln, sherr,
+  expand::escape,
+  outln, sherr,
   state::{
     Shed,
     logic::{LogTab, ShFunc},
   },
-  util::with_status,
+  util::{self, error::ShResult},
   var,
 };
 
@@ -49,7 +49,7 @@ impl super::Builtin for Autoload {
 
       let output = names
         .into_iter()
-        .map(|name| format!("autoload {}", expand::shell_quote(&name)))
+        .map(|name| format!("autoload {}", escape::shell_quote(&name)))
         .join("\n");
 
       outln!("{output}");
@@ -86,7 +86,7 @@ impl super::Builtin for Autoload {
       }
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

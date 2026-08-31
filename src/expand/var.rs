@@ -2,19 +2,18 @@ use nix::unistd::{Uid, User};
 use smol_str::format_smolstr;
 
 use crate::{
-  expand::stream::{Marker, ProcSubKind, Quote, SegCursor, SegStream, Unit},
+  eval::lex,
+  match_loop, sherr, shopt,
   state::vars::VarStr,
-  util::QuoteState,
+  try_var,
+  util::{error::ShResult, strops::QuoteState},
+  var,
 };
 
 use super::{
-  PARAMETERS, ShResult,
-  eval::lex::is_hard_sep,
-  match_loop,
-  param::perform_param_expansion,
-  sherr, shopt,
-  subshell::{expand_cmd_sub, expand_proc_sub},
-  try_var, var,
+  PARAMETERS, param,
+  stream::{Marker, ProcSubKind, Quote, SegCursor, SegStream, Unit},
+  subshell,
 };
 
 pub fn expand_raw_inner(
@@ -85,7 +84,7 @@ pub fn expand_raw_inner(
       // `expand_proc_sub`'s flag means "the substituted path is writable", i.e.
       // an *output* proc sub `>(...)`; `<(...)` (In) redirects the child's
       // stdout into the pipe and is the `false` case.
-      let fd_path = expand_proc_sub(
+      let fd_path = subshell::expand_proc_sub(
         &String::from_utf8_lossy(&inner),
         matches!(kind, ProcSubKind::Out),
       )?;
@@ -150,7 +149,7 @@ pub fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> ShResult<
         return Ok(out);
       }
       if allow_side_effects {
-        let expanded = expand_cmd_sub(&String::from_utf8_lossy(&subsh_body))?;
+        let expanded = subshell::expand_cmd_sub(&String::from_utf8_lossy(&subsh_body))?;
         return Ok(SegStream::from_bytes(expanded.as_bytes()));
       }
       return Ok(SegStream::from_bytes(&subsh_body));
@@ -162,7 +161,7 @@ pub fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> ShResult<
     }
     Unit::Byte(b'}') if brace_depth > 0 && inner_brace_depth == 0 && !in_subsh => {
       stream.bump();
-      return perform_param_expansion(&var_name, allow_side_effects);
+      return param::perform_param_expansion(&var_name, allow_side_effects);
     }
     Unit::Mark(Marker::Escape) if brace_depth > 0 => {
       stream.bump();
@@ -213,7 +212,7 @@ pub fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> ShResult<
 
       return Ok(val.into());
     }
-    Unit::Byte(b) if is_hard_sep(b) || !(b.is_ascii_alphanumeric() || b == b'_') => {
+    Unit::Byte(b) if lex::is_hard_sep(b) || !(b.is_ascii_alphanumeric() || b == b'_') => {
       return lookup_var(&var_name);
     }
     Unit::Mark(_) => {
@@ -240,6 +239,22 @@ fn lookup_var(var_name: &SegStream) -> ShResult<SegStream> {
     return Err(sherr!(NotFound, "Variable '{name}' is not set"));
   }
   Ok(val.unwrap_or_default().into())
+}
+
+pub fn is_var_name_ch(ch: char) -> bool {
+  matches!(ch,
+    '@' |
+    '*' |
+    '#' |
+    '?' |
+    '!' |
+    '-' |
+    '_' |
+    '{' |
+    'A'..='Z' |
+    'a'..='z' |
+    '0'..='9'
+  )
 }
 
 #[cfg(test)]

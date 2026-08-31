@@ -1,4 +1,5 @@
-use super::{ShResult, sherr, system_msg, ui, var};
+use super::ui;
+use crate::{sherr, system_msg, util::error::ShResult, var};
 
 pub(crate) fn init() -> ShResult<()> {
   log::set_logger(&Flog).map_err(|e| sherr!(InternalErr, "Failed to set logger: {e}"))?;

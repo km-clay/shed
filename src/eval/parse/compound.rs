@@ -3,12 +3,12 @@ use shed_macros::styled_format;
 use crate::{
   eval::parse::ast::NodeId,
   state::vars::VarStr,
-  util::{error::get_context, parse_bytes},
+  util::{self, error},
 };
 
 use super::{
   CaseNode, CondNode, LoopKind, NdRule, ParseStream, ShResult, Tk, TkFlags, TkRule, lex::Span,
-  util::split_for_arith_tk,
+  stream,
 };
 
 impl ParseStream {
@@ -48,7 +48,7 @@ impl ParseStream {
 
     extend_span!(span, self.tree.span_for(body));
 
-    let ctx = get_context(
+    let ctx = error::get_context(
       VarStr::from(styled_format!(
         "in function '{}' defined here",
         name.to_str_lossy()
@@ -539,7 +539,7 @@ impl ParseStream {
 
     let arith_tk = self.next_tk().unwrap(); // we checked already
     extend_span!(*span, arith_tk.clone().span);
-    let (init, cond, step) = match split_for_arith_tk(&mut self.tree, &arith_tk)? {
+    let (init, cond, step) = match stream::split_for_arith_tk(&mut self.tree, &arith_tk)? {
       None => (None, None, None),
       Some((init, cond, step)) => (Some(init), Some(cond), Some(step)),
     };
@@ -710,7 +710,7 @@ impl ParseStream {
     let mut redirs = vec![];
 
     let loop_tk = self.next_tk().unwrap();
-    let loop_kind: LoopKind = parse_bytes(loop_tk.as_bytes()) // LoopKind implements FromStr
+    let loop_kind: LoopKind = util::parse_bytes(loop_tk.as_bytes()) // LoopKind implements FromStr
       .unwrap();
 
     extend_span!(span, loop_tk.span);
@@ -832,7 +832,7 @@ impl ParseStream {
     } else {
       try_tk_span
     };
-    let ctx = get_context(
+    let ctx = error::get_context(
       VarStr::from(styled_format!("in '{}' block defined here", "try")),
       &try_span,
     );
@@ -957,7 +957,7 @@ impl ParseStream {
 
     extend_span!(span, self.tree.span_for(body));
 
-    let ctx = get_context(
+    let ctx = error::get_context(
       VarStr::from(styled_format!("in '{}' block defined here", "defer")),
       &defer_span,
     );

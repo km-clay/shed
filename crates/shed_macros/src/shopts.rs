@@ -146,7 +146,7 @@ pub fn derive_shopt_group(input: TokenStream) -> TokenStream {
       let s = ident.to_string();
       quote! {
         {
-          let val = crate::expand::shell_quote(&defaults.#ident.to_string());
+          let val = crate::expand::escape::shell_quote(&defaults.#ident.to_string());
           let entry = format!("shopt {}.{}={}", #group, #s, val);
           let doc: Option<String> = if #doc.is_empty() {
             None
@@ -166,7 +166,7 @@ pub fn derive_shopt_group(input: TokenStream) -> TokenStream {
       let s = ident.to_string();
       quote! {
         {
-          let val = crate::expand::shell_quote(&self.#ident.to_string());
+          let val = crate::expand::escape::shell_quote(&self.#ident.to_string());
           let entry = format!("shopt {}.{}={}", #group, #s, val);
           let doc: Option<String> = if #doc.is_empty() {
             None
@@ -184,7 +184,7 @@ pub fn derive_shopt_group(input: TokenStream) -> TokenStream {
     .map(|ident| {
       let s = ident.to_string();
       quote! {
-        format!("{}.{}={}", #group, #s, crate::expand::shell_quote(&self.#ident.to_string()))
+        format!("{}.{}={}", #group, #s, crate::expand::escape::shell_quote(&self.#ident.to_string()))
       }
     })
     .collect();
@@ -193,14 +193,14 @@ pub fn derive_shopt_group(input: TokenStream) -> TokenStream {
     #default_impl
 
     impl #name {
-      pub fn set(&mut self, opt: &str, val: &str) -> crate::util::ShResult<()> {
+      pub fn set(&mut self, opt: &str, val: &str) -> crate::util::error::ShResult<()> {
         match opt {
           #( #set_arms )*
           _ => Err(crate::sherr!(SyntaxErr, "shopt: unexpected '{}' option '{opt}'", #group))
         }
       }
 
-      pub fn get(&self, query: &str) -> crate::util::ShResult<Option<String>> {
+      pub fn get(&self, query: &str) -> crate::util::error::ShResult<Option<String>> {
         if query.is_empty() { return Ok(Some(format!("{self}"))); }
         match query {
           #( #get_arms )*

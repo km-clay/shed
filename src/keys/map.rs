@@ -2,12 +2,12 @@ use std::fmt::Display;
 
 use bitflags::bitflags;
 
-use crate::state::vars::VarStr;
-
-use super::{
-  KeyEvent,
-  expand::{expand_keymap, shell_quote},
+use crate::{
+  expand::{alias, escape},
+  state::vars::VarStr,
 };
+
+use super::KeyEvent;
 
 bitflags! {
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,10 +61,10 @@ pub struct KeyMap {
 
 impl KeyMap {
   pub fn keys_expanded(&self) -> Vec<KeyEvent> {
-    expand_keymap(&self.keys.to_str_lossy())
+    alias::expand_keymap(&self.keys.to_str_lossy())
   }
   pub fn action_expanded(&self) -> Vec<KeyEvent> {
-    expand_keymap(&self.action.to_str_lossy())
+    alias::expand_keymap(&self.action.to_str_lossy())
   }
   pub fn compare(&self, other: &[KeyEvent]) -> KeyMapMatch {
     let ours = self.keys_expanded();
@@ -81,8 +81,8 @@ impl KeyMap {
 impl Display for KeyMap {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let flags = self.flags.to_string();
-    let keys = shell_quote(&self.keys.to_str_lossy());
-    let action = shell_quote(&self.action.to_str_lossy());
+    let keys = escape::shell_quote(&self.keys.to_str_lossy());
+    let action = escape::shell_quote(&self.action.to_str_lossy());
 
     write!(f, "keymap {flags} {keys} {action}")
   }

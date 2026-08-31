@@ -3,17 +3,20 @@ use nix::sys::stat;
 use crate::{
   HashSet,
   eval::{
-    NdRule, execute,
-    parse::ast::{Ast, NodeId},
+    execute,
+    lex::Span,
+    parse::{
+      NdRule,
+      ast::{Ast, NodeId},
+    },
   },
   state::{
-    util,
+    Shed, params,
+    scopes::ScopeStack,
     vars::{Var, VarFlags, VarStr},
   },
-  try_var, util as crate_util, var,
+  try_var, util, var,
 };
-
-use super::{super::state::scopes::ScopeStack, Shed, eval::lex::Span};
 
 // ============================================================================
 // ScopeGuard - run a closure on drop (local replacement for the scopeguard crate)
@@ -61,7 +64,7 @@ pub(crate) fn guard<T, F: FnOnce(T)>(value: T, dropfn: F) -> ScopeGuard<T, F> {
 #[macro_export]
 macro_rules! defer {
   ($($body:tt)*) => {
-    let _guard = $crate::util::guard((), move |()| { $($body)* });
+    let _guard = $crate::util::guards::guard((), move |()| { $($body)* });
   };
 }
 
@@ -73,7 +76,7 @@ macro_rules! defer {
 /// Drop variables registered by `local`
 fn guard_drop(_: ()) {
   if Shed::vars(ScopeStack::has_deferred_cmds) {
-    crate_util::with_saved_status(execute::dispatch_deferred_cmds);
+    util::with_saved_status(execute::dispatch_deferred_cmds);
   }
 
   Shed::vars_mut(ScopeStack::ascend);
@@ -186,7 +189,7 @@ pub fn prefix_assign_guard(tree: &Ast, assignments: &[NodeId]) -> impl Drop {
       NdRule::Assignment { var, .. } => {
         // An indexed assignment (`arr[i]=v`) touches the whole array variable,
         // so snapshot/restore under the base name.
-        let name = util::parse_arr_bracket(tree[*var].span.as_bytes())
+        let name = params::parse_arr_bracket(tree[*var].span.as_bytes())
           .map_or_else(|| tree[*var].span.as_var_str(), |(base, _)| base);
         Some(name)
       }

@@ -1,7 +1,7 @@
 use crate::{
-  ShResult, outln,
-  state::{terminal::calc_str_width, vars::VarStr},
-  util::with_status,
+  outln,
+  state::vars::VarStr,
+  util::{self, error::ShResult, ui},
 };
 
 pub(super) struct Width;
@@ -15,10 +15,10 @@ impl super::Builtin for Width {
     }
     .map_or_else(|| super::join_raw_args(arg_vec).0, VarStr::from);
 
-    let width = calc_str_width(&input.to_str_lossy());
+    let width = ui::calc_str_width(&input.to_str_lossy());
 
     outln!("{width}");
 
-    with_status(0)
+    util::with_status(0)
   }
 }

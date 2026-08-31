@@ -5,32 +5,30 @@ use std::{
   sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::defer;
+use crate::{
+  HashSet, autocmd, defer,
+  eval::{execute, lex::TkFlags},
+  motion,
+  procio::{self, RedirSet, RedirSpec},
+  sherr, shopt,
+  state::vars::VarStr,
+  state::{
+    Shed, paths,
+    vars::{VarFlags, VarKind},
+  },
+  status_msg, system_msg, try_var,
+  util::{self, error::ShResult, guards, pos::Pos, strops},
+  varstr, verb,
+};
 use itertools::Itertools;
 use nix::libc::STDIN_FILENO;
 
 use super::{
-  Line, Lines, MotionKind, Pos, ShResult, autocmd,
+  Line, Lines, MotionKind,
   editcmd::{Anchor, Cmd, EditCmd, LineAddr, ReadSrc, StashArgs, StashListArg, Verb, WriteDest},
   editmode::{AddressRange, ExNdRule, ExNode, SubFlags},
-  eval::{
-    execute::{exec_int, exec_nonint},
-    lex::TkFlags,
-  },
-  motion, ordered,
-  procio::{RedirSet, RedirSpec, capture_command},
-  shopt,
   stash::{Stash, StashedCmd},
-  state::{Shed, vars::VarFlags, vars::VarKind},
-  status_msg, system_msg, try_var,
 };
-use crate::{
-  HashSet, sherr,
-  state::vars::VarStr,
-  util::{format_size, var_ctx_guard},
-  varstr,
-};
-use crate::{state, verb};
 
 thread_local! {
   static EX_MODE_ENTRIES: AtomicUsize = const { AtomicUsize::new(1) };
@@ -554,7 +552,7 @@ impl super::LineBuf {
           status_msg!("expected file argument for write command");
           return Ok(());
         };
-        let display_path = state::util::display_path(&path_buf);
+        let display_path = paths::display_path(&path_buf);
 
         let Ok(mut file) = (if matches!(dest, WriteDest::File(_)) {
           OpenOptions::new()
@@ -581,7 +579,7 @@ impl super::LineBuf {
         let len = bytes.len() as u64;
         let mut size = String::new();
 
-        format_size(len, &mut size)?;
+        strops::format_size(len, &mut size)?;
 
         if let Err(e) = file.write_all(bytes) {
           system_msg!("Failed to write to file {display_path}: {e}");
@@ -605,7 +603,7 @@ impl super::LineBuf {
         autocmd!(PreCmd);
         {
           defer!(autocmd!(PostCmd));
-          exec_nonint(cmd.clone(), Some("ex write".into()))?;
+          execute::exec_nonint(cmd.clone(), Some("ex write".into()))?;
         }
       }
     }
@@ -615,7 +613,7 @@ impl super::LineBuf {
   fn ex_read(&mut self, src: &ReadSrc) {
     let contents = match src {
       ReadSrc::File(path_buf) => {
-        let display_path = state::util::display_path(path_buf);
+        let display_path = paths::display_path(path_buf);
         let contents = match std::fs::read_to_string(path_buf) {
           Ok(c) => c,
           Err(e) => {
@@ -626,16 +624,16 @@ impl super::LineBuf {
         let line_count = contents.lines().count();
         let byte_count = contents.len();
         let mut size = String::new();
-        format_size(byte_count as u64, &mut size).ok();
+        strops::format_size(byte_count as u64, &mut size).ok();
         status_msg!("Read {line_count} lines [{size}] from '{display_path}'",);
-        let realpath = state::util::lex_normalize_path(path_buf);
+        let realpath = paths::lex_normalize_path(path_buf);
         self.open_file = Some(realpath.to_string_lossy().into());
         contents
       }
       ReadSrc::Cmd(cmd) => {
         autocmd!(PreCmd);
         defer!(autocmd!(PostCmd));
-        match capture_command(cmd.as_bytes(), None, Some(&get_entry_name())) {
+        match procio::capture_command(cmd.as_bytes(), None, Some(&get_entry_name())) {
           Ok(out) => out,
           Err(e) => {
             e.print_error();
@@ -658,7 +656,7 @@ impl super::LineBuf {
       let args = paths.iter().map(|p| format!("{}", p.display())).join(" ");
       let input = format!("$EDITOR {args}");
 
-      exec_int(input.into(), Some(get_entry_name()))
+      execute::exec_int(input.into(), Some(get_entry_name()))
     }
   }
 
@@ -675,7 +673,7 @@ impl super::LineBuf {
       return Ok(());
     }
 
-    let (s, mut e) = ordered(*lines.first().unwrap(), *lines.last().unwrap());
+    let (s, mut e) = util::ordered(*lines.first().unwrap(), *lines.last().unwrap());
     e = e.min(self.lines.len().saturating_sub(1));
     let lines = self.lines.drain(s..=e).collect::<Vec<_>>();
     if self.lines.is_empty() {
@@ -697,7 +695,7 @@ impl super::LineBuf {
     vars.insert("BUFFER".into());
     vars.insert("CURSOR".into());
     vars.insert("ANCHOR".into());
-    let _guard = var_ctx_guard(vars);
+    let _guard = guards::var_ctx_guard(vars);
 
     let mut buf: VarStr = self.to_string().into();
     let cursor_raw = self.cursor_to_flat();
@@ -721,7 +719,7 @@ impl super::LineBuf {
     let output = if let Some(stdin) = stdin {
       defer!(autocmd!(PostCmd));
       let _guard = Shed::term_mut(|t| t.yield_terminal(false));
-      Some(capture_command(
+      Some(procio::capture_command(
         sh_cmd.as_bytes(),
         Some(stdin.as_bytes()),
         Some(&get_entry_name()),
@@ -729,7 +727,7 @@ impl super::LineBuf {
     } else {
       defer!(autocmd!(PostCmd));
       let _guard = Shed::term_mut(|t| t.yield_terminal(false));
-      exec_int(sh_cmd.into(), Some(get_entry_name()))?;
+      execute::exec_int(sh_cmd.into(), Some(get_entry_name()))?;
       None
     };
 
@@ -853,7 +851,7 @@ impl super::LineBuf {
       Some(AddressRange::Range(s, e)) => {
         let s = self.resolve_line_addr(s)?.unwrap_or(self.row());
         let e = self.resolve_line_addr(e)?.unwrap_or(self.row());
-        let (s, e) = ordered(s, e);
+        let (s, e) = util::ordered(s, e);
         Ok((s..=e).collect())
       }
     }

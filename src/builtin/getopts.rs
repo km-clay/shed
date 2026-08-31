@@ -1,22 +1,24 @@
 use std::str::FromStr;
 
-use crate::state::vars::VarStr;
-
-use super::{
-  super::state::meta::MetaTab,
+use crate::{
   eval::{
-    execute::prepare_argv_with,
+    execute,
     lex::{Span, Tk},
   },
-  opt::{Parsed, Word},
   sherr,
   state::{
     self, Shed,
-    vars::{VarFlags, VarKind},
+    meta::MetaTab,
+    vars::{VarFlags, VarKind, VarStr},
   },
-  util::{ShErr, ShResult, ShResultExt, with_status},
+  util::{
+    self,
+    error::{ShErr, ShResult, ShResultExt},
+  },
   var,
 };
+
+use super::opt::{Parsed, Word};
 
 enum OptMatch {
   NoMatch,
@@ -83,7 +85,7 @@ impl super::Builtin for GetOpts {
   /// option parser would split those apart, so pass every word through as a
   /// plain argument and let `getopts_inner` do the parsing.
   fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
-    let expanded = prepare_argv_with(argv, no_split).promote_err(cmd_span)?;
+    let expanded = execute::prepare_argv_with(argv, no_split).promote_err(cmd_span)?;
     let trace = expanded.iter().map(|(word, _)| word.clone()).collect();
     let words = expanded
       .into_iter()
@@ -153,17 +155,17 @@ fn getopts_inner(
   if arg_str == "--" {
     advance_optind(opt_index, 1)?;
     Shed::meta_mut(MetaTab::reset_getopts_char_offset);
-    return with_status(1);
+    return util::with_status(1);
   }
 
   // Not an option - done
   let Some(opt_str) = arg_str.strip_prefix('-') else {
-    return with_status(1);
+    return util::with_status(1);
   };
 
   // Bare "-" is not an option
   if opt_str.is_empty() {
-    return with_status(1);
+    return util::with_status(1);
   }
 
   let char_idx = Shed::meta(MetaTab::getopts_char_offset);
@@ -172,7 +174,7 @@ fn getopts_inner(
     // advance to next arg and signal done for this call
     Shed::meta_mut(MetaTab::reset_getopts_char_offset);
     advance_optind(opt_index, 1)?;
-    return with_status(1);
+    return util::with_status(1);
   };
 
   let last_char_in_arg = char_idx >= opt_str.len() - 1;
@@ -265,7 +267,7 @@ fn getopts_inner(
           .print_error();
         }
         advance_optind(opt_index, 1)?;
-        return with_status(0);
+        return util::with_status(0);
       }
 
       Shed::vars_mut(|v| {
@@ -278,7 +280,7 @@ fn getopts_inner(
     }
   }
 
-  with_status(0)
+  util::with_status(0)
 }
 
 #[cfg(test)]

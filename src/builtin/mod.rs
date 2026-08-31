@@ -5,9 +5,6 @@
 //! the [`Builtin`] trait. The builtins are registered in the [`BUILTIN_TABLE`] static variable, which
 //! is used to look up builtins by name.
 
-use crate::defer;
-use ariadne::Span as ASpan;
-use itertools::Itertools;
 use nix::unistd::Pid;
 use std::{
   fs,
@@ -15,39 +12,36 @@ use std::{
 };
 
 use crate::{
-  builtin::opt::{Parsed, Word, parse_opts_with},
+  defer, errln,
   eval::{
-    execute,
-    parse::ast::{Ast, NodeId},
+    execute::{self, AssignBehavior, Dispatcher},
+    lex::{KEYWORDS, Span, Tk, TkRule},
+    parse::{
+      NdFlags, NdRule,
+      ast::{Ast, NodeId},
+    },
   },
-  procio::{bytes_to_string, out_bytes},
+  expand::{arithmetic, escape},
+  outln,
+  procio::{self, RedirResult, RedirSet},
+  sherr, signal,
   state::{
-    meta::UtilKind,
-    shopt::{xtrace_print_raw, xtrace_print_tokens},
+    Shed, cmd,
+    jobs::ChildProc,
+    meta::{MetaTab, UtilKind},
+    params, shopt as shopts,
+    terminal::Terminal,
     vars::VarStr,
   },
-  util::ShResultExt,
-  varstr,
-};
-
-use super::{
-  errln,
-  eval::{
-    self, NdFlags, NdRule,
-    execute::{AssignBehavior, Dispatcher, exec_nonint},
-    lex::{KEYWORDS, Span, Tk, TkRule},
+  util::{
+    self,
+    error::{ShErrKind, ShResult, ShResultExt},
+    guards,
   },
-  expand::{self, shell_quote},
-  key, keys, match_loop, out, outln,
-  procio::{self, RedirResult, RedirSet},
-  readline, sherr, shopt, signal,
-  state::{self, Shed, jobs::ChildProc, meta::MetaTab, terminal::Terminal},
-  status_msg, system_msg, try_var,
-  util::{self, ShErrKind, ShResult, prefix_assign_guard, with_status},
-  var,
 };
 
 mod alias;
+pub(crate) mod argv;
 mod arrops;
 mod autocmd;
 mod autoload;
@@ -91,8 +85,9 @@ mod varcmds;
 mod vice;
 mod width;
 
+pub use argv::{BuiltinArgs, join_raw_arg_iter, join_raw_args};
 pub(crate) use help::HELP_PAGE_INSTALL_DIR;
-use opt::{Opt, OptSpec};
+use opt::{OptSpec, Parsed};
 
 /// A macro to register builtins in the `BUILTIN_TABLE` static variable.
 macro_rules! register_builtins {
@@ -258,7 +253,7 @@ pub(super) trait Builtin: Sync {
   /// The way that the builtin parses its options. Some of them are weird, like `set`
   fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
     let opts = self.opts();
-    let parsed = parse_opts_with(argv, &opts, self.strict_opts(), self.double_dash_operand())
+    let parsed = opt::parse_opts_with(argv, &opts, self.strict_opts(), self.double_dash_operand())
       .promote_err(cmd_span)?;
 
     // `$_` is the last expanded word of the command line, options included; the
@@ -268,14 +263,14 @@ pub(super) trait Builtin: Sync {
   }
 
   fn get_input_str(&self, args: &mut BuiltinArgs) -> Option<String> {
-    self.get_input(args).map(bytes_to_string)
+    self.get_input(args).map(procio::bytes_to_string)
   }
 
   /// Default input getter
   ///
   /// Only reads stdin whenn no arguments are given
   fn get_input(&self, args: &mut BuiltinArgs) -> Option<Vec<u8>> {
-    self.get_input_with(args, |a| a.argv.is_empty())
+    self.get_input_with(args, |a| a.argv().is_empty())
   }
 
   /// Input getter. Takes a predicate that decides whether to slurp stdin or not.
@@ -333,7 +328,7 @@ pub(super) trait Builtin: Sync {
 
     // reverts any variable assignments made by the builtin if it is a special builtin
     let _var_guard = matches!(assign_behavior, AssignBehavior::Export)
-      .then(|| prefix_assign_guard(tree, &tree[*assignments]));
+      .then(|| guards::prefix_assign_guard(tree, &tree[*assignments]));
 
     Dispatcher::set_assignments(tree, &tree[*assignments], assign_behavior)?;
     let fork_builtins = node.flags.contains(NdFlags::FORK_BUILTINS);
@@ -341,7 +336,7 @@ pub(super) trait Builtin: Sync {
     if !self.no_help() && argv.len() == 2 && tree[argv.get(1)].as_bytes() == b"--help" {
       // we have been asked for help
       // is this a hack? only the nose knows.
-      return exec_nonint(
+      return execute::exec_nonint(
         [b"help builtin-", cmd_raw].concat().into(),
         Some("<builtin-help>".into()),
       );
@@ -395,17 +390,14 @@ pub(super) trait Builtin: Sync {
         // which cancels execution. Let's catch that here
         let kind = e.kind_mut();
         let should_propagate = match kind {
-          ShErrKind::CleanExit(_) | // this one always goes
-          ShErrKind::Raised(_, _) |
-          // Ctrl+C: must bubble up to break loops / abort execution, not be
-          // swallowed into a status (else `while true; do <builtin>; done`
-          // can't be interrupted).
-          ShErrKind::Interrupt => true,
+          ShErrKind::CleanExit(_) |     // this one always goes
+          ShErrKind::Raised(_, _) |     // raise builtin, propagate
+          ShErrKind::Interrupt => true, // Ctrl+C or something?
           ShErrKind::LoopBreak(_) | ShErrKind::LoopContinue(_) => {
-            state::Shed::meta(MetaTab::in_loop)
+            Shed::meta(MetaTab::in_loop)
           }
-          ShErrKind::FuncReturn(_) => state::Shed::meta(MetaTab::in_func),
-          _ if shopt!(set.errexit) => {
+          ShErrKind::FuncReturn(_) => Shed::meta(MetaTab::in_func),
+          _ if crate::shopt!(set.errexit) => {
             // propagate if this is enabled
             *kind = ShErrKind::ErrInterrupt;
             true
@@ -428,7 +420,7 @@ pub(super) trait Builtin: Sync {
           };
 
           e.with_context(tree[context].iter()).print_error();
-          with_status(status)
+          util::with_status(status)
         }
       }
     }
@@ -455,7 +447,7 @@ pub(super) trait Builtin: Sync {
     if !node.flags.contains(NdFlags::NO_TRACE) {
       // Trace the flat, in-order expansion (options + their args intact),
       // exactly as external commands are traced.
-      xtrace_print_raw(&parsed.trace);
+      shopts::xtrace_print_raw(&parsed.trace);
     }
 
     let mut argv = parsed.words;
@@ -463,115 +455,10 @@ pub(super) trait Builtin: Sync {
       argv.remove(0);
     }
 
-    let builtin_args = BuiltinArgs {
-      argv,
-      span,
-      cmd_span,
-    };
+    let builtin_args = BuiltinArgs::new(argv, span, cmd_span);
 
     self.execute(builtin_args)
   }
-}
-
-/// The arguments for a builtin.
-///
-/// Contains the argument vector (`argv`), the parsed options (`opts`), the
-/// `span` of the entire command for error reporting, and `stdin` piped in
-/// from a previous builtin in an in-process pipeline.
-pub struct BuiltinArgs {
-  argv: Vec<Word>,
-  /// The span of the entire builtin call
-  span: Span,
-  /// The span of just the command
-  cmd_span: Span,
-}
-
-impl BuiltinArgs {
-  pub fn span(&self) -> Span {
-    // cloning spans is cheap
-    self.span.clone()
-  }
-  pub fn cmd_span(&self) -> Span {
-    self.cmd_span.clone()
-  }
-
-  /// Get an iterator over the arguments (non-option words) of the builtin.
-  pub fn arguments(&self) -> impl Iterator<Item = (&VarStr, &Span)> {
-    self.argv.iter().filter_map(|word| match word {
-      Word::Arg(value, span) => Some((value, span)),
-      _ => None,
-    })
-  }
-  /// Get an iterator over the options of the builtin.
-  pub fn options(&self) -> impl Iterator<Item = &Opt> {
-    self.argv.iter().filter_map(|word| match word {
-      Word::Opt(opt) => Some(opt),
-      _ => None,
-    })
-  }
-  /// Check if the builtin has an option with the given key.
-  pub fn has_opt(&self, key: &str) -> bool {
-    self.options().any(|o| o.key() == key)
-  }
-  /// Get the value of an option with the given key, if it exists.
-  pub fn opt_value(&self, key: &str) -> Option<VarStr> {
-    self
-      .options()
-      .find_map(|o| {
-        let opt_key = o.key();
-        (opt_key == key).then(|| o.value().ok()).flatten()
-      })
-      .map(VarStr::from)
-  }
-  pub fn no_arguments(&self) -> bool {
-    self
-      .argv
-      .iter()
-      .all(|word| !matches!(word, Word::Arg(_, _)))
-  }
-  pub fn no_options(&self) -> bool {
-    self.argv.iter().all(|word| !matches!(word, Word::Opt(_)))
-  }
-  /// Take the arguments and options from the builtin, leaving `argv` empty.
-  /// Splits `argv` into a vector of `(VarStr, Span)` for arguments and a vector of `Opt` for options.
-  pub fn take_argv(&mut self) -> (Vec<(VarStr, Span)>, Vec<Opt>) {
-    self
-      .argv
-      .drain(..)
-      .filter(|word| !matches!(word, Word::Sep(_)))
-      .partition_map(|word| match word {
-        Word::Arg(var_str, span) => itertools::Either::Left((var_str, span)),
-        Word::Opt(opt) => itertools::Either::Right(opt),
-        Word::Sep(_) => unreachable!(),
-      })
-  }
-}
-
-/// Join all of the word-split arguments into a single string
-/// Preserve the span too
-pub fn join_raw_args(args: Vec<(VarStr, Span)>) -> (VarStr, Span) {
-  join_raw_arg_iter(args.into_iter())
-}
-
-/// Join all of the word-split arguments into a single string
-/// Preserve the span too
-pub fn join_raw_arg_iter(args: impl Iterator<Item = (VarStr, Span)>) -> (VarStr, Span) {
-  args.fold((VarStr::default(), Span::default()), |mut acc, arg| {
-    if acc.1 == Span::default() {
-      acc.1 = arg.1.clone();
-    } else {
-      let new_end = arg.1.end();
-      let start = acc.1.start();
-      acc.1.set_range(start..new_end);
-    }
-
-    if acc.0.is_empty() {
-      acc.0 = arg.0;
-    } else {
-      acc.0 = varstr!("{} {}", acc.0, arg.0);
-    }
-    acc
-  })
 }
 
 // The easy ones
@@ -586,7 +473,7 @@ impl Builtin for Colon {
     true
   }
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -597,7 +484,7 @@ impl Builtin for True {
     true
   }
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -608,7 +495,7 @@ impl Builtin for False {
     true
   }
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
-    with_status(1)
+    util::with_status(1)
   }
 }
 
@@ -618,14 +505,14 @@ impl Builtin for Let {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     if args.arguments().next().is_none() {
       // bash: `let` with no expressions returns 1
-      return with_status(1);
+      return util::with_status(1);
     }
     let mut last = 0i64;
     for (expr, _) in args.arguments() {
-      let result = expand::expand_arithmetic(expr.as_bytes())?;
+      let result = arithmetic::expand_arithmetic(expr.as_bytes())?;
       last = result.to_str_lossy().trim().parse::<i64>().unwrap_or(0);
     }
-    with_status(i32::from(last == 0))
+    util::with_status(i32::from(last == 0))
   }
 }
 
@@ -746,7 +633,7 @@ impl Builtin for Thru {
         };
 
         let chunk = &buf[..n];
-        out_bytes(chunk);
+        procio::out_bytes(chunk);
 
         if let Some(t) = tee_file.as_mut() {
           use std::io::Write;
@@ -764,7 +651,7 @@ impl Builtin for Thru {
       errln!("thru: {byte_count} bytes");
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -792,7 +679,7 @@ impl Builtin for BuiltinBuiltin {
     let mut inner_argv = expand_argv(&tree[*argv])?;
 
     if !node.flags.contains(NdFlags::NO_TRACE) {
-      xtrace_print_tokens(&inner_argv);
+      shopts::xtrace_print_tokens(&inner_argv);
     }
 
     if !inner_argv.is_empty() {
@@ -802,7 +689,7 @@ impl Builtin for BuiltinBuiltin {
     let cmd = inner_argv.first().map(Tk::word).unwrap_or_default();
     let Some(builtin) = lookup_builtin(cmd.as_bytes()) else {
       sherr!(NotFound @ span, "builtin not found: {cmd}").print_error();
-      return with_status(127);
+      return util::with_status(127);
     };
 
     // copy the wrapped invocation into its own ast, then dispatch
@@ -863,7 +750,7 @@ impl Builtin for CommandBuiltin {
     let mut argv = expand_argv(&tree[*argv])?;
 
     if !node.flags.contains(NdFlags::NO_TRACE) {
-      xtrace_print_tokens(&argv);
+      shopts::xtrace_print_tokens(&argv);
     }
 
     if !argv.is_empty() {
@@ -906,7 +793,7 @@ impl Builtin for CommandBuiltin {
     }
 
     if rest.is_empty() {
-      return with_status(0);
+      return util::with_status(0);
     }
 
     argv = rest;
@@ -927,7 +814,7 @@ impl Builtin for CommandBuiltin {
     sub_ast[root].flags |= NdFlags::NO_TRACE;
 
     if use_default_path {
-      let Some(default_path) = state::util::get_default_path() else {
+      let Some(default_path) = params::get_default_path() else {
         #[cfg(target_os = "android")]
         return Err(
           sherr!(ExecFail @ sub_ast[root].get_span(), "the -p flag is not supported on Android"),
@@ -941,7 +828,7 @@ impl Builtin for CommandBuiltin {
       defer! {
         Shed::meta_mut(MetaTab::rehash_path_cache);
       }
-      state::util::with_vars([("PATH".into(), default_path)], || {
+      params::with_vars([("PATH".into(), default_path)], || {
         Shed::meta_mut(MetaTab::rehash_path_cache);
         Self::execute_inner(print_path, print_type, &sub_ast, root, dispatcher)
       })
@@ -965,45 +852,45 @@ impl CommandBuiltin {
     };
     if print_path {
       let Some(name) = argv.first() else {
-        return with_status(2);
+        return util::with_status(2);
       };
       let name_word = tree[name].word();
       let name_str = name_word.to_str_lossy();
-      match state::util::which_util(&name_str) {
+      match cmd::which_util(&name_str) {
         Some(util) => match util.kind() {
           UtilKind::Alias => {
             let Some(alias) = Shed::logic(|l| l.get_alias(&name_str)) else {
-              return with_status(127);
+              return util::with_status(127);
             };
             outln!(
               "alias {name_str}={}",
-              shell_quote(&alias.body().to_str_lossy())
+              escape::shell_quote(&alias.body().to_str_lossy())
             );
           }
           UtilKind::Function | UtilKind::Builtin => outln!("{name_str}"),
           UtilKind::Command(p) | UtilKind::File(p) => outln!("{}", p.display()),
         },
         None if KEYWORDS.contains(&name_str.as_bytes()) => outln!("{name_str}"),
-        None => return with_status(127),
+        None => return util::with_status(127),
       }
 
-      return with_status(0);
+      return util::with_status(0);
     }
     if print_type {
       let Some(name) = argv.first() else {
-        return with_status(2);
+        return util::with_status(2);
       };
       let name_word = tree[name].word();
       let name_str = name_word.to_str_lossy();
-      match state::util::which_util(&name_str) {
+      match cmd::which_util(&name_str) {
         Some(util) => match util.kind() {
           UtilKind::Alias => {
             let Some(alias) = Shed::logic(|l| l.get_alias(&name_str)) else {
-              return with_status(127);
+              return util::with_status(127);
             };
             outln!(
               "{name_str} is an alias for {}",
-              shell_quote(&alias.body().to_str_lossy())
+              escape::shell_quote(&alias.body().to_str_lossy())
             );
           }
           UtilKind::Function => outln!("{name_str} is a function"),
@@ -1015,11 +902,11 @@ impl CommandBuiltin {
         None if KEYWORDS.contains(&name_str.as_bytes()) => outln!("{name_str} is a shell keyword"),
         None => {
           errln!("command: {name_str}: not found");
-          return with_status(127);
+          return util::with_status(127);
         }
       }
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     // Per POSIX, `command` suppresses alias/function lookup but must still
@@ -1036,9 +923,9 @@ pub mod tests {
   use tempfile::TempDir;
 
   use crate::{
-    Shed, assert_status_eq,
+    assert_status_eq,
     eval::execute::exec_nonint,
-    state::{self, vars::VarFlags},
+    state::{self, Shed, cmd, vars::VarFlags},
     tests::testutil::{TestGuard, canon, has_cmd, test_input},
   };
 
@@ -1343,9 +1230,9 @@ pub mod tests {
     // Force the exact post-pipeline state: pristine cache, then resolve one
     // command so $PATH is marked seen with only `cat` cached.
     state::Shed::meta_mut(state::meta::MetaTab::clear_path_cache);
-    let _ = state::util::lookup_cmd("cat");
+    let _ = cmd::lookup_cmd("cat");
     assert!(
-      state::util::which_util("env").is_some(),
+      cmd::which_util("env").is_some(),
       "env must resolve even though only `cat` is cached"
     );
   }

@@ -15,25 +15,29 @@ use nix::sys::signal::{
   SaFlags, SigAction, SigHandler, SigSet, SigmaskHow, Signal, raise, sigaction, sigprocmask,
 };
 
-use crate::{eval::execute, write_term};
+use crate::{
+  eval::execute,
+  state::{db, params, paths, rc},
+  write_term,
+};
 
 use super::{
-  ShResult, Shed, autocmd,
+  autocmd,
   builtin::set::{Role, SetFlags, scan_options},
   eval::{execute::exec_nonint, lex::Span},
   outln,
   procio::{self, RedirType},
   sherr, signal,
   state::{
+    Shed,
     jobs::JobTab,
     logic::{LogTab, TrapTarget},
     meta::MetaTab,
     terminal::Terminal,
-    util::{self, generate_default_rc, source_env},
     vars::{VarFlags, VarKind, VarStr},
   },
   status_msg,
-  util::flog,
+  util::{error::ShResult, flog},
 };
 
 #[expect(clippy::struct_excessive_bools)]
@@ -232,12 +236,12 @@ pub(super) fn setup() -> Option<ShedArgs> {
   yansi::enable();
   setup_panic_handler();
   flog::init().ok();
-  util::set_ver_info().ok();
-  util::set_sh_lvl().ok();
+  params::set_ver_info().ok();
+  params::set_sh_lvl().ok();
 
   // Parse argv with shed's own option scanner (shared with the `set` builtin),
   // so `-e`/`-x`/`-o pipefail`/`+e` etc. behave identically at invocation and
-  // via `set`. Note: this applies set-opts *before* `source_env` below.
+  // via `set`.
   let mut args = match parse_args() {
     Ok(args) => args,
     Err(e) => {
@@ -267,7 +271,7 @@ pub(super) fn setup() -> Option<ShedArgs> {
     if let Some(ref path) = args.rc_path {
       Shed::vars_mut(|v| v.set_var("SHED_RC", VarKind::string(path.into()), VarFlags::EXPORT)).ok();
     }
-    if let Err(e) = source_env() {
+    if let Err(e) = rc::source_env() {
       e.print_error();
     }
   }
@@ -276,7 +280,7 @@ pub(super) fn setup() -> Option<ShedArgs> {
   // `sig_setup` later (adding tty/job-control setup on top); non-interactive
   // shells rely on this so `trap` works in `-c` and scripts.
   signal::install_signal_handlers();
-  util::register_fork_marker();
+  db::register_fork_marker();
 
   Some(args)
 }
@@ -285,7 +289,7 @@ pub(super) fn setup() -> Option<ShedArgs> {
 ///
 /// Generates a default runtime commands file, and displays a status message announcing its path.
 pub(super) fn first_run_setup() -> ShResult<()> {
-  let rc_path = generate_default_rc()?;
+  let rc_path = rc::generate_default_rc()?;
 
   if let Some(rc_path) = rc_path {
     status_msg!("Generated default rc file at '{}'", rc_path.display());
@@ -310,7 +314,7 @@ fn setup_panic_handler() {
     let time = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
 
     // Best-effort panic log.
-    let log_file = util::data_dir()
+    let log_file = paths::data_dir()
       .or_else(|| {
         std::env::var("HOME")
           .ok()
@@ -398,7 +402,7 @@ pub fn exit_signaled(sig: Signal) {
 ///
 /// Ideally this should be executed at the top of any `ForkResult::Child` block in the codebase
 pub(super) fn setup_child() {
-  if !util::FORKED_CHILD.load(Ordering::SeqCst) {
+  if !db::FORKED_CHILD.load(Ordering::SeqCst) {
     return;
   }
 

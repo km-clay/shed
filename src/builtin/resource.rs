@@ -7,17 +7,19 @@ use nix::{
 };
 
 use crate::{
-  Shed,
-  state::vars::{VarFlags, VarKind},
-  util::ShResultExt,
+  eval::lex::Span,
+  outln, sherr,
+  state::{
+    Shed,
+    vars::{VarFlags, VarKind},
+  },
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+  },
 };
 
-use super::{
-  ShResult,
-  eval::lex::Span,
-  opt::{Opt, OptSpec},
-  outln, sherr, with_status,
-};
+use super::opt::{Opt, OptSpec};
 
 struct RLimits {
   fds: Option<u64>,
@@ -178,7 +180,7 @@ impl super::Builtin for ULimit {
       })?;
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -350,7 +352,7 @@ impl super::Builtin for UMask {
       outln!("{old_bits:04o}");
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

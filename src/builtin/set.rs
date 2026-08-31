@@ -2,27 +2,26 @@ use std::{fmt::Write, iter::Peekable, str::FromStr};
 
 use unicode_width::UnicodeWidthStr;
 
-use crate::procio::outln_bytes;
-use crate::state::{
-  shopt::ShOptSet,
-  vars::{VarStr, VarStrSliceExt},
-};
-
-use super::{
-  super::state::scopes::ScopeStack,
+use crate::{
   eval::{
-    execute::prepare_argv_with,
+    execute,
     lex::{Span, Tk},
   },
-  expand::shell_quote_bytes,
-  opt::Parsed,
-  outln, sherr,
+  expand::escape,
+  outln, procio, sherr,
   state::{
     Shed,
-    vars::{ValueBytes, VarKind},
+    scopes::ScopeStack,
+    shopt::ShOptSet,
+    vars::{ValueBytes, VarKind, VarStr, VarStrSliceExt},
   },
-  util::{ShErr, ShResult, ShResultExt, with_status},
+  util::{
+    self,
+    error::{ShErr, ShResult, ShResultExt},
+  },
 };
+
+use super::opt::Parsed;
 use bitflags::bitflags;
 
 bitflags! {
@@ -396,7 +395,7 @@ impl super::Builtin for Set {
 
   fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     Ok(
-      prepare_argv_with(argv, no_split)
+      execute::prepare_argv_with(argv, no_split)
         .promote_err(cmd_span)?
         .into(),
     )
@@ -412,7 +411,7 @@ impl super::Builtin for Set {
           line.extend_from_slice(b"=( ");
           let mut item_iter = items.iter().peekable();
           while let Some(item) = item_iter.next() {
-            line.extend_from_slice(&shell_quote_bytes(item.as_bytes()));
+            line.extend_from_slice(&escape::shell_quote_bytes(item.as_bytes()));
             if item_iter.peek().is_some() {
               line.push(b' ');
             }
@@ -420,9 +419,9 @@ impl super::Builtin for Set {
           line.extend_from_slice(b" )");
         } else {
           line.push(b'=');
-          line.extend_from_slice(&shell_quote_bytes(&v.value_bytes()));
+          line.extend_from_slice(&escape::shell_quote_bytes(&v.value_bytes()));
         }
-        outln_bytes(&line);
+        procio::outln_bytes(&line);
       }
     }
 
@@ -456,7 +455,7 @@ impl super::Builtin for Set {
       });
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

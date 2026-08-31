@@ -40,7 +40,7 @@ macro_rules! exec_term {
     };
 
     if let Err(e) = Shed::term_mut(|t| t.flush()) {
-      break 'exec_term Err($crate::util::ShErr::from(e));
+      break 'exec_term Err($crate::util::error::ShErr::from(e));
     }
 
     Ok(())
@@ -328,26 +328,26 @@ macro_rules! match_loop {
 #[macro_export]
 macro_rules! sherr {
 	($kind:ident($($inner:tt)*)@$span:expr, $($arg:tt)*) => {
-		$crate::util::ShErr::at(
-			$crate::util::ShErrKind::$kind($($inner)*),
+		$crate::util::error::ShErr::at(
+			$crate::util::error::ShErrKind::$kind($($inner)*),
 			$span, ::shed_macros::styled_format!($($arg)*).into()
 		)
 	};
 	($kind:ident($($inner:tt)*), $($arg:tt)*) => {
-		$crate::util::ShErr::simple(
-			$crate::util::ShErrKind::$kind($($inner)*),
+		$crate::util::error::ShErr::simple(
+			$crate::util::error::ShErrKind::$kind($($inner)*),
 			::shed_macros::styled_format!($($arg)*).into()
 		)
 	};
 	($kind:ident@$span:expr, $($arg:tt)*) => {
-		$crate::util::ShErr::at(
-			$crate::util::ShErrKind::$kind,
+		$crate::util::error::ShErr::at(
+			$crate::util::error::ShErrKind::$kind,
 			$span, ::shed_macros::styled_format!($($arg)*).into()
 		)
 	};
 	($kind:ident, $($arg:tt)*) => {
-		$crate::util::ShErr::simple(
-			$crate::util::ShErrKind::$kind,
+		$crate::util::error::ShErr::simple(
+			$crate::util::error::ShErrKind::$kind,
 			$crate::state::vars::VarStr::from(::shed_macros::styled_format!($($arg)*))
 		)
 	};
@@ -379,7 +379,7 @@ macro_rules! two_way_display {
 		}
 
 		impl ::std::str::FromStr for $name {
-			type Err = $crate::util::ShErr;
+			type Err = $crate::util::error::ShErr;
 			fn from_str(s: &str) -> Result<Self, Self::Err> {
 				match s {
 					$($val => Ok(Self::$member),)*

@@ -1,5 +1,10 @@
 use crate::{
-  ShResult, Shed, errln, expand, opt, out, outln, readline::FuzzyBuilder, util::with_status,
+  errln,
+  expand::escape,
+  opt, out, outln,
+  readline::FuzzyBuilder,
+  state::Shed,
+  util::{self, error::ShResult},
 };
 
 use super::opt::OptSpec;
@@ -20,7 +25,7 @@ impl super::Builtin for Scry {
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let Some(input) = self.get_input_str(&mut args) else {
-      return with_status(0);
+      return util::with_status(0);
     };
     let mut null_in = false;
     let mut quote_in = false;
@@ -51,7 +56,7 @@ impl super::Builtin for Scry {
 
     if entries.is_empty() {
       errln!("scry: received no items to list");
-      return with_status(2);
+      return util::with_status(2);
     }
 
     let mut selector = FuzzyBuilder::new().with_entries(entries).with_inline(false);
@@ -63,15 +68,15 @@ impl super::Builtin for Scry {
     match selector.pick()? {
       Some(item) => {
         if quote_out {
-          Shed::sinks(|s| expand::shell_quote_fmt(&item, s)).ok();
+          Shed::sinks(|s| escape::shell_quote_fmt(&item, s)).ok();
         } else if no_newline {
           out!("{item}");
         } else {
           outln!("{item}");
         }
-        with_status(0)
+        util::with_status(0)
       }
-      None => with_status(1),
+      None => util::with_status(1),
     }
   }
 }

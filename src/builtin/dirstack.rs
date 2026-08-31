@@ -6,17 +6,17 @@
 
 use std::{env, path::PathBuf};
 
-use crate::procio::{out_bytes, outln_bytes};
-
-use super::{
-  super::state::meta::MetaTab,
-  ShResult, Shed, Span,
-  opt::OptSpec,
-  sherr,
-  state::util::{change_dir, display_path_bytes},
-  util::ShResultExt,
-  with_status,
+use crate::{
+  eval::lex::Span,
+  procio, sherr,
+  state::{Shed, cwd, meta::MetaTab, paths},
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+  },
 };
+
+use super::opt::OptSpec;
 
 fn is_index_arg(arg: &str) -> bool {
   arg.starts_with('+')
@@ -105,7 +105,7 @@ impl super::Builtin for PushDir {
       if let Some(dir) = &new_cwd
         && !parsed.no_cd
       {
-        change_dir(dir).promote_err(blame)?;
+        cwd::change_dir(dir).promote_err(blame)?;
       }
       Shed::meta_mut(|m| *m.dirs_mut() = stack);
       print_dirs()?;
@@ -116,7 +116,7 @@ impl super::Builtin for PushDir {
         // instead of {dir}, so the target was silently dropped.
         Shed::meta_mut(|m| m.push_dir(dir));
         print_dirs()?;
-        return with_status(0);
+        return util::with_status(0);
       }
 
       let old_dir = env::current_dir()?;
@@ -124,11 +124,11 @@ impl super::Builtin for PushDir {
         Shed::meta_mut(|m| m.push_dir(old_dir));
       }
 
-      change_dir(&dir).promote_err(blame)?;
+      cwd::change_dir(&dir).promote_err(blame)?;
       print_dirs()?;
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -148,7 +148,7 @@ impl super::Builtin for PopDir {
           let dir = Shed::meta_mut(MetaTab::pop_dir);
           if !parsed.no_cd {
             if let Some(dir) = dir {
-              change_dir(&dir).promote_err(blame)?;
+              cwd::change_dir(&dir).promote_err(blame)?;
             } else {
               return Err(sherr!(
                 ExecFail @ blame,
@@ -191,11 +191,11 @@ impl super::Builtin for PopDir {
       let dir = Shed::meta_mut(super::super::state::meta::MetaTab::pop_dir);
 
       if parsed.no_cd {
-        return with_status(0);
+        return util::with_status(0);
       }
 
       if let Some(dir) = dir {
-        change_dir(&dir).promote_err(blame)?;
+        cwd::change_dir(&dir).promote_err(blame)?;
         print_dirs()?;
       } else {
         return Err(sherr!(
@@ -205,7 +205,7 @@ impl super::Builtin for PopDir {
       }
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -267,7 +267,7 @@ impl super::Builtin for Dirs {
       let stack = [current_dir].into_iter().chain(m.dirs().clone());
 
       if abbreviate_home {
-        stack.map(|d| display_path_bytes(&d)).collect()
+        stack.map(|d| paths::display_path_bytes(&d)).collect()
       } else {
         stack.map(|d| path_bytes(&d)).collect()
       }
@@ -295,7 +295,7 @@ impl super::Builtin for Dirs {
     }
 
     if one_per_line {
-      out_bytes(&join_bytes(&dirs, b"\n"));
+      procio::outln_bytes(&join_bytes(&dirs, b"\n"));
     } else if one_per_line_indexed {
       let indexed_lines: Vec<Vec<u8>> = dirs
         .iter()
@@ -306,18 +306,16 @@ impl super::Builtin for Dirs {
           line
         })
         .collect();
-      out_bytes(&join_bytes(&indexed_lines, b"\n"));
-      out_bytes(b"\n");
+      procio::outln_bytes(&join_bytes(&indexed_lines, b"\n"));
     } else if indexed {
       // An index was supplied: print just the selected entry (`dirs` was
       // narrowed above), not the whole stack.
-      out_bytes(&join_bytes(&dirs, b" "));
-      out_bytes(b"\n");
+      procio::outln_bytes(&join_bytes(&dirs, b" "));
     } else {
       print_dirs()?;
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -350,10 +348,10 @@ fn print_dirs() -> ShResult<()> {
   let all_dirs: Vec<Vec<u8>> = [current_dir]
     .into_iter()
     .chain(dirs_iter)
-    .map(|d| display_path_bytes(&d))
+    .map(|d| paths::display_path_bytes(&d))
     .collect();
 
-  outln_bytes(&join_bytes(&all_dirs, b" "));
+  procio::outln_bytes(&join_bytes(&all_dirs, b" "));
 
   Ok(())
 }
@@ -362,7 +360,7 @@ fn print_dirs() -> ShResult<()> {
 /// byte-native [`display_path_bytes`]).
 #[cfg(test)]
 pub fn truncate_home_path(path: &str) -> String {
-  String::from_utf8_lossy(&display_path_bytes(std::path::Path::new(path))).into_owned()
+  String::from_utf8_lossy(&paths::display_path_bytes(std::path::Path::new(path))).into_owned()
 }
 
 fn parse_stack_idx(arg: &str, blame: Span, cmd: &str) -> ShResult<StackIdx> {
@@ -410,7 +408,7 @@ fn parse_stack_idx(arg: &str, blame: Span, cmd: &str) -> ShResult<StackIdx> {
 #[cfg(test)]
 pub mod tests {
   use crate::{
-    Shed, state,
+    state::{self, Shed},
     tests::testutil::{TestGuard, canon, test_input},
   };
   use pretty_assertions::{assert_eq, assert_ne};

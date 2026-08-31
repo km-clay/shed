@@ -20,18 +20,27 @@ use super::{
   WtStat, autocmd, builtin, errln, eval, expand, keys, match_loop, procio, readline, sherr,
   shopt as shopt_macro, signal, socket,
   state::vars::{VarFlags, VarKind},
-  system_msg, try_var, two_way_display, util as crate_util,
-  util::{Pos, ShErr, ShErrKind, ShResult, error::LabelBuilder},
+  system_msg, try_var, two_way_display,
+  util::{
+    self,
+    error::{LabelBuilder, ShErr, ShErrKind, ShResult},
+    pos::Pos,
+  },
   var, writefd,
 };
 
+pub(super) mod cmd;
+pub(super) mod cwd;
+pub(super) mod db;
 pub mod jobs;
 pub(super) mod logic;
 pub(super) mod meta;
+pub(super) mod params;
+pub(super) mod paths;
+pub(super) mod rc;
 pub(super) mod scopes;
 pub mod shopt;
 pub(super) mod terminal;
-pub(super) mod util;
 pub(super) mod vars;
 
 thread_local! {

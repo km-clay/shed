@@ -1,14 +1,15 @@
 use ariadne::Span;
 
-use crate::autoload::AutoloadSrc;
-
-use super::{
+use crate::{
+  autoload::AutoloadSrc,
   eval::lex::KEYWORDS,
-  opt::OptSpec,
   outln, sherr,
-  state::{self, Shed, logic::ShFunc, meta::UtilKind, vars::VarKind},
-  util::{ShResult, with_status},
+  state::cmd,
+  state::{Shed, logic::ShFunc, meta::UtilKind, vars::VarKind},
+  util::{self, error::ShResult},
 };
+
+use super::opt::OptSpec;
 
 pub(super) struct Type;
 impl super::Builtin for Type {
@@ -25,7 +26,7 @@ impl super::Builtin for Type {
 
     for (arg, span) in args.arguments() {
       if terse {
-        let word = if let Some(util) = state::util::which_util(&arg.to_str_lossy()) {
+        let word = if let Some(util) = cmd::which_util(&arg.to_str_lossy()) {
           match util.kind() {
             UtilKind::Alias => Some("alias"),
             UtilKind::Function => Some("function"),
@@ -44,7 +45,7 @@ impl super::Builtin for Type {
         continue;
       }
 
-      if let Some(util) = state::util::which_util(&arg.to_str_lossy()) {
+      if let Some(util) = cmd::which_util(&arg.to_str_lossy()) {
         match util.kind() {
           UtilKind::Alias => {
             let alias = Shed::logic(|v| v.get_alias(&arg.to_str_lossy())).unwrap();
@@ -147,7 +148,7 @@ impl super::Builtin for Type {
       }
     }
 
-    with_status(status)
+    util::with_status(status)
   }
 }
 

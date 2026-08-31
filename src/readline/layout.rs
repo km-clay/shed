@@ -2,10 +2,11 @@ use std::{fmt::Debug, fmt::Write as FmtWrite};
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::queue_term;
-
-use super::{
-  super::state::terminal::Terminal, Shed, linebuf::Pos, shopt, state::terminal::width, try_var,
+use crate::{
+  queue_term, shopt,
+  state::{Shed, terminal::Terminal},
+  try_var,
+  util::{pos::Pos, ui},
   write_term,
 };
 
@@ -113,7 +114,7 @@ fn expand_tabs(s: &str, left_margin: usize, tab_stop: usize) -> String {
       col = left_margin;
     } else {
       out.push_str(c);
-      col += width(c, &mut esc_seq);
+      col += ui::width(c, &mut esc_seq);
     }
   }
   out
@@ -179,7 +180,7 @@ impl Layout {
       } else if raw_calc && Self::is_ctl_char(c) {
         2
       } else {
-        width(c, &mut esc_seq)
+        ui::width(c, &mut esc_seq)
       };
       pos.col += c_width;
       if pos.col > term_width {

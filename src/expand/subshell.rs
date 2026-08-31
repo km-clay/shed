@@ -3,27 +3,16 @@ use std::os::fd::{AsFd, AsRawFd};
 use crate::{
   errln,
   eval::{
-    ParsedSrc,
-    execute::{self, exec_input},
-    parse::node::nodes_have_only_builtins,
+    execute,
+    parse::{ParsedSrc, node},
   },
+  expand::arithmetic,
   lifecycle,
-  procio::{self, SinkScope},
-  readline::{NestedSub, nested_subs},
-  state::{Shed, meta::MetaTab, vars::VarStr},
-  util::isolation_guard,
-};
-
-use super::{
-  super::state::terminal::Terminal,
-  ShResult,
-  arithmetic::expand_arithmetic_wrapped,
-  eval::execute::exec_nonint,
-  procio::{
-    RedirSet, RedirSpec, RedirType, StdinPipe, feed_fd_async, pipes_high, pipes_high_no_cloexec,
-    read_to_sink,
-  },
+  procio::{self, RedirSet, RedirSpec, RedirType, SinkScope, StdinPipe},
+  readline::{self, NestedSub},
   sherr,
+  state::{Shed, meta::MetaTab, terminal::Terminal, vars::VarStr},
+  util::{error::ShResult, guards},
 };
 
 use bstr::ByteSlice;
@@ -32,7 +21,7 @@ use nix::sys::wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid};
 use nix::unistd::{ForkResult, fork};
 
 pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
-  let (rpipe, wpipe) = pipes_high_no_cloexec()?;
+  let (rpipe, wpipe) = procio::pipes_high_no_cloexec()?;
   let rpipe_raw = rpipe.as_raw_fd();
   let wpipe_raw = wpipe.as_raw_fd();
 
@@ -81,7 +70,7 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       let redir: RedirSet = specs.into();
       let _guard = redir.apply().or_fatal()?;
 
-      if let Err(e) = exec_nonint(raw.into(), Some("process_sub".into())) {
+      if let Err(e) = execute::exec_nonint(raw.into(), Some("process_sub".into())) {
         e.print_error();
 
         lifecycle::exit_shed(true, 1);
@@ -94,7 +83,7 @@ pub fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       // Feed the sink in the background; the procsub child is not waited on, so
       // the feeder thread is detached and ends on its own at EOF/EPIPE.
       if let (Some(pipe), Some(bytes)) = (stdin_pipe, sink_stdin) {
-        feed_fd_async(pipe.into_writer(), bytes);
+        procio::feed_fd_async(pipe.into_writer(), bytes);
       }
       // Do not wait; process may run in background
       Ok(path)
@@ -112,11 +101,11 @@ pub fn is_internal(raw: &str) -> bool {
   let ast = parser.into_ast();
   let roots = ast.roots();
 
-  if !nodes_have_only_builtins(&ast, roots.iter().copied()) {
+  if !node::nodes_have_only_builtins(&ast, roots.iter().copied()) {
     return false;
   }
 
-  let has_forking_sub = nested_subs(raw).into_iter().any(|sub| match sub {
+  let has_forking_sub = readline::nested_subs(raw).into_iter().any(|sub| match sub {
     NestedSub::Proc => true,
     NestedSub::Cmd(body) => !is_internal(&body.to_str_lossy()),
   });
@@ -129,9 +118,9 @@ pub fn is_internal(raw: &str) -> bool {
 
 pub fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
   let sink_scope = SinkScope::new();
-  let _ceiling = isolation_guard(None);
+  let _ceiling = guards::isolation_guard(None);
 
-  if let Err(e) = exec_nonint(raw.into(), Some("command_sub".into())) {
+  if let Err(e) = execute::exec_nonint(raw.into(), Some("command_sub".into())) {
     e.print_error();
   }
 
@@ -154,7 +143,7 @@ pub fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
 /// Get the command output of a given command input as a String
 pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
   if raw.starts_with('(') && raw.ends_with(')') {
-    return expand_arithmetic_wrapped(raw.as_bytes());
+    return arithmetic::expand_arithmetic_wrapped(raw.as_bytes());
   }
   // command subs add an xtrace layer
   let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
@@ -163,7 +152,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
     return internal_cmd_sub(raw);
   }
 
-  let (rpipe, wpipe) = pipes_high()?;
+  let (rpipe, wpipe) = procio::pipes_high()?;
 
   // If this fork happens while an in-process pipeline stdin sink is live,
   // materialize it onto the child's fd 0 so a forked child (e.g. an external
@@ -181,7 +170,7 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
       let _redir_guard = redir.apply().or_fatal()?;
 
       execute::catch_exit(
-        || exec_input(raw.into(), Some("command_sub".into())),
+        || execute::exec_input(raw.into(), Some("command_sub".into())),
         execute::exit_with,
       );
 
@@ -192,13 +181,13 @@ pub fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
       drop(wpipe);
 
       let feeder = match (stdin_pipe, sink_stdin) {
-        (Some(pipe), Some(bytes)) => Some(feed_fd_async(pipe.into_writer(), bytes)),
+        (Some(pipe), Some(bytes)) => Some(procio::feed_fd_async(pipe.into_writer(), bytes)),
         _ => None,
       };
 
       // Read output first (before waiting) to avoid deadlock if
       // child fills pipe buffer
-      let sink = read_to_sink(rpipe.as_fd())?;
+      let sink = procio::read_to_sink(rpipe.as_fd())?;
       if let Some(handle) = feeder {
         let _ = handle.join();
       }

@@ -18,15 +18,18 @@ use bstr::ByteSlice;
 
 use crate::{
   assert_sorted,
-  state::vars::{VarStr, VarStrSliceExt},
-  util::{self, ByteCursor, SliceCursor},
-};
-
-use super::{
-  Shed,
   builtin::BUILTIN_NAMES,
   match_loop, sherr,
-  util::{Pos, QuoteState, ShResult, ends_with_unescaped, scan_param_exp, scan_parens},
+  state::{
+    Shed,
+    vars::{VarStr, VarStrSliceExt},
+  },
+  util::{
+    self,
+    error::ShResult,
+    pos::Pos,
+    strops::{self, ByteCursor, QuoteState, SliceCursor},
+  },
 };
 
 pub const KEYWORDS: [&[u8]; 21] = [
@@ -1155,7 +1158,7 @@ impl LexStream {
           b'$' if self.peek_byte() == Some(b'(') => {
             self.bump();
             let paren_pos = self.cursor;
-            if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+            if !strops::scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
               return Err(lex_err!(
                   self,
                   paren_pos..paren_pos + 1,
@@ -1171,7 +1174,7 @@ impl LexStream {
         // arithmetic substitution
         self.inc_cursor(2); // '$('
         let paren_pos = self.cursor;
-        if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+        if !strops::scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(self, paren_pos..paren_pos + 1, "Unclosed subshell"));
         }
       }
@@ -1204,7 +1207,7 @@ impl LexStream {
         // parameter expansion
         self.inc_cursor(2); // '${'
         let open_pos = self.cursor - 2;
-        if !scan_param_exp(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+        if !strops::scan_param_exp(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
               self,
               open_pos..open_pos + 2,
@@ -1228,7 +1231,7 @@ impl LexStream {
         // it's a process sub
         self.inc_cursor(2); // '<' or '>', then '('
         let paren_pos = self.cursor;
-        if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+        if !strops::scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
               self,
               paren_pos..paren_pos + 1,
@@ -1269,7 +1272,7 @@ impl LexStream {
           return Ok(tk);
         }
         // find our closing paren
-        if !scan_parens(self, paren_count) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+        if !strops::scan_parens(self, paren_count) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
               self,
               paren_pos..paren_pos + 1,
@@ -1318,7 +1321,7 @@ impl LexStream {
       b'=' if self.peek_nth(1) == Some(b'(') => {
         // looks like an array literal
         self.inc_cursor(2); // '=('
-        if !scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
+        if !strops::scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
               self,
               self.cursor..self.cursor + 1,
@@ -1830,7 +1833,7 @@ pub fn scan_cmd_sub_body(body: &[u8]) -> Option<usize> {
 }
 
 pub fn is_cmd_sub(slice: &[u8]) -> bool {
-  slice.starts_with(b"$(") && ends_with_unescaped(slice, b")")
+  slice.starts_with(b"$(") && strops::ends_with_unescaped(slice, b")")
 }
 
 #[cfg(test)]

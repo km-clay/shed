@@ -1,6 +1,9 @@
 use crate::{
   eval::parse::{ast::NodeId, node::LabelCtx},
-  util::{self, ByteCursor, SliceCursor, error::get_context},
+  util::{
+    self, error,
+    strops::{ByteCursor, SliceCursor},
+  },
 };
 
 use super::{
@@ -257,7 +260,7 @@ impl ParseStream {
         );
         if had_assignments {
           let assignments_span = self.tree.span_for_range(node_range);
-          let label = get_context("in variable assignment defined here", &assignments_span);
+          let label = error::get_context("in variable assignment defined here", &assignments_span);
           let mut labels: Vec<_> = nd
             .context
             .map(|r| self.tree[r].to_vec())

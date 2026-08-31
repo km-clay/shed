@@ -19,9 +19,11 @@ use nix::{
 
 use crate::{
   HashMap,
-  eval::parse::ast::Ast,
+  eval::parse::{ParsedSrc, ast::Ast},
+  expand::alias,
   signal,
-  state::{scopes::ScopeStack, util},
+  state::{cmd, db, scopes::ScopeStack},
+  util::error::ShResult,
 };
 
 #[macro_export]
@@ -88,12 +90,10 @@ macro_rules! assert_status_ne {
 }
 
 use crate::{
-  eval::{NdKind, ParsedSrc, execute::exec_nonint, lex::LexFlags},
-  expand::expand_aliases,
+  eval::{NdKind, execute::exec_nonint, lex::LexFlags},
   procio::{RedirGuard, RedirSet, RedirSpec, RedirType},
   readline::{restore_registers, save_registers},
   state::{self, Shed, meta::MetaTab},
-  util::ShResult,
 };
 
 /// Returns the canonical (symlink-resolved) form of `p`. Useful in tests
@@ -170,7 +170,7 @@ pub(crate) struct TestGuard {
 
 impl TestGuard {
   pub fn new() -> Self {
-    util::register_fork_marker();
+    db::register_fork_marker();
     let pty = openpty(None, None).unwrap();
     let (pty_master, pty_slave) = (pty.master, pty.slave);
     let master_raw = pty_master.as_raw_fd();
@@ -259,13 +259,13 @@ impl TestGuard {
         let _ = v.unset_var(key);
       }
     });
-    state::util::try_hash();
+    cmd::try_hash();
     save_registers();
     // Set up an in-memory sqlite db (once per test thread; OnceLock means
     // subsequent TestGuards no-op here). Then wipe the stash table so each
     // test starts with a clean slate.
-    state::util::init_test_db_conn();
-    if let Some(conn) = state::util::get_db_conn() {
+    db::init_test_db_conn();
+    if let Some(conn) = db::get_db_conn() {
       // The table won't exist on first run; ignore that error.
       let _ = conn
         .lock()
@@ -415,7 +415,7 @@ impl Drop for TestGuard {
 }
 
 pub(crate) fn get_ast(input: &str) -> ShResult<Ast> {
-  let input = expand_aliases(input);
+  let input = alias::expand_aliases(input);
 
   let mut parser = ParsedSrc::new(input.into())
     .with_lex_flags(LexFlags::empty())

@@ -1,13 +1,15 @@
-use crate::procio::outln_bytes;
-
-use super::{
-  Shed, errln,
-  expand::shell_quote_bytes,
-  opt::OptSpec,
-  sherr,
-  state::logic::TrapTarget,
-  util::{ShResult, ShResultExt, with_status},
+use crate::{
+  errln,
+  expand::escape,
+  procio, sherr,
+  state::{Shed, logic::TrapTarget},
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+  },
 };
+
+use super::opt::OptSpec;
 
 pub(super) struct Trap;
 impl super::Builtin for Trap {
@@ -45,7 +47,7 @@ impl super::Builtin for Trap {
 
     if list_signals {
       super::jobctl::list_all_signals();
-      return with_status(0);
+      return util::with_status(0);
     }
 
     // Print mode: explicit `-p`, or a bare `trap` with no operands. Any
@@ -61,15 +63,15 @@ impl super::Builtin for Trap {
           let target = entry.0;
           if filter.is_empty() || filter.contains(target) {
             let mut line = b"trap -- ".to_vec();
-            line.extend_from_slice(&shell_quote_bytes(entry.1.as_bytes()));
+            line.extend_from_slice(&escape::shell_quote_bytes(entry.1.as_bytes()));
             line.push(b' ');
             line.extend_from_slice(target.to_string().as_bytes());
-            outln_bytes(&line);
+            procio::outln_bytes(&line);
           }
         }
         Ok(())
       })?;
-      return with_status(0);
+      return util::with_status(0);
     }
 
     // if the first operand is an unsigned integer, every operand is a trap target
@@ -82,12 +84,12 @@ impl super::Builtin for Trap {
         let target = TrapTarget::parse(&arg).promote_err(span)?;
         Shed::logic_mut(|l| l.remove_trap(target));
       }
-      return with_status(0);
+      return util::with_status(0);
     }
 
     if arg_vec.len() == 1 {
       errln!("usage: trap <COMMAND> [SIGNAL...]");
-      return with_status(1);
+      return util::with_status(1);
     }
 
     let mut arg_iter = arg_vec.into_iter();
@@ -108,7 +110,7 @@ impl super::Builtin for Trap {
       }
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

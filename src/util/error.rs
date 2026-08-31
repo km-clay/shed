@@ -7,17 +7,17 @@ use std::fmt::{self, Debug, Display};
 use std::io::Write;
 use std::rc::Rc;
 
-use crate::procio::bytes_to_string;
-use crate::state::vars::VarStr;
-use crate::util::random::random;
-use crate::{HashMap, shopt, varstr};
-
-use super::{
-  FdWriter,
+use crate::{
+  HashMap,
   eval::lex::{Span, SpanSource},
-  procio::{RedirGuard, stderr_fileno},
-  sherr,
+  procio::{self, RedirGuard},
+  sherr, shopt,
+  state::vars::VarStr,
+  util::random,
+  varstr,
 };
+
+use super::FdWriter;
 
 pub type ShResult<T> = Result<T, ShErr>;
 
@@ -65,7 +65,7 @@ impl Iterator for ColorRng {
   type Item = Color;
   fn next(&mut self) -> Option<Self::Item> {
     let colors = Self::get_colors();
-    let idx = random::<usize>() % colors.len();
+    let idx = random::random::<usize>() % colors.len();
 
     Some(colors[idx])
   }
@@ -547,7 +547,7 @@ impl ShErr {
       with_frames
     };
 
-    error.print_error_internal(&mut FdWriter(stderr_fileno()));
+    error.print_error_internal(&mut FdWriter(procio::stderr_fileno()));
   }
 }
 
@@ -555,7 +555,7 @@ impl Display for ShErr {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let mut buf = vec![];
     self.print_error_internal(&mut buf);
-    let out = bytes_to_string(buf);
+    let out = procio::bytes_to_string(buf);
     write!(f, "{out}")
   }
 }

@@ -2,12 +2,16 @@ use std::str::FromStr;
 
 use bstr::ByteSlice;
 
-use crate::{opt, state::vars::VarStr, util, varstr};
-
-use super::{
-  ShResult, Shed, expand::markers, join_raw_args, match_loop, opt::OptSpec, sherr, try_var,
-  util::stylize_loglevel, var, with_status,
+use crate::{
+  expand::markers,
+  match_loop, opt, sherr,
+  state::{Shed, vars::VarStr},
+  try_var,
+  util::{self, error::ShResult, ui},
+  var, varstr,
 };
+
+use super::{argv, opt::OptSpec};
 
 pub struct Flog;
 impl super::Builtin for Flog {
@@ -31,10 +35,10 @@ impl super::Builtin for Flog {
 
     let cur_level = Self::get_log_level().unwrap_or(log::Level::Error);
     if level > cur_level {
-      return with_status(0);
+      return util::with_status(0);
     }
 
-    let level = stylize_loglevel(level);
+    let level = ui::stylize_loglevel(level);
 
     let mut prefix_fmt = try_var!("FLOG_FMT").unwrap_or_else(|| "[{level}]".into());
 
@@ -45,7 +49,7 @@ impl super::Builtin for Flog {
       }
     }
 
-    let (rest, _) = join_raw_args(arg_vec);
+    let (rest, _) = argv::join_raw_args(arg_vec);
     let formatted = Self::expand_prefix_fmt(
       prefix_fmt.as_bytes(),
       level.as_bytes(),
@@ -58,7 +62,7 @@ impl super::Builtin for Flog {
 
     Shed::post_system_msg(out);
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

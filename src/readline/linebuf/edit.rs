@@ -1,12 +1,19 @@
 use bstr::ByteSlice;
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::{
-  Grapheme, Line, Lines, Pos,
-  eval::{ParseFlags, ParsedSrc, lex::LexFlags},
+use crate::{
+  eval::{
+    lex::LexFlags,
+    parse::{ParseFlags, ParsedSrc},
+  },
+  state::vars::VarStr,
+  util::{pos::Pos, strops::VarStrDisplay},
 };
-use crate::readline::context::CtxTkRule;
-use crate::{readline::context::CtxTk, state::vars::VarStr, util::VarStrDisplay};
+
+use super::{
+  Grapheme, Line, Lines,
+  context::{CtxTk, CtxTkRule},
+};
 
 /// One undo step. Finalized steps are stored compactly as a positional delta;
 /// only an actively-merging entry keeps full buffer snapshots, and there is at

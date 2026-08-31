@@ -1,33 +1,16 @@
 pub(crate) mod error;
 pub mod flog;
-mod guards;
-mod macros;
-mod path;
-mod pos;
-pub mod posix_extension;
+pub mod guards;
+pub mod macros;
+pub mod pos;
+pub mod posix;
 pub mod random;
-mod strops;
-mod ui;
+pub mod strops;
+pub mod ui;
 
 use std::{os::fd::BorrowedFd, str::FromStr};
 
-use super::{Shed, eval, match_loop, procio, sherr, state, system_msg, var};
-
 use bstr::ByteSlice;
-pub(super) use guards::{
-  function_scope_guard, guard, isolation_guard, prefix_assign_guard, shared_scope_guard,
-  var_ctx_guard,
-};
-pub(super) use path::{
-  PathCache, is_executable_file, path_entries, path_from_bytes, path_list_entries, resolve_in_path,
-  split_path_list,
-};
-pub(super) use pos::{Pos, SignedPos};
-use smallvec::SmallVec;
-pub(super) use ui::{
-  BOT_LEFT, BOT_RIGHT, HOR_LINE, PaletteEntry, TOP_LEFT, TOP_RIGHT, VERT_LINE,
-  ansi_from_description, pad_line_into, style_from_description, stylize_loglevel,
-};
 
 #[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Direction {
@@ -36,14 +19,9 @@ pub(crate) enum Direction {
   Backward,
 }
 
-pub(super) use error::{ShErr, ShErrKind, ShResult, ShResultExt};
+use smallvec::SmallVec;
 
-pub(super) use strops::{
-  ByteCursor, EDIT_WEIGHT, QuoteState, SliceCursor, TimeReader, VarStrDisplay, ends_with_unescaped,
-  format_mode, format_size, format_time, has_unescaped, levenshtein, parse_size, scan_param_exp,
-  scan_parens, split_at_unescaped, split_tk,
-};
-
+use crate::{state::Shed, util::error::ShResult};
 pub(super) struct FdWriter<'a>(pub BorrowedFd<'a>);
 
 impl std::io::Write for FdWriter<'_> {
@@ -123,6 +101,6 @@ pub(super) fn parse_bytes<T: FromStr>(bytes: &[u8]) -> Option<T> {
 /// It's easy to forget to set the status code, this helps with that
 #[expect(clippy::unnecessary_wraps)]
 pub(super) fn with_status(code: i32) -> ShResult<()> {
-  state::Shed::set_status(code);
+  Shed::set_status(code);
   Ok(())
 }

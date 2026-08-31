@@ -6,9 +6,10 @@ use std::{
   time::{Duration, Instant},
 };
 
-mod util;
-pub(crate) use util::{ColorMode, calc_str_width, get_win_size, truncate_with_ellipsis, width};
-use util::{enable_cooked_mode, enable_raw_mode};
+mod termios;
+use crate::util::ui::{ColorMode, calc_str_width};
+pub(crate) use termios::get_win_size;
+use termios::{enable_cooked_mode, enable_raw_mode};
 
 mod guard;
 use guard::Snapshot;
@@ -27,20 +28,20 @@ use bitflags::bitflags;
 
 use nix::{
   errno::Errno,
-  fcntl::{OFlag, open},
+  fcntl::{self, OFlag},
   libc,
-  poll::{PollFd, PollFlags, PollTimeout, poll},
+  poll::{self, PollFd, PollFlags, PollTimeout},
   sys::{
-    signal::{SigSet, SigmaskHow, Signal, kill, killpg, pthread_sigmask},
+    signal::{self, SigSet, SigmaskHow, Signal},
     stat::Mode,
-    termios::{self, Termios, tcgetattr, tcsetattr},
+    termios::{self as term, LocalFlags, SetArg, Termios},
   },
-  unistd::{Pid, getpgrp, isatty, tcsetpgrp, write},
+  unistd::{self, Pid},
 };
 
 use crate::{
   status_msg,
-  util::{base64_encode, format_size, random},
+  util::{self, random, strops},
 };
 
 use super::{
@@ -53,10 +54,10 @@ static TTY_FILENO: LazyLock<Option<OwnedFd>> = LazyLock::new(|| {
   // try to call dup2() on stdin if it is a tty.
   // on mac, calling open on /dev/tty directly will cause issues.
   let stdin = unsafe { BorrowedFd::borrow_raw(libc::STDIN_FILENO) };
-  let owned = if isatty(stdin).unwrap_or(false) {
+  let owned = if unistd::isatty(stdin).unwrap_or(false) {
     stdin.try_clone_to_owned().ok()? // dup2
   } else {
-    open("/dev/tty", OFlag::O_RDWR, Mode::empty()).ok()?
+    fcntl::open("/dev/tty", OFlag::O_RDWR, Mode::empty()).ok()?
   };
   // Move the tty fd above the user-accessible range so that
   // `exec 3>&-` and friends don't collide with shell internals.
@@ -271,7 +272,7 @@ impl Terminal {
   pub fn new() -> Self {
     let tty: Option<RawFd> = TTY_FILENO
       .as_ref()
-      .filter(|fd| isatty(fd.as_fd()).unwrap_or(false))
+      .filter(|fd| unistd::isatty(fd.as_fd()).unwrap_or(false))
       .map(AsRawFd::as_raw_fd);
     let (cols, rows) = tty.map_or((80, 24), get_win_size);
 
@@ -328,7 +329,7 @@ impl Terminal {
     let tty = self
       .tty()
       .ok_or_else(|| sherr!(InternalErr, "Not attached to a terminal"))?;
-    if isatty(tty)? {
+    if unistd::isatty(tty)? {
       Ok(tty)
     } else {
       Err(sherr!(InternalErr, "File descriptor is not a terminal"))
@@ -360,7 +361,7 @@ impl Terminal {
   pub fn isatty(&self) -> bool {
     self.tty.is_some_and(|raw| {
       let borrowed = unsafe { BorrowedFd::borrow_raw(raw) };
-      isatty(borrowed).unwrap_or(false)
+      unistd::isatty(borrowed).unwrap_or(false)
     })
   }
 
@@ -614,7 +615,7 @@ impl Terminal {
 
     loop {
       let mut fds = [PollFd::new(tty, PollFlags::POLLIN)];
-      let res = poll(&mut fds, timeout);
+      let res = poll::poll(&mut fds, timeout);
       if matches!(res, Err(Errno::EINTR)) {
         continue;
       }
@@ -706,12 +707,12 @@ impl Terminal {
 
   pub fn emit_osc_copy(&mut self, primary: bool, buf: &str) -> ShResult<()> {
     let sel = if primary { "p" } else { "c" };
-    let encoded = base64_encode(buf.as_bytes());
+    let encoded = util::base64_encode(buf.as_bytes());
 
     if encoded.len() > (1024 * 75) {
       // the limit for these is 75kb
       let mut size = String::new();
-      format_size(encoded.len() as u64, &mut size)?;
+      strops::format_size(encoded.len() as u64, &mut size)?;
 
       status_msg!("clipboard copy failed: buffer too large ({size})");
       return Ok(());
@@ -821,12 +822,12 @@ impl Terminal {
     // process group does not exist Then return ok
     let term_controller = self.controller().unwrap_or(Pid::this());
     let isatty = self.isatty();
-    if !isatty || pgid == term_controller || killpg(pgid, None).is_err() {
+    if !isatty || pgid == term_controller || signal::killpg(pgid, None).is_err() {
       return Ok(());
     }
 
-    if pgid == getpgrp() && term_controller != getpgrp() {
-      kill(term_controller, Signal::SIGTTOU).ok();
+    if pgid == unistd::getpgrp() && term_controller != unistd::getpgrp() {
+      signal::kill(term_controller, Signal::SIGTTOU).ok();
     }
 
     let mut new_mask = SigSet::empty();
@@ -836,18 +837,18 @@ impl Terminal {
     new_mask.add(Signal::SIGTTIN);
     new_mask.add(Signal::SIGTTOU);
 
-    pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&new_mask), Some(&mut mask_bkup))?;
+    signal::pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&new_mask), Some(&mut mask_bkup))?;
 
-    let result = tcsetpgrp(tty, pgid);
+    let result = unistd::tcsetpgrp(tty, pgid);
 
-    pthread_sigmask(
+    signal::pthread_sigmask(
       SigmaskHow::SIG_SETMASK,
       Some(&mask_bkup),
       Some(&mut new_mask),
     )?;
 
     if result.is_err() {
-      tcsetpgrp(tty, getpgrp())?;
+      unistd::tcsetpgrp(tty, unistd::getpgrp())?;
     }
 
     Ok(())
@@ -891,7 +892,7 @@ impl Terminal {
     }
     self.edit_termios(|t| {
       enable_cooked_mode(t);
-      t.local_flags.remove(termios::LocalFlags::ECHO);
+      t.local_flags.remove(LocalFlags::ECHO);
     })?;
     Ok(guard.activate())
   }
@@ -962,9 +963,9 @@ impl Terminal {
     };
 
     if let Some(termios) = self.termios_stack.pop() {
-      tcsetattr(
+      term::tcsetattr(
         unsafe { BorrowedFd::borrow_raw(tty) },
-        termios::SetArg::TCSANOW,
+        SetArg::TCSANOW,
         &termios,
       )
       .map_err(|e| sherr!(InternalErr, "Failed to restore terminal attributes: {e}"))?;
@@ -986,9 +987,9 @@ impl Terminal {
     let tty_raw = self.tty_raw_checked()?;
     let tty = unsafe { BorrowedFd::borrow_raw(tty_raw) };
 
-    let mut t = tcgetattr(tty)?;
+    let mut t = term::tcgetattr(tty)?;
     enable_raw_mode(&mut t);
-    tcsetattr(tty, termios::SetArg::TCSANOW, &t)?;
+    term::tcsetattr(tty, SetArg::TCSANOW, &t)?;
     Ok(())
   }
 
@@ -998,13 +999,13 @@ impl Terminal {
     };
 
     let tty = unsafe { BorrowedFd::borrow_raw(tty) };
-    let mut raw =
-      tcgetattr(tty).map_err(|e| sherr!(InternalErr, "Failed to get terminal attributes: {e}"))?;
+    let mut raw = term::tcgetattr(tty)
+      .map_err(|e| sherr!(InternalErr, "Failed to get terminal attributes: {e}"))?;
 
     self.termios_stack.push(raw.clone());
 
     f(&mut raw);
-    tcsetattr(tty, termios::SetArg::TCSANOW, &raw)
+    term::tcsetattr(tty, SetArg::TCSANOW, &raw)
       .map_err(|e| sherr!(InternalErr, "Failed to set terminal attributes: {e}"))?;
 
     Ok(())
@@ -1016,7 +1017,7 @@ impl Terminal {
     };
     let mut buf = buf.as_bytes();
     while !buf.is_empty() {
-      match write(tty, buf) {
+      match unistd::write(tty, buf) {
         Ok(n) => buf = &buf[n..],
         Err(Errno::EINTR) => (),
         Err(_) => return Err(std::io::Error::last_os_error().into()),
@@ -1151,7 +1152,7 @@ impl std::io::Write for Terminal {
     };
     let mut buf = self.input_buf.as_bytes();
     while !buf.is_empty() {
-      match write(tty, buf) {
+      match unistd::write(tty, buf) {
         Ok(n) => buf = &buf[n..],
         Err(Errno::EINTR) => (),
         Err(_) => {

@@ -2,12 +2,11 @@ use std::path::PathBuf;
 
 use bitflags::bitflags;
 
-use crate::{state::vars::VarStr, verb};
+use crate::{state::vars::VarStr, try_var, util::pos::Pos, verb};
 
 use super::{
   editmode::ExNode,
-  linebuf::{Grapheme, Pos, SelectShape},
-  try_var,
+  linebuf::{Grapheme, SelectShape},
 };
 
 pub(crate) use super::util::Direction;

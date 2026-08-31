@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
 
-use super::{
+use crate::{
+  HashSet,
   eval::lex::{LexFlags, LexStream, Tk, TkFlags},
   keys::{KeyCode, KeyEvent, ModKeys},
   shopt,
   state::Shed,
 };
-use crate::HashSet;
 
 struct AliasExpander {
   input: String,

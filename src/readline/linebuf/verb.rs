@@ -12,8 +12,7 @@ use crate::{
 };
 
 use super::{
-  Grapheme, Line, Lines, MotionKind, Pos, SelectMode, killring, ordered, rot13_char,
-  toggle_case_char,
+  Grapheme, Line, Lines, MotionKind, Pos, SelectMode, killring, rot13_char, toggle_case_char,
 };
 
 impl super::LineBuf {
@@ -182,7 +181,7 @@ impl super::LineBuf {
       let MotionKind::Line { start, end, .. } = &motion else {
         unreachable!()
       };
-      let (insert_target, _) = ordered(*start, *end);
+      let (insert_target, _) = util::ordered(*start, *end);
       let n_lines = self.lines.len();
       let content = self.delete_range(&motion);
       self.fix_cursor();
@@ -202,7 +201,7 @@ impl super::LineBuf {
 
     match motion {
       MotionKind::Char { start, end, .. } => {
-        let (s, _) = ordered(start, end);
+        let (s, _) = util::ordered(start, end);
         self.set_cursor(s);
       }
       MotionKind::Line {
@@ -215,7 +214,7 @@ impl super::LineBuf {
         } else {
           end.saturating_sub(1)
         };
-        let (s, _) = ordered(start, end);
+        let (s, _) = util::ordered(start, end);
         self.set_row(s);
         if *verb == Verb::Change {
           // we've gotta indent
@@ -230,7 +229,7 @@ impl super::LineBuf {
         }
       }
       MotionKind::Block { start, .. } => {
-        let (s, _) = ordered(self.cursor.pos, start);
+        let (s, _) = util::ordered(self.cursor.pos, start);
         self.set_cursor(s);
       }
     }
@@ -266,7 +265,7 @@ impl super::LineBuf {
     let total_len: usize =
       content.iter().map(Line::len).sum::<usize>() + content.len().saturating_sub(1); // adds the newlines too
 
-    let (s, e) = ordered(span.0, span.1);
+    let (s, e) = util::ordered(span.0, span.1);
     let _old = self.extract_span((s, e), false);
 
     self.set_cursor(s);
@@ -435,7 +434,7 @@ impl super::LineBuf {
 
     if let Some(motion) = self.select_range() {
       if let Motion::CharRange(s, e) = &motion {
-        let (start, _) = ordered(*s, *e);
+        let (start, _) = util::ordered(*s, *e);
         selection_start = Some(start);
       }
       let rec_cmd = cmd
@@ -633,7 +632,7 @@ impl super::LineBuf {
       },
     };
     if let Some((start_row, end_row)) = range {
-      let (s, e) = ordered(start_row, end_row);
+      let (s, e) = util::ordered(start_row, end_row);
       count = (e - s).max(1);
       row = s;
     }
@@ -681,8 +680,8 @@ impl super::LineBuf {
       return Ok(());
     };
     let lines = match motion {
-      MotionKind::Char { start, end, .. } => self.line_iter_mut(ordered(start.row, end.row)),
-      MotionKind::Line { start, end, .. } => self.line_iter_mut(ordered(start, end)),
+      MotionKind::Char { start, end, .. } => self.line_iter_mut(util::ordered(start.row, end.row)),
+      MotionKind::Line { start, end, .. } => self.line_iter_mut(util::ordered(start, end)),
       MotionKind::Block { .. } => unimplemented!(),
     };
     let mut col_offset = 0;
@@ -704,11 +703,11 @@ impl super::LineBuf {
     };
     let line_nums = match motion {
       MotionKind::Char { start, end, .. } => {
-        let (s, e) = ordered(start.row, end.row);
+        let (s, e) = util::ordered(start.row, end.row);
         s..=e
       }
       MotionKind::Line { start, end, .. } => {
-        let (s, e) = ordered(start, end);
+        let (s, e) = util::ordered(start, end);
         s..=e
       }
       MotionKind::Block { .. } => unimplemented!(),

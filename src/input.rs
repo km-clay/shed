@@ -5,16 +5,17 @@
 
 use std::{path::Path, sync::atomic::Ordering};
 
-use nix::unistd::isatty;
+use nix::unistd;
 
-use crate::procio::{bytes_to_string, read_input};
-
-use super::{
-  ShResult, Shed, errln,
-  eval::execute::{exec_dash_c, exec_nonint},
-  expand_keymap, interactive, lifecycle, procio, sherr,
+use crate::{
+  errln,
+  eval::execute,
+  expand::alias,
+  interactive, lifecycle, procio, sherr,
   signal::QUIT_CODE,
-  state, status_msg,
+  state::{self, Shed, paths},
+  status_msg,
+  util::error::ShResult,
 };
 
 /// Dispatch input handling based on the given [`lifecycle::ShedArgs`]
@@ -24,43 +25,63 @@ pub fn dispatch_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
   if args.edit_script {
     // in this arm, we interpret the input we are given as a sequence of keys
     // for the line editor to consume and execute
-    let input = if let Some(ref cmd) = args.command {
-      cmd.clone()
-    } else if args.stdin {
-      // explicit `-s`: read stdin as the script, script_args are positional
-      bytes_to_string(read_input()?)
-    } else if !args.script_args.is_empty() {
-      let path = args.script_args.remove(0);
-      std::fs::read_to_string(path)?
-    } else if !isatty(procio::stdin_fileno()).unwrap_or(false) {
-      bytes_to_string(read_input()?)
-    } else {
+    let Some(input) = collect_input(&mut args)? else {
       // no input provided, just run interactively
       status_msg!("warning: --script was passed but no input was given");
       return interactive::shed_interactive(&args, None);
     };
 
-    let keys = expand_keymap(&input);
+    let keys = alias::expand_keymap(&input);
     interactive::shed_interactive(&args, Some(keys))
-  } else if let Some(cmd) = args.command {
-    exec_dash_c(&cmd, args.script_args)
+  } else {
+    execute_input(args)
+  }
+}
+
+fn execute_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
+  if let Some(cmd) = args.command {
+    // -c command
+    execute::exec_dash_c(&cmd, args.script_args)
   } else if args.stdin {
-    // explicit `-s`: read stdin, script_args are positional
+    // -s, read stdin
     read_commands(args.script_args)
   } else if !args.script_args.is_empty() {
+    // script path argument
     let path = args.script_args.remove(0);
     run_script(path, args.script_args)
-  } else if !isatty(procio::stdin_fileno()).unwrap_or(false) {
+  } else if !unistd::isatty(procio::stdin_fileno()).unwrap_or(false) {
+    // piped input
     read_commands(args.script_args)
   } else {
+    // nothing, start the repl
     interactive::shed_interactive(&args, None)
   }
 }
 
+fn collect_input(args: &mut lifecycle::ShedArgs) -> ShResult<Option<String>> {
+  let input = if let Some(cmd) = &args.command {
+    // -c command
+    cmd.clone()
+  } else if args.stdin {
+    // -s, read stdin
+    procio::bytes_to_string(procio::read_input()?)
+  } else if !args.script_args.is_empty() {
+    // script path argument
+    std::fs::read_to_string(&args.script_args.remove(0))?
+  } else if !unistd::isatty(procio::stdin_fileno()).unwrap_or(false) {
+    // piped input
+    procio::bytes_to_string(procio::read_input()?)
+  } else {
+    // nothing
+    return Ok(None);
+  };
+  Ok(Some(input))
+}
+
 /// Read and execute commands from stdin
 pub(crate) fn read_commands(args: Vec<String>) -> ShResult<()> {
-  let bytes = read_input()?;
-  let commands = bytes_to_string(bytes);
+  let bytes = procio::read_input()?;
+  let commands = procio::bytes_to_string(bytes);
 
   Shed::vars_mut(|v| {
     let scope = v.cur_scope_mut();
@@ -72,7 +93,7 @@ pub(crate) fn read_commands(args: Vec<String>) -> ShResult<()> {
     }
   });
 
-  exec_nonint(commands.into(), None)
+  execute::exec_nonint(commands.into(), None)
 }
 
 /// Read and execute the script at a given path
@@ -80,7 +101,7 @@ pub(crate) fn read_commands(args: Vec<String>) -> ShResult<()> {
 /// Fails if `shed` is not able to open or read the file.
 pub(crate) fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
   let path = path.as_ref();
-  let source_path = state::util::display_path(path);
+  let source_path = paths::display_path(path);
 
   if !path.is_file() {
     let reason = if path.is_dir() {
@@ -116,7 +137,7 @@ pub(crate) fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult
     }
   });
 
-  exec_nonint(input.into(), Some(source_path.into()))
+  execute::exec_nonint(input.into(), Some(source_path.into()))
 }
 
 #[cfg(test)]

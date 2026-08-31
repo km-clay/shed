@@ -24,22 +24,19 @@ use nix::{
 };
 
 use crate::{
-  Shed,
-  eval::execute,
-  lifecycle, signal,
-  state::{shopt::ReadLimit, terminal::Terminal, vars::VarStr},
-  util::{self, ByteCursor, SliceCursor, parse_bytes},
-  varstr,
-};
-
-use super::{
   eval::{
-    execute::exec_nonint,
+    execute,
     lex::{Span, Tk, TkFlags},
   },
   expand::Expander,
-  match_loop, sherr, shopt, state,
-  util::{ShErr, ShResult},
+  lifecycle, match_loop, sherr, shopt, signal, state,
+  state::{Shed, shopt::ReadLimit, terminal::Terminal, vars::VarStr},
+  util::{
+    self,
+    error::{ShErr, ShResult},
+    strops::{ByteCursor, SliceCursor},
+  },
+  varstr,
 };
 
 /// Minimum fd number for shell-internal file descriptors.
@@ -322,14 +319,14 @@ impl RedirBldr {
       }
     });
 
-    let tgt_fd = parse_bytes::<i32>(&tgt_fd).unwrap_or_else(|| match redir.class.unwrap() {
+    let tgt_fd = util::parse_bytes::<i32>(&tgt_fd).unwrap_or_else(|| match redir.class.unwrap() {
       RedirType::Input | RedirType::ReadWrite | RedirType::HereDoc | RedirType::HereString => 0,
       _ => 1,
     });
     redir = redir.with_fd(tgt_fd);
     if *src_fd == *b"-" {
       redir = redir.with_target(RedirTarget::Close);
-    } else if let Some(src_fd) = parse_bytes::<i32>(&src_fd) {
+    } else if let Some(src_fd) = util::parse_bytes::<i32>(&src_fd) {
       redir = redir.with_target(RedirTarget::Fd(src_fd));
     }
     Ok(redir)
@@ -1269,7 +1266,7 @@ pub(super) fn capture_command(
       let _guard = redirs.apply().or_fatal()?;
 
       execute::catch_exit(
-        || exec_nonint(cmd.into(), name.cloned()),
+        || execute::exec_nonint(cmd.into(), name.cloned()),
         |code| unsafe { nix::libc::_exit(code) },
       );
 

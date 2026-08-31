@@ -1,9 +1,14 @@
 use crate::{
-  procio::out_bytes,
+  expand::{escape, prompt},
+  procio, shopt,
   state::vars::{VarStr, VarStrSliceExt},
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+  },
 };
 
-use super::{Builtin, ShResult, expand, opt::OptSpec, shopt, util::ShResultExt, with_status};
+use super::{Builtin, opt::OptSpec};
 use bitflags::bitflags;
 
 bitflags! {
@@ -53,10 +58,10 @@ impl Builtin for Echo {
       .arguments()
       .map(|(st, sp)| -> ShResult<VarStr> {
         if use_escape {
-          Ok(expand::expand_ansi_c(st.as_bytes()).into())
+          Ok(escape::expand_ansi_c(st.as_bytes()).into())
         } else if use_prompt {
           Ok(
-            expand::expand_prompt(st.as_bytes())
+            prompt::expand_prompt(st.as_bytes())
               .promote_err(sp.clone())?
               .into(),
           )
@@ -71,9 +76,9 @@ impl Builtin for Echo {
     if !flags.contains(EchoFlags::NO_NEWLINE) {
       bytes.push(b'\n');
     }
-    out_bytes(&bytes);
+    procio::out_bytes(&bytes);
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

@@ -1,9 +1,13 @@
 use crate::{
   HashMap,
   eval::execute,
-  opt,
-  state::logic::TrapTarget,
-  util::{self, ByteCursor, SliceCursor},
+  opt, sherr,
+  state::{Shed, logic::TrapTarget},
+  util::{
+    self,
+    error::{ShErr, ShErrKind, ShResult, ShResultExt},
+    strops::{ByteCursor, SliceCursor},
+  },
   varstr,
 };
 use bstr::ByteSlice;
@@ -12,12 +16,7 @@ use yansi::Paint;
 
 use crate::match_loop;
 
-use super::{
-  Shed,
-  opt::OptSpec,
-  sherr,
-  util::{ShErr, ShErrKind, ShResult, ShResultExt},
-};
+use super::opt::OptSpec;
 
 /// A trait for flow control builtins (break, continue, return, exit).
 ///
@@ -45,7 +44,7 @@ trait FlowCtl: super::Builtin {
       .transpose()?
       .unwrap_or_else(|| self.default_code());
 
-    Err(self.flow_control(code)).promote_err(args.span)
+    Err(self.flow_control(code)).promote_err(args.span())
   }
 }
 

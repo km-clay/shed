@@ -8,35 +8,38 @@ use std::{
   time::{Duration, Instant},
 };
 
-use crate::{
-  HashMap,
-  expand::{GlobOpts, Pattern},
-  state::vars::VarStr,
-};
-
-use super::{
-  ShResult, Shed, autocmd, crate_util as util,
-  expand::expand_keymap,
-  jobs::Job,
-  keys::KeyEvent,
-  logic::AutoCmdKind,
-  match_loop,
-  readline::{Candidate, CompSpec},
-  sherr, system_msg,
-  util::query_db,
-  var,
-  vars::{VarFlags, VarKind},
-};
 use nix::{
   libc::time_t,
   poll::PollTimeout,
   sys::{
-    resource::{Usage, UsageWho, getrusage},
+    resource::{self, Usage, UsageWho},
     time::TimeVal,
   },
 };
 use regex::Regex;
 
+use crate::{
+  HashMap,
+  expand::{
+    alias,
+    glob::{GlobOpts, Pattern},
+  },
+  match_loop,
+  readline::{Candidate, CompSpec},
+  sherr,
+  state::{Shed, params, paths, vars::VarStr},
+  system_msg,
+  util::{error::ShResult, ui},
+  var,
+};
+
+use super::{
+  autocmd, db,
+  jobs::Job,
+  keys::KeyEvent,
+  logic::AutoCmdKind,
+  vars::{VarFlags, VarKind},
+};
 #[derive(Debug)]
 pub(crate) struct CmdTimer {
   wall_start: Instant,
@@ -50,8 +53,8 @@ pub(crate) struct CmdTimer {
 impl CmdTimer {
   pub fn new() -> ShResult<Self> {
     let (self_usage_start, child_usage_start) = (
-      Some(getrusage(UsageWho::RUSAGE_SELF)?),
-      Some(getrusage(UsageWho::RUSAGE_CHILDREN)?),
+      Some(resource::getrusage(UsageWho::RUSAGE_SELF)?),
+      Some(resource::getrusage(UsageWho::RUSAGE_CHILDREN)?),
     );
     Ok(Self {
       wall_start: Instant::now(),
@@ -65,8 +68,8 @@ impl CmdTimer {
 
   pub fn stop(&mut self) -> ShResult<()> {
     self.wall_end = Some(self.wall_start.elapsed());
-    self.self_usage_end = Some(getrusage(UsageWho::RUSAGE_SELF)?);
-    self.child_usage_end = Some(getrusage(UsageWho::RUSAGE_CHILDREN)?);
+    self.self_usage_end = Some(resource::getrusage(UsageWho::RUSAGE_SELF)?);
+    self.child_usage_end = Some(resource::getrusage(UsageWho::RUSAGE_CHILDREN)?);
     self.report()?;
     Ok(())
   }
@@ -344,9 +347,9 @@ impl CmdTimer {
         ("TIME_CPU_PCT".into(), self.cpu_pct()?.to_string()),
         ("TIME_RSS".into(), self.max_rss()?.to_string()),
       ];
-      super::util::with_vars(vars, || autocmd!(OnTimeReport));
+      params::with_vars(vars, || autocmd!(OnTimeReport));
     } else {
-      let fmt_str = super::util::get_time_fmt();
+      let fmt_str = params::get_time_fmt();
       let report = self.format_report(&fmt_str.to_str_lossy())?;
       system_msg!("{report}");
     }
@@ -428,8 +431,8 @@ impl PathTable {
   }
   pub fn hash_path_list(&mut self, path_list: &str) {
     self.index.clear();
-    for entry in util::path_list_entries(path_list) {
-      if !util::is_executable_file(&entry) {
+    for entry in paths::path_list_entries(path_list) {
+      if !paths::is_executable_file(&entry) {
         continue;
       }
       let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
@@ -715,7 +718,7 @@ impl MetaTab {
     self.shell_time
   }
   pub fn ensure_meta_table() -> ShResult<()> {
-    query_db(|conn| {
+    db::query_db(|conn| {
       conn.execute(
         "CREATE TABLE IF NOT EXISTS meta (
 					key TEXT PRIMARY KEY,
@@ -728,7 +731,7 @@ impl MetaTab {
     Ok(())
   }
   pub fn disable_welcome_message() -> ShResult<()> {
-    query_db(|conn| {
+    db::query_db(|conn| {
       conn.execute(
         "INSERT INTO meta (key, value) VALUES ('show_welcome', '0')
 				ON CONFLICT(key) DO UPDATE SET value='0' WHERE key='welcome_message'",
@@ -796,7 +799,7 @@ impl MetaTab {
     self.func_depth
   }
   pub fn welcome_message(force: bool) -> Option<String> {
-    let res = query_db(|conn| {
+    let res = db::query_db(|conn| {
       let result = conn.query_row(
         "SELECT value FROM meta WHERE key='show_welcome'",
         [],
@@ -839,16 +842,16 @@ impl MetaTab {
     // ╭─ shed v0.xx.x ───────────╮
     let title = format!(
       "{}{} \x1b[1;35mshed\x1b[0m v{} ",
-      util::TOP_LEFT,
-      util::HOR_LINE,
+      ui::TOP_LEFT,
+      ui::HOR_LINE,
       version
     );
-    util::pad_line_into(&mut buf, &title, util::HOR_LINE, util::TOP_RIGHT, longest);
+    ui::pad_line_into(&mut buf, &title, ui::HOR_LINE, ui::TOP_RIGHT, longest);
     buf.push('\n');
 
     for line in &content_lines {
-      let row = format!("{} {}", util::VERT_LINE, line);
-      util::pad_line_into(&mut buf, &row, " ", util::VERT_LINE, longest);
+      let row = format!("{} {}", ui::VERT_LINE, line);
+      ui::pad_line_into(&mut buf, &row, " ", ui::VERT_LINE, longest);
       buf.push('\n');
     }
 
@@ -856,16 +859,16 @@ impl MetaTab {
     write!(
       buf,
       "{}{}{}",
-      util::BOT_LEFT,
-      util::HOR_LINE.repeat(longest.saturating_sub(2)),
-      util::BOT_RIGHT
+      ui::BOT_LEFT,
+      ui::HOR_LINE.repeat(longest.saturating_sub(2)),
+      ui::BOT_RIGHT
     )
     .unwrap();
 
     Some(buf)
   }
   pub fn set_pending_widget_keys(&mut self, keys: &str) {
-    let exp = expand_keymap(keys);
+    let exp = alias::expand_keymap(keys);
     self.pending_widget_keys = exp;
   }
   pub fn get_regex(&mut self, pat: &str) -> Result<Rc<Regex>, String> {
@@ -923,7 +926,7 @@ impl MetaTab {
     let mut files = vec![];
     if let Ok(entries) = Path::new(&cwd).read_dir() {
       for entry in entries.flatten() {
-        let is_exec = util::is_executable_file(&entry);
+        let is_exec = paths::is_executable_file(&entry);
 
         if is_exec && let Some(name) = entry.file_name().to_str() {
           let util = Utility::file(name.into(), entry.path());
@@ -1055,13 +1058,13 @@ impl MetaTab {
   pub fn get_cmds_in_path() -> Vec<Rc<Utility>> {
     let path = var!("PATH");
     let path = path.to_str_lossy();
-    let paths = util::path_list_entries(&path);
+    let paths = paths::path_list_entries(&path);
 
     let mut seen = crate::HashSet::default();
     let mut cmds = vec![];
 
     for entry in paths {
-      let is_exec = util::is_executable_file(&entry);
+      let is_exec = paths::is_executable_file(&entry);
 
       if is_exec
         && let Some(name) = entry.file_name().to_str()
@@ -1327,7 +1330,7 @@ mod cmd_timer_tests {
 
 #[cfg(test)]
 mod pattern_tests {
-  use crate::expand::{GlobOpts, Pattern};
+  use crate::expand::glob::{GlobOpts, Pattern};
 
   fn matches(pat: &str, text: &str) -> bool {
     Pattern::compile(pat.as_bytes(), GlobOpts::new()).is_match(text.as_bytes())

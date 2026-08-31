@@ -11,23 +11,25 @@ use nix::{
   unistd::{self, read},
 };
 
-use crate::{builtin::quote, match_loop, state::vars::VarStr, varstr};
-
-use super::{
-  super::state::terminal::Terminal,
-  Shed,
+use crate::{
+  builtin::quote,
   eval::lex::Span,
-  expand::expand_keymap,
-  opt::OptSpec,
-  out, procio,
-  procio::stdin_fileno,
-  sherr, signal,
+  expand::alias,
+  match_loop, out, procio, sherr, signal,
   state::{
-    self,
-    vars::{VarFlags, VarKind},
+    self, Shed, params,
+    terminal::Terminal,
+    vars::{VarFlags, VarKind, VarStr},
   },
-  util::{ShErrKind, ShResult, ShResultExt, with_status},
+  util::{
+    self,
+    error::{ShErrKind, ShResult, ShResultExt},
+    ui,
+  },
+  varstr,
 };
+
+use super::opt::OptSpec;
 
 const CHUNK_SIZE: usize = 4096; // 4kb
 
@@ -42,7 +44,7 @@ fn stdin_has_data() -> bool {
     return has;
   }
   let mut nbytes: nix::libc::c_int = 0;
-  unsafe { fionread(stdin_fileno().as_raw_fd(), &raw mut nbytes) }.is_ok() && nbytes > 0
+  unsafe { fionread(procio::stdin_fileno().as_raw_fd(), &raw mut nbytes) }.is_ok() && nbytes > 0
 }
 
 bitflags! {
@@ -121,20 +123,22 @@ impl super::Builtin for Read {
     // `read -t 0` polls without consuming or assigning: status 0 if input is
     // available on stdin right now, non-zero otherwise (matches bash).
     if timeout == Some(0) {
-      return with_status(i32::from(!stdin_has_data()));
+      return util::with_status(i32::from(!stdin_has_data()));
     }
 
     if let Some(p) = prompt {
       out!("{p}");
     }
 
-    let _guard = unistd::isatty(stdin_fileno()).unwrap_or(false).then(|| {
-      if flags.contains(ReadFlags::NO_ECHO) {
-        Shed::term_mut(Terminal::cooked_no_echo_guard)
-      } else {
-        Shed::term_mut(Terminal::cooked_mode_guard)
-      }
-    });
+    let _guard = unistd::isatty(procio::stdin_fileno())
+      .unwrap_or(false)
+      .then(|| {
+        if flags.contains(ReadFlags::NO_ECHO) {
+          Shed::term_mut(Terminal::cooked_no_echo_guard)
+        } else {
+          Shed::term_mut(Terminal::cooked_mode_guard)
+        }
+      });
 
     let input = do_read(
       delim,
@@ -165,7 +169,7 @@ fn do_read(
   timeout: Option<i32>,
   max_bytes: Option<usize>,
 ) -> ShResult<Vec<u8>> {
-  let fd = stdin_fileno();
+  let fd = procio::stdin_fileno();
 
   if !procio::has_in_sink()
     && timeout.is_none()
@@ -473,7 +477,7 @@ fn glue_zero_width(fields: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
   let mut pending: Vec<u8> = Vec::new();
 
   for field in fields {
-    if !field.is_empty() && state::terminal::calc_str_width(&String::from_utf8_lossy(&field)) == 0 {
+    if !field.is_empty() && ui::calc_str_width(&String::from_utf8_lossy(&field)) == 0 {
       pending.extend_from_slice(&field);
     } else if pending.is_empty() {
       out.push(field);
@@ -503,7 +507,7 @@ fn field_split_vars(input: &[u8], vars: &[(VarStr, Span)]) -> ShResult<()> {
     return Ok(());
   }
 
-  let sep = state::util::get_separators();
+  let sep = params::get_separators();
   let fields = ifs_split(input, sep.as_bytes(), Some(vars.len()));
 
   for (i, (name, _)) in vars.iter().enumerate() {
@@ -525,7 +529,7 @@ fn field_split_arr(input: &[u8], arr_name: &str) -> ShResult<()> {
     return Err(sherr!(ExecFail, "read: Array name cannot be empty"));
   }
 
-  let sep = state::util::get_separators();
+  let sep = params::get_separators();
   let fields = glue_zero_width(ifs_split(input, sep.as_bytes(), None));
 
   Shed::vars_mut(|v| {
@@ -612,7 +616,7 @@ impl super::Builtin for ReadKey {
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if !Shed::term(Terminal::isatty) {
-      return with_status(1);
+      return util::with_status(1);
     }
     let mut whitelist = None;
     let mut blacklist = None;
@@ -639,15 +643,15 @@ impl super::Builtin for ReadKey {
       let _raw = Shed::term_mut(Terminal::raw_mode_guard);
       if let Err(e) = Shed::term_mut(Terminal::read) {
         match e.kind() {
-          ShErrKind::LoopBreak(_) => return with_status(1),
-          ShErrKind::LoopContinue(_) => return with_status(0),
+          ShErrKind::LoopBreak(_) => return util::with_status(1),
+          ShErrKind::LoopContinue(_) => return util::with_status(0),
           _ => return Err(e).promote_err(args.span()),
         }
       }
 
       let mut keys = Shed::term_mut(Terminal::drain_keys);
       if keys.is_empty() {
-        return with_status(1);
+        return util::with_status(1);
       }
 
       keys.remove(0)
@@ -656,15 +660,15 @@ impl super::Builtin for ReadKey {
     let vim_seq = key.as_vim_seq();
 
     if let Some(wl) = whitelist {
-      let allowed = expand_keymap(wl);
+      let allowed = alias::expand_keymap(wl);
       if !allowed.contains(&key) {
-        return with_status(1);
+        return util::with_status(1);
       }
     }
     if let Some(bl) = blacklist {
-      let disallowed = expand_keymap(bl);
+      let disallowed = alias::expand_keymap(bl);
       if disallowed.contains(&key) {
-        return with_status(1);
+        return util::with_status(1);
       }
     }
 
@@ -674,7 +678,7 @@ impl super::Builtin for ReadKey {
       out!("{vim_seq}");
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

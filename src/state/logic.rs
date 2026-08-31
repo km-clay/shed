@@ -3,9 +3,9 @@ use nix::sys::signal::Signal;
 use std::fmt::{self, Display};
 use std::rc::Rc;
 
-use crate::util::error::LabelBuilder;
+use crate::util::error::{LabelBuilder, ShResult};
 use crate::{
-  HashMap, ShResult,
+  HashMap,
   autoload::{self, AutoloadSrc, Autoloader},
   eval::parse::ast::Ast,
   sherr,
@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
   eval::lex::Span,
-  expand::shell_quote,
+  expand::escape,
   keys::{KeyEvent, KeyMap, KeyMapFlags, KeyMapMatch},
   signal::parse_signal,
 };
@@ -219,7 +219,7 @@ impl AutoCmd {
 impl Display for AutoCmd {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let kind = self.kind.to_string();
-    let command = shell_quote(&self.command.to_str_lossy());
+    let command = escape::shell_quote(&self.command.to_str_lossy());
     write!(f, "autocmd {kind} {command}")
   }
 }

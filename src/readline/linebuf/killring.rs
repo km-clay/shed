@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 
-use super::{Lines, Pos};
+use crate::util::pos::Pos;
+
+use super::Lines;
 
 pub const MAX_KILL_RING: usize = 60;
 

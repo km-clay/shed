@@ -27,15 +27,18 @@ use nix::{
   unistd::{ForkResult, Pid},
 };
 
+use super::opt::{Opt, OptSpec};
 use crate::{
-  ShErrKind, ShResult, Shed,
-  builtin::{
-    join_raw_args,
-    opt::{Opt, OptSpec},
-  },
   eval, lifecycle, procio, sherr, shopt, signal,
-  state::vars::{VarFlags, VarKind, VarStr},
-  util::{ShErr, ShResultExt, VarStrDisplay, with_status},
+  state::{
+    Shed,
+    vars::{VarFlags, VarKind, VarStr},
+  },
+  util::{
+    self,
+    error::{ShErr, ShErrKind, ShResult, ShResultExt},
+    strops::VarStrDisplay,
+  },
   varstr,
 };
 
@@ -368,7 +371,7 @@ fn install_socket_fd(
     _ => {}
   }
 
-  with_status(0)
+  util::with_status(0)
 }
 
 pub(super) struct Accept;
@@ -449,7 +452,7 @@ impl Accept {
     match unsafe { nix::unistd::fork()? } {
       ForkResult::Parent { child: _ } => {
         nix::unistd::close(conn).ok();
-        with_status(0)
+        util::with_status(0)
       }
       ForkResult::Child => {
         lifecycle::setup_child();
@@ -561,7 +564,7 @@ impl super::Builtin for Sock {
     } = SockOpts::from_opts(&opts).promote_err(args.cmd_span())?;
 
     if oneshot {
-      let (mut message, _) = join_raw_args(arg_vec);
+      let (mut message, _) = super::join_raw_args(arg_vec);
       if message.is_empty()
         && let Some(input) = self.get_input(&mut args)
       {
@@ -581,7 +584,7 @@ impl super::Builtin for Sock {
       // stream response to our stdout
       procio::stream_to_sink(stream.as_fd()).promote_err(args.cmd_span())?;
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     if arg_vec.len() > 1 {

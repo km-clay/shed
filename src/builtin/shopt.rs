@@ -1,12 +1,14 @@
-use crate::{state::vars::VarStr, varstr};
-
-use super::{
-  super::state::shopt::ShOpts,
-  Shed,
-  opt::OptSpec,
+use crate::{
   outln, sherr,
-  util::{ShResult, ShResultExt, with_status},
+  state::{Shed, shopt::ShOpts, vars::VarStr},
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+  },
+  varstr,
 };
+
+use super::opt::OptSpec;
 
 /// List of deprecated shopt names, in case we need an entire list at some point.
 /// Can't hurt to have.
@@ -27,7 +29,7 @@ impl super::Builtin for Shopt {
 
       outln!("{}", prefix_sourceable(&output));
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     for (mut arg, span) in arg_vec {
@@ -67,7 +69,7 @@ impl super::Builtin for Shopt {
       }
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

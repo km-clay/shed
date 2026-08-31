@@ -1,22 +1,41 @@
-use crate::{
-  autocmd, builtin,
-  eval::parse::{
+use super::{
+  lex::{KEYWORDS, Span, Tk, TkFlags},
+  parse::{
     ast::{Ast, NodeId},
-    node::node_has_only_builtins,
+    node,
   },
-  expand, lifecycle,
-  procio::{OutputSink, SinkScope, StdinScope},
-  shopt_mut, signal, socket,
+};
+use crate::{
+  autocmd, builtin, defer, errln,
+  eval::parse::{
+    AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node,
+    ParsedSrc,
+  },
+  expand::{alias, arithmetic, case, escape},
+  lifecycle,
+  procio::{
+    self, OutputSink, PipeGenerator, RedirGuard, RedirResult, RedirSet, SinkScope, StdinScope,
+  },
+  sherr, shopt, shopt_mut, signal, socket,
   state::{
-    Shed, shopt,
-    vars::{DeferredAst, VarStr, VarStrSliceExt},
+    Shed, cmd,
+    jobs::{ChildProc, JobStack, dispatch_job},
+    logic::{ShFunc, TrapTarget},
+    meta::{CmdTimer, MetaTab},
+    params, shopt,
+    terminal::Terminal,
+    vars::{DeferredAst, ShellParam, Var, VarFlags, VarKind, VarKindTag, VarStr, VarStrSliceExt},
   },
+  try_var,
   util::{
     self,
-    error::{LabelBuilder, LabelMsg},
+    error::{LabelBuilder, LabelMsg, ShErr, ShErrKind, ShResult, ShResultExt},
+    guards, posix,
   },
-  varstr,
+  var, varstr,
 };
+use builtin::{BUILTIN_NAMES, lookup_builtin};
+
 use bstr::ByteSlice;
 use std::{
   collections::{HashSet, VecDeque},
@@ -27,10 +46,6 @@ use std::{
   string::ToString,
 };
 
-use crate::state::util::with_vars;
-use crate::util::posix_extension::execvpe;
-
-use crate::defer;
 use itertools::Itertools;
 use nix::{
   errno::Errno,
@@ -38,30 +53,6 @@ use nix::{
 };
 use shed_macros::styled_format;
 use unicode_segmentation::UnicodeSegmentation;
-
-use super::{
-  super::state::{meta::MetaTab, terminal::Terminal},
-  AssignKind, CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdFlags, NdRule, Node,
-  ParsedSrc,
-  builtin::{BUILTIN_NAMES, lookup_builtin},
-  errln,
-  expand::{expand_aliases, expand_arithmetic, expand_arithmetic_wrapped, expand_case_pattern},
-  jobs::{ChildProc, JobStack, dispatch_job},
-  lex::{KEYWORDS, Span, Tk, TkFlags},
-  procio::{self, PipeGenerator, RedirGuard, RedirResult, RedirSet},
-  sherr, shopt,
-  signal::{check_signals, signals_pending},
-  state::{
-    self,
-    logic::{ShFunc, TrapTarget},
-    meta::CmdTimer,
-    shopt::{xtrace_line, xtrace_print},
-    vars::{ShellParam, Var, VarFlags, VarKind, VarKindTag},
-  },
-  try_var,
-  util::{ShErr, ShErrKind, ShResult, ShResultExt, with_status},
-  var,
-};
 
 /// Run a closure, catching and handling `ShErrKind::CleanExit(code)` if it is returned.
 pub fn catch_exit<F: FnMut() -> ShResult<()>, E: FnMut(i32)>(mut f: F, mut on_exit: E) {
@@ -174,7 +165,7 @@ fn commit_underscore() {
 /// prior state on drop so nested pipelines compose.
 fn suppress_underscore_guard() -> impl Drop {
   let prev = SUPPRESS_UNDERSCORE.with(|s| s.replace(true));
-  crate::util::guard((), move |()| SUPPRESS_UNDERSCORE.with(|s| s.set(prev)))
+  guards::guard((), move |()| SUPPRESS_UNDERSCORE.with(|s| s.set(prev)))
 }
 
 /// Dispatch commands registered by the `defer` keyword.
@@ -303,7 +294,7 @@ pub fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
     }
   });
 
-  let expanded = expand_aliases(input);
+  let expanded = alias::expand_aliases(input);
   let mut parser = ParsedSrc::new(expanded.into())
     .with_lex_flags(super::lex::LexFlags::empty())
     .with_name(name.clone());
@@ -363,7 +354,7 @@ pub fn exec_input(mut input: VarStr, source_name: Option<VarStr>) -> ShResult<()
   let interactive = Shed::term(Terminal::interactive);
 
   if !interactive || !Shed::shopts(|o| o.prompt.expand_aliases) {
-    input = expand_aliases(&input.to_str_lossy()).into();
+    input = alias::expand_aliases(&input.to_str_lossy()).into();
   }
   let lex_flags = if interactive {
     super::lex::LexFlags::INTERACTIVE
@@ -418,11 +409,11 @@ impl Dispatcher {
     stacker::maybe_grow(64 * 1024, 1024 * 1024, || {
       let _guard = Shed::meta_mut(MetaTab::push_procsub_frame);
 
-      while signals_pending() {
+      while signal::signals_pending() {
         // If we have received SIGINT,
         // this will stop the execution here
         // and propagate back to the functions in main.rs
-        check_signals()?;
+        signal::check_signals()?;
       }
 
       // set -n
@@ -664,7 +655,7 @@ impl Dispatcher {
     let NdRule::Arithmetic { body } = &tree[arith].class else {
       unreachable!()
     };
-    let result = expand_arithmetic_wrapped(tree[*body].as_bytes())?;
+    let result = arithmetic::expand_arithmetic_wrapped(tree[*body].as_bytes())?;
     let val: f64 = result.to_str_lossy().parse().unwrap_or(0.0);
     Shed::set_status_from_bool(val != 0.0);
     Ok(())
@@ -791,7 +782,7 @@ impl Dispatcher {
 
     // Prefix assignments on a function call (`X=2 f`) are temporary: snapshot
     // the prior values first so they revert on return
-    let _var_guard = util::prefix_assign_guard(tree, &tree[*assignments]);
+    let _var_guard = guards::prefix_assign_guard(tree, &tree[*assignments]);
     Self::set_assignments(tree, &tree[*assignments], AssignBehavior::Export)?;
 
     let redirs = RedirSet::from(&tree[func.redirs]);
@@ -807,7 +798,7 @@ impl Dispatcher {
     let argv = prepare_argv(&tree[*argv]).try_blame(blame.clone())?;
 
     if !func.flags.contains(NdFlags::NO_TRACE) {
-      xtrace_print(&argv);
+      shopt::xtrace_print(&argv);
     }
 
     defer! {
@@ -820,7 +811,7 @@ impl Dispatcher {
       }
     }
 
-    let _guard = util::function_scope_guard(Some(argv));
+    let _guard = guards::function_scope_guard(Some(argv));
     let _func_guard = Shed::meta_mut(MetaTab::enter_func);
 
     // getopts OPTIND variable
@@ -909,7 +900,7 @@ impl Dispatcher {
 
     let _timer = self.take_timer();
     let brc_grp_logic = |s: &mut Self, tree: &Ast| -> ShResult<()> {
-      let _guard = util::shared_scope_guard();
+      let _guard = guards::shared_scope_guard();
       s.dispatch_node(tree, *body)?;
 
       Ok(())
@@ -965,17 +956,17 @@ impl Dispatcher {
         let CaseNode { patterns, body } = &tree[block];
 
         for pattern in patterns {
-          let pattern_exp = expand_case_pattern(pattern.span.as_bytes())?;
+          let pattern_exp = case::expand_case_pattern(pattern.span.as_bytes())?;
           if pattern_exp.is_empty() {
             if pattern_raw.is_empty() {
-              let _guard = util::shared_scope_guard();
+              let _guard = guards::shared_scope_guard();
               s.dispatch_node(tree, *body)?;
               break 'outer;
             }
           } else {
             let pattern = Shed::meta_mut(|m| m.get_glob(pattern_exp.as_bytes()));
             if pattern.is_match(pattern_raw.as_bytes()) {
-              let _guard = util::shared_scope_guard();
+              let _guard = guards::shared_scope_guard();
               s.dispatch_node(tree, *body)?;
               break 'outer;
             }
@@ -1006,7 +997,7 @@ impl Dispatcher {
       'outer: loop {
         {
           // condition scope
-          let _guard = util::shared_scope_guard();
+          let _guard = guards::shared_scope_guard();
           if let Err(mut e) = s.dispatch_node(tree, cond) {
             match e.kind_mut() {
               ShErrKind::LoopBreak(count) => {
@@ -1037,7 +1028,7 @@ impl Dispatcher {
 
         {
           // body scope
-          let _guard = util::shared_scope_guard();
+          let _guard = guards::shared_scope_guard();
           if !keep_going(*kind, status) {
             Shed::set_status(last_body_status);
             break;
@@ -1101,7 +1092,7 @@ impl Dispatcher {
             break;
           }
         }
-        let _guard = util::shared_scope_guard();
+        let _guard = guards::shared_scope_guard();
 
         if let Err(mut e) = s.dispatch_node(tree, *body) {
           match e.kind_mut() {
@@ -1186,7 +1177,7 @@ impl Dispatcher {
           })?;
         }
 
-        let _guard = util::shared_scope_guard();
+        let _guard = guards::shared_scope_guard();
 
         if let Err(mut e) = s.dispatch_node(tree, *body) {
           match e.kind_mut() {
@@ -1232,7 +1223,7 @@ impl Dispatcher {
 
         {
           // condition scope
-          let _guard = util::shared_scope_guard();
+          let _guard = guards::shared_scope_guard();
           if let Err(e) = s.dispatch_node(tree, *cond) {
             Shed::set_status(1);
             return Err(e);
@@ -1242,14 +1233,14 @@ impl Dispatcher {
         {
           // body scope
           if Shed::get_status() == 0 {
-            let _guard = util::shared_scope_guard();
+            let _guard = guards::shared_scope_guard();
             return s.dispatch_node(tree, *body);
           }
         }
       }
 
       if let Some(body) = else_block {
-        let _guard = util::shared_scope_guard();
+        let _guard = guards::shared_scope_guard();
         s.dispatch_node(tree, *body)?;
       } else {
         Shed::set_status(0);
@@ -1359,7 +1350,7 @@ impl Dispatcher {
         let builtin_tail = match cmds
           .iter_mut()
           .rev()
-          .position(|n| !node_has_only_builtins(tree, *n))
+          .position(|n| !node::node_has_only_builtins(tree, *n))
         {
           Some(pos) => num_cmds - pos,
           None => 0,
@@ -1541,7 +1532,7 @@ impl Dispatcher {
 
       let result = match &tree[*cmd].class {
         NdRule::Subshell { body } => {
-          let _ceiling = util::isolation_guard(None);
+          let _ceiling = guards::isolation_guard(None);
 
           match self.dispatch_node(tree, *body) {
             Err(e) => {
@@ -1583,7 +1574,7 @@ impl Dispatcher {
     let Some(builtin) = lookup_builtin(cmd_name) else {
       sherr!(NotFound @ tree.span_for(cmd_id), "builtin not found: {}", cmd_name.to_str_lossy())
         .print_error();
-      return with_status(127);
+      return util::with_status(127);
     };
 
     if fork_builtins {
@@ -1660,7 +1651,7 @@ impl Dispatcher {
     // argv is not empty. let's set this stuff here.
     let cmd_tk = &tree[argv.get(0)];
     let cmd_name = &cmd_tk.to_str_lossy();
-    let exec_path = state::util::lookup_cmd(cmd_name);
+    let exec_path = cmd::lookup_cmd(cmd_name);
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
 
@@ -1689,7 +1680,7 @@ impl Dispatcher {
     // Resolve prefix assignments in the parent. We set them in the child later.
     if !assignments.is_empty() {
       let assignments = &tree[*assignments];
-      let _guard = util::prefix_assign_guard(tree, assignments);
+      let _guard = guards::prefix_assign_guard(tree, assignments);
       if let Err(e) = Self::set_assignments(tree, assignments, assign_behavior) {
         Shed::set_status(1);
         e.print_error();
@@ -1701,7 +1692,7 @@ impl Dispatcher {
         if let NdRule::Assignment { var, .. } = &a.class {
           let raw = tree[*var].span.as_bytes();
           let name: VarStr =
-            state::util::parse_arr_bracket(raw).map_or_else(|| raw.into(), |(base, _)| base);
+            params::parse_arr_bracket(raw).map_or_else(|| raw.into(), |(base, _)| base);
 
           if names.insert(name.clone()) {
             let Some(var) = Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy())) else {
@@ -1714,7 +1705,7 @@ impl Dispatcher {
     }
 
     if !cmd.flags.contains(NdFlags::NO_TRACE) {
-      xtrace_print(&expanded);
+      shopt::xtrace_print(&expanded);
     }
 
     let child_logic = |pgid: Option<Pid>| -> ! {
@@ -1749,7 +1740,7 @@ impl Dispatcher {
         execve(&c_path, &exec_args.argv, &envp)
       } else {
         log::warn!("command not found in cache: {cmd_raw}");
-        execvpe(cmd, &exec_args.argv, &exec_args.envp)
+        posix::execvpe(cmd, &exec_args.argv, &exec_args.envp)
       };
 
       // execvpe only returns on error
@@ -1768,7 +1759,7 @@ impl Dispatcher {
       };
       match e {
         Errno::ENOENT => {
-          let suggestions = state::util::check_typo(cmd.as_bytes());
+          let suggestions = cmd::check_typo(cmd.as_bytes());
           let note = match suggestions.as_slice() {
             [] => None,
             [one] => Some(varstr!("did you mean '{one}'?")),
@@ -1787,7 +1778,7 @@ impl Dispatcher {
 
           print_error(err);
 
-          with_vars([("CMD".into(), cmd.to_str().unwrap_or_default())], || {
+          params::with_vars([("CMD".into(), cmd.to_str().unwrap_or_default())], || {
             autocmd!(OnCommandNotFound);
           });
 
@@ -1926,7 +1917,7 @@ impl Dispatcher {
         VarKind::arr_from_tk(&tree[*val])?
       } else if is_integer {
         let raw = tree[*val].expand_no_split()?;
-        let n = expand_arithmetic(raw.as_bytes())
+        let n = arithmetic::expand_arithmetic(raw.as_bytes())
           .ok()
           .and_then(|s| s.to_str_lossy().parse::<i32>().ok())
           .unwrap_or(0);
@@ -1936,9 +1927,9 @@ impl Dispatcher {
       };
 
       // Parse and expand array index BEFORE entering write_vars borrow
-      let indexed = state::util::parse_arr_bracket(var_name.as_bytes())
+      let indexed = params::parse_arr_bracket(var_name.as_bytes())
         .map(|(name, idx_raw)| {
-          state::util::expand_arr_index(idx_raw.as_bytes(), true).map(|idx| (name, idx))
+          params::expand_arr_index(idx_raw.as_bytes(), true).map(|idx| (name, idx))
         })
         .transpose()?;
 
@@ -1967,13 +1958,13 @@ impl Dispatcher {
           VarKind::Arr(items) => {
             let items = items
               .iter()
-              .map(|i| expand::xtrace_quote(&i.to_str_lossy()))
+              .map(|i| escape::xtrace_quote(&i.to_str_lossy()))
               .join(" ");
             format!("({items})")
           }
-          other => expand::xtrace_quote(&other.to_string()),
+          other => escape::xtrace_quote(&other.to_string()),
         };
-        xtrace_line(&format!("{var_name}{op}{rhs}"));
+        shopt::xtrace_line(&format!("{var_name}{op}{rhs}"));
       }
 
       match kind {

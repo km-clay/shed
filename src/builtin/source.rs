@@ -1,11 +1,10 @@
 use std::path::PathBuf;
 
 use crate::{
-  ShErrKind, Shed,
-  state::{meta::MetaTab, vars::VarStr},
+  sherr,
+  state::{Shed, meta::MetaTab, rc, vars::VarStr},
+  util::error::{ShErrKind, ShResult},
 };
-
-use super::{ShResult, sherr, state::util::source_file};
 
 pub(super) struct Source;
 impl super::Builtin for Source {
@@ -19,7 +18,7 @@ impl super::Builtin for Source {
 
     let Some((file, span)) = arg_iter.next() else {
       return Err(sherr!(
-        ExecFail @ args.span,
+        ExecFail @ args.span(),
         "source: filename argument required",
       ));
     };
@@ -55,7 +54,7 @@ impl super::Builtin for Source {
     // source adds an xtrace layer
     let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
 
-    let result = source_file(path);
+    let result = rc::source_file(path);
 
     if let Some(saved) = saved_argv {
       Shed::vars_mut(|v| {

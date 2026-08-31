@@ -618,31 +618,28 @@ fn cycle_wraps_backward() {
 }
 
 // ===================== Completion escaping =====================
+use crate::expand::escape::escape_str;
 
 #[test]
 fn escape_str_special_chars() {
-  use crate::expand::escape_str;
   let escaped = escape_str("hello world");
   assert_eq!(escaped, "hello\\ world");
 }
 
 #[test]
 fn escape_str_multiple_specials() {
-  use crate::expand::escape_str;
   let escaped = escape_str("a&b|c");
   assert_eq!(escaped, "a\\&b\\|c");
 }
 
 #[test]
 fn escape_str_no_specials() {
-  use crate::expand::escape_str;
   let escaped = escape_str("hello");
   assert_eq!(escaped, "hello");
 }
 
 #[test]
 fn escape_str_all_shell_metacharacters() {
-  use crate::expand::escape_str;
   for ch in [
     '\'', '"', '\\', '|', '&', ';', '(', ')', '<', '>', '$', '*', '!', '`', '{', '?', '[', '#',
     ' ', '\t', '\n',
@@ -656,7 +653,6 @@ fn escape_str_all_shell_metacharacters() {
 
 #[test]
 fn escape_str_kitchen_sink() {
-  use crate::expand::escape_str;
   let input = "f$le (with) 'spaces' & {braces} | pipes; #hash ~tilde `backtick` !bang";
   let escaped = escape_str(input);
   assert_eq!(
@@ -798,7 +794,7 @@ fn tab_does_not_escape_user_text() {
 /// Run the dispatcher against a literal source string and cursor position.
 /// Returns (strategy, replacement-span as a (start, end) tuple).
 fn dispatch(input: &str, cursor: usize) -> (CompStrat, (usize, usize)) {
-  let tks = get_context_tokens(input);
+  let tks = context::get_context_tokens(input);
   let (strat, span, _cursor_pos) = CompStrat::resolve(&tks, cursor);
   (strat, (span.range().start, span.range().end))
 }
@@ -1046,7 +1042,7 @@ fn dispatch_argument_carries_full_path() {
 // they contain spaces, quotes, $, ;, etc. These tests exercise the same
 // formatting path that exec_comp_func uses.
 
-use crate::expand::shell_quote;
+use crate::expand::escape::shell_quote;
 use crate::tests::testutil::test_input;
 
 fn run_comp_func_with_args(cmd: &str, cword: &str, pword: &str) -> (String, String, String) {

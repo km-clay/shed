@@ -1,13 +1,10 @@
-use super::{
-  ShResult,
-  opt::OptSpec,
+use crate::{
   outln,
-  state::{
-    shopt::ShoptSource,
-    util::{GenRcConfig, compose_rc},
-  },
-  util::with_status,
+  state::{rc, shopt::ShoptSource},
+  util::{self, error::ShResult},
 };
+
+use super::opt::OptSpec;
 
 /// `genrc` — print an rc file built from the current shell state to
 /// stdout. Used to (re)generate `~/.shedrc` after a shopt rename, or to
@@ -33,7 +30,7 @@ impl super::Builtin for GenRc {
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let mut config = GenRcConfig::default();
+    let mut config = rc::GenRcConfig::default();
     let mut use_defaults = false;
     let mut no_comments = false;
 
@@ -95,10 +92,10 @@ impl super::Builtin for GenRc {
       config.include_comments = false;
     }
 
-    for line in compose_rc(&config) {
+    for line in rc::compose_rc(&config) {
       outln!("{}", line);
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }

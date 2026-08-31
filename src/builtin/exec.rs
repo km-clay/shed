@@ -1,12 +1,10 @@
-use crate::state::{Shed, terminal::Terminal};
-use crate::util::posix_extension::execvpe;
-use nix::errno::Errno;
-
-use super::{
+use crate::{
   eval::execute::ExecArgs,
   sherr,
-  util::{ShResult, with_status},
+  state::{Shed, terminal::Terminal},
+  util::{self, error::ShResult, posix},
 };
+use nix::errno::Errno;
 
 pub(super) struct Exec;
 impl super::Builtin for Exec {
@@ -20,7 +18,7 @@ impl super::Builtin for Exec {
 
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     if args.no_arguments() {
-      return with_status(0);
+      return util::with_status(0);
     }
 
     let (arg_vec, _) = args.take_argv();
@@ -32,7 +30,7 @@ impl super::Builtin for Exec {
 
     let _term_guard = Shed::term_mut(Terminal::prepare_for_exec);
 
-    let Err(e) = execvpe(cmd, &args.argv, &args.envp);
+    let Err(e) = posix::execvpe(cmd, &args.argv, &args.envp);
 
     // execvpe only returns on error
     let cmd_str = cmd.to_str().unwrap().to_string();

@@ -4,11 +4,14 @@ use bitflags::bitflags;
 use bstr::ByteSlice;
 
 use crate::{
-  ShResult, expand, match_loop,
-  procio::out_bytes,
-  sherr,
+  expand::escape,
+  match_loop, procio, sherr,
   state::vars::VarStr,
-  util::{self, ByteCursor, SliceCursor, with_status},
+  util::{
+    self,
+    error::ShResult,
+    strops::{ByteCursor, SliceCursor},
+  },
 };
 
 bitflags! {
@@ -61,7 +64,7 @@ impl PrintFormatter {
     match_loop!(cur.next_byte() => b, {
       b'%' => {
         if !literal.is_empty() {
-          segments.push(Segment::Literal(expand::expand_ansi_c(&literal)));
+          segments.push(Segment::Literal(escape::expand_ansi_c(&literal)));
           literal.clear();
         }
 
@@ -72,7 +75,7 @@ impl PrintFormatter {
     });
 
     if !literal.is_empty() {
-      segments.push(Segment::Literal(expand::expand_ansi_c(&literal)));
+      segments.push(Segment::Literal(escape::expand_ansi_c(&literal)));
     }
 
     Ok(Self(segments.into_boxed_slice()))
@@ -475,7 +478,7 @@ impl FmtSpec {
     prec: Option<usize>,
   ) -> ShResult<Vec<u8>> {
     let s = args.next().unwrap_or_default();
-    let expanded = expand::expand_ansi_c(&s);
+    let expanded = escape::expand_ansi_c(&s);
     let truncated = match prec {
       Some(p) => expanded.into_iter().take(p).collect::<Vec<u8>>(),
       None => expanded,
@@ -489,7 +492,7 @@ impl FmtSpec {
     width: Option<usize>,
   ) -> ShResult<Vec<u8>> {
     let s = args.next().unwrap_or_default();
-    let quoted = crate::expand::shell_quote(&String::from_utf8_lossy(&s));
+    let quoted = escape::shell_quote(&String::from_utf8_lossy(&s));
     Ok(pad_to_width(quoted.as_bytes(), b"", flags, width, false))
   }
 
@@ -794,7 +797,7 @@ impl super::Builtin for Printf {
     // (options end there), so a `--` at or after the format stays literal data.
     true
   }
-  fn execute(&self, mut args: super::BuiltinArgs) -> crate::ShResult<()> {
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let (arg_vec, _) = args.take_argv();
 
     let mut arg_iter = arg_vec.into_iter();
@@ -825,7 +828,7 @@ impl super::Builtin for Printf {
       loop {
         let before = values.len();
         let rendered = formatter.apply_once(&mut values)?;
-        out_bytes(&rendered.text);
+        procio::out_bytes(&rendered.text);
         had_error |= emit_printf_errors(&rendered.errors);
         if values.peek().is_none() || values.len() == before {
           break;
@@ -834,11 +837,11 @@ impl super::Builtin for Printf {
     } else {
       // No specs: emit format once, ignore extra args.
       let rendered = formatter.apply_once(&mut values)?;
-      out_bytes(&rendered.text);
+      procio::out_bytes(&rendered.text);
       had_error |= emit_printf_errors(&rendered.errors);
     }
 
-    with_status(i32::from(had_error))
+    util::with_status(i32::from(had_error))
   }
 }
 

@@ -4,25 +4,22 @@ use bstr::ByteSlice;
 use tempfile::NamedTempFile;
 
 use crate::{
-  eval::parse::ast::{Ast, NodeId},
-  state::vars::VarStr,
-  varstr,
-};
-
-use super::{
-  super::state::meta::MetaTab,
-  Shed,
   eval::{
-    NdRule,
-    execute::{Dispatcher, exec_input},
+    execute::{self, Dispatcher},
     lex::{Span, Tk},
+    parse::NdRule,
+    parse::ast::{Ast, NodeId},
   },
   match_loop,
   readline::{HistEntry, History},
   sherr,
-  state::{self},
+  state::{self, Shed, db, meta::MetaTab, vars::VarStr},
   try_var,
-  util::{ShResult, ShResultExt, ordered},
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+  },
+  varstr,
 };
 
 use bitflags::bitflags;
@@ -173,7 +170,7 @@ impl super::Builtin for FixCmd {
 
     let (_argv, opts) = parse_fc_args(&tree[*argv]).promote_err(span.clone())?;
 
-    let conn = state::util::get_db_conn()
+    let conn = db::get_db_conn()
       .ok_or_else(|| sherr!(InternalErr, "database not available"))
       .promote_err(span.clone())?;
     let hist = History::new(conn, "shed_history").promote_err(span.clone())?;
@@ -228,7 +225,7 @@ fn fc_edit(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
 
     let editor_cmd = varstr!("{editor} {}", tmp.path().display());
 
-    exec_input(editor_cmd, Some("fc edit".into()))?;
+    execute::exec_input(editor_cmd, Some("fc edit".into()))?;
 
     tmp.rewind()?;
     tmp.read_to_string(&mut new_cmd)?;
@@ -236,7 +233,7 @@ fn fc_edit(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
 
     should_push = new_cmd.as_bytes() != old_cmd.as_bytes();
 
-    exec_input(new_cmd.clone().into(), Some("fc re-exec".into()))?;
+    execute::exec_input(new_cmd.clone().into(), Some("fc re-exec".into()))?;
 
     if should_push {
       hist.push(&new_cmd)?;
@@ -269,7 +266,7 @@ fn fc_reexec(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
       }
     }
 
-    exec_input(command.clone().into(), Some("fc re-exec".into()))?;
+    execute::exec_input(command.clone().into(), Some("fc re-exec".into()))?;
     if should_push {
       hist.push(&command)?;
     }
@@ -338,7 +335,7 @@ fn get_entry_range(
   let first_id = resolve(&first.unwrap_or(RangeArg::Number(last_id as i32)))?;
   let last_id = resolve(&last.unwrap_or(RangeArg::Number(first_id as i32)))?;
 
-  let (lo, hi) = ordered(first_id, last_id);
+  let (lo, hi) = util::ordered(first_id, last_id);
 
   let mut entries = hist.query_range(lo, hi)?;
   if reverse || first_id > last_id {
@@ -584,8 +581,9 @@ mod tests {
 mod fc_edit_tests {
   use super::*;
   use crate::readline::History;
+  use crate::state::db;
   use crate::state::{
-    self, Shed,
+    Shed,
     vars::{VarFlags, VarKind},
   };
   use crate::tests::testutil::TestGuard;
@@ -596,7 +594,7 @@ mod fc_edit_tests {
   /// Drop and re-init the history table so each test starts clean (the
   /// in-memory sqlite conn is shared across tests in the thread).
   fn fresh_history() -> History {
-    let conn = state::util::get_db_conn().expect("test db conn");
+    let conn = db::get_db_conn().expect("test db conn");
     let _ = conn
       .lock()
       .unwrap()
@@ -611,7 +609,7 @@ mod fc_edit_tests {
   /// New View over the same DB without dropping data. For asserting on
   /// what's in history after `fc_edit` consumed the previous handle.
   fn hist_view() -> History {
-    let conn = state::util::get_db_conn().unwrap();
+    let conn = db::get_db_conn().unwrap();
     History::new(conn, "shed_history").unwrap()
   }
 
@@ -851,7 +849,7 @@ mod fc_run_builtin_tests {
   use crate::tests::testutil::{TestGuard, test_input};
 
   fn fresh_history() -> History {
-    let conn = state::util::get_db_conn().expect("test db");
+    let conn = state::db::get_db_conn().expect("test db");
     let _ = conn
       .lock()
       .unwrap()
@@ -920,7 +918,7 @@ mod fc_reexec_tests {
   use crate::tests::testutil::{TestGuard, test_input};
 
   fn fresh_history() -> History {
-    let conn = state::util::get_db_conn().expect("test db");
+    let conn = state::db::get_db_conn().expect("test db");
     let _ = conn
       .lock()
       .unwrap()
@@ -933,7 +931,7 @@ mod fc_reexec_tests {
   }
 
   fn hist_view() -> History {
-    let conn = state::util::get_db_conn().unwrap();
+    let conn = state::db::get_db_conn().unwrap();
     History::new(conn, "shed_history").unwrap()
   }
 

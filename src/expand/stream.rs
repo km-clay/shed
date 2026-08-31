@@ -1,7 +1,7 @@
 use bstr::ByteSlice;
 use smallvec::SmallVec;
 
-use crate::{state::vars::VarStr, util::QuoteState};
+use crate::{state::vars::VarStr, util::strops::QuoteState};
 
 /// A stream of bytes and markers.
 ///

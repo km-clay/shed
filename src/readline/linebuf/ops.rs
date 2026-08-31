@@ -3,19 +3,17 @@ use std::fmt::{Display, Write};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 
-use crate::readline::editmode::AddressRange;
-use crate::readline::linebuf::HighlightCache;
-use crate::readline::linebuf::edit::{
-  depth_levels_from_tokens, depth_levels_via_ctx, parse_failed_strict,
+use crate::{
+  eval::lex,
+  procio, sherr, shopt,
+  state::{terminal, vars::VarStr},
+  status_msg, util,
 };
-use crate::state::vars::VarStr;
-use crate::util;
 
-use super::types::Grapheme;
 use super::{
-  CharClass, DEFAULT_VIEWPORT_HEIGHT, Edit, Line, Lines, MotionKind, Pos, SelectMode, ShResult,
-  Shed, editcmd::Motion, eval::lex, highlight, ordered, procio::stdin_fileno, sherr, shopt,
-  state::terminal::get_win_size, status_msg,
+  CharClass, DEFAULT_VIEWPORT_HEIGHT, Edit, HighlightCache, Line, Lines, MotionKind, Pos,
+  SelectMode, ShResult, Shed, edit, editcmd::Motion, editmode::AddressRange, highlight,
+  types::Grapheme,
 };
 
 use super::char_class::{CharClassIter, CharClassIterRev};
@@ -84,19 +82,19 @@ impl super::LineBuf {
       } else if let Some(pre) = height.strip_suffix('%')
         && let Ok(num) = pre.parse::<usize>()
       {
-        if !isatty(stdin_fileno()).unwrap_or_default() {
+        if !isatty(procio::stdin_fileno()).unwrap_or_default() {
           return DEFAULT_VIEWPORT_HEIGHT;
         }
-        let (_, rows) = get_win_size(STDIN_FILENO);
+        let (_, rows) = terminal::get_win_size(STDIN_FILENO);
         (f64::from(rows) * (num as f64 / 100.0)).round() as usize
       } else {
         log::warn!(
           "Invalid viewport height shopt value: '{height}', using 50% of terminal height as default",
         );
-        if !isatty(stdin_fileno()).unwrap_or_default() {
+        if !isatty(procio::stdin_fileno()).unwrap_or_default() {
           return DEFAULT_VIEWPORT_HEIGHT;
         }
-        let (_, rows) = get_win_size(STDIN_FILENO);
+        let (_, rows) = terminal::get_win_size(STDIN_FILENO);
         (f64::from(rows) * 0.5).round() as usize
       }
     });
@@ -895,12 +893,12 @@ impl super::LineBuf {
   pub fn cursor_indent_level(&mut self) -> (usize, bool) {
     let (to_cursor, _) = self.lines.clone().split_lines(self.cursor.pos);
     let raw = to_cursor.join();
-    let depth = depth_levels_via_ctx(&raw)
+    let depth = edit::depth_levels_via_ctx(&raw)
       .last()
       .copied()
       .unwrap_or_default()
       .1;
-    (depth, parse_failed_strict(&raw))
+    (depth, edit::parse_failed_strict(&raw))
   }
   pub fn indent_levels(&mut self) -> &[(usize, usize)] {
     if self.indent_cache.is_none() {
@@ -910,7 +908,7 @@ impl super::LineBuf {
       let levels = self
         .highlight_cache
         .as_ref()
-        .map(|c| depth_levels_from_tokens(&c.tokens, &joined))
+        .map(|c| edit::depth_levels_from_tokens(&c.tokens, &joined))
         .unwrap_or_default();
       self.indent_cache = Some(levels);
     }
@@ -947,7 +945,7 @@ impl super::LineBuf {
         self.lines.drain(*start..=end).collect()
       }
       MotionKind::Block { start, end } => {
-        let (s, e) = ordered(*start, *end);
+        let (s, e) = util::ordered(*start, *end);
         (s.row..=e.row)
           .map(|row| {
             let sc = s.col.min(self.lines[row].len());
@@ -971,7 +969,7 @@ impl super::LineBuf {
     tmp.extract_span(span, inclusive)
   }
   pub(super) fn extract_span(&mut self, span: (Pos, Pos), inclusive: bool) -> Lines {
-    let (s, e) = ordered(span.0, span.1);
+    let (s, e) = util::ordered(span.0, span.1);
     let end = if inclusive {
       Pos {
         row: e.row,
@@ -988,11 +986,11 @@ impl super::LineBuf {
   pub(super) fn move_to_start(&mut self, motion: &MotionKind) {
     match motion {
       MotionKind::Char { start, end, .. } => {
-        let (s, _) = ordered(start, end);
+        let (s, _) = util::ordered(start, end);
         self.set_cursor(*s);
       }
       MotionKind::Line { start, end, .. } => {
-        let (s, _) = ordered(start, end);
+        let (s, _) = util::ordered(start, end);
         self.set_cursor(Pos { row: *s, col: 0 });
       }
       MotionKind::Block { .. } => unimplemented!(),
@@ -1012,7 +1010,7 @@ impl super::LineBuf {
         let Some(e) = self.resolve_line_addr(e)? else {
           return Ok(vec![]);
         };
-        ordered(s, e)
+        util::ordered(s, e)
       }
       Motion::Line(addr) => {
         let Some(line) = self.resolve_line_addr(addr)? else {
@@ -1186,7 +1184,7 @@ impl super::LineBuf {
     out
   }
   pub(super) fn pos_slice_str(&self, s: Pos, e: Pos) -> String {
-    let (s, e) = ordered(s, e);
+    let (s, e) = util::ordered(s, e);
     if s.row == e.row {
       self.lines[s.row].0[s.col..=e.col]
         .iter()
@@ -1558,7 +1556,7 @@ impl super::LineBuf {
     self.cursor.pos.set(row + 1, col);
   }
   pub(super) fn line_iter_mut(&mut self, span: (usize, usize)) -> impl Iterator<Item = &mut Line> {
-    let (start, end) = ordered(span.0, span.1);
+    let (start, end) = util::ordered(span.0, span.1);
     self.lines.iter_mut().take(end + 1).skip(start)
   }
   pub(super) fn line_mut(&mut self, row: usize) -> &mut Line {

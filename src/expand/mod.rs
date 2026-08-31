@@ -1,40 +1,29 @@
-mod alias;
-mod arithmetic;
-mod brace;
-mod escape;
-mod glob;
-pub(super) mod markers;
-mod param;
-mod prompt;
+pub(crate) mod alias;
+pub(crate) mod arithmetic;
+pub(crate) mod brace;
+pub(crate) mod case;
+pub(crate) mod escape;
+pub(crate) mod glob;
+pub(crate) mod markers;
+pub(crate) mod param;
+pub(crate) mod prompt;
 pub(crate) mod stream;
 pub(crate) mod subshell;
-mod util;
-mod var;
+pub(crate) mod var;
 
 use std::{convert::Into, rc::Rc};
 
-pub(super) use alias::{expand_alias_with_pos, expand_aliases, expand_keymap};
-pub(super) use arithmetic::{expand_arithmetic, expand_arithmetic_wrapped};
-pub(super) use escape::{
-  escape_str, expand_ansi_c, shell_quote, shell_quote_bytes, shell_quote_fmt, unescape_heredoc,
-  unescape_prompt, unescape_str, xtrace_quote,
-};
-pub(super) use glob::{GlobOpts, Pattern, expand_glob_with, replace_posix_classes};
-pub(super) use prompt::expand_prompt;
-pub(super) use util::expand_case_pattern;
-pub(super) use var::{expand_raw, expand_raw_inner};
-
-use crate::state::vars::{VarStr, VarStrSliceExt};
-
-use super::{
-  eval::{
-    self,
-    lex::{Tk, TkFlags, TkRule},
+use crate::{
+  eval::lex::{Tk, TkFlags, TkRule},
+  match_loop, shopt,
+  state::{
+    params,
+    vars::{VarStr, VarStrSliceExt},
   },
-  keys, match_loop, procio, sherr, shopt, state, status_msg, try_var, util as crate_util,
-  util::{QuoteState, ShErr, ShResult, ShResultExt},
-  var,
+  util::error::{ShResult, ShResultExt},
 };
+
+use stream::Quote;
 
 pub(crate) const PARAMETERS: [char; 8] = ['-', '@', '*', '#', '$', '?', '!', '0'];
 
@@ -143,9 +132,9 @@ impl Expander {
       VarStr::from(raw)
     };
     let unescaped = if flags.contains(TkFlags::IS_HEREDOC) {
-      unescape_heredoc(&raw)
+      escape::unescape_heredoc(&raw)
     } else {
-      unescape_str(&raw)
+      escape::unescape_str(&raw)
     };
     Self::from_segs(unescaped, flags)
   }
@@ -260,7 +249,7 @@ impl Expander {
   }
   pub fn expand_inner(self, mark_split: bool) -> ShResult<stream::SegStream> {
     let mut cursor = self.raw.cursor();
-    let raw = expand_raw_inner(&mut cursor, self.allow_side_effects, mark_split)?;
+    let raw = var::expand_raw_inner(&mut cursor, self.allow_side_effects, mark_split)?;
 
     Ok(raw)
   }
@@ -269,12 +258,12 @@ impl Expander {
   /// Resolves escapes and the special `$@`/`$*` cases, and performs IFS field
   /// splitting, but only inside `EXPAND_START`/`EXPAND_END` runs.
   pub fn split_words(raw: &stream::SegStream) -> Vec<stream::SegStream> {
-    use stream::{Marker, Quote, SegStream, StreamSeg, Unit};
+    use stream::{Marker, SegStream, StreamSeg, Unit};
     let mut words: Vec<SegStream> = vec![];
     let mut cursor = raw.cursor();
     let mut cur_word = SegStream::new();
     let mut was_quoted = false;
-    let ifs = state::util::get_separators();
+    let ifs = params::get_separators();
     // Delimiter-run tracking: whitespace and non-whitespace IFS chars combine
     // into one run that delimits a single field. A second non-WS IFS in the
     // same run emits an additional empty field (per POSIX step 5).
@@ -551,7 +540,7 @@ mod tests {
   fn word_split_escaped_space() {
     let _guard = TestGuard::new();
 
-    let raw = format!("hello{}world", render(&unescape_str(b"\\ ")));
+    let raw = format!("hello{}world", render(&escape::unescape_str(b"\\ ")));
     let exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),
@@ -567,7 +556,7 @@ mod tests {
   fn word_split_escaped_tab() {
     let _guard = TestGuard::new();
 
-    let raw = format!("hello{}world", render(&unescape_str(b"\\\t")));
+    let raw = format!("hello{}world", render(&escape::unescape_str(b"\\\t")));
     let exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),
@@ -584,7 +573,7 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
 
-    let raw = format!("a{}b:c", render(&unescape_str(b"\\:")));
+    let raw = format!("a{}b:c", render(&escape::unescape_str(b"\\:")));
     let exp = Expander {
       allow_side_effects: true,
       raw: to_segstream(&raw),

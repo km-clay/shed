@@ -1,26 +1,24 @@
 use std::fmt::Debug;
 
-use crate::defer;
-
 use super::editcmd::{Cmd, CmdFlags, EditCmd, Motion, Verb, invert_char_motion};
 use super::editmode::{
   CmdReplay, EditMode, Emacs, ModeReport, RemoteMode, ViEx, ViInsert, ViNormal, ViReplace,
   ViSearch, ViSearchRev, ViVerbatim, ViVisual,
 };
-use super::linebuf::{LineBuf, Pos};
+use super::linebuf::LineBuf;
 use super::register::RegisterName;
 
-use crate::keys::{KeyCode, ModKeys};
 use crate::{
-  autocmd,
-  expand::expand_keymap,
-  keys::KeyEvent,
+  autocmd, defer,
+  expand::alias,
+  keys::{KeyCode, KeyEvent, ModKeys},
   motion,
   state::{
     Shed,
     vars::{VarFlags, VarKind},
   },
-  util::ShResult,
+  util::error::ShResult,
+  util::pos::Pos,
 };
 
 pub(crate) struct EditorCore {
@@ -186,7 +184,7 @@ impl EditorCore {
   /// Run a `:normal` key sequence on each addressed line, in normal mode,
   /// folded into one undo step.
   fn run_normal_seq(&mut self, lines: &[usize], seq: &str) -> ShResult<()> {
-    let keys = expand_keymap(seq);
+    let keys = alias::expand_keymap(seq);
     self.editor.start_undo_merge();
     for &line in lines {
       self.editor.set_cursor(Pos { row: line, col: 0 });

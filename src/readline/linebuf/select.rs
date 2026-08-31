@@ -1,9 +1,10 @@
 use std::ops::Range;
 
+use crate::util;
+
 use super::{
   Pos, SignedPos,
   editcmd::{LineAddr, Motion},
-  ordered,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -17,16 +18,16 @@ impl SelectMode {
   pub fn shape(&self, other: Pos) -> SelectShape {
     match self {
       SelectMode::Char(pos) => {
-        let (s, e) = ordered(*pos, other);
+        let (s, e) = util::ordered(*pos, other);
         // offset points from lower end (s) to upper end (e) - always non-negative
         SelectShape::Char(e.difference(&s))
       }
       SelectMode::Line(pos) => {
-        let (s, e) = ordered(*pos, other);
+        let (s, e) = util::ordered(*pos, other);
         SelectShape::Line(e.difference(&s))
       }
       SelectMode::Block(pos) => {
-        let (s, e) = ordered(*pos, other);
+        let (s, e) = util::ordered(*pos, other);
         SelectShape::Block(e.difference(&s))
       }
     }
@@ -93,7 +94,7 @@ impl super::LineBuf {
   pub fn selection_str(&self) -> Option<String> {
     let (start, end) = match self.select_range()? {
       Motion::CharRange(s, e) => {
-        let (s, e) = ordered(s, e);
+        let (s, e) = util::ordered(s, e);
         // exclusive end: include the grapheme under the end cursor if present
         let end = if e.col < self.line(e.row).len() {
           Pos {
@@ -108,7 +109,7 @@ impl super::LineBuf {
       Motion::LineRange(s, e) => {
         let s = self.resolve_line_addr(&s).ok()??;
         let e = self.resolve_line_addr(&e).ok()??;
-        let (s, e) = ordered(s, e);
+        let (s, e) = util::ordered(s, e);
         (
           Pos { row: s, col: 0 },
           Pos {
@@ -126,7 +127,7 @@ impl super::LineBuf {
   pub fn select_range_byte_pos(&mut self) -> Option<Range<usize>> {
     match self.select_range()? {
       Motion::CharRange(s, e) => {
-        let (s, e) = ordered(s, e);
+        let (s, e) = util::ordered(s, e);
         let start = self.pos_to_byte(s)?;
         let mut end = self.pos_to_byte(e)?;
         // Charwise selections are inclusive of the grapheme under the cursor,
@@ -144,7 +145,7 @@ impl super::LineBuf {
           row: e,
           col: self.lines[e].len(),
         });
-        let (s, e) = ordered(s?, e?);
+        let (s, e) = util::ordered(s?, e?);
         Some(s..e)
       }
       Motion::BlockRange(..) => todo!(),
@@ -155,15 +156,15 @@ impl super::LineBuf {
   pub fn evaluate_selection(&self, mode: &SelectMode) -> Motion {
     match mode {
       SelectMode::Char(pos) => {
-        let (s, e) = ordered(self.cursor.pos, *pos);
+        let (s, e) = util::ordered(self.cursor.pos, *pos);
         Motion::CharRange(s, e)
       }
       SelectMode::Line(pos) => {
-        let (s, e) = ordered(self.row() + 1, pos.row + 1);
+        let (s, e) = util::ordered(self.row() + 1, pos.row + 1);
         Motion::LineRange(LineAddr::Number(s), LineAddr::Number(e))
       }
       SelectMode::Block(pos) => {
-        let (s, e) = ordered(self.cursor.pos, *pos);
+        let (s, e) = util::ordered(self.cursor.pos, *pos);
         Motion::BlockRange(s, e)
       }
     }

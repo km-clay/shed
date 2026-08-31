@@ -21,34 +21,32 @@ use nix::{
 use smallvec::SmallVec;
 
 use crate::{
+  autocmd, errln,
+  eval::execute,
   exec_term,
-  signal::FOCUS_GAINED,
-  state::{
-    logic::{AutoCmdKind, LogTab},
-    terminal::CursorCtl,
-    util::with_vars,
-    vars::VarStr,
-  },
-  status_msg, varstr,
-};
-
-use super::{
-  KeyEvent, KeyMapMatch, Prompt, ReadlineEvent, ShErrKind, ShResult, Shed, ShedLine, autocmd,
-  errln,
-  eval::execute::exec_int,
-  lifecycle::{self, first_run_setup},
-  outln, sherr, shopt,
+  keys::{KeyEvent, KeyMapMatch},
+  lifecycle, outln,
+  readline::{Prompt, ReadlineEvent, ShedLine},
+  sherr, shopt,
   signal::{
-    GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup, signals_pending,
+    FOCUS_GAINED, GOT_SIGUSR1, GOT_SIGWINCH, JOB_DONE, QUIT_CODE, check_signals, sig_setup,
+    signals_pending,
   },
   socket::{ShedSocket, handle_socket_request},
   state::{
-    self,
+    self, Shed, cmd,
+    logic::{AutoCmdKind, LogTab},
     meta::MetaTab,
-    terminal::{TermGuard, Terminal},
-    util::{rc_file_path, source_login, source_rc},
+    params, rc,
+    terminal::{CursorCtl, TermGuard, Terminal},
+    vars::VarStr,
   },
-  try_var, util,
+  status_msg, try_var,
+  util::{
+    self,
+    error::{ShErrKind, ShResult},
+  },
+  varstr,
 };
 
 static PARENT_PROCESS_ID: OnceLock<Pid> = OnceLock::new();
@@ -193,19 +191,19 @@ fn interactive_setup(args: &lifecycle::ShedArgs) -> ShResult<TermGuard> {
   }
 
   if args.login_shell && !args.no_rc {
-    source_login().ok();
+    rc::source_login().ok();
   }
 
-  if rc_file_path().is_none_or(|f| !f.is_file()) {
+  if rc::rc_file_path().is_none_or(|f| !f.is_file()) {
     // we didn't find any runtime files at all
     // let's run a first time setup
-    if let Err(e) = first_run_setup() {
+    if let Err(e) = lifecycle::first_run_setup() {
       e.print_error();
     }
   }
 
   if !args.no_rc
-    && let Err(e) = source_rc()
+    && let Err(e) = rc::source_rc()
   {
     e.print_error();
   }
@@ -226,7 +224,7 @@ pub(super) fn shed_interactive(
   script_keys: Option<Vec<KeyEvent>>,
 ) -> ShResult<()> {
   let _raw_mode = interactive_setup(args)?;
-  state::util::try_hash();
+  cmd::try_hash();
   Shed::meta_mut(|m| m.set_interactive_shell(true));
   let _ = PARENT_PROCESS_ID.set(getppid());
 
@@ -331,7 +329,7 @@ fn shed_loop_iter(
   )
   .ok();
 
-  state::util::try_hash();
+  cmd::try_hash();
   util::flog::update_log_level();
   let _flush_guard = state::terminal::FlushGuard; // flushes terminal on drop
 
@@ -380,7 +378,7 @@ fn shed_loop_iter(
             .as_secs_f64()
             .round() as u64;
 
-          let res = with_vars(
+          let res = params::with_vars(
             [("IDLE_SECONDS".into(), idle_secs.to_string())],
             || -> ShResult<LoopAction> {
               util::with_saved_status(|| {
@@ -655,7 +653,7 @@ pub(crate) fn run_prompt_command(
 
   let res = {
     let _scroll_guard = Shed::term_mut(|t| t.yield_terminal(clear_prompt.is_some()));
-    exec_int(input.into(), source)
+    execute::exec_int(input.into(), source)
   };
 
   if let Some((row, col)) = position {
@@ -730,6 +728,7 @@ fn resolve_keymap(readline: &mut ShedLine) -> ShResult<()> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::expand::alias::expand_keymap;
   use crate::shopt_mut;
   use crate::state::logic::AutoCmd;
   use crate::tests::testutil::TestGuard;
@@ -998,7 +997,6 @@ mod tests {
 
   // ===================== resolve_keymap =====================
 
-  use crate::expand::expand_keymap;
   use crate::keys::KeyMapFlags;
 
   fn fresh_readline() -> (ShedLine, TestGuard) {
@@ -1063,7 +1061,7 @@ mod tests {
 
   // ===================== handle_readline_event =====================
 
-  use crate::util::{ShErr, ShErrKind};
+  use crate::util::error::{ShErr, ShErrKind};
 
   #[test]
   fn handle_event_eof_returns_true() {

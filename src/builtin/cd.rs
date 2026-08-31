@@ -9,19 +9,17 @@ use std::{
 };
 
 use crate::{
-  expand, opt,
-  readline::{FuzzyBuilder, fuzzy_best_match, fuzzy_match_score, match_positions},
+  expand::escape,
+  opt, outln, procio,
+  readline::{self, FuzzyBuilder},
+  sherr,
+  state::{Shed, cwd, db, paths, terminal::Terminal},
+  try_var,
+  util::{self, error::ShResult},
+  var,
 };
 
-use crate::procio::outln_bytes;
-
-use super::{
-  ShResult, Shed,
-  opt::OptSpec,
-  outln, sherr,
-  state::{terminal::Terminal, util},
-  try_var, var, with_status,
-};
+use super::opt::OptSpec;
 
 pub(super) struct Cd;
 impl super::Builtin for Cd {
@@ -55,7 +53,7 @@ impl super::Builtin for Cd {
         (PathBuf::from(arg), Some(span.clone()))
       }
     } else {
-      let home_dir = util::get_home_str().unwrap_or("/".into());
+      let home_dir = paths::get_home_str().unwrap_or("/".into());
       (PathBuf::from(home_dir), None)
     };
 
@@ -79,7 +77,7 @@ impl super::Builtin for Cd {
           .or_else(|| std::env::current_dir().ok())
           .unwrap_or_else(|| PathBuf::from("/"))
       };
-      Some(util::lex_normalize_path(&base.join(&new_dir)))
+      Some(paths::lex_normalize_path(&base.join(&new_dir)))
     };
 
     let target = if resolve_syms {
@@ -101,16 +99,16 @@ impl super::Builtin for Cd {
     if !target.is_dir() {
       return Err(sherr!(ExecFail @ span.clone(), "Not a directory"));
     }
-    if let Err(e) = util::change_dir_with_pwd(&target, logical_pwd) {
+    if let Err(e) = cwd::change_dir_with_pwd(&target, logical_pwd) {
       return Err(sherr!(ExecFail @ span.clone(), "Failed to change directory: {e}"));
     }
 
     if print_dir {
       let pwd = PathBuf::from(var!("PWD"));
-      outln_bytes(&util::display_path_bytes(&pwd));
+      procio::outln_bytes(&paths::display_path_bytes(&pwd));
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -119,7 +117,7 @@ fn search_cd_path(new_dir: impl AsRef<Path>) -> Option<PathBuf> {
   let path = path.to_str_lossy();
 
   // find the first path that contains a directory matching `new_dir`
-  crate::util::split_path_list(&path).find_map(|p| {
+  paths::split_path_list(&path).find_map(|p| {
     let resolved = p.join(&new_dir);
     resolved.is_dir().then_some(resolved)
   })
@@ -177,7 +175,7 @@ impl Zd {
     }) {
       Some(n) => match n.parse::<usize>() {
         Ok(n) => Some(n),
-        Err(_) => return Err(sherr!(ParseErr @ args.span.clone(), "zd: invalid depth: {n}")),
+        Err(_) => return Err(sherr!(ParseErr @ args.span().clone(), "zd: invalid depth: {n}")),
       },
       None => None,
     };
@@ -198,7 +196,7 @@ impl Zd {
     let mut paths = Vec::new();
     for dir in dirs {
       if !dir.is_dir() {
-        return Err(sherr!(ExecFail @ args.span, "zd: not a directory: {}", dir.display()));
+        return Err(sherr!(ExecFail @ args.span(), "zd: not a directory: {}", dir.display()));
       }
       if recursive {
         collect_subdirs(&dir, depth, &mut paths);
@@ -207,11 +205,11 @@ impl Zd {
       }
     }
 
-    let Some(conn) = util::get_db_conn() else {
-      return with_status(0);
+    let Some(conn) = db::get_db_conn() else {
+      return util::with_status(0);
     };
     let Ok(conn) = conn.try_lock() else {
-      return with_status(0);
+      return util::with_status(0);
     };
     let now = now_secs();
     conn.execute_batch("BEGIN").ok();
@@ -225,7 +223,7 @@ impl Zd {
         .ok();
     }
     conn.execute_batch("COMMIT").ok();
-    with_status(0)
+    util::with_status(0)
   }
 
   /// zd add [-r] <dirs...> - remove directories
@@ -237,14 +235,14 @@ impl Zd {
       .map(|(a, _)| a.to_string())
       .collect();
     if targets.is_empty() {
-      return Err(sherr!(ExecFail @ args.span, "zd: remove requires a directory"));
+      return Err(sherr!(ExecFail @ args.span(), "zd: remove requires a directory"));
     }
 
-    let Some(conn) = util::get_db_conn() else {
-      return with_status(0);
+    let Some(conn) = db::get_db_conn() else {
+      return util::with_status(0);
     };
     let Ok(conn) = conn.try_lock() else {
-      return with_status(0);
+      return util::with_status(0);
     };
     let mut removed = 0;
     for target in &targets {
@@ -266,7 +264,7 @@ impl Zd {
           .unwrap_or(0)
       };
     }
-    with_status(i32::from(removed == 0))
+    util::with_status(i32::from(removed == 0))
   }
 
   fn list(args: super::BuiltinArgs) -> ShResult<()> {
@@ -297,7 +295,7 @@ impl Zd {
       }
     }
     if json && quoted {
-      return Err(sherr!(ParseErr @ args.span, "--json and --quoted are mutually exclusive"));
+      return Err(sherr!(ParseErr @ args.span(), "--json and --quoted are mutually exclusive"));
     }
 
     let query = args
@@ -309,7 +307,7 @@ impl Zd {
     let mut rows = load_dir_stats();
 
     if rows.is_empty() {
-      return Err(sherr!(ExecFail @ args.span, "zd: no directory history yet"));
+      return Err(sherr!(ExecFail @ args.span(), "zd: no directory history yet"));
     }
 
     if !query.is_empty() {
@@ -344,10 +342,10 @@ impl Zd {
         } = row;
 
         // Same column order as the bare output (path last), just shell-quoted.
-        entry.push(expand::shell_quote(&visits.to_string()));
-        entry.push(expand::shell_quote(&last_visit.to_string()));
-        entry.push(expand::shell_quote(&frecency.to_string()));
-        entry.push(expand::shell_quote(path));
+        entry.push(escape::shell_quote(&visits.to_string()));
+        entry.push(escape::shell_quote(&last_visit.to_string()));
+        entry.push(escape::shell_quote(&frecency.to_string()));
+        entry.push(escape::shell_quote(path));
 
         entries.push(entry.join(" ")); // SQR fields are separated by spaces
       }
@@ -420,23 +418,23 @@ impl Zd {
       outln!("{output}");
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 
   /// `zd clean` - prune entries whose directory no longer exists.
   fn clean() -> ShResult<()> {
-    let Some(conn) = util::get_db_conn() else {
-      return with_status(0);
+    let Some(conn) = db::get_db_conn() else {
+      return util::with_status(0);
     };
     let Ok(conn) = conn.try_lock() else {
-      return with_status(0);
+      return util::with_status(0);
     };
     let dead: Vec<String> = {
       let Ok(mut stmt) = conn.prepare("SELECT path FROM dir_history") else {
-        return with_status(0);
+        return util::with_status(0);
       };
       let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else {
-        return with_status(0);
+        return util::with_status(0);
       };
       rows.flatten().filter(|p| !Path::new(p).is_dir()).collect()
     };
@@ -457,7 +455,7 @@ impl Zd {
         "directories"
       }
     );
-    with_status(0)
+    util::with_status(0)
   }
 
   fn query(args: super::BuiltinArgs) -> ShResult<()> {
@@ -472,13 +470,13 @@ impl Zd {
       load_dir_entries()
     };
     if entries.is_empty() {
-      return Err(sherr!(ExecFail @ args.span, "zd: no directory history yet"));
+      return Err(sherr!(ExecFail @ args.span(), "zd: no directory history yet"));
     }
 
     let mut target = if query.is_empty() {
       if !Shed::term(Terminal::interactive) {
         return Err(
-          sherr!(ExecFail @ args.span, "zd: a directory query is required when non-interactive"),
+          sherr!(ExecFail @ args.span(), "zd: a directory query is required when non-interactive"),
         );
       }
       // no argument, let's open the fuzzy finder
@@ -490,12 +488,12 @@ impl Zd {
 
       selector.pick()?
     } else {
-      fuzzy_best_match(&query, entries, Some(fuzzy_score_dir), None)
+      readline::fuzzy_best_match(&query, entries, Some(fuzzy_score_dir), None)
     };
 
     if let Some(target) = target.as_mut()
       && target.starts_with('~')
-      && let Some(home) = util::get_home_str()
+      && let Some(home) = paths::get_home_str()
     {
       *target = target.replacen('~', &home.to_str_lossy(), 1);
     }
@@ -504,13 +502,13 @@ impl Zd {
       Some(path) => {
         if print_dir {
           outln!("{path}");
-        } else if let Err(e) = util::change_dir(&path) {
-          return Err(sherr!(ExecFail @ args.span, "zd: could not change directory: {e}"));
+        } else if let Err(e) = cwd::change_dir(&path) {
+          return Err(sherr!(ExecFail @ args.span(), "zd: could not change directory: {e}"));
         }
-        with_status(0)
+        util::with_status(0)
       }
       // cancelled, or nothing matched the query
-      None => with_status(1),
+      None => util::with_status(1),
     }
   }
 }
@@ -550,12 +548,12 @@ fn query_dir_stats(conn: &rusqlite::Connection) -> Vec<DirStat> {
 }
 
 fn load_dir_stats() -> Vec<DirStat> {
-  if let Some(shared) = util::get_db_conn() {
+  if let Some(shared) = db::get_db_conn() {
     let Ok(conn) = shared.try_lock() else {
       return vec![];
     };
     query_dir_stats(&conn)
-  } else if let Ok(conn) = util::open_db_conn_readonly() {
+  } else if let Ok(conn) = db::open_db_conn_readonly() {
     query_dir_stats(&conn)
   } else {
     vec![]
@@ -569,7 +567,7 @@ fn highlight_dir(display: &str, query: &str) -> Option<Vec<usize>> {
   let base = Path::new(display).file_name()?.to_str()?;
   // char offset of the basename within the display string (positions are chars).
   let offset = display.chars().count() - base.chars().count();
-  let positions = match_positions(base, query);
+  let positions = readline::match_positions(base, query);
   (!positions.is_empty()).then(|| positions.into_iter().map(|p| p + offset).collect())
 }
 
@@ -587,14 +585,14 @@ fn fuzzy_score_dir(cand: &str, chars: &[char], penalize_len_diff: bool) -> i32 {
   // match on the final segment ("fer" -> ".../fern") outranks one smeared across
   // parent directories. Double-counting the basename is the point.
   if let Some(base) = path.file_name().and_then(|b| b.to_str()) {
-    let base_score = fuzzy_match_score(base, chars, penalize_len_diff);
-    let full = fuzzy_match_score(cand, chars, penalize_len_diff);
+    let base_score = readline::fuzzy_match_score(base, chars, penalize_len_diff);
+    let full = readline::fuzzy_match_score(cand, chars, penalize_len_diff);
     if base_score > i32::MIN && full > i32::MIN {
       return full.saturating_add(base_score);
     }
   }
 
-  fuzzy_match_score(cand, chars, penalize_len_diff)
+  readline::fuzzy_match_score(cand, chars, penalize_len_diff)
 }
 
 fn now_secs() -> i64 {
@@ -654,7 +652,7 @@ fn load_abbreviated_dirs() -> Vec<(String, i32)> {
 /// Load visited directories as `(path, frecency weight)`, skipping any that no
 /// longer exist on disk.
 fn load_dir_entries_inner(format_paths: bool) -> Vec<(String, i32)> {
-  let Some(conn) = util::get_db_conn() else {
+  let Some(conn) = db::get_db_conn() else {
     return vec![];
   };
   let Ok(conn) = conn.try_lock() else {
@@ -678,7 +676,7 @@ fn load_dir_entries_inner(format_paths: bool) -> Vec<(String, i32)> {
     .filter(|(path, ..)| Path::new(path).is_dir())
     .map(|(path, visits, last_visit)| {
       let path = if format_paths {
-        util::display_path(path)
+        paths::display_path(path)
       } else {
         path
       };
@@ -689,7 +687,7 @@ fn load_dir_entries_inner(format_paths: bool) -> Vec<(String, i32)> {
 
 fn get_old_pwd() -> PathBuf {
   try_var!("OLDPWD")
-    .or_else(|| util::get_home_str().or_else(|| Some("/".into())))
+    .or_else(|| paths::get_home_str().or_else(|| Some("/".into())))
     .map(PathBuf::from)
     .unwrap()
 }
@@ -701,6 +699,7 @@ pub mod tests {
 
   use tempfile::TempDir;
 
+  use crate::state::db;
   use crate::var;
   use crate::{
     state::{
@@ -1225,7 +1224,7 @@ pub mod tests {
   // ===================== zd: dir_history DB =====================
 
   fn fresh_dir_history() {
-    let conn = state::util::get_db_conn().expect("test db");
+    let conn = db::get_db_conn().expect("test db");
     conn
       .lock()
       .unwrap()
@@ -1241,7 +1240,7 @@ pub mod tests {
   }
 
   fn dir_visits(path: &str) -> Option<i64> {
-    let conn = state::util::get_db_conn().unwrap();
+    let conn = db::get_db_conn().unwrap();
     let conn = conn.lock().unwrap();
     conn
       .query_row(
@@ -1253,7 +1252,7 @@ pub mod tests {
   }
 
   fn insert_dir(path: &str, visits: i64, last_visit: i64) {
-    let conn = state::util::get_db_conn().unwrap();
+    let conn = db::get_db_conn().unwrap();
     conn
       .lock()
       .unwrap()

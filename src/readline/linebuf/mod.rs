@@ -4,23 +4,24 @@ use ariadne::Span as AriadneSpan;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-  readline::context,
-  state::vars::{VarFlags, VarKind, VarStr},
+  eval::lex::{LexFlags, LexStream, TkFlags, TkRule},
+  expand::{self, alias},
+  motion, procio, sherr, shopt,
+  state::{
+    self, Shed, paths,
+    vars::{VarFlags, VarKind, VarStr},
+  },
+  status_msg,
+  util::error::ShResult,
 };
 
 use super::{
-  Shed, autocmd,
-  context::{CtxTkRule, get_context_tokens},
+  context::{self, CtxTkRule},
   editcmd,
   editcmd::{EditCmd, Motion, Verb},
-  editmode, eval,
-  eval::lex::{LexFlags, LexStream, TkFlags, TkRule},
-  expand,
-  expand::expand_alias_with_pos,
-  highlight,
+  editmode, highlight,
   history::History,
-  motion, procio, register, sherr, shopt, stash, state, status_msg, system_msg, try_var,
-  util::{ShResult, ordered},
+  register, stash,
 };
 
 mod char_class;
@@ -29,21 +30,21 @@ mod excmd;
 mod hint;
 mod killring;
 mod motion;
+mod ops;
 mod pos;
 mod select;
 mod types;
-mod util;
 mod verb;
 
-pub(crate) use super::util::{Pos, SignedPos};
+pub(crate) use super::util::pos::{Pos, SignedPos};
 pub(crate) use char_class::CharClass;
 pub(crate) use edit::Edit;
 pub(crate) use hint::Hint;
 pub(crate) use killring::KillRing;
+pub(crate) use ops::{rot13_char, toggle_case_char};
 pub(crate) use pos::{Cursor, MotionKind};
 pub(crate) use select::{SelectMode, SelectShape};
 pub(crate) use types::{Grapheme, Line, Lines};
-pub(crate) use util::{rot13_char, toggle_case_char};
 
 pub(crate) const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
 
@@ -240,7 +241,7 @@ impl LineBuf {
     })?;
 
     if let Some(file) = &self.open_file {
-      let display = state::util::display_path(file);
+      let display = paths::display_path(file);
       Shed::vars_mut(|v| {
         v.set_var(
           "EDITOR_FILE",
@@ -305,7 +306,7 @@ impl LineBuf {
 
   pub fn attempt_alias_expansion_all(&mut self) -> bool {
     let raw = self.to_string();
-    let (result, first_pos) = expand_alias_with_pos(raw);
+    let (result, first_pos) = alias::expand_alias_with_pos(raw);
     if first_pos.is_some() {
       self.lines = Lines::to_lines(&result);
       true
@@ -357,7 +358,7 @@ impl LineBuf {
 
   pub fn attempt_history_expansion(&mut self, history: &History) -> bool {
     let buf = self.to_string();
-    let tks = get_context_tokens(&buf);
+    let tks = context::get_context_tokens(&buf);
     let mut hist_expansions = vec![];
     for tk in &tks {
       hist_expansions.extend(tk.find_nodes(|n| *n.class() == CtxTkRule::HistExp));

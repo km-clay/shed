@@ -1068,7 +1068,7 @@ macro_rules! hint_test {
   } => {
     mod hint {
       use super::*;
-      use crate::expand::expand_keymap;
+      use crate::expand::alias::expand_keymap;
       $(#[test]
         fn $name() {
           Shed::shopts_mut(|o| {
@@ -1234,7 +1234,7 @@ macro_rules! emacs_test {
   { $($name:ident: $input:expr => $op:expr => $expected_text:expr,$expected_cursor:expr);* $(;)? } => {
     mod emacs {
       use super::*;
-      use crate::expand::expand_keymap;
+      use crate::expand::alias::expand_keymap;
       $(#[test]
         fn $name() {
           let (mut em, _g) = test_emacs($input);
@@ -1466,7 +1466,7 @@ macro_rules! visual_test {
   { $($name:ident: $input:expr => $op:expr => $expected_text:expr, $expected_cursor:expr);* $(;)? } => {
     mod visual {
       use super::*;
-      use crate::expand::expand_keymap;
+      use crate::expand::alias::expand_keymap;
       $(#[test]
         fn $name() {
           let (mut vi, _g) = test_vi($input);
@@ -1627,7 +1627,7 @@ visual_test! {
 // at it rather than dropping it once the hint is restored.
 #[test]
 fn va_quote_with_hint_at_eol_includes_closing_quote() {
-  use crate::expand::expand_keymap;
+  use crate::expand::alias::expand_keymap;
   use crate::readline::linebuf::{Hint, Lines};
 
   let (mut vi, _g) = test_vi("say \"hi\"");
@@ -1888,7 +1888,7 @@ mod handle_key_dispatch {
 //                scroll_history_virtual, handle_cmd_repeat (count>1)}
 mod readline_mod_coverage {
   use super::*;
-  use crate::expand::expand_keymap;
+  use crate::expand::alias::expand_keymap;
   use crate::keys::{KeyCode, KeyEvent, KeyMap, KeyMapFlags, ModKeys};
   use crate::motion;
   use crate::readline::editcmd::{CmdFlags, EditCmd, Motion};

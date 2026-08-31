@@ -3,21 +3,20 @@ use std::{cell::Cell, str::FromStr};
 use bstr::ByteSlice;
 
 use crate::{
-  state::vars::VarStr,
-  util::{self, ByteCursor},
-};
-
-use super::{
-  ShErr, ShResult,
-  escape::unescape_math,
   match_loop, sherr,
   state::{
     Shed,
-    vars::{VarFlags, VarKind},
+    vars::{VarFlags, VarKind, VarStr},
   },
   try_var,
-  var::expand_raw,
+  util::{
+    self,
+    error::{ShErr, ShResult},
+    strops::{self, ByteCursor, SliceCursor},
+  },
 };
+
+use super::{escape, var};
 
 #[derive(Debug, Clone)]
 enum ArithOp {
@@ -510,7 +509,7 @@ impl ArithTk {
   #[expect(clippy::too_many_lines)]
   pub fn tokenize(raw: &[u8]) -> ShResult<Vec<Self>> {
     let mut tokens = Vec::new();
-    let mut cur = util::SliceCursor::new(raw);
+    let mut cur = SliceCursor::new(raw);
     // Track whether the last emitted token was an operand, to distinguish
     // unary minus from binary subtraction.
     let mut last_was_operand = false;
@@ -1241,8 +1240,8 @@ impl ArithTk {
 /// Evaluate an arithmetic expression string, returning the result.
 /// The caller is responsible for stripping any `((...))` or `(...)` wrappers.
 pub fn expand_arithmetic(expr: &[u8]) -> ShResult<VarStr> {
-  let unescaped = unescape_math(expr)?;
-  let expanded = expand_raw(&mut unescaped.cursor())?.into_bytes();
+  let unescaped = escape::unescape_math(expr)?;
+  let expanded = var::expand_raw(&mut unescaped.cursor())?.into_bytes();
   let tokens = ArithTk::tokenize(&expanded)?;
   let rpn = ArithTk::to_rpn(tokens)?;
   let result = ArithTk::eval_rpn(&rpn)?;
@@ -1261,11 +1260,11 @@ pub fn expand_arithmetic_wrapped(raw: &[u8]) -> ShResult<VarStr> {
 
 fn strip_enclosing_parens(s: &[u8]) -> Option<&[u8]> {
   let inner = s.strip_prefix(b"(")?;
-  let mut cur = util::SliceCursor::new(inner);
+  let mut cur = SliceCursor::new(inner);
   // The opening `(` is already consumed (depth 1); scan to its matching `)`.
   // The cursor lands just past that `)`; if that is the end of `inner`, the
   // opening paren enclosed the whole string.
-  (util::scan_parens(&mut cur, 1) && cur.pos() == inner.len()).then(|| &inner[..cur.pos() - 1])
+  (strops::scan_parens(&mut cur, 1) && cur.pos() == inner.len()).then(|| &inner[..cur.pos() - 1])
 }
 
 #[cfg(test)]

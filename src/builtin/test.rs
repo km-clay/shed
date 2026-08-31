@@ -1,19 +1,22 @@
 use std::{collections::VecDeque, fs::metadata, os::fd::BorrowedFd, path::PathBuf, str::FromStr};
 
 use crate::{
-  eval::lex::Tk, expand::replace_posix_classes, procio, state::vars::VarStr, util::ShResultExt,
+  eval::{
+    execute,
+    lex::{Span, Tk, TkVecUtils},
+  },
+  expand::glob,
+  procio, sherr,
+  state::{
+    Shed,
+    vars::{VarFlags, VarKind, VarStr},
+  },
+  util::{
+    self,
+    error::{ShErr, ShResult, ShResultExt},
+  },
 };
 
-use super::{
-  Shed,
-  eval::{
-    execute::prepare_argv_with,
-    lex::{Span, TkVecUtils},
-  },
-  sherr,
-  state::{vars::VarFlags, vars::VarKind},
-  util::{ShErr, ShResult, with_status},
-};
 use nix::{
   sys::stat::{self, SFlag},
   unistd::{AccessFlags, isatty},
@@ -214,7 +217,7 @@ fn eval_binary(
       })
     }
     BinaryOp::RegexMatch => {
-      let cleaned = replace_posix_classes(&rhs.0.to_str_lossy());
+      let cleaned = glob::replace_posix_classes(&rhs.0.to_str_lossy());
       let re = Shed::meta_mut(|m| m.get_regex(&cleaned))
         .map_err(|e| sherr!(SyntaxErr @ rhs.1.clone(), "Invalid regex: {e}"))?;
       if let Some(caps) = re.captures(&lhs.0.to_str_lossy()) {
@@ -381,7 +384,7 @@ impl super::Builtin for Test {
     no_split: bool,
   ) -> ShResult<super::opt::Parsed> {
     let span = argv.get_span().unwrap();
-    let argv = prepare_argv_with(argv, no_split)
+    let argv = execute::prepare_argv_with(argv, no_split)
       .promote_err(cmd_span)?
       .into_iter()
       .collect::<Vec<_>>();
@@ -429,7 +432,7 @@ impl super::Builtin for Test {
           Shed::set_status(2);
           Err(e)
         }
-        Ok(res) => with_status(i32::from(!res)),
+        Ok(res) => util::with_status(i32::from(!res)),
       };
     }
 
@@ -442,7 +445,7 @@ impl super::Builtin for Test {
         Shed::set_status(2);
         Err(e)
       }
-      Ok(res) => with_status(i32::from(!res)),
+      Ok(res) => util::with_status(i32::from(!res)),
     }
   }
 }

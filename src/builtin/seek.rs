@@ -2,11 +2,9 @@ use std::os::fd::BorrowedFd;
 
 use nix::unistd::{Whence, lseek};
 
-use super::{
-  opt::OptSpec,
-  outln, sherr,
-  util::{ShResult, with_status},
-};
+use crate::{outln, sherr, util, util::error::ShResult};
+
+use super::opt::OptSpec;
 
 pub(super) struct Seek;
 impl super::Builtin for Seek {
@@ -74,7 +72,7 @@ impl super::Builtin for Seek {
 
     outln!("{new_off}");
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

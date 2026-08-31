@@ -1,8 +1,7 @@
 use std::{iter::Peekable, ops::Range, str::Chars};
 
-use super::{expand::markers, match_loop, util::QuoteState};
+use crate::{expand::markers, match_loop, util::strops::QuoteState};
 
-/// If `bytes[pos..]` starts with an SGR sequence `ESC [ ... m`, return the
 /// byte index one past its trailing `m`. Otherwise None.
 pub(super) fn scan_sgr(bytes: &[u8], pos: usize) -> Option<usize> {
   if bytes.get(pos)? != &0x1b {

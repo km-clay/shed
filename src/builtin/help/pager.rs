@@ -1,20 +1,24 @@
 use std::io;
 
-use nix::unistd::{isatty, write};
+use nix::unistd;
 use regex::Regex;
 
 use yansi::Style;
 
-use crate::{queue_term, state::terminal::Terminal, write_term};
+use crate::{
+  key,
+  keys::{KeyCode, KeyEvent},
+  procio, queue_term,
+  readline::SimpleEditor,
+  state::{Shed, terminal::Terminal},
+  util::{Direction, error::ShResult, ui},
+  write_term,
+};
 
 use super::{
-  Direction, ShResult, Shed, StyledHelp, key,
-  keys::{KeyCode, KeyEvent},
+  StyledHelp,
   markup::{MarkedSpan, REF_SEQ},
-  procio::stdout_fileno,
-  readline::SimpleEditor,
   render::{self, Overlay},
-  state::terminal::calc_str_width,
 };
 
 pub(super) enum PagerEvent {
@@ -102,11 +106,11 @@ pub(super) struct HelpPager {
 
 impl HelpPager {
   pub fn new(content: &str, scroll_offset: usize, filename: Option<String>) -> Option<Self> {
-    if !isatty(stdout_fileno()).unwrap_or(false) {
+    if !unistd::isatty(procio::stdout_fileno()).unwrap_or(false) {
       // If we're not in a terminal, just print the content and exit
       // Someone could be piping the output, like `help | grep foo`
-      write(stdout_fileno(), content.as_bytes()).ok();
-      write(stdout_fileno(), b"\n").ok();
+      unistd::write(procio::stdout_fileno(), content.as_bytes()).ok();
+      unistd::write(procio::stdout_fileno(), b"\n").ok();
       return None;
     }
     let mut content = StyledHelp::new(content);
@@ -173,8 +177,8 @@ impl HelpPager {
       let (prefix_range, _, postfix_range) = c_ref.span().rel_to_line(content_str);
       let line_text = &content_str[line_start..];
 
-      let col_start = calc_str_width(&line_text[..prefix_range.start]);
-      let col_end = calc_str_width(&line_text[..postfix_range.end]);
+      let col_start = ui::calc_str_width(&line_text[..prefix_range.start]);
+      let col_end = ui::calc_str_width(&line_text[..postfix_range.end]);
 
       self.click_refs.push(ClickableRef {
         row: screen_row,

@@ -1,4 +1,6 @@
-use super::{Grapheme, Lines, Pos};
+use crate::util::pos::Pos;
+
+use super::{Grapheme, Lines};
 
 #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
 pub enum CharClass {

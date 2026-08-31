@@ -1,17 +1,22 @@
-use super::{
-  super::state::terminal::Terminal,
-  ShResult, Shed, match_loop, sherr,
-  state::terminal::{ColorMode, calc_str_width},
-};
 use std::fmt::Write;
+use std::sync::OnceLock;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthChar;
 use yansi::{Paint, Painted, Style};
 
-pub const BOT_LEFT: &str = "\x1b[90m╰\x1b[0m";
-pub const BOT_RIGHT: &str = "\x1b[90m╯\x1b[0m";
-pub const TOP_LEFT: &str = "\x1b[90m╭\x1b[0m";
-pub const TOP_RIGHT: &str = "\x1b[90m╮\x1b[0m";
-pub const HOR_LINE: &str = "\x1b[90m─\x1b[0m";
-pub const VERT_LINE: &str = "\x1b[90m│\x1b[0m";
+use crate::{
+  match_loop, sherr,
+  state::{Shed, terminal::Terminal},
+  try_var,
+  util::error::ShResult,
+};
+
+pub(crate) const BOT_LEFT: &str = "\x1b[90m╰\x1b[0m";
+pub(crate) const BOT_RIGHT: &str = "\x1b[90m╯\x1b[0m";
+pub(crate) const TOP_LEFT: &str = "\x1b[90m╭\x1b[0m";
+pub(crate) const TOP_RIGHT: &str = "\x1b[90m╮\x1b[0m";
+pub(crate) const HOR_LINE: &str = "\x1b[90m─\x1b[0m";
+pub(crate) const VERT_LINE: &str = "\x1b[90m│\x1b[0m";
 
 fn rgb_to_xterm256(r: u8, g: u8, b: u8) -> u8 {
   let r = (u16::from(r) * 5 / 255) as u8;
@@ -67,14 +72,14 @@ fn apply_bg_rgb_raw(style: Painted<&str>, r: u8, g: u8, b: u8) -> Painted<&str> 
 
 /// A wrapper around `yansi::Style`. Defers application of text attributes like bold/italic.
 #[derive(Clone, Debug, Default, Copy)]
-pub struct PaletteEntry {
+pub(crate) struct PaletteEntry {
   style: Style,
   decorations: Decorations,
 }
 
 #[expect(dead_code)]
 impl PaletteEntry {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       style: Style::new().primary().on_primary(),
       decorations: Decorations::default(),
@@ -99,144 +104,144 @@ impl PaletteEntry {
   "inverted" => decor = decor.inverted(),
   "reset" => style = style.resetting(),
   */
-  pub fn style(&self) -> Style {
+  pub(crate) fn style(&self) -> Style {
     self.decorations.apply(self.style)
   }
-  pub fn decor(&self) -> Decorations {
+  pub(crate) fn decor(&self) -> Decorations {
     self.decorations
   }
-  pub fn set_decor(&mut self, decor: Decorations) {
+  pub(crate) fn set_decor(&mut self, decor: Decorations) {
     self.decorations = decor;
   }
-  pub fn green(mut self) -> Self {
+  pub(crate) fn green(mut self) -> Self {
     self.style = self.style.green();
     self
   }
-  pub fn red(mut self) -> Self {
+  pub(crate) fn red(mut self) -> Self {
     self.style = self.style.red();
     self
   }
-  pub fn yellow(mut self) -> Self {
+  pub(crate) fn yellow(mut self) -> Self {
     self.style = self.style.yellow();
     self
   }
-  pub fn blue(mut self) -> Self {
+  pub(crate) fn blue(mut self) -> Self {
     self.style = self.style.blue();
     self
   }
-  pub fn magenta(mut self) -> Self {
+  pub(crate) fn magenta(mut self) -> Self {
     self.style = self.style.magenta();
     self
   }
-  pub fn cyan(mut self) -> Self {
+  pub(crate) fn cyan(mut self) -> Self {
     self.style = self.style.cyan();
     self
   }
-  pub fn white(mut self) -> Self {
+  pub(crate) fn white(mut self) -> Self {
     self.style = self.style.white();
     self
   }
-  pub fn black(mut self) -> Self {
+  pub(crate) fn black(mut self) -> Self {
     self.style = self.style.black();
     self
   }
-  pub fn bright_green(mut self) -> Self {
+  pub(crate) fn bright_green(mut self) -> Self {
     self.style = self.style.bright_green();
     self
   }
-  pub fn bright_red(mut self) -> Self {
+  pub(crate) fn bright_red(mut self) -> Self {
     self.style = self.style.bright_red();
     self
   }
-  pub fn bright_yellow(mut self) -> Self {
+  pub(crate) fn bright_yellow(mut self) -> Self {
     self.style = self.style.bright_yellow();
     self
   }
-  pub fn bright_blue(mut self) -> Self {
+  pub(crate) fn bright_blue(mut self) -> Self {
     self.style = self.style.bright_blue();
     self
   }
-  pub fn bright_magenta(mut self) -> Self {
+  pub(crate) fn bright_magenta(mut self) -> Self {
     self.style = self.style.bright_magenta();
     self
   }
-  pub fn bright_cyan(mut self) -> Self {
+  pub(crate) fn bright_cyan(mut self) -> Self {
     self.style = self.style.bright_cyan();
     self
   }
-  pub fn bright_white(mut self) -> Self {
+  pub(crate) fn bright_white(mut self) -> Self {
     self.style = self.style.bright_white();
     self
   }
-  pub fn bright_black(mut self) -> Self {
+  pub(crate) fn bright_black(mut self) -> Self {
     self.style = self.style.bright_black();
     self
   }
-  pub fn on_green(mut self) -> Self {
+  pub(crate) fn on_green(mut self) -> Self {
     self.style = self.style.on_green();
     self
   }
-  pub fn on_red(mut self) -> Self {
+  pub(crate) fn on_red(mut self) -> Self {
     self.style = self.style.on_red();
     self
   }
-  pub fn on_yellow(mut self) -> Self {
+  pub(crate) fn on_yellow(mut self) -> Self {
     self.style = self.style.on_yellow();
     self
   }
-  pub fn on_blue(mut self) -> Self {
+  pub(crate) fn on_blue(mut self) -> Self {
     self.style = self.style.on_blue();
     self
   }
-  pub fn on_magenta(mut self) -> Self {
+  pub(crate) fn on_magenta(mut self) -> Self {
     self.style = self.style.on_magenta();
     self
   }
-  pub fn on_cyan(mut self) -> Self {
+  pub(crate) fn on_cyan(mut self) -> Self {
     self.style = self.style.on_cyan();
     self
   }
-  pub fn on_white(mut self) -> Self {
+  pub(crate) fn on_white(mut self) -> Self {
     self.style = self.style.on_white();
     self
   }
-  pub fn on_black(mut self) -> Self {
+  pub(crate) fn on_black(mut self) -> Self {
     self.style = self.style.on_black();
     self
   }
-  pub fn on_bright(mut self) -> Self {
+  pub(crate) fn on_bright(mut self) -> Self {
     self.style = self.style.on_bright();
     self
   }
-  pub fn bold(mut self) -> Self {
+  pub(crate) fn bold(mut self) -> Self {
     self.decorations = self.decorations.bold();
     self
   }
-  pub fn italic(mut self) -> Self {
+  pub(crate) fn italic(mut self) -> Self {
     self.decorations = self.decorations.italic();
     self
   }
-  pub fn strike(mut self) -> Self {
+  pub(crate) fn strike(mut self) -> Self {
     self.decorations = self.decorations.strike();
     self
   }
-  pub fn underline(mut self) -> Self {
+  pub(crate) fn underline(mut self) -> Self {
     self.decorations = self.decorations.underline();
     self
   }
-  pub fn dim(mut self) -> Self {
+  pub(crate) fn dim(mut self) -> Self {
     self.decorations = self.decorations.dim();
     self
   }
-  pub fn blink(mut self) -> Self {
+  pub(crate) fn blink(mut self) -> Self {
     self.decorations = self.decorations.blink();
     self
   }
-  pub fn hidden(mut self) -> Self {
+  pub(crate) fn hidden(mut self) -> Self {
     self.decorations = self.decorations.hidden();
     self
   }
-  pub fn inverted(mut self) -> Self {
+  pub(crate) fn inverted(mut self) -> Self {
     self.decorations = self.decorations.inverted();
     self
   }
@@ -247,7 +252,7 @@ impl PaletteEntry {
 /// This is made as a workaround for the fact that yansi's `Style` struct does not offer any kind of introspection.
 #[derive(Clone, Default, Debug, Copy)]
 #[expect(clippy::struct_excessive_bools)]
-pub struct Decorations {
+pub(crate) struct Decorations {
   underline: bool,
   bold: bool,
   italic: bool,
@@ -259,7 +264,7 @@ pub struct Decorations {
 }
 
 impl Decorations {
-  pub fn apply(self, mut s: Style) -> Style {
+  pub(crate) fn apply(self, mut s: Style) -> Style {
     if self.underline {
       s = s.underline();
     }
@@ -287,7 +292,7 @@ impl Decorations {
     s
   }
 
-  pub fn union(self, other: Decorations) -> Self {
+  pub(crate) fn union(self, other: Decorations) -> Self {
     Self {
       underline: self.underline | other.underline,
       bold: self.bold | other.bold,
@@ -300,42 +305,48 @@ impl Decorations {
     }
   }
 
-  pub fn bold(mut self) -> Self {
+  pub(crate) fn bold(mut self) -> Self {
     self.bold = true;
     self
   }
-  pub fn italic(mut self) -> Self {
+  pub(crate) fn italic(mut self) -> Self {
     self.italic = true;
     self
   }
-  pub fn underline(mut self) -> Self {
+  pub(crate) fn underline(mut self) -> Self {
     self.underline = true;
     self
   }
-  pub fn strike(mut self) -> Self {
+  pub(crate) fn strike(mut self) -> Self {
     self.strike = true;
     self
   }
-  pub fn dim(mut self) -> Self {
+  pub(crate) fn dim(mut self) -> Self {
     self.dimmed = true;
     self
   }
-  pub fn blink(mut self) -> Self {
+  pub(crate) fn blink(mut self) -> Self {
     self.blink = true;
     self
   }
-  pub fn hidden(mut self) -> Self {
+  pub(crate) fn hidden(mut self) -> Self {
     self.hidden = true;
     self
   }
-  pub fn inverted(mut self) -> Self {
+  pub(crate) fn inverted(mut self) -> Self {
     self.inverted = true;
     self
   }
 }
 
 /// Pad `content` with `fill` to `cols` width, appending `right_border` at the end.
-pub fn pad_line_into(buf: &mut String, content: &str, fill: &str, right_border: &str, cols: usize) {
+pub(crate) fn pad_line_into(
+  buf: &mut String,
+  content: &str,
+  fill: &str,
+  right_border: &str,
+  cols: usize,
+) {
   let used = calc_str_width(content);
   let padding = cols.saturating_sub(used + 1);
   write!(buf, "{content}").ok();
@@ -346,7 +357,7 @@ pub fn pad_line_into(buf: &mut String, content: &str, fill: &str, right_border: 
 }
 
 /// Build an ansi color escape sequence from a plain english description
-pub fn style_from_description(desc: &str) -> ShResult<PaletteEntry> {
+pub(crate) fn style_from_description(desc: &str) -> ShResult<PaletteEntry> {
   let mut style = Style::new().primary().on_primary();
   let mut decor = Decorations::default();
   let mut words = desc.split_whitespace();
@@ -414,7 +425,7 @@ pub fn style_from_description(desc: &str) -> ShResult<PaletteEntry> {
 }
 
 /// Build an ansi color escape sequence from a plain english description
-pub fn ansi_from_description(desc: &str) -> ShResult<String> {
+pub(crate) fn ansi_from_description(desc: &str) -> ShResult<String> {
   let mut style: Painted<&str> = "".primary().on_primary().linger();
   let mut words = desc.split_whitespace();
 
@@ -477,7 +488,7 @@ pub fn ansi_from_description(desc: &str) -> ShResult<String> {
   Ok(style.to_string())
 }
 
-pub fn hex_to_rgb(hex: &str) -> ShResult<(u8, u8, u8)> {
+pub(crate) fn hex_to_rgb(hex: &str) -> ShResult<(u8, u8, u8)> {
   let hex = &hex[1..];
   if hex.len() != 6
     || !hex
@@ -506,6 +517,239 @@ pub(crate) fn stylize_loglevel(level: log::Level) -> String {
     log::Level::Trace => style_from_description("magenta bold").unwrap(),
   };
   format!("{level}").paint(style.style()).to_string()
+}
+
+pub(crate) fn calc_str_width(s: &str) -> usize {
+  let mut esc_seq = 0;
+  s.graphemes(true).map(|g| width(g, &mut esc_seq)).sum()
+}
+
+pub(crate) fn truncate_visual(s: &str, max_width: usize) -> String {
+  let mut out = String::new();
+  let mut visible = 0;
+  let mut esc_seq = 0u8;
+  let mut wrote_anything_visible = false;
+
+  for g in s.graphemes(true) {
+    let w = width(g, &mut esc_seq);
+    if esc_seq == 0 && visible + w > max_width {
+      break;
+    }
+    out.push_str(g);
+    visible += w;
+    if w > 0 {
+      wrote_anything_visible = true;
+    }
+  }
+
+  if wrote_anything_visible {
+    out.push_str("\x1b[0m");
+  }
+  out
+}
+
+pub(crate) fn truncate_with_ellipsis(s: &str, max_width: usize) -> String {
+  if calc_str_width(s) <= max_width {
+    return s.to_string();
+  }
+  if max_width <= 3 {
+    // Not enough room even for the ellipsis itself; just hard-truncate.
+    return truncate_visual(s, max_width);
+  }
+  let mut out = truncate_visual(s, max_width - 3);
+  out.push_str("...");
+  out
+}
+
+// Big credit to rustyline for this
+pub(crate) fn width(s: &str, esc_seq: &mut u8) -> usize {
+  if *esc_seq == 1 {
+    if s == "[" {
+      // CSI
+      *esc_seq = 2;
+    } else {
+      // two-character sequence
+      *esc_seq = 0;
+    }
+    0
+  } else if *esc_seq == 2 {
+    if s == ";" || (s.as_bytes()[0] >= b'0' && s.as_bytes()[0] <= b'9') {
+      /*} else if s == "m" {
+      // last
+       *esc_seq = 0;*/
+    } else {
+      // not supported
+      *esc_seq = 0;
+    }
+
+    0
+  } else if s == "\x1b" {
+    *esc_seq = 1;
+    0
+  } else if s == "\n" {
+    0
+  } else {
+    get_width_calculator().width(s)
+  }
+}
+
+pub(crate) trait WidthCalculator: Send + Sync {
+  fn width(&self, text: &str) -> usize;
+}
+
+static WIDTH_CALC: OnceLock<Box<dyn WidthCalculator>> = OnceLock::new();
+
+pub(crate) fn get_width_calculator() -> &'static dyn WidthCalculator {
+  WIDTH_CALC.get_or_init(width_calculator).as_ref()
+}
+
+fn is_visual_control(c: char) -> bool {
+  matches!(c, '\x00'..='\x08' | '\x0b'..='\x1f' | '\x7f')
+}
+
+fn cwidth(ch: char) -> usize {
+  if is_visual_control(ch) {
+    2
+  } else {
+    ch.width().unwrap_or(0)
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct UnicodeWidth;
+
+impl WidthCalculator for UnicodeWidth {
+  fn width(&self, text: &str) -> usize {
+    text.chars().map(cwidth).sum()
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct WcWidth;
+
+impl WidthCalculator for WcWidth {
+  fn width(&self, text: &str) -> usize {
+    text.chars().map(cwidth).sum()
+  }
+}
+
+const ZWJ: char = '\u{200D}';
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NoZwj;
+
+impl WidthCalculator for NoZwj {
+  fn width(&self, text: &str) -> usize {
+    if text.contains(ZWJ) {
+      // ZWJ sequence renders as a single glyph on supported terminals
+      2
+    } else {
+      UnicodeWidth.width(text)
+    }
+  }
+}
+
+pub(crate) fn width_calculator() -> Box<dyn WidthCalculator> {
+  match try_var!("TERM_PROGRAM")
+    .as_ref()
+    .map(|v| v.to_str_lossy())
+    .as_deref()
+  {
+    Some("Apple_Terminal" | "iTerm.app" | "WezTerm") => Box::new(UnicodeWidth),
+    Some(_) => Box::new(WcWidth),
+    None => match try_var!("TERM")
+      .as_ref()
+      .map(|v| v.to_str_lossy())
+      .as_deref()
+    {
+      Some("xterm-kitty") => Box::new(NoZwj),
+      _ => Box::new(WcWidth),
+    },
+  }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ColorMode {
+  Truecolor,
+  Palette256,
+  Palette16,
+}
+
+#[cfg(test)]
+mod truncate_visual_tests {
+  use super::*;
+
+  const RESET: &str = "\x1b[0m";
+
+  #[test]
+  fn empty_string_returns_empty_no_reset() {
+    // Nothing visible was written → no SGR reset appended.
+    assert_eq!(truncate_visual("", 10), "");
+  }
+
+  #[test]
+  fn short_string_passes_through_with_reset() {
+    // Plain text shorter than max_width returns the full string +
+    // trailing SGR reset.
+    let out = truncate_visual("hi", 10);
+    assert_eq!(out, format!("hi{RESET}"));
+  }
+
+  #[test]
+  fn exact_fit_passes_through() {
+    let out = truncate_visual("hello", 5);
+    assert_eq!(out, format!("hello{RESET}"));
+  }
+
+  #[test]
+  fn over_long_is_truncated() {
+    let out = truncate_visual("hello world", 5);
+    assert_eq!(out, format!("hello{RESET}"));
+  }
+
+  #[test]
+  fn zero_max_width_with_only_visible_input_drops_everything() {
+    let out = truncate_visual("hello", 0);
+    // No visible char fits, so wrote_anything_visible stays false and
+    // the reset is *not* appended.
+    assert_eq!(out, "");
+  }
+
+  #[test]
+  fn ansi_escape_does_not_count_against_width() {
+    // The CSI sequence itself contributes width 0, so even with a
+    // tight budget the visible chars after still survive.
+    let input = "\x1b[31mhi\x1b[0m";
+    let out = truncate_visual(input, 2);
+    // Both visible chars + the inline escapes survive; an extra
+    // reset is then appended.
+    assert_eq!(out, format!("\x1b[31mhi\x1b[0m{RESET}"));
+  }
+
+  #[test]
+  fn wide_grapheme_counted_as_its_width() {
+    // CJK character takes width 2 in monospace terminals.
+    let out = truncate_visual("漢字", 2);
+    // Only one CJK char fits in width 2.
+    assert_eq!(out, format!("漢{RESET}"));
+  }
+
+  #[test]
+  fn ansi_only_input_writes_no_reset() {
+    // The bytes are pushed into the output (esc_seq path doesn't
+    // break the loop), but no visible char triggered the reset.
+    // We're really just pinning the wrote_anything_visible branch.
+    let input = "\x1b[31m";
+    let out = truncate_visual(input, 5);
+    assert_eq!(out, "\x1b[31m");
+  }
+
+  #[test]
+  fn truncation_breaks_before_overrun() {
+    // "abcdef" with width 4 stops after "abcd"; the 'e' check sees
+    // visible(4) + w(1) > 4 and breaks before pushing.
+    let out = truncate_visual("abcdef", 4);
+    assert_eq!(out, format!("abcd{RESET}"));
+  }
 }
 
 #[cfg(test)]

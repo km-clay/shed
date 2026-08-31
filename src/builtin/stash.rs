@@ -1,12 +1,12 @@
-use crate::{opt, state::vars::VarStr};
-
-use super::{
-  opt::{Opt, OptSpec},
-  outln,
+use crate::{
+  opt, outln,
   readline::stash::{Stash, StashedCmd},
   sherr,
-  util::{ShResult, ShResultExt},
+  state::vars::VarStr,
+  util::error::{ShResult, ShResultExt},
 };
+
+use super::opt::{Opt, OptSpec};
 
 #[derive(Debug, Default)]
 pub(crate) struct StashOpts {
@@ -98,12 +98,12 @@ impl super::Builtin for StashBuiltin {
 #[cfg(test)]
 mod stash_builtin_tests {
   use super::*;
-  use crate::state;
+  use crate::state::{self, db};
   use crate::tests::testutil::{TestGuard, test_input};
 
   /// Drop any leftover stash entries from prior tests in this thread.
   fn fresh_stash() -> Stash {
-    let conn = crate::state::util::get_db_conn().expect("test db");
+    let conn = db::get_db_conn().expect("test db");
     conn
       .lock()
       .unwrap()

@@ -3,10 +3,10 @@ use std::{fmt::Display, iter::Peekable};
 use bstr::ByteSlice;
 
 use crate::{
-  ShResult,
   eval::lex::{Span, Tk},
   sherr,
   state::vars::VarStr,
+  util::error::ShResult,
   varstr,
 };
 

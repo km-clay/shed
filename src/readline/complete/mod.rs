@@ -1,7 +1,7 @@
 use crate::{
   HashSet,
-  expand::{self, GlobOpts},
-  state::vars::VarStr,
+  expand::glob::{self, GlobOpts},
+  state::{paths, vars::VarStr},
   varstr,
 };
 use std::{
@@ -26,15 +26,15 @@ pub(crate) use fuzzy::{FuzzyCompleter, FuzzySelector, ScoredCandidate, SelectorR
 
 pub(crate) use grid::GridCompleter;
 
-use crate::readline::context::{CmdKind, get_ex_context_tokens};
+use crate::readline::context::CmdKind;
 
 use super::{
   super::state::meta::MetaTab,
   builtin::BUILTIN_NAMES,
-  context::{CtxTk, CtxTkRule, get_context_tokens},
+  context::{self, CtxTk, CtxTkRule},
   editmode,
-  eval::{execute::exec_nonint, lex::Span},
-  expand::{escape_str, expand_raw_inner, shell_quote, unescape_str},
+  eval::{execute, lex::Span},
+  expand::{escape, var},
   key,
   keys::{self, KeyEvent as K},
   linebuf, shopt,
@@ -44,7 +44,7 @@ use super::{
     vars::{VarFlags, VarKind},
   },
   try_var,
-  util::{self, ShResult, ends_with_unescaped, has_unescaped, var_ctx_guard},
+  util::{error::ShResult, guards, strops},
   write_term,
 };
 
@@ -692,7 +692,7 @@ fn command_utils() -> Vec<Utility> {
 }
 
 fn complete_commands(start: &str, cursor_pos: usize) -> Vec<Candidate> {
-  if has_unescaped(start.as_bytes(), b"/") {
+  if strops::has_unescaped(start.as_bytes(), b"/") {
     return complete_path(start, cursor_pos)
       .into_iter()
       .filter(|c| {
@@ -729,8 +729,8 @@ fn complete_dirs(start: &str, cursor_pos: usize) -> Vec<Candidate> {
 }
 
 fn unescape_for_completion(raw: &str) -> String {
-  let unescaped = unescape_str(raw.as_bytes());
-  expand_raw_inner(&mut unescaped.cursor(), false, false).map_or_else(
+  let unescaped = escape::unescape_str(raw.as_bytes());
+  var::expand_raw_inner(&mut unescaped.cursor(), false, false).map_or_else(
     |_| raw.to_string(),
     |s| String::from_utf8_lossy(&s.into_bytes()).into_owned(),
   )
@@ -764,7 +764,7 @@ fn is_char_boundary(bytes: &[u8], i: usize) -> bool {
 /// splice for `~`/`$VAR` structural prefixes and case-insensitive matches.
 fn splice_literal_prefix(literal: &str, expanded: &str, candidate: &str) -> VarStr {
   if let Some(rest) = candidate.strip_prefix(expanded) {
-    let rest_escaped = escape_str(rest);
+    let rest_escaped = escape::escape_str(rest);
     return varstr!("{literal}{rest_escaped}");
   }
 
@@ -774,10 +774,10 @@ fn splice_literal_prefix(literal: &str, expanded: &str, candidate: &str) -> VarS
 
   match candidate.strip_prefix(expanded_structural) {
     Some(rest) => {
-      let rest_escaped = escape_str(rest);
+      let rest_escaped = escape::escape_str(rest);
       varstr!("{literal_structural}{rest_escaped}")
     }
-    None => escape_str(candidate).into(),
+    None => escape::escape_str(candidate).into(),
   }
 }
 
@@ -806,7 +806,7 @@ where
 /// splicing.
 fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
   let (prefix, postfix) = path.split_at_checked(cursor_pos).unwrap_or((path, ""));
-  let prefix = if ends_with_unescaped(prefix.as_bytes(), b"\\") {
+  let prefix = if strops::ends_with_unescaped(prefix.as_bytes(), b"\\") {
     &prefix[..prefix.len() - 1]
   } else {
     prefix
@@ -817,9 +817,9 @@ fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
     .no_case(shopt!(prompt.completion_ignore_case))
     .null_glob(true);
 
-  let candidates: Vec<Candidate> = expand::expand_glob_with(pat.as_bytes(), opts)
+  let candidates: Vec<Candidate> = glob::expand_glob_with(pat.as_bytes(), opts)
     .into_iter()
-    .map(|it| util::path_from_bytes(&it).to_path_buf().into())
+    .map(|it| paths::path_from_bytes(&it).to_path_buf().into())
     .collect();
 
   candidates
@@ -863,10 +863,10 @@ fn file_desc<P: AsRef<Path>>(path: P) -> VarStr {
     String::from("-")
   } else {
     let mut buf = String::new();
-    util::format_size(meta.len(), &mut buf).ok();
+    strops::format_size(meta.len(), &mut buf).ok();
     buf
   };
-  let mode = util::format_mode(meta.permissions().mode());
+  let mode = strops::format_mode(meta.permissions().mode());
 
   varstr!("{kind:<4} {size:>6} {mode}")
 }
@@ -980,7 +980,7 @@ impl BashCompSpec {
     ] {
       vars_to_unset.insert(var.into());
     }
-    let _guard = var_ctx_guard(vars_to_unset);
+    let _guard = guards::var_ctx_guard(vars_to_unset);
 
     let CompContext {
       words,
@@ -1032,13 +1032,13 @@ impl BashCompSpec {
     let input = format!(
       "{} {} {} {}",
       self.function.as_ref().unwrap(),
-      shell_quote(&cmd_name),
-      shell_quote(&cword_str),
-      shell_quote(&pword_str),
+      escape::shell_quote(&cmd_name),
+      escape::shell_quote(&cword_str),
+      escape::shell_quote(&pword_str),
     );
 
     let _cooked = Shed::term_mut(|t| t.yield_terminal(false));
-    exec_nonint(input.into(), Some("comp_function".into()))?;
+    execute::exec_nonint(input.into(), Some("comp_function".into()))?;
 
     let comp_reply: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems("COMPREPLY"))
       .into_iter()
@@ -1060,8 +1060,8 @@ impl CompSpec for BashCompSpec {
   fn complete(&self, ctx: &CompContext) -> ShResult<Vec<Candidate>> {
     let prefix = &ctx.words[ctx.cword];
 
-    let unescaped = unescape_str(prefix.as_bytes());
-    let expanded = expand_raw_inner(&mut unescaped.cursor(), false, false)?;
+    let unescaped = escape::unescape_str(prefix.as_bytes());
+    let expanded = var::expand_raw_inner(&mut unescaped.cursor(), false, false)?;
     let stripped = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
 
     // path-shaped: wrapper handles expansion and escaping, candidates are
@@ -1130,9 +1130,9 @@ impl CompSpec for BashCompSpec {
             // TODO: make sure this stat call doesn't destroy performance
             // for long candidate lists
             if std::fs::metadata(&tail).is_ok_and(|m| m.is_dir()) {
-              escape_str(&format!("{tail}/"))
+              escape::escape_str(&format!("{tail}/"))
             } else {
-              escape_str(&tail)
+              escape::escape_str(&tail)
             }
           } else {
             tail
@@ -1425,9 +1425,9 @@ impl SimpleCompleter {
       self.candidates = std::mem::take(&mut self.candidates)
         .into_iter()
         .map(|c| {
-          if !ends_with_unescaped(c.as_bytes(), b"/") 		// directory
-					&& !ends_with_unescaped(c.as_bytes(), b"=") 		// '='-type arg
-					&& !ends_with_unescaped(c.as_bytes(), b" ")
+          if !strops::ends_with_unescaped(c.as_bytes(), b"/") 		// directory
+					&& !strops::ends_with_unescaped(c.as_bytes(), b"=") 		// '='-type arg
+					&& !strops::ends_with_unescaped(c.as_bytes(), b" ")
           {
             // already has a space
             Candidate::from(format!("{c} "))
@@ -1600,8 +1600,8 @@ impl SimpleCompleter {
     source: CompSource,
   ) -> ShResult<CompResult> {
     let tks = match source {
-      CompSource::Shell => get_context_tokens(line),
-      CompSource::ExMode => get_ex_context_tokens(line),
+      CompSource::Shell => context::get_context_tokens(line),
+      CompSource::ExMode => context::get_ex_context_tokens(line),
     };
     let (strat, replace_span, _leaf_cursor_pos) = CompStrat::resolve(&tks, cursor_pos);
 

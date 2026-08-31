@@ -1,14 +1,17 @@
 use std::{collections::VecDeque, fmt::Display};
 
+use bstr::ByteSlice;
 use chrono::{DateTime, Datelike, Days, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 
-use crate::{state::vars::VarStr, util::Direction, varstr};
-
-use super::{
-  error::ShResult,
+use crate::{
   eval::lex::{Span, Tk},
   match_loop, sherr,
+  state::vars::VarStr,
+  util::Direction,
+  varstr,
 };
+
+use super::error::ShResult;
 
 pub(crate) trait VarStrDisplay {
   fn to_var_str(&self) -> VarStr;
@@ -105,6 +108,13 @@ pub fn split_at_unescaped(slice: &[u8], pat: &[u8]) -> Option<(usize, usize)> {
 
 pub fn split_at_any_unescaped(slice: &[u8], pats: &[&[u8]]) -> Option<(usize, usize)> {
   split_at_any_inner(slice, pats, b'\\', b'\'', b'"')
+}
+
+pub fn split_assignment_raw(arg: &[u8]) -> (&[u8], Option<&[u8]>) {
+  let Some((e, l)) = split_at_unescaped(arg, b"=") else {
+    return (arg, None);
+  };
+  (arg[..e].trim(), Some(&arg[e + l..]))
 }
 
 /// Split at the first of `pats` not escaped by `esc` and not inside a

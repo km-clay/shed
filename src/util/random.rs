@@ -1,8 +1,11 @@
 use std::{cell::Cell, fmt::Display, ops::Range, str::FromStr};
 
 use crate::{
-  ShResult, sherr,
-  util::{ByteCursor, ShErr, SliceCursor},
+  sherr,
+  util::{
+    error::{ShErr, ShResult},
+    strops::{ByteCursor, SliceCursor},
+  },
 };
 
 thread_local! {

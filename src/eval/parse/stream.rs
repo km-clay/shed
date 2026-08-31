@@ -1,8 +1,8 @@
-use crate::eval::parse::ast::{Ast, NodeId};
+use crate::{sherr, util::strops};
 
 use super::{
   LabelCtx, NdFlags, NdRule, Node, ParseStream, ShErr, ShResult, Span, Tk, TkFlags, TkRule,
-  crate_util::split_tk, sherr,
+  ast::{Ast, NodeId},
 };
 
 impl ParseStream {
@@ -124,7 +124,7 @@ pub(super) fn split_for_arith_tk(
   tk: &Tk,
 ) -> ShResult<Option<(NodeId, NodeId, NodeId)>> {
   let span = tk.span.clone();
-  let mut tks = split_tk(&tk.strip_arith_header()?, b";").into_iter();
+  let mut tks = strops::split_tk(&tk.strip_arith_header()?, b";").into_iter();
 
   let Some(init_tk) = tks.next() else {
     return Err(sherr!(ParseErr @ span, "Missing init statement"));

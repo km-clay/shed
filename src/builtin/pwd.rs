@@ -1,10 +1,13 @@
 use std::{env, fs};
 
-use crate::procio::outln_bytes;
-use crate::state::util;
-use crate::state::vars::VarStr;
+use crate::{
+  procio, sherr,
+  state::{paths, vars::VarStr},
+  try_var,
+  util::{self, error::ShResult},
+};
 
-use super::{ShResult, opt::OptSpec, sherr, try_var, with_status};
+use super::opt::OptSpec;
 
 pub(super) struct Pwd;
 impl super::Builtin for Pwd {
@@ -27,26 +30,26 @@ impl super::Builtin for Pwd {
     }
 
     if !args.no_arguments() {
-      return Err(sherr!(ParseErr @ args.span, "pwd: too many arguments"));
+      return Err(sherr!(ParseErr @ args.span(), "pwd: too many arguments"));
     }
 
     let dir: Option<VarStr> = if logical {
       try_var!("PWD")
         .filter(|p| is_same_dir_as_cwd(p.as_bytes()))
-        .or_else(|| physical_cwd().map(|p| util::path_to_varstr(&p)))
+        .or_else(|| physical_cwd().map(|p| paths::path_to_varstr(&p)))
     } else {
-      physical_cwd().map(|p| util::path_to_varstr(&p))
+      physical_cwd().map(|p| paths::path_to_varstr(&p))
     };
 
     let Some(dir) = dir else {
       return Err(sherr!(
-        ExecFail @ args.span,
+        ExecFail @ args.span(),
         "pwd: cannot determine current directory",
       ));
     };
 
-    outln_bytes(dir.as_bytes());
-    with_status(0)
+    procio::outln_bytes(dir.as_bytes());
+    util::with_status(0)
   }
 }
 

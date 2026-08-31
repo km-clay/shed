@@ -1,10 +1,15 @@
 use bstr::ByteSlice;
 
-use crate::expand::expand_raw;
-use crate::expand::stream::SegStream;
-use crate::state::vars::VarStr;
-use crate::util::{ByteCursor, QuoteState, SliceCursor, parse_bytes};
-use crate::{match_loop, util, varstr};
+use crate::{
+  expand::{stream::SegStream, var},
+  match_loop,
+  state::vars::VarStr,
+  util::{
+    self,
+    strops::{ByteCursor, QuoteState, SliceCursor},
+  },
+  varstr,
+};
 
 /// Check if a string contains valid brace expansion patterns.
 /// Returns true if there's a valid {a,b} or {1..5} pattern at the outermost
@@ -13,7 +18,7 @@ fn has_braces(s: &[u8]) -> bool {
   if !s.contains(&b'{') {
     return false;
   }
-  let s = expand_raw(&mut SegStream::from_bytes(s).cursor())
+  let s = var::expand_raw(&mut SegStream::from_bytes(s).cursor())
     .map_or_else(|_| VarStr::from(s), |sg| VarStr::from(sg.into_bytes()));
   let mut bytes = SliceCursor::new(&s);
   let mut depth = 0;
@@ -259,7 +264,7 @@ fn try_expand_range(inner: &[u8]) -> Option<Vec<VarStr>> {
     3 => {
       let start = parts[0];
       let end = parts[1];
-      let step: i32 = parse_bytes(parts[2])?;
+      let step: i32 = util::parse_bytes(parts[2])?;
       if step == 0 {
         return None;
       }
@@ -296,8 +301,8 @@ fn expand_range(start: &[u8], end: &[u8], step: usize) -> Option<Vec<VarStr>> {
 
   // Try numeric range
   if is_numeric_range_bound(start) && is_numeric_range_bound(end) {
-    let start_num: i32 = parse_bytes(start)?;
-    let end_num: i32 = parse_bytes(end)?;
+    let start_num: i32 = util::parse_bytes(start)?;
+    let end_num: i32 = util::parse_bytes(end)?;
     let reverse = end_num < start_num;
 
     // Handle zero-padding

@@ -1,6 +1,6 @@
 use super::{
   Shed, sherr,
-  util::{ShResult, with_status},
+  util::{error::ShResult, with_status},
 };
 
 pub(super) struct Shift;

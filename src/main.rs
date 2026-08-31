@@ -1,7 +1,7 @@
 #![warn(clippy::pedantic)]
+#![warn(unreachable_pub)]
 #![expect(
   clippy::unnecessary_wraps,
-  clippy::too_many_lines,
   clippy::cast_sign_loss,
   clippy::cast_possible_wrap,
   clippy::cast_possible_truncation,
@@ -38,19 +38,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-use state::Shed;
+use std::process::ExitCode;
+use std::sync::atomic::Ordering;
 
-use std::{process::ExitCode, sync::atomic::Ordering};
-
-use expand::expand_keymap;
-use keys::KeyEvent;
-use keys::KeyMapMatch;
 use nix::sys::wait::WaitStatus as WtStat;
-use readline::{Hint, LineData, Lines, Prompt, ReadlineEvent, ShedLine};
 use rustc_hash::FxHashMap as HashMap;
 use rustc_hash::FxHashSet as HashSet;
-use signal::QUIT_CODE;
-use util::{ShErrKind, ShResult};
 
 pub(crate) mod autoload;
 pub(crate) mod builtin;
@@ -86,19 +79,19 @@ fn main() -> ExitCode {
     Ok(()) => {
       // if SHOULD_QUIT is already set, the QUIT_CODE has already been handled
       if !signal::SHOULD_QUIT.load(Ordering::SeqCst) {
-        QUIT_CODE.store(Shed::get_status(), Ordering::SeqCst);
+        signal::QUIT_CODE.store(state::Shed::get_status(), Ordering::SeqCst);
       }
     }
 
     Err(e) => {
-      if let ShErrKind::CleanExit(code) = e.kind() {
+      if let util::error::ShErrKind::CleanExit(code) = e.kind() {
         // manual `exit` call or something similar
-        QUIT_CODE.store(*code, Ordering::SeqCst);
+        signal::QUIT_CODE.store(*code, Ordering::SeqCst);
       } else {
         // actual error
         e.print_error();
-        if QUIT_CODE.load(Ordering::SeqCst) == 0 {
-          QUIT_CODE.store(1, Ordering::SeqCst);
+        if signal::QUIT_CODE.load(Ordering::SeqCst) == 0 {
+          signal::QUIT_CODE.store(1, Ordering::SeqCst);
         }
       }
     }

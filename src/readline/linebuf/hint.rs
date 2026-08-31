@@ -1,8 +1,12 @@
 use std::cmp::Ordering;
 
-use crate::readline::{highlight, linebuf::Line};
+use crate::{
+  readline::{highlight, linebuf::Line},
+  shopt,
+  util::pos::Pos,
+};
 
-use super::{Lines, Pos, shopt};
+use super::Lines;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum Hint {

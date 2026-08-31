@@ -1,11 +1,13 @@
-use crate::{queue_term, state::terminal::Terminal};
+use crate::{
+  queue_term,
+  state::terminal::Terminal,
+  util::{error::ShResult, ui},
+};
 
 use super::{
-  Candidate, CompMatch, CompResponse, Completer, K as KeyEvent, ShResult, Shed, SimpleCompleter,
+  Candidate, CompMatch, CompResponse, Completer, K as KeyEvent, Shed, SimpleCompleter,
   fuzzy::{ClampedUsize, emphasize_grid, one_line},
-  key,
-  state::terminal::calc_str_width,
-  write_term,
+  key, write_term,
 };
 
 /// Truncate `s` (as display width) to at most `max_width` columns. Stops
@@ -16,7 +18,7 @@ pub(crate) fn truncate_to_width(s: &str, max_width: usize) -> String {
   let mut out = String::with_capacity(s.len());
   let mut w = 0;
   for ch in s.chars() {
-    let cw = calc_str_width(&ch.to_string());
+    let cw = ui::calc_str_width(&ch.to_string());
     if w + cw > max_width {
       break;
     }
@@ -244,7 +246,7 @@ impl GridSelector {
   fn col_dims(cands: &[Candidate]) -> (usize, usize) {
     let name = cands
       .iter()
-      .map(|c| calc_str_width(&one_line(c.as_str())))
+      .map(|c| ui::calc_str_width(&one_line(c.as_str())))
       .max()
       .unwrap_or(0);
     let desc = cands
@@ -253,7 +255,7 @@ impl GridSelector {
         c.desc
           .as_ref()
           .filter(|d| !d.is_empty())
-          .map_or(0, |d| calc_str_width(d) + 2)
+          .map_or(0, |d| ui::calc_str_width(d) + 2)
       })
       .max()
       .unwrap_or(0);
@@ -345,7 +347,7 @@ impl GridSelector {
 
         let cand = &self.candidates[idx];
         let name_plain = one_line(cand.as_str());
-        let name_w = calc_str_width(&name_plain);
+        let name_w = ui::calc_str_width(&name_plain);
         // Emphasize the prefix the candidate shares with the typed token.
         let prefix_len = common_prefix_len(&self.prefix, &name_plain);
         let name = emphasize_grid(&name_plain, |i| i < prefix_len);
@@ -359,7 +361,7 @@ impl GridSelector {
             // description doesn't fit there, it can extend leftward into
             // the name-pad, down to a minimum 2-char gap after the name.
             // Beyond that point we truncate with an ellipsis.
-            let desc_w_full = calc_str_width(desc) + 2; // includes parens
+            let desc_w_full = ui::calc_str_width(desc) + 2; // includes parens
             let aligned_avail = col_w.saturating_sub(col_name_max + 2);
             let max_extend_avail = col_w.saturating_sub(name_w + 2);
             let (pad_chars, desc_text) = if desc_w_full <= aligned_avail {
@@ -378,7 +380,7 @@ impl GridSelector {
               (0, format!("({truncated}…)"))
             };
             let name_pad_str = " ".repeat(pad_chars);
-            let used = name_w + pad_chars + 2 + calc_str_width(&desc_text);
+            let used = name_w + pad_chars + 2 + ui::calc_str_width(&desc_text);
             let trailing = " ".repeat(col_w.saturating_sub(used));
             if is_selected {
               write_term!("\x1b[7m{name}{name_pad_str}  {desc_text}{trailing}\x1b[27m",).ok();

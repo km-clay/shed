@@ -1,21 +1,24 @@
 use nix::{
   sys::signal::Signal,
-  unistd::{Pid, getpgrp},
+  unistd::{self, Pid},
 };
 
-use super::{
-  super::state::{jobs::JobTab, terminal::Terminal},
-  BuiltinArgs,
+use crate::{
   eval::lex::Span,
-  opt::OptSpec,
-  outln, sherr,
-  signal::parse_signal,
+  outln, sherr, signal,
   state::{
-    self, Shed,
-    jobs::{JobCmdFlags, JobID, wait_bg, wait_fg},
+    Shed,
+    jobs::{self, JobCmdFlags, JobID, JobTab},
+    params,
+    terminal::Terminal,
   },
-  util::{ShResult, ShResultExt, with_status},
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+  },
 };
+
+use super::{BuiltinArgs, opt::OptSpec};
 
 fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
   if arg.starts_with('%') {
@@ -117,7 +120,7 @@ pub fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResult<()> 
   match behavior {
     JobBehavior::Foregound => {
       let _cooked = Shed::term_mut(Terminal::prepare_for_exec);
-      wait_fg(job, true)?;
+      jobs::wait_fg(job, true)?;
     }
     JobBehavior::Background => {
       let job_order = Shed::jobs(|j| j.order().to_vec());
@@ -126,7 +129,7 @@ pub fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResult<()> 
     }
   }
 
-  with_status(0)
+  util::with_status(0)
 }
 
 pub(super) struct Jobs;
@@ -160,7 +163,7 @@ impl super::Builtin for Jobs {
     }
 
     Shed::jobs_mut(|j| j.print_jobs(flags))?;
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -169,7 +172,7 @@ impl super::Builtin for Wait {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     if Shed::jobs(|j| j.curr_job().is_none()) {
-      return with_status(0);
+      return util::with_status(0);
     }
     let arg_vec = args
       .arguments()
@@ -192,7 +195,7 @@ impl super::Builtin for Wait {
       Shed::jobs_mut(JobTab::wait_all_bg).promote_err(span)?;
     } else {
       for arg in arg_vec {
-        wait_bg(&arg).promote_err(span.clone())?;
+        jobs::wait_bg(&arg).promote_err(span.clone())?;
       }
     }
 
@@ -232,7 +235,7 @@ impl super::Builtin for Disown {
     // fallback are both irrelevant.
     if disown_all {
       Shed::jobs_mut(|j| j.disown_all(nohup));
-      return with_status(0);
+      return util::with_status(0);
     }
 
     let mut ids = vec![];
@@ -256,7 +259,7 @@ impl super::Builtin for Disown {
       Shed::jobs_mut(|j| j.disown(JobID::TableID(id), nohup));
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -304,7 +307,7 @@ fn parse_kill_sig(s: &str) -> ShResult<KillSig> {
       return Ok(KillSig::Zero);
     }
   }
-  parse_signal(s).map(KillSig::Real)
+  signal::parse_signal(s).map(KillSig::Real)
 }
 
 fn raw_kill(pid: Pid, sig: i32) -> nix::Result<()> {
@@ -348,7 +351,7 @@ pub(super) fn list_all_signals() {
       sig.strip_prefix("SIG").unwrap_or(&sig).to_string()
     })
     .collect::<Vec<_>>()
-    .join(&state::util::get_separator().to_str_lossy());
+    .join(&params::get_separator().to_str_lossy());
   outln!("{signals}");
 }
 
@@ -363,7 +366,7 @@ fn send_signal(target: &KillTarget, sig: KillSig, verbose: bool, blame: &Span) -
       format!("killing process group {pid} with {sig}")
     }
     KillTarget::OurPgrp => {
-      let pgrp = getpgrp();
+      let pgrp = unistd::getpgrp();
       raw_killpg(pgrp, sig.as_i32())?;
       format!("killing shell's process group ({pgrp}) with {sig}")
     }
@@ -415,7 +418,7 @@ impl super::Builtin for Kill {
         "list" => list_sig = true,
         "signal" => {
           let sig_name = opt.value()?;
-          signal = Some(parse_kill_sig(sig_name).promote_err(args.span.clone())?);
+          signal = Some(parse_kill_sig(sig_name).promote_err(args.span().clone())?);
         }
         _ => {}
       }
@@ -431,7 +434,7 @@ impl super::Builtin for Kill {
       // kill -l <arg> converts between names and numbers. A numeric argument
       // prints the signal name; a name prints its number. Signal 0 isn't named,
       // so we only accept real signals here.
-      let sig = parse_signal(&arg.to_str_lossy()).promote_err(span.clone())?;
+      let sig = signal::parse_signal(&arg.to_str_lossy()).promote_err(span.clone())?;
       if arg.to_str_lossy().trim().parse::<i32>().is_ok() {
         let name = sig.to_string();
         outln!("{}", name.strip_prefix("SIG").unwrap_or(&name));
@@ -439,11 +442,11 @@ impl super::Builtin for Kill {
         outln!("{}", sig as i32);
       }
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     if args.no_arguments() {
-      return Err(sherr!(SyntaxErr @ args.span, "usage: kill [-signal] pid ..."));
+      return Err(sherr!(SyntaxErr @ args.span(), "usage: kill [-signal] pid ..."));
     }
 
     let sig = signal.unwrap_or(KillSig::Real(Signal::SIGTERM));
@@ -463,7 +466,7 @@ impl super::Builtin for Kill {
       send_signal(&target, signal.unwrap_or(sig), verbose, span)?;
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

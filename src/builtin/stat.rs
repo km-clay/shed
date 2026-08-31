@@ -7,11 +7,16 @@ use nix::{
 };
 
 use crate::{
-  ShResult,
   builtin::opt::OptSpec,
-  errln, expand, match_loop, opt, outln, sherr,
+  errln,
+  expand::escape,
+  match_loop, opt, outln, sherr,
   state::vars::VarStr,
-  util::{self, ByteCursor, ShErr, ShResultExt, SliceCursor, with_status},
+  util::{
+    self,
+    error::{ShErr, ShResult, ShResultExt},
+    strops::{ByteCursor, SliceCursor},
+  },
 };
 
 // File-type bits, normalized to `u32`. The `libc::S_IF*` constants are
@@ -321,7 +326,7 @@ impl FileInfo {
   }
 
   fn fmt_quoted_name(&self, f: &mut impl fmt::Write) -> fmt::Result {
-    let quoted = expand::shell_quote(&self.name.to_str_lossy());
+    let quoted = escape::shell_quote(&self.name.to_str_lossy());
 
     if self.st_mode & 0o170_000 == S_IFLNK
       && let Ok(tgt) = std::fs::read_link(&self.name)
@@ -807,7 +812,7 @@ impl super::Builtin for Stat {
       }
     }
 
-    with_status(status)
+    util::with_status(status)
   }
 }
 

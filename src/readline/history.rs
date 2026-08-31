@@ -13,10 +13,10 @@ use super::{
   editcmd::Direction,
   linebuf::{Hint, LineBuf, Lines},
   procio::{MIN_INTERNAL_FD, do_something_that_opens_fds_that_we_cant_access_hack},
-  sherr, shopt, state,
-  util::ShResult,
+  sherr, shopt,
+  util::error::ShResult,
 };
-use crate::{HashMap, util::random::Uuid};
+use crate::{HashMap, state::db, util::random::Uuid};
 
 #[derive(Debug, Clone)]
 pub struct HistEntry {
@@ -206,7 +206,7 @@ impl History {
     let table_name = hist.table.clone();
     std::thread::spawn(move || {
       do_something_that_opens_fds_that_we_cant_access_hack(MIN_INTERNAL_FD, || {
-        let Some(conn) = state::util::get_db_conn() else {
+        let Some(conn) = db::get_db_conn() else {
           return;
         };
         let loaded = {
@@ -430,7 +430,7 @@ impl History {
 
     std::thread::spawn(move || {
       do_something_that_opens_fds_that_we_cant_access_hack(MIN_INTERNAL_FD, || {
-        let Some(conn) = state::util::get_db_conn() else {
+        let Some(conn) = db::get_db_conn() else {
           return;
         };
         let conn = conn

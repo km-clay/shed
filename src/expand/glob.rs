@@ -8,10 +8,7 @@ use std::{
 
 use bstr::ByteSlice;
 
-use crate::{
-  match_loop, shopt,
-  util::{path_entries, path_from_bytes},
-};
+use crate::{match_loop, shopt, state::paths};
 
 /// A matcher representing a single byte
 #[derive(Debug, Clone)]
@@ -681,7 +678,7 @@ pub fn expand_glob_with(pattern: &[u8], opts: GlobOpts) -> Vec<Vec<u8>> {
           frontier.push_back((path.clone(), i + 1));
         }
 
-        for entry in path_entries(&normalize_dir(&path)) {
+        for entry in paths::path_entries(&normalize_dir(&path)) {
           let is_dir = entry.file_type().is_ok_and(|ft| ft.is_dir());
 
           let mut child = path.clone();
@@ -695,13 +692,13 @@ pub fn expand_glob_with(pattern: &[u8], opts: GlobOpts) -> Vec<Vec<u8>> {
       }
       PathSeg::Literal(lit) => {
         let mut child = path.clone();
-        child.push(path_from_bytes(lit));
+        child.push(paths::path_from_bytes(lit));
         if child.exists() {
           frontier.push_back((child, i + 1));
         }
       }
       PathSeg::Glob { pat, lit_dot } => {
-        for entry in path_entries(&normalize_dir(&path)) {
+        for entry in paths::path_entries(&normalize_dir(&path)) {
           let name = entry.file_name();
           let bytes = name.as_bytes();
           if bytes.first() == Some(&b'.') && !*lit_dot && !dotglob {

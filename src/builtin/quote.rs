@@ -1,10 +1,12 @@
 use crate::{
-  ShResult, Shed,
   builtin::opt::OptSpec,
-  expand, match_loop, opt,
-  procio::{out_bytes, outln_bytes},
-  state::vars::{VarFlags, VarKind, VarStr},
-  util::with_status,
+  expand::escape,
+  match_loop, opt, procio,
+  state::{
+    Shed,
+    vars::{VarFlags, VarKind, VarStr},
+  },
+  util::{self, error::ShResult},
   varstr,
 };
 
@@ -27,13 +29,13 @@ impl super::Builtin for Quote {
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     if let Some(stdin) = self.get_input(&mut args) {
-      outln_bytes(&expand::shell_quote_bytes(&stdin));
-      return with_status(0);
+      procio::outln_bytes(&escape::shell_quote_bytes(&stdin));
+      return util::with_status(0);
     }
 
     let mut parts: Vec<Vec<u8>> = args
       .arguments()
-      .map(|(s, _)| expand::shell_quote_bytes(s.as_bytes()))
+      .map(|(s, _)| escape::shell_quote_bytes(s.as_bytes()))
       .collect();
 
     for opt in args.options() {
@@ -45,23 +47,23 @@ impl super::Builtin for Quote {
       }
     }
 
-    outln_bytes(&join_bytes(&parts, b" "));
-    with_status(0)
+    procio::outln_bytes(&join_bytes(&parts, b" "));
+    util::with_status(0)
   }
 }
 
 fn quote_var(name: &str) -> Option<Vec<u8>> {
   let var = Shed::vars(|v| v.try_get_var_meta(name))?;
   match var.kind() {
-    VarKind::Str(var_str) => Some(expand::shell_quote_bytes(var_str.as_bytes())),
+    VarKind::Str(var_str) => Some(escape::shell_quote_bytes(var_str.as_bytes())),
     VarKind::Int(int) => {
       let int_str = varstr!("{int}");
-      Some(expand::shell_quote_bytes(&int_str))
+      Some(escape::shell_quote_bytes(&int_str))
     }
     VarKind::Arr(var_strs) => Some(join_bytes(
       &var_strs
         .iter()
-        .map(|v| expand::shell_quote_bytes(v.as_bytes()))
+        .map(|v| escape::shell_quote_bytes(v.as_bytes()))
         .collect::<Vec<_>>(),
       b" ",
     )),
@@ -69,9 +71,9 @@ fn quote_var(name: &str) -> Option<Vec<u8>> {
       &items
         .iter()
         .map(|(k, v)| {
-          let mut entry = expand::shell_quote_bytes(k.as_bytes());
+          let mut entry = escape::shell_quote_bytes(k.as_bytes());
           entry.push(b' ');
-          entry.extend_from_slice(&expand::shell_quote_bytes(v.as_bytes()));
+          entry.extend_from_slice(&escape::shell_quote_bytes(v.as_bytes()));
           entry
         })
         .collect::<Vec<_>>(),
@@ -79,7 +81,7 @@ fn quote_var(name: &str) -> Option<Vec<u8>> {
     )),
     VarKind::Magic(magic_var) => {
       let resolved = magic_var()?;
-      Some(expand::shell_quote_bytes(resolved.as_bytes()))
+      Some(escape::shell_quote_bytes(resolved.as_bytes()))
     }
     VarKind::Unset => None,
   }
@@ -135,13 +137,13 @@ impl super::Builtin for Unquote {
     match target {
       None => {
         if let Some(first) = fields.next() {
-          out_bytes(&first);
+          procio::out_bytes(&first);
           for field in fields {
-            out_bytes(delim.as_bytes());
-            out_bytes(&field);
+            procio::out_bytes(delim.as_bytes());
+            procio::out_bytes(&field);
           }
           if delim == "\n" {
-            out_bytes(b"\n");
+            procio::out_bytes(b"\n");
           }
         }
       }
@@ -156,7 +158,7 @@ impl super::Builtin for Unquote {
       }
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -197,7 +199,7 @@ pub(crate) fn unquote_raw(s: &[u8]) -> ShResult<Vec<Vec<u8>>> {
 
       // Byte-native: `$'...'` expands straight into the field, preserving any
       // raw bytes (e.g. `\377`) instead of laundering through `from_utf8_lossy`.
-      field.extend_from_slice(&expand::expand_ansi_c(&raw));
+      field.extend_from_slice(&escape::expand_ansi_c(&raw));
     }
     _ if ch.is_ascii_whitespace() => {
       if started {

@@ -1,6 +1,10 @@
 use nix::sys::resource::{UsageWho, getrusage};
 
-use super::{ShResult, outln, state::meta::CmdTimer, with_status};
+use crate::{
+  outln,
+  state::meta::CmdTimer,
+  util::{self, error::ShResult},
+};
 
 pub(super) struct Times;
 impl super::Builtin for Times {
@@ -41,6 +45,6 @@ impl super::Builtin for Times {
       "{child_user_minutes}m{child_user_seconds}.{child_user_milliseconds:03} {child_sys_minutes}m{child_sys_seconds}.{child_sys_milliseconds:03}\n"
     );
 
-    with_status(0)
+    util::with_status(0)
   }
 }

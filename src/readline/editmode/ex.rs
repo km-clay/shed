@@ -20,7 +20,11 @@ use super::{
   state::terminal::CursorStyle,
   status_msg,
 };
-use crate::{Shed, eval::lex::TkFlags, state::vars::VarStr, varstr, verb};
+use crate::{
+  eval::lex::TkFlags,
+  state::{Shed, vars::VarStr},
+  varstr, verb,
+};
 use bitflags::bitflags;
 
 bitflags! {

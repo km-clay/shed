@@ -1,7 +1,8 @@
+use crate::{status_msg, util};
+
 use super::{
   CharClass, Grapheme, MotionKind, Pos, ShResult, Shed,
   editcmd::{Bound, Cmd, Dest, Direction, EditCmd, LineAddr, Motion, TextObj, To, Verb, Word},
-  ordered, status_msg,
   types::Line,
 };
 
@@ -318,7 +319,7 @@ impl super::LineBuf {
           if verb.is_some() {
             let row = this.row();
             let target_row = this.offset_row(off);
-            let (s, e) = ordered(row, target_row);
+            let (s, e) = util::ordered(row, target_row);
             Some(MotionKind::Line {
               start: s,
               end: e,
@@ -353,7 +354,7 @@ impl super::LineBuf {
           if verb.is_some() {
             let row = this.row();
             let target_row = this.offset_row(off);
-            let (s, e) = ordered(row, target_row);
+            let (s, e) = util::ordered(row, target_row);
             Some(MotionKind::Line {
               start: s,
               end: e,
@@ -465,7 +466,7 @@ impl super::LineBuf {
         }
 
         Motion::CharRange(s, e) => {
-          let (s, e) = ordered(*s, *e);
+          let (s, e) = util::ordered(*s, *e);
           Some(MotionKind::Char {
             start: s,
             end: e,
@@ -489,7 +490,7 @@ impl super::LineBuf {
           let Some(e) = this.resolve_line_addr(e)? else {
             return Ok(None);
           };
-          let (s, e) = ordered(s, e);
+          let (s, e) = util::ordered(s, e);
           Some(MotionKind::Line {
             start: s,
             end: e,
@@ -497,7 +498,7 @@ impl super::LineBuf {
           })
         }
         Motion::BlockRange(s, e) => {
-          let (s, e) = ordered(*s, *e);
+          let (s, e) = util::ordered(*s, *e);
           Some(MotionKind::Block { start: s, end: e })
         }
         dir @ (Motion::HalfScreenUp | Motion::HalfScreenDown) => {
@@ -566,7 +567,7 @@ impl super::LineBuf {
         end,
         inclusive,
       } => {
-        let (s, e) = ordered(start, end);
+        let (s, e) = util::ordered(start, end);
         if s.row == e.row {
           let range = if *inclusive {
             s.col..e.col + 1

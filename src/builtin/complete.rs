@@ -7,17 +7,17 @@ use itertools::{EitherOrBoth, Itertools};
 
 use crate::{
   eval::parse::ast::{Ast, NodeId},
+  out, outln,
+  readline::{BashCompSpec, Candidate, CompContext, CompFlags, CompOptFlags, CompOpts, CompSpec},
+  sherr,
   state::vars::{VarStr, VarStrSliceExt},
+  state::{Shed, vars::VarKind},
+  util,
 };
 
 use super::{
   BuiltinArgs, Dispatcher, NdRule, ShResult,
   opt::{Opt, OptSpec, Word, parse_opts},
-  out, outln,
-  readline::{BashCompSpec, Candidate, CompContext, CompFlags, CompOptFlags, CompOpts, CompSpec},
-  sherr,
-  state::{Shed, vars::VarKind},
-  with_status,
 };
 
 pub(super) struct Complete;
@@ -66,7 +66,7 @@ impl super::Builtin for Complete {
         })?;
       }
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     if comp_opts.flags.contains(CompFlags::REMOVE) {
@@ -76,7 +76,7 @@ impl super::Builtin for Complete {
         }
       });
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     if args.arguments().next().is_none() {
@@ -92,7 +92,7 @@ impl super::Builtin for Complete {
       Shed::meta_mut(|m| m.set_comp_spec(cmd.clone(), Box::new(comp_spec.clone())));
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -166,7 +166,7 @@ impl super::Builtin for CompGen {
       outln!("{result}");
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -269,7 +269,7 @@ impl super::Builtin for Compadd {
       }
     });
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

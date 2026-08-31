@@ -6,24 +6,24 @@ use std::{
   time::UNIX_EPOCH,
 };
 
-use crate::util::TimeReader;
-
 use crate::{
   HashSet,
   builtin::opt::Opt,
-  expand::shell_quote_bytes,
+  errln,
+  expand::escape,
   opt,
-  state::{util, vars::VarStr},
+  readline::{self, HistEntry, History},
+  sherr,
+  state::{Shed, db, paths, vars::VarStr},
   status_msg,
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+    strops::TimeReader,
+  },
 };
 
-use super::{
-  Shed, errln,
-  opt::OptSpec,
-  readline::{HistEntry, History, import_history},
-  sherr, state,
-  util::{ShResult, ShResultExt, with_status},
-};
+use super::opt::OptSpec;
 
 /// Helper macro to reduce repetition when adding conditions to the query. It handles the '--not' logic and parameter binding.
 macro_rules! cond {
@@ -74,7 +74,6 @@ impl HistQuery {
     Self::default()
   }
 
-  #[expect(clippy::too_many_lines)]
   pub fn execute(&self, hist: &History) -> ShResult<Vec<(i64, HistEntry)>> {
     let mut conditions: Vec<String> = vec![];
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
@@ -322,7 +321,7 @@ impl HistQuery {
           let arg = opt.value()?;
           let path = match arg {
             "bash" => {
-              let Some(home) = state::util::get_home() else {
+              let Some(home) = paths::get_home() else {
                 return Err(sherr!(
                   ParseErr,
                   "Cannot use {opt} without a valid home directory"
@@ -331,7 +330,7 @@ impl HistQuery {
               home.join(".bash_history")
             }
             "zsh" => {
-              let Some(home) = state::util::get_home() else {
+              let Some(home) = paths::get_home() else {
                 return Err(sherr!(
                   ParseErr,
                   "Cannot use {opt} without a valid home directory"
@@ -340,13 +339,13 @@ impl HistQuery {
               home.join(".zsh_history")
             }
             "fish" => {
-              let Some(home) = state::util::get_home() else {
+              let Some(home) = paths::get_home() else {
                 return Err(sherr!(
                   ParseErr,
                   "Cannot use {opt} without a valid home directory"
                 ));
               };
-              let data_dir = util::data_dir()
+              let data_dir = paths::data_dir()
                 .unwrap_or_else(|| PathBuf::from(format!("{}/.local/share", home.display())));
               data_dir.join("fish").join("fish_history")
             }
@@ -397,7 +396,7 @@ impl HistQuery {
         if !self.no_numbers {
           write!(f, "{id} ")?;
         }
-        f.write_all(&shell_quote_bytes(entry.command_bytes()))?;
+        f.write_all(&escape::shell_quote_bytes(entry.command_bytes()))?;
         f.write_all(b"\n")?;
       }
 
@@ -527,7 +526,7 @@ impl super::Builtin for Hist {
     } else {
       "shed_history"
     };
-    let hist = if let Some(conn) = state::util::get_db_conn() {
+    let hist = if let Some(conn) = db::get_db_conn() {
       History::new(conn, table).promote_err(span.clone())?
     } else {
       if query.delete || query.pull || query.restore || query.import.is_some() {
@@ -539,7 +538,7 @@ impl super::Builtin for Hist {
           .promote(span),
         );
       }
-      let conn = state::util::open_db_conn_readonly().promote_err(span.clone())?;
+      let conn = db::open_db_conn_readonly().promote_err(span.clone())?;
       History::attach(Arc::new(Mutex::new(conn)), table)
     };
 
@@ -555,18 +554,18 @@ impl super::Builtin for Hist {
       let num_restored = hist.restore_backup()?;
       errln!("hist: restored {num_restored} entries from backup.");
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     if query.pull {
       let pulled = hist.refresh_hist_entries();
       status_msg!("hist: pulled {pulled} commands");
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     if let Some(ref path) = query.import {
-      let entries: Vec<(i64, HistEntry)> = import_history(path)
+      let entries: Vec<(i64, HistEntry)> = readline::import_history(path)
         .promote_err(span.clone())?
         .into_iter()
         .enumerate()
@@ -587,7 +586,7 @@ impl super::Builtin for Hist {
       errln!("hist: imported {count} entries.");
 
       hist.sort_by_timestamp()?;
-      return with_status(0);
+      return util::with_status(0);
     }
 
     let entries = query.execute(&hist).promote_err(span.clone())?;
@@ -598,7 +597,7 @@ impl super::Builtin for Hist {
       errln!("hist: deleted {num_deleted} entries.");
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -1260,14 +1259,14 @@ mod hist_builtin_execute_tests {
   //! import branches.
 
   use crate::readline::History;
-  use crate::state::{self, Shed};
+  use crate::state::{Shed, db};
   use crate::tests::testutil::{TestGuard, test_input};
 
   /// Drop and re-init the named table on the shared in-memory conn so
   /// each test starts with a clean slate. Returns a History handle for
   /// seeding entries.
   fn fresh_history(table: &str) -> History {
-    let conn = state::util::get_db_conn().expect("test db conn");
+    let conn = db::get_db_conn().expect("test db conn");
     let _ = conn
       .lock()
       .unwrap()
@@ -1420,7 +1419,7 @@ mod hist_builtin_execute_tests {
     // the same connection skipped its CREATE TABLE and silently never
     // persisted. Simulate startup order on one shared connection.
     let _g = TestGuard::new();
-    let conn = state::util::get_db_conn().expect("test db conn");
+    let conn = db::get_db_conn().expect("test db conn");
     {
       let c = conn.lock().unwrap();
       c.execute_batch("DROP TABLE IF EXISTS shed_history").ok();

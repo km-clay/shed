@@ -26,20 +26,24 @@ use std::{
 
 use bitflags::bitflags;
 
-use crate::{Shed, state::vars::VarStr, util};
-
-use super::{
+use crate::{
   builtin::BUILTIN_NAMES,
-  editmode::{ExCommand, ExLineAddr, ExTk, ExTkRule},
   eval::{
     execute::{in_cd_path, is_in_path},
     lex::{LexFlags, LexStream, Span, Tk, TkFlags, TkRule},
   },
-  expand::{expand_raw_inner, unescape_str},
+  expand::{escape, var},
   match_loop, shopt,
-  state::{self, meta::UtilKind, util::get_exec_wrappers, vars::ShellParam},
-  util::{QuoteState, has_unescaped, split_at_unescaped},
+  state::{
+    Shed, cmd,
+    meta::UtilKind,
+    params, paths,
+    vars::{ShellParam, VarStr},
+  },
+  util::strops::{self, QuoteState},
 };
+
+use super::editmode::{ExCommand, ExLineAddr, ExTk, ExTkRule};
 
 /// Turn raw shell input into `CtxTks`
 pub fn get_context_tokens(input: &str) -> Vec<CtxTk> {
@@ -122,7 +126,7 @@ fn process_ctx_tokens(mut out: Vec<CtxTk>) -> Vec<CtxTk> {
 }
 
 fn is_exec_wrapper(tk: &CtxTk) -> bool {
-  get_exec_wrappers()
+  params::get_exec_wrappers()
     .into_iter()
     .any(|wr| wr.as_bytes() == tk.span().as_bytes())
     && is_valid_cmd(&tk.as_tk()).is_some()
@@ -152,13 +156,14 @@ fn promote_exec_wrappers(tokens: &mut [CtxTk]) {
     while let Some(target) = tokens.peek() {
       match target.class {
         CtxTkRule::Argument | CtxTkRule::ArgumentFile => {
-          if target.span.as_bytes().starts_with(b"-") || has_unescaped(target.span.as_bytes(), b"=")
+          if target.span.as_bytes().starts_with(b"-")
+            || strops::has_unescaped(target.span.as_bytes(), b"=")
           {
             // looks like an option or an assignment
             tokens.next();
             continue;
           }
-          if get_exec_wrappers().contains(&target.span.as_bytes().into()) {
+          if params::get_exec_wrappers().contains(&target.span.as_bytes().into()) {
             // chaining exec wrappers is a thing people do, e.g. `sudo strace cmd`
             // continue the outer loop and let it get picked up by the next iteration
             // we don't use is_exec_wrapper() for this since it doesnt have the ValidCommand rule
@@ -242,7 +247,7 @@ fn is_valid_cmd(command: &Tk) -> Option<CmdKind> {
   } else if BUILTIN_NAMES.contains(&name.as_bytes()) {
     Some(CmdKind::Builtin)
   } else {
-    let util = state::util::which_util(&name.to_str_lossy())?;
+    let util = cmd::which_util(&name.to_str_lossy())?;
     match util.kind() {
       UtilKind::Alias => Some(CmdKind::Alias),
       UtilKind::Function => Some(CmdKind::Function),
@@ -811,8 +816,8 @@ fn check_path_exists(path: &str) -> bool {
     return true;
   }
 
-  let unescaped = unescape_str(path.as_bytes());
-  let Ok(expanded) = expand_raw_inner(&mut unescaped.cursor(), false, false) else {
+  let unescaped = escape::unescape_str(path.as_bytes());
+  let Ok(expanded) = var::expand_raw_inner(&mut unescaped.cursor(), false, false) else {
     return false;
   };
   let stripped = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
@@ -823,10 +828,10 @@ fn check_path_exists(path: &str) -> bool {
   // Does any entry start with `stripped`?
   let bytes = stripped.as_bytes();
   let (dir, prefix): (&Path, &[u8]) = match bytes.iter().rposition(|&b| b == b'/') {
-    Some(idx) => (util::path_from_bytes(&bytes[..=idx]), &bytes[idx + 1..]),
+    Some(idx) => (paths::path_from_bytes(&bytes[..=idx]), &bytes[idx + 1..]),
     None => (Path::new("."), bytes),
   };
-  util::path_entries(dir).any(|e| e.file_name().as_bytes().starts_with(prefix))
+  paths::path_entries(dir).any(|e| e.file_name().as_bytes().starts_with(prefix))
 }
 
 /// Break a token at `comp_wordbreaks`
@@ -834,7 +839,7 @@ fn check_path_exists(path: &str) -> bool {
 /// This allows for styling filenames in tokens like `--foo=/path/to/bar`
 /// And also allows the completer to get more fine-grained context
 fn subdivide_argument(mut tk: CtxTk) -> Vec<CtxTk> {
-  let wordbreaks = state::util::get_comp_wordbreaks();
+  let wordbreaks = params::get_comp_wordbreaks();
   let mut tokens = vec![];
 
   let push_token = |tks: &mut Vec<CtxTk>, mut tk: CtxTk| {
@@ -884,7 +889,7 @@ fn parse_assignment(span: &Span, flags: TkFlags) -> Vec<CtxTk> {
   let span_start = span.range().start;
 
   // Find the `=` operator. ASSIGN was set, so this should always succeed.
-  let Some((eq_off, eq_len)) = split_at_unescaped(raw.as_bytes(), b"=") else {
+  let Some((eq_off, eq_len)) = strops::split_at_unescaped(raw.as_bytes(), b"=") else {
     return vec![CtxTk {
       span: span.clone(),
       class: CtxTkRule::Argument,

@@ -6,10 +6,10 @@
 use std::path::PathBuf;
 
 use crate::{
-  COMPLETIONS, FUNCTIONS, HELP, ShResult,
+  COMPLETIONS, FUNCTIONS, HELP,
   eval::execute::exec_nonint,
-  state::{util::source_file, vars::VarStr},
-  util,
+  state::{paths, rc::source_file, vars::VarStr},
+  util::error::ShResult,
 };
 
 use super::HashMap;
@@ -48,7 +48,7 @@ pub(crate) trait Autoloader {
 /// Walk a `:`-separated list of directories, mapping each file's stem to its path.
 pub(crate) fn crawl(path_list: &str) -> HashMap<String, AutoloadSrc> {
   let mut out = HashMap::default();
-  for entry in util::path_list_entries(path_list) {
+  for entry in paths::path_list_entries(path_list) {
     let path = entry.path();
     if path.is_dir() {
       continue;

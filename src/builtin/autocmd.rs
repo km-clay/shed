@@ -1,14 +1,15 @@
 //! The `autocmd` builtin - register commands to be executed automatically on certain shell events
 
-use crate::opt;
-
-use super::{
-  ShResult, Shed,
-  opt::OptSpec,
-  outln, sherr,
-  state::logic::{AutoCmd, AutoCmdKind},
-  with_status,
+use crate::{
+  opt, outln, sherr,
+  state::{
+    Shed,
+    logic::{AutoCmd, AutoCmdKind},
+  },
+  util::{self, error::ShResult},
 };
+
+use super::opt::OptSpec;
 
 pub(super) struct AutoCmdBuiltin;
 impl super::Builtin for AutoCmdBuiltin {
@@ -40,7 +41,7 @@ impl super::Builtin for AutoCmdBuiltin {
         .unwrap_or_default();
 
       outln!("cleared {count} autocmds");
-      return with_status(0);
+      return util::with_status(0);
     }
 
     let Some((autocmd_cmd, _)) = arg_vec.next() else {
@@ -51,7 +52,7 @@ impl super::Builtin for AutoCmdBuiltin {
 
     Shed::logic_mut(|l| l.insert_autocmd(autocmd));
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -78,7 +79,7 @@ fn display_autocmds(kind: Option<AutoCmdKind>) -> ShResult<()> {
   let out = lines.join("\n");
   outln!("{out}");
 
-  with_status(0)
+  util::with_status(0)
 }
 
 #[cfg(test)]

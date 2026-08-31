@@ -17,7 +17,7 @@ pub(crate) use node::NdKind;
 mod macros;
 mod command;
 mod compound;
-mod util;
+mod stream;
 
 #[cfg(test)]
 pub mod tests;
@@ -27,15 +27,13 @@ use crate::{
     ast::{Ast, NodeId},
     node::LabelCtx,
   },
-  match_loop,
+  match_loop, procio, sherr,
   state::vars::VarStr,
+  two_way_display,
+  util::error::{ShErr, ShResult},
 };
 
-use super::{
-  lex::{self, LexFlags, LexStream, Span, Tk, TkFlags, TkRule, clean_input},
-  procio, sherr, two_way_display,
-  util::{self as crate_util, ShErr, ShResult},
-};
+use super::lex::{self, LexFlags, LexStream, Span, Tk, TkFlags, TkRule, clean_input};
 
 /// The parsed AST along with the source input it parsed
 ///

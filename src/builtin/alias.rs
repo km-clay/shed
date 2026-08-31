@@ -6,16 +6,13 @@
 
 use bstr::ByteSlice;
 
-use crate::opt;
-
-use super::{
-  ShResult, Shed,
-  opt::OptSpec,
-  sherr,
-  state::vars::{display_as_var, display_as_vars},
-  varcmds::split_assignment_raw,
-  with_status,
+use crate::{
+  opt, sherr,
+  state::{Shed, vars},
+  util::{self, error::ShResult, strops},
 };
+
+use super::opt::OptSpec;
 use crate::procio::outln_bytes;
 
 /// Create a shell alias
@@ -25,15 +22,15 @@ use crate::procio::outln_bytes;
 pub(super) struct Alias;
 impl super::Builtin for Alias {
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    if args.argv.is_empty() {
-      let output = Shed::logic(|l| display_as_vars(l.aliases().iter()));
+    if args.argv().is_empty() {
+      let output = Shed::logic(|l| vars::display_as_vars(l.aliases().iter()));
       outln_bytes(&output);
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     for (arg, span) in args.arguments() {
-      let (name, value) = split_assignment_raw(arg);
+      let (name, value) = strops::split_assignment_raw(arg);
 
       // reject these two
       if name == b"command" || name == b"builtin" {
@@ -47,7 +44,7 @@ impl super::Builtin for Alias {
       if let Some(value) = value {
         Shed::logic_mut(|l| l.insert_alias(&name.to_str_lossy(), &value.into(), span.clone()));
       } else if let Some(alias) = Shed::logic(|l| l.get_alias(&name.to_str_lossy())) {
-        outln_bytes(&display_as_var(name, alias.body()));
+        outln_bytes(&vars::display_as_var(name, alias.body()));
       } else {
         return Err(sherr!(
           SyntaxErr @ span.clone(),
@@ -57,7 +54,7 @@ impl super::Builtin for Alias {
       }
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -65,11 +62,11 @@ impl super::Builtin for Alias {
 pub(super) struct Unalias;
 impl super::Builtin for Unalias {
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    if args.argv.is_empty() {
-      let output = Shed::logic(|l| display_as_vars(l.aliases().iter()));
+    if args.argv().is_empty() {
+      let output = Shed::logic(|l| vars::display_as_vars(l.aliases().iter()));
       outln_bytes(&output);
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     for (arg, span) in args.arguments() {
@@ -82,7 +79,7 @@ impl super::Builtin for Unalias {
       Shed::logic_mut(|l| l.remove_alias(&arg.to_str_lossy()));
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -98,11 +95,11 @@ impl super::Builtin for ExCmd {
     true
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    if args.argv.is_empty() {
-      let output = Shed::logic(|l| display_as_vars(l.ex_aliases().iter()));
+    if args.argv().is_empty() {
+      let output = Shed::logic(|l| vars::display_as_vars(l.ex_aliases().iter()));
       outln_bytes(&output);
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     let mut remove = false;
@@ -114,7 +111,7 @@ impl super::Builtin for ExCmd {
     }
 
     for (arg, span) in args.arguments() {
-      let (name, value) = split_assignment_raw(arg);
+      let (name, value) = strops::split_assignment_raw(arg);
       let name = &name.to_str_lossy();
 
       if !remove && let Some(value) = value {
@@ -122,13 +119,13 @@ impl super::Builtin for ExCmd {
       } else {
         match Shed::logic(|l| l.get_ex_alias(name)) {
           Some(_) if remove => Shed::logic_mut(|l| l.remove_ex_alias(name)),
-          Some(alias) => outln_bytes(&display_as_var(name.as_bytes(), alias.body())),
+          Some(alias) => outln_bytes(&vars::display_as_var(name.as_bytes(), alias.body())),
           None => return Err(sherr!(SyntaxErr @ span.clone(),"Unknown ex command alias '{name}'")),
         }
       }
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

@@ -1,19 +1,19 @@
 use std::{collections::VecDeque, rc::Rc};
 
-use crate::{
-  Shed,
-  eval::{
-    execute::{is_builtin, is_func_node},
-    parse::{
-      Ast,
-      ast::{
-        CaseNodeRange, ChildRange, CondNodeId, CondNodeRange, ConjunctRange, LabelId, LabelRange,
-        RedirRange, SpanId, TkId, TkRange,
-      },
-    },
+use super::{
+  super::execute::{is_builtin, is_func_node},
+  ast::{
+    Ast, CaseNodeRange, ChildRange, CondNodeId, CondNodeRange, ConjunctRange, LabelId, LabelRange,
+    RedirRange, SpanId, TkId, TkRange,
   },
+};
+
+use crate::{
   expand::subshell,
-  state::logic::{IsInternal, ShFunc},
+  state::{
+    Shed,
+    logic::{IsInternal, ShFunc},
+  },
   util::error::LabelBuilder,
 };
 

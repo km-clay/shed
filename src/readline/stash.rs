@@ -2,9 +2,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::Connection;
 
-use crate::state::vars::VarStr;
+use crate::state::{db, vars::VarStr};
 
-use super::{ShResult, sherr, state};
+use super::{ShResult, sherr};
 
 #[derive(Debug)]
 pub(crate) struct StashedCmd {
@@ -19,8 +19,7 @@ pub(crate) struct Stash {
 
 impl Stash {
   pub fn new() -> ShResult<Self> {
-    let conn =
-      state::util::get_db_conn().ok_or_else(|| sherr!(InternalErr, "database not available"))?;
+    let conn = db::get_db_conn().ok_or_else(|| sherr!(InternalErr, "database not available"))?;
     Self::init_stash_table(
       &conn
         .lock()

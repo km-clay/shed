@@ -2,16 +2,17 @@ use std::path::PathBuf;
 
 use bstr::ByteSlice;
 
-use crate::util::{ByteCursor, SliceCursor};
-use crate::{shopt_mut, state::vars::VarStr, util};
-
-use super::{
-  ShResult,
-  crate_util::{ansi_from_description, format_time},
-  match_loop, shopt, state,
-  state::Shed,
+use crate::{
+  expand::{escape, subshell, var},
+  match_loop, shopt, shopt_mut,
+  state::{Shed, paths, vars::VarStr},
   status_msg,
-  subshell::expand_cmd_sub,
+  util::{
+    self,
+    error::ShResult,
+    strops::{self, ByteCursor, SliceCursor},
+    ui,
+  },
   var,
 };
 
@@ -222,8 +223,8 @@ pub fn expand_prompt(raw: &[u8]) -> ShResult<String> {
   });
 
   if shopt!(prompt.substitute) {
-    let marked = super::unescape_prompt(&result);
-    let expanded = super::expand_raw_inner(&mut marked.cursor(), true, false)?;
+    let marked = escape::unescape_prompt(&result);
+    let expanded = var::expand_raw_inner(&mut marked.cursor(), true, false)?;
     result = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
   }
 
@@ -231,7 +232,7 @@ pub fn expand_prompt(raw: &[u8]) -> ShResult<String> {
 }
 
 fn ansi_color(c: &str, out: &mut String) {
-  match ansi_from_description(c) {
+  match ui::ansi_from_description(c) {
     Ok(esc_seq) => out.push_str(esc_seq.as_str()),
     Err(e) => status_msg!("{e}"),
   }
@@ -242,7 +243,7 @@ fn runtime(formatted: bool, out: &mut String) {
     return;
   };
   if formatted {
-    let runtime_fmt = format_time(runtime);
+    let runtime_fmt = strops::format_time(runtime);
     out.push_str(&runtime_fmt);
   } else {
     let runtime_millis = runtime.as_millis().to_string();
@@ -251,7 +252,7 @@ fn runtime(formatted: bool, out: &mut String) {
 }
 
 fn prompt_pwd(short: bool, out: &mut String) {
-  let pwd = state::util::display_path(var!("PWD"));
+  let pwd = paths::display_path(var!("PWD"));
 
   if !short {
     out.push_str(&pwd);
@@ -314,7 +315,7 @@ fn func_expand(input: &str, out: &mut String) -> ShResult<()> {
   shopt_mut!(set.errexit = false);
   shopt_mut!(set.noexec = false);
   shopt_mut!(set.xtrace = false);
-  let res = expand_cmd_sub(input);
+  let res = subshell::expand_cmd_sub(input);
   shopt_mut!(set.errexit = errexit);
   shopt_mut!(set.noexec = noexec);
   shopt_mut!(set.xtrace = xtrace);
@@ -429,31 +430,31 @@ mod tests {
   #[test]
   fn runtime_millis() {
     let dur = Duration::from_millis(500);
-    assert_eq!(format_time(dur), "500ms");
+    assert_eq!(strops::format_time(dur), "500ms");
   }
 
   #[test]
   fn runtime_seconds() {
     let dur = Duration::from_secs(5);
-    assert_eq!(format_time(dur), "5s");
+    assert_eq!(strops::format_time(dur), "5s");
   }
 
   #[test]
   fn runtime_minutes_and_seconds() {
     let dur = Duration::from_secs(125);
-    assert_eq!(format_time(dur), "2m 5s");
+    assert_eq!(strops::format_time(dur), "2m 5s");
   }
 
   #[test]
   fn runtime_hours() {
     let dur = Duration::from_secs(3661);
-    assert_eq!(format_time(dur), "1h 1m 1s");
+    assert_eq!(strops::format_time(dur), "1h 1m 1s");
   }
 
   #[test]
   fn runtime_micros() {
     let dur = Duration::from_micros(500);
-    assert_eq!(format_time(dur), "500µs");
+    assert_eq!(strops::format_time(dur), "500µs");
   }
 
   // ===================== tokenize_prompt extra escapes =====================

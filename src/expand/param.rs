@@ -1,15 +1,23 @@
-use crate::eval::lex::TkFlags;
-use crate::expand::Expander;
-use crate::expand::stream::{Marker, SegStream, Unit};
-use crate::expand::var::expand_raw_inner;
-use crate::state::vars::VarStr;
-use crate::state::{
-  Shed, scopes::ScopeStack, vars::ArrIndex, vars::ShellParam, vars::VarFlags, vars::VarKind,
-  vars::VarName,
+use crate::{
+  eval::lex::TkFlags,
+  expand::{
+    Expander,
+    stream::{Marker, SegStream, Unit},
+    var,
+  },
+  match_loop, sherr, shopt,
+  state::vars::VarStr,
+  state::{
+    Shed, scopes::ScopeStack, vars::ArrIndex, vars::ShellParam, vars::VarFlags, vars::VarKind,
+    vars::VarName,
+  },
+  util,
+  util::{
+    error::ShResult,
+    strops::{ByteCursor, SliceCursor},
+  },
+  var,
 };
-use crate::util::{ByteCursor, ShResult, SliceCursor};
-use crate::{match_loop, util};
-use crate::{sherr, shopt, var};
 
 #[derive(Debug)]
 pub(crate) enum ParamExp {
@@ -159,7 +167,7 @@ pub fn parse_param_exp(body: &SegStream, allow_side_effects: bool) -> ShResult<P
 /// (`${v: -2}`) and a single layer of surrounding parens (`${v:(-2)}`).
 fn parse_signed_component(s: &str, allow_side_effects: bool) -> Option<i64> {
   let input = SegStream::from_bytes(s.as_bytes());
-  let expanded = expand_raw_inner(&mut input.cursor(), allow_side_effects, false)
+  let expanded = var::expand_raw_inner(&mut input.cursor(), allow_side_effects, false)
     .map_or_else(|_| s.as_bytes().to_vec(), SegStream::into_bytes);
   let expanded = String::from_utf8_lossy(&expanded);
   let trimmed = expanded.trim();
@@ -224,7 +232,7 @@ fn expand_body_subscripts(body: &SegStream, allow_side_effects: bool) -> ShResul
             _ => inner.push(u),
           }
         }
-        out.append(expand_raw_inner(
+        out.append(var::expand_raw_inner(
           &mut inner.cursor(),
           allow_side_effects,
           false,
@@ -416,18 +424,18 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
       ParamExp::DefaultUnsetOrNull(default) => {
         match Shed::vars(try_get).filter(|v| !v.is_empty()) {
           Some(val) => Ok(val.into()),
-          None => expand_raw_inner(&mut default.cursor(), allow_side_effects, false),
+          None => var::expand_raw_inner(&mut default.cursor(), allow_side_effects, false),
         }
       }
       ParamExp::DefaultUnset(default) => match Shed::vars(try_get) {
         Some(val) => Ok(val.into()),
-        None => expand_raw_inner(&mut default.cursor(), allow_side_effects, false),
+        None => var::expand_raw_inner(&mut default.cursor(), allow_side_effects, false),
       },
       ParamExp::SetDefaultUnsetOrNull(default) => {
         if let Some(val) = Shed::vars(try_get).filter(|v| !v.is_empty()) {
           Ok(val.into())
         } else {
-          let expanded = expand_raw_inner(&mut default.cursor(), allow_side_effects, false)?;
+          let expanded = var::expand_raw_inner(&mut default.cursor(), allow_side_effects, false)?;
           if allow_side_effects {
             let stored = VarStr::from(expanded.to_bytes());
             Shed::vars_mut(|v| {
@@ -441,7 +449,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         if let Some(val) = Shed::vars(try_get) {
           Ok(val.into())
         } else {
-          let expanded = expand_raw_inner(&mut default.cursor(), allow_side_effects, false)?;
+          let expanded = var::expand_raw_inner(&mut default.cursor(), allow_side_effects, false)?;
           if allow_side_effects {
             let stored = VarStr::from(expanded.to_bytes());
             Shed::vars_mut(|v| {
@@ -452,11 +460,11 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
         }
       }
       ParamExp::AltSetNotNull(alt) => match Shed::vars(try_get).filter(|v| !v.is_empty()) {
-        Some(_) => expand_raw_inner(&mut alt.cursor(), allow_side_effects, false),
+        Some(_) => var::expand_raw_inner(&mut alt.cursor(), allow_side_effects, false),
         None => Ok(SegStream::new()),
       },
       ParamExp::AltNotNull(alt) => match Shed::vars(try_get) {
-        Some(_) => expand_raw_inner(&mut alt.cursor(), allow_side_effects, false),
+        Some(_) => var::expand_raw_inner(&mut alt.cursor(), allow_side_effects, false),
         None => Ok(SegStream::new()),
       },
       ParamExp::ErrUnsetOrNull(err) => {
@@ -466,7 +474,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
           if !allow_side_effects {
             return Ok(SegStream::new());
           }
-          let expanded = expand_raw_inner(&mut err.cursor(), allow_side_effects, false)?;
+          let expanded = var::expand_raw_inner(&mut err.cursor(), allow_side_effects, false)?;
           Err(sherr!(
             ExecFail,
             "{}",
@@ -481,7 +489,7 @@ pub fn perform_param_expansion(body: &SegStream, allow_side_effects: bool) -> Sh
           if !allow_side_effects {
             return Ok(SegStream::new());
           }
-          let expanded = expand_raw_inner(&mut err.cursor(), allow_side_effects, false)?;
+          let expanded = var::expand_raw_inner(&mut err.cursor(), allow_side_effects, false)?;
           Err(sherr!(
             ExecFail,
             "{}",

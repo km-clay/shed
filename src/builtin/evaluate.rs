@@ -1,11 +1,7 @@
 use crate::{
-  Shed,
-  state::{meta::MetaTab, vars::VarStrSliceExt},
-};
-
-use super::{
-  exec_nonint, state,
-  util::{ShResult, with_status},
+  eval::execute,
+  state::{Shed, meta::MetaTab, params, vars::VarStrSliceExt},
+  util::{self, error::ShResult},
 };
 
 pub(super) struct Eval;
@@ -20,9 +16,9 @@ impl super::Builtin for Eval {
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if args.arguments().count() == 0 {
-      return with_status(0);
+      return util::with_status(0);
     }
-    let sep = state::util::get_separator();
+    let sep = params::get_separator();
     let command = args
       .arguments()
       .map(|(s, _)| s)
@@ -32,7 +28,7 @@ impl super::Builtin for Eval {
     // eval adds an xtrace layer
     let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
 
-    exec_nonint(command, Some("eval".into()))
+    execute::exec_nonint(command, Some("eval".into()))
   }
 }
 

@@ -2,31 +2,31 @@ use std::collections::VecDeque;
 
 use bstr::ByteSlice;
 
-use crate::procio::outln_bytes;
-use crate::state::{logic::ShFunc, vars::VarStr};
-use crate::util::ends_with_unescaped;
-
-use super::{
-  Span, Tk,
-  expand::expand_arithmetic,
-  opt::{Opt, OptSpec, Parsed, Word, parse_opts_raw},
-  outln, sherr,
+use crate::{
+  eval::lex::{Span, Tk},
+  expand::arithmetic,
+  outln, procio, sherr,
   state::{
     Shed,
+    logic::ShFunc,
     meta::MetaTab,
-    vars::{
-      VarFlags, VarKind, VarName, display_as_var, display_exported, display_local, display_readonly,
-    },
+    vars::{self, VarFlags, VarKind, VarName, VarStr},
   },
   try_var,
-  util::{ShResult, ShResultExt, split_at_unescaped, with_status},
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+    strops,
+  },
 };
+
+use super::opt::{self, Opt, OptSpec, Parsed, Word};
 
 trait VarCmd: super::Builtin {
   fn parse_args(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
     // Options are parsed normally, but operands stay raw so `prepare_assignment_argv`
     // can see the source (array literals, quoted RHS whitespace).
-    let (opts, operand_tks) = parse_opts_raw(argv, &self.opts());
+    let (opts, operand_tks) = opt::parse_opts_raw(argv, &self.opts());
     let operand_argv = prepare_assignment_argv(&operand_tks).promote_err(cmd_span)?;
 
     // The command word (always the first operand) stays at `words[0]` so
@@ -53,9 +53,9 @@ trait VarCmd: super::Builtin {
 }
 
 pub fn is_array_literal_assignment(raw: &[u8]) -> bool {
-  split_at_unescaped(raw, b"=")
+  strops::split_at_unescaped(raw, b"=")
     .map(|(eq, len)| &raw[eq + len..])
-    .is_some_and(|rhs| rhs.starts_with(b"(") && ends_with_unescaped(rhs, b")"))
+    .is_some_and(|rhs| rhs.starts_with(b"(") && strops::ends_with_unescaped(rhs, b")"))
 }
 
 /// Like `prepare_argv` but preserves raw token text for `name=(...)` array
@@ -67,7 +67,7 @@ pub fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
   let mut out = vec![];
   for tk in argv {
     let raw = tk.span.as_bytes();
-    let eq_pos = split_at_unescaped(raw, b"=").map(|(pos, _)| pos);
+    let eq_pos = strops::split_at_unescaped(raw, b"=").map(|(pos, _)| pos);
 
     if is_array_literal_assignment(raw) {
       out.push((raw.into(), tk.span.clone()));
@@ -109,21 +109,8 @@ fn assignment_value(val: &[u8], src: &[u8]) -> VarKind {
 
 /// Split `name=value`, building the value's `VarKind` from the raw source token
 pub fn split_assignment<'a>(arg: &'a [u8], src: &[u8]) -> (&'a [u8], Option<VarKind>) {
-  let Some((e, l)) = split_at_unescaped(arg.as_bytes(), b"=") else {
-    return (arg, None);
-  };
-  let var = arg[..e].trim();
-  let val = &arg[e + l..];
-  (var, Some(assignment_value(val, src)))
-}
-
-pub fn split_assignment_raw(arg: &[u8]) -> (&[u8], Option<&[u8]>) {
-  let Some((e, l)) = split_at_unescaped(arg.as_bytes(), b"=") else {
-    return (arg, None);
-  };
-  let var = arg[..e].trim();
-  let val = &arg[e + l..];
-  (var, Some(val))
+  let (var, val) = strops::split_assignment_raw(arg);
+  (var, val.map(|v| assignment_value(v, src)))
 }
 
 #[derive(Clone, Copy)]
@@ -164,7 +151,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
   }
 
   for (arg, span) in argv {
-    let (name, raw_val) = split_assignment_raw(&arg);
+    let (name, raw_val) = strops::split_assignment_raw(&arg);
     let name = &name.to_str_lossy();
 
     if matches!(kind, DeclareKind::Str | DeclareKind::Int) && raw_val.is_none() {
@@ -174,7 +161,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
     let val = match (kind, raw_val) {
       (DeclareKind::Str, Some(v)) => assignment_value(v, span.as_bytes()),
       (DeclareKind::Int, Some(v)) => {
-        let evaluated = expand_arithmetic(v).promote_err(span.clone())?;
+        let evaluated = arithmetic::expand_arithmetic(v).promote_err(span.clone())?;
         let n = evaluated
           .to_str_lossy()
           .parse::<i32>()
@@ -191,7 +178,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
     Shed::vars_mut(|v| v.set_var(name, val, flags)).promote_err(span)?;
   }
 
-  with_status(0)
+  util::with_status(0)
 }
 
 pub(super) struct Declare;
@@ -231,9 +218,9 @@ impl super::Builtin for Declare {
 
     if arg_vec.is_empty() {
       // Bare `declare` prints all variables in declare-style format.
-      let output = Shed::vars(display_local);
-      outln_bytes(&output);
-      return with_status(0);
+      let output = Shed::vars(vars::display_local);
+      procio::outln_bytes(&output);
+      return util::with_status(0);
     }
 
     apply_var_decl(&opts, arg_vec, VarFlags::empty())
@@ -244,13 +231,13 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
   match mode {
     IntrospectMode::Vars => {
       if argv.is_empty() {
-        let output = Shed::vars(display_local);
-        outln_bytes(&output);
+        let output = Shed::vars(vars::display_local);
+        procio::outln_bytes(&output);
       } else {
         for (name, span) in argv {
           let val = try_var!(&name.to_str_lossy());
           match val {
-            Some(v) => outln_bytes(&display_as_var(name.as_bytes(), v)),
+            Some(v) => procio::outln_bytes(&vars::display_as_var(name.as_bytes(), v)),
             None if Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy())).is_some() => {
               // Declared but unset: it exists, so show it value-less rather than
               // erroring (cf. bash's `declare -- name`).
@@ -313,7 +300,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
         out
       });
       if !dump.is_empty() {
-        outln_bytes(dump.trim_end());
+        procio::outln_bytes(dump.trim_end());
       }
     }
     IntrospectMode::FunctionNames => {
@@ -336,7 +323,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
       }
     }
   }
-  with_status(0)
+  util::with_status(0)
 }
 
 pub(super) struct Readonly;
@@ -359,10 +346,10 @@ impl super::Builtin for Readonly {
     let list = opts.iter().any(|o| o.key() == "print");
     if list || arg_vec.is_empty() {
       // List the readonly variables (bare `readonly` and `readonly -p`).
-      let vars = Shed::vars(display_readonly);
-      outln_bytes(&vars);
+      let vars = Shed::vars(vars::display_readonly);
+      procio::outln_bytes(&vars);
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     for (arg, span) in arg_vec {
@@ -375,7 +362,7 @@ impl super::Builtin for Readonly {
       .promote_err(span)?;
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -420,7 +407,7 @@ impl super::Builtin for Unset {
       }
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -450,9 +437,9 @@ impl super::Builtin for Export {
 
     if list || (arg_vec.is_empty() && !unexport) {
       // List the exported variables (bare `export` and `export -p` are the same).
-      let vars = Shed::vars(display_exported);
-      outln_bytes(&vars);
-      return with_status(0);
+      let vars = Shed::vars(vars::display_exported);
+      procio::outln_bytes(&vars);
+      return util::with_status(0);
     }
 
     for (arg, span) in arg_vec {
@@ -471,7 +458,7 @@ impl super::Builtin for Export {
       }
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -500,9 +487,9 @@ impl super::Builtin for Local {
     let (arg_vec, opts) = args.take_argv();
 
     if arg_vec.is_empty() {
-      let vars = Shed::vars(display_local);
-      outln_bytes(&vars);
-      return with_status(0);
+      let vars = Shed::vars(vars::display_local);
+      procio::outln_bytes(&vars);
+      return util::with_status(0);
     }
 
     apply_var_decl(&opts, arg_vec, VarFlags::LOCAL)

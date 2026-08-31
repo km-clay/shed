@@ -2,11 +2,14 @@ use std::ops::Range;
 
 use yansi::Paint;
 
+use crate::{
+  state::shopt::ShOptHighlight,
+  util::ui::{self, PaletteEntry},
+};
+
 use super::{
   Shed,
   context::{CmdKind, CtxTk, CtxTkRule, get_ex_context_tokens},
-  state::shopt::ShOptHighlight,
-  util::{PaletteEntry, style_from_description},
 };
 
 pub struct Palette {
@@ -30,7 +33,7 @@ pub struct Palette {
 impl Palette {
   pub fn new() -> Self {
     let get_color = |desc: &str| -> PaletteEntry {
-      style_from_description(desc).unwrap_or_else(|_| PaletteEntry::new())
+      ui::style_from_description(desc).unwrap_or_else(|_| PaletteEntry::new())
     };
     Shed::shopts(|o| {
       let ShOptHighlight {

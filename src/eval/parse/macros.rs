@@ -25,7 +25,7 @@ macro_rules! bail {
 /// A helper macro for constructing parse errors with context
 macro_rules! parse_err {
 	($parser:expr, $span:expr, $($arg:tt)*) => {
-		$crate::eval::parse::util::parse_err_full(
+		$crate::eval::parse::stream::parse_err_full(
 			&format!($($arg)*),
 			&$span.unwrap_or_default(),
 			&$parser.context,

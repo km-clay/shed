@@ -245,8 +245,9 @@ impl From<&u16> for ModKeys {
 
 #[cfg(test)]
 mod tests {
+  use crate::expand::alias::expand_keymap;
+
   use super::*;
-  use crate::expand::expand_keymap;
 
   fn seq_of(code: KeyCode, mods: ModKeys) -> VarStr {
     KeyEvent(code, mods).as_vim_seq()

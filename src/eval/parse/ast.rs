@@ -11,14 +11,13 @@ use std::{
 use ariadne::Span as _;
 use smallvec::SmallVec;
 
+use super::{
+  CaseNode, CondNode, ConjunctNode, NdRule, Node,
+  lex::{Span, Tk},
+};
 use crate::{
-  ShResult,
-  eval::{
-    CaseNode, CondNode, ConjunctNode, NdRule, Node,
-    lex::{Span, Tk},
-  },
   procio::RedirSpec,
-  util::error::LabelBuilder,
+  util::error::{LabelBuilder, ShResult},
 };
 
 /// Used to identify instances of `Ast`.

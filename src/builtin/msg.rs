@@ -1,11 +1,11 @@
-use crate::{opt, procio::bytes_to_string, socket_msg, state::vars::VarStr};
-
-use super::{
-  Shed, join_raw_args,
-  opt::OptSpec,
-  outln, sherr, status_msg, system_msg,
-  util::{ShResult, with_status},
+use crate::{
+  opt, outln, procio, sherr, socket_msg,
+  state::{Shed, vars::VarStr},
+  status_msg, system_msg,
+  util::{self, error::ShResult},
 };
+
+use super::{join_raw_args, opt::OptSpec};
 
 pub(super) struct Msg;
 impl super::Builtin for Msg {
@@ -36,7 +36,7 @@ impl super::Builtin for Msg {
 
     let input = if arg_vec.is_empty() {
       self.get_input(&mut args).map(|s| {
-        let mut s = bytes_to_string(s);
+        let mut s = procio::bytes_to_string(s);
         s.truncate(s.trim_end_matches('\n').len());
         VarStr::from(s)
       })
@@ -56,7 +56,7 @@ impl super::Builtin for Msg {
         outln!("{formatted}");
       }
 
-      return with_status(0);
+      return util::with_status(0);
     }
 
     let msg: VarStr = input.unwrap_or_else(|| join_raw_args(arg_vec).0);
@@ -75,7 +75,7 @@ impl super::Builtin for Msg {
       status_msg!("{msg}");
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

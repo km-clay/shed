@@ -3,17 +3,16 @@ use std::str::FromStr;
 
 use crate::state::terminal::CursorStyle;
 use crate::state::vars::VarStr;
+use crate::util::error::{ShErr, ShResult};
 
 use super::{
-  KeyCode as K, KeyEvent as E, ModKeys as M, ShResult, Shed, SimpleEditor,
+  KeyCode as K, KeyEvent as E, ModKeys as M, Shed, SimpleEditor,
   editcmd::{self, CmdFlags, Direction, EditCmd, Motion, To, Verb, Word},
   eval, history,
   history::History,
   key, keys,
   linebuf::{self, LineBuf},
-  match_loop, motion, register, state, status_msg,
-  util::ShErr,
-  verb,
+  match_loop, motion, register, state, status_msg, verb,
 };
 
 mod emacs;

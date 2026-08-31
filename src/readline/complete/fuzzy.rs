@@ -8,16 +8,17 @@ use nix::{
 use crate::{
   flush_term, sherr,
   state::terminal::{TermCap, Terminal},
+  util::{error::ShResult, ui},
 };
 
 use super::{
-  Candidate, CompMatch, CompResponse, Completer, ShResult, Shed, SimpleCompleter,
+  Candidate, CompMatch, CompResponse, Completer, Shed, SimpleCompleter,
   editmode::{EditMode, Emacs},
   grid::{GridLayout, truncate_to_width},
   key,
   keys::{KeyCode as C, KeyEvent as K},
   linebuf::LineBuf,
-  state::terminal::{TermGuard, calc_str_width},
+  state::terminal::TermGuard,
   write_term,
 };
 
@@ -637,7 +638,7 @@ impl FuzzySelector {
     let raw = self.query.linebuf.to_string();
     let flat = self.query.linebuf.cursor_to_flat();
     let before: String = raw.chars().take(flat).collect();
-    Self::LEADER_W + calc_str_width(&caret_notation(&before))
+    Self::LEADER_W + ui::calc_str_width(&caret_notation(&before))
   }
 
   /// Retained for API compatibility; the grid layout doesn't number rows.
@@ -749,13 +750,13 @@ impl FuzzySelector {
   fn col_dims(cands: &[ScoredCandidate]) -> (usize, usize) {
     let name = cands
       .iter()
-      .map(|sc| calc_str_width(&one_line(&sc.candidate.display())))
+      .map(|sc| ui::calc_str_width(&one_line(&sc.candidate.display())))
       .max()
       .unwrap_or(0);
     let desc = cands
       .iter()
       .filter_map(|sc| sc.candidate.desc().filter(|d| !d.is_empty()))
-      .map(|d| calc_str_width(d) + 2) // includes parens
+      .map(|d| ui::calc_str_width(d) + 2) // includes parens
       .max()
       .unwrap_or(0);
     (name, desc)
@@ -809,11 +810,11 @@ impl FuzzySelector {
     let (body, used) = match self.placeholder.as_ref() {
       Some(placeholder) if query.is_empty() => {
         let hint = truncate_to_width(placeholder, field_width);
-        let width = calc_str_width(&hint);
+        let width = ui::calc_str_width(&hint);
         (format!("\x1b[2m{hint}\x1b[22m"), width)
       }
       _ => {
-        let width = calc_str_width(&query);
+        let width = ui::calc_str_width(&query);
         (query, width)
       }
     };
@@ -984,13 +985,13 @@ impl FuzzySelector {
           let avail = width.saturating_sub(Self::LEADER_W);
 
           let mut name_plain = one_line(&self.filtered[idx].candidate.display());
-          if calc_str_width(&name_plain) > avail {
+          if ui::calc_str_width(&name_plain) > avail {
             name_plain = format!(
               "{}…",
               truncate_to_width(&name_plain, avail.saturating_sub(1))
             );
           }
-          let name_w = calc_str_width(&name_plain);
+          let name_w = ui::calc_str_width(&name_plain);
           let positions = highlight_cb
             .and_then(|cb| cb(&name_plain, &query))
             .unwrap_or_else(|| match_positions(&name_plain, &query));
@@ -1011,7 +1012,7 @@ impl FuzzySelector {
             // Aligned position is after col_name_max + a 2-col gap; if the
             // desc doesn't fit there it may extend left into the name-pad,
             // and past that it truncates with an ellipsis.
-            let desc_w_full = calc_str_width(desc) + 2; // includes parens
+            let desc_w_full = ui::calc_str_width(desc) + 2; // includes parens
             let aligned_avail = avail.saturating_sub(col_name_max + 2);
             let max_extend_avail = avail.saturating_sub(name_w + 2);
 
@@ -1027,7 +1028,7 @@ impl FuzzySelector {
             };
 
             let name_pad = " ".repeat(pad_chars);
-            let used = name_w + pad_chars + 2 + calc_str_width(&desc_text);
+            let used = name_w + pad_chars + 2 + ui::calc_str_width(&desc_text);
             let trailing = " ".repeat(avail.saturating_sub(used));
 
             if is_selected {

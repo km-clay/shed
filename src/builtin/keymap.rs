@@ -1,6 +1,10 @@
-use super::{ShResult, Shed, opt::OptSpec, outln, sherr, with_status};
-
-use super::keys::{KeyMap, KeyMapFlags};
+use super::opt::OptSpec;
+use crate::{
+  keys::{KeyMap, KeyMapFlags},
+  outln, sherr,
+  state::Shed,
+  util::{self, error::ShResult},
+};
 
 pub(super) struct KeyMapBuiltin;
 impl super::Builtin for KeyMapBuiltin {
@@ -40,7 +44,7 @@ impl super::Builtin for KeyMapBuiltin {
 
     if args.no_arguments() && remove.is_none() {
       display_keymaps(flags);
-      return with_status(0);
+      return util::with_status(0);
     }
 
     if flags.is_empty() {
@@ -54,7 +58,7 @@ impl super::Builtin for KeyMapBuiltin {
 
     if let Some(keys) = remove {
       Shed::logic_mut(|l| l.remove_keymap(&keys, flags));
-      return with_status(0);
+      return util::with_status(0);
     }
 
     let mut arguments = args.arguments();
@@ -81,7 +85,7 @@ impl super::Builtin for KeyMapBuiltin {
 
     Shed::logic_mut(|l| l.insert_keymap(keymap));
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -102,7 +106,7 @@ fn display_keymaps(mut flags: KeyMapFlags) {
 #[cfg(test)]
 mod tests {
   use crate::{
-    expand::expand_keymap,
+    expand::alias::expand_keymap,
     keys::{KeyMap, KeyMapFlags, KeyMapMatch},
     state::{self, Shed},
     tests::testutil::{TestGuard, test_input},

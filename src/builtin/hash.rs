@@ -1,13 +1,11 @@
-use crate::procio::outln_bytes;
-
-use super::{
-  Shed,
-  expand::shell_quote_bytes,
-  opt::OptSpec,
-  sherr,
-  state::{meta::MetaTab, util::path_to_varstr},
-  util::{ShResult, with_status},
+use crate::{
+  expand::escape,
+  procio, sherr,
+  state::{Shed, meta::MetaTab, paths},
+  util::{self, error::ShResult},
 };
+
+use super::opt::OptSpec;
 
 pub(super) struct Hash;
 impl super::Builtin for Hash {
@@ -43,8 +41,10 @@ impl super::Builtin for Hash {
       for (name, path) in entries {
         let mut line = name.into_bytes();
         line.push(b'=');
-        line.extend_from_slice(&shell_quote_bytes(path_to_varstr(&path).as_bytes()));
-        outln_bytes(&line);
+        line.extend_from_slice(&escape::shell_quote_bytes(
+          paths::path_to_varstr(&path).as_bytes(),
+        ));
+        procio::outln_bytes(&line);
       }
     }
 
@@ -69,7 +69,7 @@ impl super::Builtin for Hash {
       })?;
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

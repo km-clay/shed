@@ -1,14 +1,3 @@
-use crate::{
-  HashMap,
-  eval::{lex::TkFlags, parse::ast::Ast},
-  expand::{Expander, expand_raw_inner, stream::SegStream},
-  match_loop,
-  util::{self, ByteCursor, QuoteState, SliceCursor, error::LabelBuilder, random},
-  varstr,
-};
-
-use super::{meta::MetaTab, scopes::ScopeStack};
-
 use std::{
   borrow::Cow,
   collections::VecDeque,
@@ -31,22 +20,33 @@ use bstr::ByteSlice;
 use hipstr::LocalHipByt as HipByt;
 use nix::{
   sys::stat,
-  unistd::{Pid, User, gethostname, getppid, isatty},
+  unistd::{self, Pid, User},
 };
 use rusqlite::{ToSql, types::FromSql};
 use smallvec::SmallVec;
 use smol_str::{SmolStr, SmolStrBuilder};
 
-use super::{
-  ShResult, Shed,
-  eval::lex::{LexFlags, LexStream, Tk, TkRule},
-  expand::{expand_arithmetic, expand_raw, markers, shell_quote_bytes},
-  procio::stdin_fileno,
+use crate::{
+  HashMap,
+  eval::{
+    lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
+    parse::ast::Ast,
+  },
+  expand::{Expander, arithmetic, escape, markers, stream::SegStream, var},
+  match_loop, procio,
   readline::Candidate,
   sherr,
-  terminal::Terminal,
-  util::get_separator,
+  state::{Shed, params, paths},
+  util::{
+    self,
+    error::{LabelBuilder, ShResult},
+    random,
+    strops::{ByteCursor, QuoteState, SliceCursor},
+  },
+  varstr,
 };
+
+use super::{meta::MetaTab, scopes::ScopeStack, terminal::Terminal};
 
 /// A variable/alias value that can be rendered as raw bytes for reuse as a
 /// shell assignment. Unlike `Display`, this preserves arbitrary non-UTF-8
@@ -93,9 +93,9 @@ impl ValueBytes for VarKind {
         let mut out = Vec::new();
         let mut item_iter = items.iter().peekable();
         while let Some((k, v)) = item_iter.next() {
-          out.extend_from_slice(&shell_quote_bytes(k.as_bytes()));
+          out.extend_from_slice(&escape::shell_quote_bytes(k.as_bytes()));
           out.push(b'=');
-          out.extend_from_slice(&shell_quote_bytes(v.as_bytes()));
+          out.extend_from_slice(&escape::shell_quote_bytes(v.as_bytes()));
           if item_iter.peek().is_some() {
             out.push(b' ');
           }
@@ -133,7 +133,7 @@ pub(crate) fn display_as_vars(
 
 pub(crate) fn display_as_var(name: impl AsRef<[u8]>, value: impl ValueBytes) -> Vec<u8> {
   let name = name.as_ref();
-  let value = shell_quote_bytes(&value.value_bytes());
+  let value = escape::shell_quote_bytes(&value.value_bytes());
   let mut out = Vec::with_capacity(name.len() + value.len() + 1);
   out.extend_from_slice(name);
   out.push(b'=');
@@ -282,7 +282,7 @@ impl ArrIndex {
   /// expansions and command substitutions will be evaluated.
   pub fn parse(s: &str, allow_side_effects: bool) -> ShResult<Self> {
     let input = SegStream::from_bytes(s.as_bytes());
-    let expanded = expand_raw_inner(&mut input.cursor(), allow_side_effects, false)?;
+    let expanded = var::expand_raw_inner(&mut input.cursor(), allow_side_effects, false)?;
     let s = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
     match s.as_str() {
       "@" => Ok(Self::AllSplit),
@@ -318,7 +318,7 @@ impl ArrIndex {
         )),
         VarKindTag::AssocArr => Ok(Self::Key(s)),
         VarKindTag::Arr | VarKindTag::Str | VarKindTag::Int | VarKindTag::Magic => {
-          let evaluated = expand_arithmetic(s.as_bytes())?;
+          let evaluated = arithmetic::expand_arithmetic(s.as_bytes())?;
           let n: usize = evaluated
             .to_str_lossy()
             .parse()
@@ -413,18 +413,18 @@ impl VarName {
           let l = &rest[split_pos + 1..];
           let s_input = SegStream::from_bytes(s.as_bytes());
           let l_input = SegStream::from_bytes(l.as_bytes());
-          let s_exp = expand_raw(&mut s_input.cursor()).map_or_else(
+          let s_exp = var::expand_raw(&mut s_input.cursor()).map_or_else(
             |_| s.to_string(),
             |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
           );
-          let l_exp = expand_raw(&mut l_input.cursor()).map_or_else(
+          let l_exp = var::expand_raw(&mut l_input.cursor()).map_or_else(
             |_| l.to_string(),
             |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
           );
           (s_exp.parse::<usize>().ok(), l_exp.parse::<usize>().ok())
         } else {
           let rest_input = SegStream::from_bytes(rest.as_bytes());
-          let expanded = expand_raw(&mut rest_input.cursor()).map_or_else(
+          let expanded = var::expand_raw(&mut rest_input.cursor()).map_or_else(
             |_| rest.to_string(),
             |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
           );
@@ -981,8 +981,8 @@ impl Display for VarKind {
         let mut item_iter = items.iter().peekable();
         while let Some(item) = item_iter.next() {
           let (k, v) = item;
-          let key = super::expand::shell_quote(&k.to_str_lossy());
-          let val = super::expand::shell_quote(&v.to_str_lossy());
+          let key = escape::shell_quote(&k.to_str_lossy());
+          let val = escape::shell_quote(&v.to_str_lossy());
           write!(f, "{key}={val}")?;
           if item_iter.peek().is_some() {
             write!(f, " ")?;
@@ -1191,7 +1191,7 @@ impl VarTab {
     let pathbuf_to_string =
       |pb: Result<PathBuf, std::io::Error>| pb.unwrap_or_default().to_string_lossy().to_string();
 
-    let term = if isatty(stdin_fileno()).unwrap_or_default() {
+    let term = if unistd::isatty(procio::stdin_fileno()).unwrap_or_default() {
       std::env::var("TERM").unwrap_or_else(|_| "linux".to_string())
     } else {
       "xterm-256color".to_string()
@@ -1210,17 +1210,13 @@ impl VarTab {
       uid = 0.into();
     }
     let home_fallback = pathbuf_to_string(Ok(home_fallback));
-    let hostname = gethostname()
+    let hostname = unistd::gethostname()
       .map(|hname| hname.to_string_lossy().to_string())
       .unwrap_or_default();
 
     // Inherit OS env. Subsequent steps either insert-if-missing (user-set
-    // vars like HOME/USER) or unconditionally override (shed-controlled
-    // vars like UID/PPID/PWD). Values are read byte-native (`vars_os`): env
-    // values (e.g. an inherited `PWD` for a non-UTF-8 cwd) can hold arbitrary
-    // bytes, so `env::vars()` — which panics on non-UTF-8 — is unusable here.
-    // Variable *names* must be valid identifiers, so a non-UTF-8 key is
-    // skipped.
+    // vars like HOME/USER) or are unconditionally overridden for
+    // shed-controlled vars like UID/PPID/PWD.
     let mut env: HashMap<String, VarStr> = std::env::vars_os()
       .filter_map(|(k, v)| Some((k.into_string().ok()?, VarStr::from(v.into_vec()))))
       .collect();
@@ -1259,7 +1255,7 @@ impl VarTab {
     if let Some(install_dir) = super::builtin::HELP_PAGE_INSTALL_DIR {
       let new_hpath = match env.get("SHED_HPATH") {
         Some(hpath)
-          if !util::split_path_list(&hpath.to_str_lossy())
+          if !paths::split_path_list(&hpath.to_str_lossy())
             .any(|p| p.as_os_str() == install_dir) =>
         {
           Some(format!("{install_dir}:{}", hpath.to_str_lossy()))
@@ -1276,11 +1272,11 @@ impl VarTab {
     // honor an inherited (potentially spoofed) env entry.
     env.insert(
       "PWD".into(),
-      super::util::path_to_varstr(&std::env::current_dir().unwrap_or_default()),
+      paths::path_to_varstr(&std::env::current_dir().unwrap_or_default()),
     );
     env.insert("IFS".into(), " \t\n".into());
     env.insert("UID".into(), uid.to_string().into());
-    env.insert("PPID".into(), getppid().to_string().into());
+    env.insert("PPID".into(), unistd::getppid().to_string().into());
     env.insert("HOST".into(), hostname.into());
 
     let mut vars: Vec<(String, Var)> = env
@@ -1582,7 +1578,8 @@ impl VarTab {
     match param {
       ShellParam::Pos(n) => self.sh_argv().get(n).cloned(),
       ShellParam::AllArgsStr => {
-        let ifs = get_separator();
+        // FIXME: re-entrancy???
+        let ifs = params::get_separator();
         self.params.get(&ShellParam::AllArgs).map(|s| {
           let mut buf = [0u8; 4];
           s.replace(markers::ARG_SEP.encode_utf8(&mut buf), ifs.as_bytes())

@@ -4,6 +4,27 @@ use std::{collections::VecDeque, io::Write, sync::mpsc, time::Instant};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use crate::{
+  autocmd, builtin, eval, exec_term, expand,
+  expand::{alias, prompt},
+  interactive::{self, LoopAction, Redraw},
+  key, keys,
+  keys::{KeyCode, KeyEvent, KeyMap, KeyMapFlags, KeyMapMatch, ModKeys},
+  match_loop, motion, procio, queue_term, sherr, shopt, socket,
+  state::{
+    self, Shed, db,
+    logic::AutoCmdKind,
+    meta::MetaTab,
+    params,
+    shopt::CompleteStyle,
+    terminal::{Scroll, SyncOutputGuard, TermCtl, Terminal},
+    vars::{Var, VarFlags, VarKind, VarStr},
+  },
+  status_msg, system_msg, try_var,
+  util::{self, error::ShResult, ui},
+  varstr, verb, write_term,
+};
+
 mod complete;
 pub(crate) use complete::{FuzzyBuilder, fuzzy_best_match, match_positions};
 mod context;
@@ -28,36 +49,9 @@ use complete::{
 use editcmd::{Cmd, CmdFlags, EditCmd, Motion, Verb};
 use editmode::{EditMode, Emacs, ViInsert, ViNormal};
 
-use layout::{Layout, move_cursor_to_end, redraw};
+use layout::Layout;
 use linebuf::LineBuf;
 use register::{RegisterContent, RegisterName};
-
-use crate::interactive::{LoopAction, Redraw, run_prompt_command};
-use crate::keys::KeyMap;
-use crate::state::logic::AutoCmdKind;
-use crate::state::terminal::{Scroll, TermCtl};
-use crate::state::vars::{Var, VarStr};
-use crate::{exec_term, queue_term, varstr};
-
-use super::state::meta::MetaTab;
-use super::state::terminal::Terminal;
-use super::{
-  autocmd, builtin, eval,
-  expand::{self, expand_keymap, expand_prompt},
-  key, keys,
-  keys::{KeyCode, KeyEvent, KeyMapFlags, KeyMapMatch, ModKeys},
-  match_loop, motion, procio, sherr, shopt, socket,
-  state::{
-    self, Shed,
-    shopt::CompleteStyle,
-    terminal::{SyncOutputGuard, calc_str_width, truncate_with_ellipsis},
-    util::with_vars,
-    vars::{VarFlags, VarKind},
-  },
-  status_msg, system_msg, try_var,
-  util::{self, ShResult},
-  verb, write_term,
-};
 
 pub(super) use complete::{
   BashCompSpec, Candidate, CompContext, CompFlags, CompMatch, CompOptFlags, CompOpts, CompSpec,
@@ -91,7 +85,7 @@ pub(super) struct SimpleEditor {
 impl SimpleEditor {
   pub fn new(history_table: Option<&str>) -> Self {
     let history = history_table.map(|name| {
-      state::util::get_db_conn()
+      db::get_db_conn()
         .and_then(|conn| History::new(conn, name).ok())
         .unwrap_or(History::empty(name))
     });
@@ -195,9 +189,9 @@ impl StatusLine {
 
     let (left, middle, right) = util::with_saved_status(|| {
       (
-        expand_prompt(left_raw.as_bytes()).unwrap_or(left_raw.clone()),
-        expand_prompt(middle_raw.as_bytes()).unwrap_or(middle_raw.clone()),
-        expand_prompt(right_raw.as_bytes()).unwrap_or(right_raw.clone()),
+        prompt::expand_prompt(left_raw.as_bytes()).unwrap_or(left_raw.clone()),
+        prompt::expand_prompt(middle_raw.as_bytes()).unwrap_or(middle_raw.clone()),
+        prompt::expand_prompt(right_raw.as_bytes()).unwrap_or(right_raw.clone()),
       )
     });
 
@@ -217,9 +211,9 @@ impl StatusLine {
   pub fn render(&mut self, term_width: usize) -> String {
     let (left, middle, right) = self.parts();
 
-    let lw = calc_str_width(left);
-    let mw = calc_str_width(middle);
-    let rw = calc_str_width(right);
+    let lw = ui::calc_str_width(left);
+    let mw = ui::calc_str_width(middle);
+    let rw = ui::calc_str_width(right);
 
     let right_w = rw.min(term_width);
     let after_right = term_width.saturating_sub(right_w);
@@ -231,13 +225,13 @@ impl StatusLine {
     let leftover = after_middle.saturating_sub(left_w);
 
     let middle_str = if middle_w < mw {
-      truncate_with_ellipsis(middle, middle_w)
+      ui::truncate_with_ellipsis(middle, middle_w)
     } else {
       middle.to_string()
     };
 
     let left_str = if left_w < lw {
-      truncate_with_ellipsis(left, left_w)
+      ui::truncate_with_ellipsis(left, left_w)
     } else {
       left.to_string()
     };
@@ -276,13 +270,14 @@ impl Prompt {
       return Self::default();
     };
     // PS1 expansion may involve running commands (e.g., for \h or \W), which can modify shell state
-    let Ok(ps1_expanded) = util::with_saved_status(|| expand_prompt(ps1_raw.as_bytes())) else {
+    let Ok(ps1_expanded) = util::with_saved_status(|| prompt::expand_prompt(ps1_raw.as_bytes()))
+    else {
       return Self::default();
     };
     let psr_raw = try_var!("PSR");
     let psr_expanded = psr_raw
       .clone()
-      .map(|r| util::with_saved_status(|| expand_prompt(r.as_bytes())))
+      .map(|r| util::with_saved_status(|| prompt::expand_prompt(r.as_bytes())))
       .transpose()
       .ok()
       .flatten();
@@ -314,7 +309,7 @@ impl Prompt {
 impl Default for Prompt {
   fn default() -> Self {
     Self {
-      ps1_expanded: expand_prompt(DEFAULT_PS1.as_bytes())
+      ps1_expanded: prompt::expand_prompt(DEFAULT_PS1.as_bytes())
         .unwrap_or_else(|_| DEFAULT_PS1.to_string()),
       psr_expanded: None,
       dirty: false,
@@ -509,7 +504,7 @@ impl ShedLine {
     let statline = shopt!(statline.enable).then(StatusLine::new);
 
     let history = if with_hist {
-      if let Some(conn) = state::util::get_db_conn() {
+      if let Some(conn) = db::get_db_conn() {
         History::new(conn, "shed_history")?
       } else {
         History::empty("shed_history")
@@ -517,7 +512,7 @@ impl ShedLine {
     } else {
       History::empty("shed_history")
     };
-    let ex_history = if let Some(conn) = state::util::get_db_conn() {
+    let ex_history = if let Some(conn) = db::get_db_conn() {
       History::new(conn, "ex_history")?
     } else {
       History::empty("ex_history")
@@ -757,7 +752,7 @@ impl ShedLine {
         }
         self.focused_history().stop_search();
 
-        with_vars([("HIST_ENTRY".into(), cmd.content().to_string())], || {
+        params::with_vars([("HIST_ENTRY".into(), cmd.content().to_string())], || {
           autocmd!(OnHistorySelect);
         });
 
@@ -863,7 +858,7 @@ impl ShedLine {
         .ok();
         self.refresh_ui();
 
-        with_vars(
+        params::with_vars(
           [("COMP_CANDIDATE".into(), candidate.content().to_string())],
           || autocmd!(OnCompletionSelect),
         );
@@ -1178,9 +1173,11 @@ impl ShedLine {
 
         let cancelled = util::with_saved_status(|| -> ShResult<bool> {
           for cmd in cmds {
-            if let LoopAction::Break =
-              run_prompt_command(cmd.command().to_string(), Some(Redraw::Partial), None)?
-            {
+            if let LoopAction::Break = interactive::run_prompt_command(
+              cmd.command().to_string(),
+              Some(Redraw::Partial),
+              None,
+            )? {
               res = LoopAction::Break;
               break;
             }
@@ -1245,7 +1242,7 @@ impl ShedLine {
 
   /// Apply a resolved completion candidate to the focused editor.
   fn apply_completion(&mut self, comp: &dyn Completer, line: &str, cand: &Candidate) {
-    with_vars(
+    params::with_vars(
       [("COMP_CANDIDATE".into(), cand.content().to_string())],
       || autocmd!(OnCompletionSelect),
     );
@@ -1274,7 +1271,7 @@ impl ShedLine {
     // have overwritten the buffer.
     let restore = (initial.clone(), self.core.editor.cursor_to_flat());
     if let Some(entry) = self.focused_history().start_search(&initial) {
-      with_vars([("HIST_ENTRY".into(), entry.clone())], || {
+      params::with_vars([("HIST_ENTRY".into(), entry.clone())], || {
         autocmd!(OnHistorySelect);
       });
 
@@ -1299,7 +1296,7 @@ impl ShedLine {
 
       let num_entries = entries.len();
       let num_matches = matches.len();
-      with_vars(
+      params::with_vars(
         [
           ("ENTRIES".into(), Into::<Var>::into(entries)),
           ("NUM_ENTRIES".into(), Into::<Var>::into(num_entries)),
@@ -1354,7 +1351,7 @@ impl ShedLine {
       .set_cursor_from_flat(self.core.editor.cursor_max());
     self.print_line(true)?;
     if let Some(layout) = &self.old_layout {
-      move_cursor_to_end(layout);
+      layout::move_cursor_to_end(layout);
     }
     if shopt!(line.trim_on_submit) {
       self.core.editor.trim();
@@ -1501,7 +1498,7 @@ impl ShedLine {
           RegisterContent::Empty => return Ok(None),
           RegisterContent::Span(s) | RegisterContent::Line(s) | RegisterContent::Block(s) => {
             let joined = Lines::from(s).join();
-            expand_keymap(&joined)
+            alias::expand_keymap(&joined)
           }
           RegisterContent::Macro(keys) => keys,
         },
@@ -1620,7 +1617,7 @@ impl ShedLine {
         Ok(None)
       }
       LineCmd::NormalSeq(line_nums, seq, bang) => {
-        let keys = expand_keymap(&seq);
+        let keys = alias::expand_keymap(&seq);
 
         self.core.editor.start_undo_merge();
         for line in line_nums {
@@ -1993,7 +1990,7 @@ impl ShedLine {
       write_term!("{system_msg}").ok();
     }
 
-    redraw(
+    layout::redraw(
       self.prompt.get_ps1(),
       &line,
       &new_layout,
@@ -2016,7 +2013,7 @@ impl ShedLine {
       && !self.core.mode.is_input_mode()
     {
       // write our pending sequence
-      let to_col = (t_cols - calc_str_width(&seq.to_str_lossy())) as u16;
+      let to_col = (t_cols - ui::calc_str_width(&seq.to_str_lossy())) as u16;
       let up = new_layout.cursor.row as u16; // rows to move up from cursor to top line of prompt
 
       // Save cursor, move up to top row, move right to column, write sequence,
@@ -2034,7 +2031,7 @@ impl ShedLine {
       && psr_fits
     {
       // write PSR
-      let to_col = (t_cols - calc_str_width(&psr)) as u16;
+      let to_col = (t_cols - ui::calc_str_width(&psr)) as u16;
       let down = new_layout.end.row.saturating_sub(new_layout.cursor.row) as u16;
 
       queue_term!(

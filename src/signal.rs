@@ -26,11 +26,11 @@ use super::{
     jobs::{Job, JobData, JobID, SIG_EXIT_OFFSET, take_term},
     logic::TrapTarget,
     meta::MetaTab,
-    util::with_vars,
+    params,
     vars::{Var, VarFlags, VarKind},
   },
   system_msg,
-  util::ShResult,
+  util::error::ShResult,
 };
 
 use crate::{HashMap, state::vars::VarStr, varstr};
@@ -544,7 +544,7 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   .into_iter()
   .collect();
 
-  with_vars(post_job_vars, || autocmd!(OnJobFinish));
+  params::with_vars(post_job_vars, || autocmd!(OnJobFinish));
 
   // post the job status notification
   if notify {
@@ -563,9 +563,9 @@ pub fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::ShErrKind;
   use crate::state::logic::TrapTarget;
   use crate::tests::testutil::TestGuard;
+  use crate::util::error::ShErrKind;
 
   /// Reset all signal-related global state so tests don't pollute each
   /// other. Call at the top of every `check_signals` test.

@@ -822,9 +822,9 @@ mod word_expansions_2_6 {
      * In assignment context, tilde expansion is also performed after the '='
      * and after each unquoted ':' within the assigned value.
      */
-    use crate::{
+    use crate::state::{
       Shed,
-      state::vars::{VarFlags, VarKind},
+      vars::{VarFlags, VarKind},
     };
 
     test_input! {

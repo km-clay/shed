@@ -12,17 +12,19 @@
 
 use std::collections::VecDeque;
 
-use crate::procio::outln_bytes;
-use crate::state::vars::VarStr;
-
-use super::{
-  BuiltinArgs, ShResult, Shed,
-  opt::OptSpec,
-  sherr,
-  state::vars::{VarFlags, VarKind},
-  util::ShResultExt,
-  with_status,
+use crate::{
+  procio, sherr,
+  state::{
+    Shed,
+    vars::{VarFlags, VarKind, VarStr},
+  },
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+  },
 };
+
+use super::{BuiltinArgs, opt::OptSpec};
 
 /// Trait that provides common functionality for array operations like push and pop.
 ///
@@ -78,7 +80,7 @@ trait ArrOp {
       Ok(())
     })?;
 
-    with_status(0)
+    util::with_status(0)
   }
   fn pop(&self, args: BuiltinArgs) -> ShResult<()> {
     let end = self.direction();
@@ -115,7 +117,7 @@ trait ArrOp {
         let Some(popped_val) =
           Shed::vars_mut(|v| v.get_arr_mut(&arg.to_str_lossy()).ok().and_then(pop))
         else {
-          return with_status(1);
+          return util::with_status(1);
         };
         popped.push_back(popped_val);
       }
@@ -130,11 +132,11 @@ trait ArrOp {
       }
     } else {
       for val in popped {
-        outln_bytes(val.as_bytes());
+        procio::outln_bytes(val.as_bytes());
       }
     }
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 
@@ -263,7 +265,7 @@ impl super::Builtin for Rotate {
       Ok(())
     })?;
 
-    with_status(0)
+    util::with_status(0)
   }
 }
 

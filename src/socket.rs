@@ -27,25 +27,26 @@ use nix::{
 };
 
 use crate::{
-  state::vars::{VarStr, VarStrSliceExt},
-  try_var,
-  util::{self, ByteCursor, SliceCursor, random},
-  varstr,
-};
-
-use super::{
-  Hint, LineData, Lines, ReadlineEvent, ShResult, Shed, ShedLine, expand_keymap,
+  expand::alias,
   keys::KeyEvent,
   procio::MIN_INTERNAL_FD,
+  readline::{Hint, LineData, Lines, ReadlineEvent, ShedLine},
   sherr,
   state::{
-    self,
+    Shed,
     jobs::Job,
-    vars::{VarFlags, VarKind},
+    paths,
+    vars::{VarFlags, VarKind, VarStr, VarStrSliceExt},
   },
-  status_msg, system_msg,
-  util::{Pos, ShErr},
-  var,
+  status_msg, system_msg, try_var,
+  util::{
+    self,
+    error::{ShErr, ShResult},
+    pos::Pos,
+    random,
+    strops::{ByteCursor, SliceCursor},
+  },
+  var, varstr,
 };
 pub(crate) use private::authorize;
 
@@ -465,7 +466,7 @@ impl SocketRequest {
         let Some(value) = args.next() else {
           return Err(sherr!(ParseErr, "Missing value in 'line keys' request",));
         };
-        let events = expand_keymap(&value.to_str_lossy());
+        let events = alias::expand_keymap(&value.to_str_lossy());
         Ok(Self::LineSendKeys(events))
       }
       _ => Err(sherr!(
@@ -498,7 +499,7 @@ impl ShedSocket {
       .unwrap_or(Mode::S_IRUSR | Mode::S_IWUSR)
   }
   pub fn new() -> ShResult<Self> {
-    let Some(runtime) = state::util::runtime_dir() else {
+    let Some(runtime) = paths::runtime_dir() else {
       return Err(sherr!(
         ExecFail,
         "runtime directory not found; is $XDG_RUNTIME_DIR set?"
@@ -1198,7 +1199,7 @@ mod tests {
   use std::io::Read;
   use std::time::Duration;
 
-  use crate::Prompt;
+  use crate::readline::Prompt;
   use crate::tests::testutil::TestGuard;
 
   /// Run a request against a fresh `ShedLine` and return the bytes the

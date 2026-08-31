@@ -3,20 +3,18 @@ use std::{cell::RefCell, fmt::Display};
 use itertools::Itertools;
 
 use crate::{
-  HashMap, Shed,
-  procio::capture_command,
+  HashMap,
+  expand::alias,
+  keys::KeyEvent,
+  procio,
   readline::linebuf::MotionKind,
   sherr,
-  state::{meta::UtilKind, util::which_util, vars::VarStr},
+  state::{Shed, cmd, meta::UtilKind, vars::VarStr},
   status_msg, try_var,
-  util::{self, ShErr},
+  util::{self, error::ShErr},
 };
 
-use super::{
-  super::keys::KeyEvent,
-  expand::expand_keymap,
-  linebuf::{Line, Lines},
-};
+use super::linebuf::{Line, Lines};
 
 thread_local! {
   pub static REGISTERS: RefCell<Registers> = RefCell::new(Registers::new());
@@ -203,7 +201,7 @@ fn tmux_set() -> bool {
 }
 
 fn exists(cmd: &str) -> bool {
-  which_util(cmd).is_some_and(|u| matches!(u.kind(), UtilKind::Command(_)))
+  cmd::which_util(cmd).is_some_and(|u| matches!(u.kind(), UtilKind::Command(_)))
 }
 
 impl ClipboardProvider {
@@ -246,7 +244,7 @@ impl ClipboardProvider {
     match self.copy_argv(sel) {
       Some(argv) => {
         let res = util::with_saved_status(|| {
-          capture_command(
+          procio::capture_command(
             argv.as_bytes(),
             Some(text.as_bytes()),
             Some(&("clipboard copy".into())),
@@ -267,7 +265,7 @@ impl ClipboardProvider {
   pub fn paste(self, sel: Selection) -> Option<RegisterContent> {
     let argv = self.paste_argv(sel)?;
     let out = util::with_saved_status(|| {
-      capture_command(argv.as_bytes(), None, Some(&("clipboard paste".into()))).ok()
+      procio::capture_command(argv.as_bytes(), None, Some(&("clipboard paste".into()))).ok()
     })?;
 
     Some(RegisterContent::Span(Lines::to_lines(&out).into_vec()))
@@ -415,7 +413,7 @@ impl Register {
           .map(ToString::to_string)
           .collect::<Vec<_>>()
           .join("\n");
-        a.extend(expand_keymap(&text));
+        a.extend(alias::expand_keymap(&text));
       }
 
       (

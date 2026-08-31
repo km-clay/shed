@@ -14,20 +14,15 @@ use std::{
 use crate::{
   HashSet,
   autoload::{self, Autoloader},
-  opt,
-  state::meta::MetaTab,
-};
-
-use super::{
-  super::state::terminal::Terminal,
-  Shed, expand, key, keys, match_loop,
-  opt::OptSpec,
-  outln, procio,
+  key, keys, opt, outln, procio,
   readline::{self, ScoredCandidate},
-  sherr, state,
-  util::{self, Direction, ShResult, with_status},
+  sherr,
+  state::{self, Shed, meta::MetaTab, paths, terminal::Terminal},
+  util::{Direction, error::ShResult, guards, with_status},
   var,
 };
+
+use super::opt::OptSpec;
 
 use markup::TAG_SEQ;
 use nix::{
@@ -88,7 +83,7 @@ impl PageStack {
 }
 
 thread_local! {
-  static TAG_CACHE: RefCell<Option<(util::PathCache, Vec<ScoredTag>)>> = const { RefCell::new(None) };
+  static TAG_CACHE: RefCell<Option<(paths::PathCache, Vec<ScoredTag>)>> = const { RefCell::new(None) };
   static PAGE_STACK: RefCell<Option<PageStack>> = const { RefCell::new(None) };
 }
 
@@ -110,7 +105,7 @@ fn cached_tags<F: FnOnce() -> Vec<ScoredTag>>(build: F) -> Vec<ScoredTag> {
     if needs_rebuild {
       let tags = build();
       let path_cache = borrow.take().map_or_else(
-        || util::PathCache::new("SHED_HPATH".to_string()),
+        || paths::PathCache::new("SHED_HPATH".to_string()),
         |(pc, _)| pc,
       );
       *borrow = Some((path_cache, tags.clone()));
@@ -127,7 +122,7 @@ impl super::Builtin for Help {
     vec![opt!("list-tags" | b'l')]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let _guard = crate::util::guard((), |()| {
+    let _guard = guards::guard((), |()| {
       if !Shed::term(Terminal::test_mode) {
         Shed::meta_mut(|_| MetaTab::disable_welcome_message()).unwrap();
       }
@@ -191,7 +186,7 @@ pub fn get_all_tags() -> ShResult<Vec<ScoredTag>> {
   let hpath = var!("SHED_HPATH");
   let mut hpath_names: HashSet<String> = HashSet::default();
 
-  for entry in util::path_list_entries(&hpath.to_str_lossy()) {
+  for entry in paths::path_list_entries(&hpath.to_str_lossy()) {
     let path = entry.path();
     if !path.is_file() {
       continue;
@@ -237,7 +232,7 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
   let hpath = var!("SHED_HPATH");
   let mut hpath_names: HashSet<String> = HashSet::default();
 
-  for entry in util::path_list_entries(&hpath.to_str_lossy()) {
+  for entry in paths::path_list_entries(&hpath.to_str_lossy()) {
     let path = entry.path();
     if !path.is_file() {
       continue;
@@ -267,7 +262,7 @@ pub fn get_help_content(topic: &str) -> Option<(usize, String, Option<String>)> 
   // No filename match, fall through to tag scoring across both sources.
   let mut tags = cached_tags(|| {
     let mut tags = vec![];
-    for entry in util::path_list_entries(&hpath.to_str_lossy()) {
+    for entry in paths::path_list_entries(&hpath.to_str_lossy()) {
       let path = entry.path();
       if !path.is_file() {
         continue;

@@ -3,14 +3,18 @@ use std::{io::Write, path::Path};
 use bitflags::bitflags;
 
 use crate::{
-  KeyEvent, ShResult,
   builtin::opt::{Opt, OptSpec},
   eval::lex::Span,
-  expand, expand_keymap, opt, outln,
+  expand::{alias, escape},
+  keys::KeyEvent,
+  opt, outln,
   readline::EditorCore,
   sherr,
   state::vars::VarStr,
-  util::{ShResultExt, with_status},
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+  },
 };
 
 bitflags! {
@@ -54,11 +58,11 @@ enum ViceCmd {
 
 impl ViceCmd {
   pub fn parse_cut(keys: &str) -> Self {
-    let keys = expand_keymap(keys);
+    let keys = alias::expand_keymap(keys);
     Self::Cut(keys)
   }
   pub fn parse_move(keys: &str) -> Self {
-    let keys = expand_keymap(keys);
+    let keys = alias::expand_keymap(keys);
     Self::Move(keys)
   }
   /// Parse the shared `<number>:<number>` argument for `-r` / `--repeat`.
@@ -105,7 +109,7 @@ impl Vice {
         }
         "sep" => {
           let arg = opt.value()?;
-          prog.sep = Some(expand_keymap(arg));
+          prog.sep = Some(alias::expand_keymap(arg));
         }
         "move" => {
           let arg = opt.value()?;
@@ -167,7 +171,7 @@ impl Vice {
           };
 
           fields.push(if prog.quoted() {
-            expand::shell_quote(&field)
+            escape::shell_quote(&field)
           } else {
             field.clone()
           });
@@ -343,7 +347,7 @@ impl super::Builtin for Vice {
       && let Some(input) = self.get_input_str(&mut args)
     {
       let ok = Self::run_stream(&input, &prog, &span)?;
-      return with_status(i32::from(!ok));
+      return util::with_status(i32::from(!ok));
     }
 
     let mut ok = true;
@@ -360,7 +364,7 @@ impl super::Builtin for Vice {
       ok = ok && file_ok;
     }
 
-    with_status(i32::from(!ok))
+    util::with_status(i32::from(!ok))
   }
 }
 

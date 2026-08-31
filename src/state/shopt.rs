@@ -9,27 +9,28 @@ use itertools::Itertools;
 
 use shed_macros::ShOptGroup;
 
-use super::{
-  ShErr, ShResult,
-  crate_util::{ansi_from_description, format_time},
-  eval::lex::Span,
-  expand::expand_keymap,
-  sherr, two_way_display,
-};
 use crate::{
-  Shed, errln,
-  eval::lex::Tk,
-  expand, shopt,
-  state::{self, meta::MetaTab, vars::VarStr},
-  system_msg, util, varstr,
+  errln,
+  eval::lex::{Span, Tk},
+  expand::{alias, escape},
+  shopt,
+  state::{Shed, meta::MetaTab, params, vars::VarStr},
+  system_msg,
+  util::{
+    error::{ShErr, ShResult},
+    strops, ui,
+  },
+  varstr,
 };
+
+use super::{sherr, two_way_display};
 
 /// Trace a command: shell-quote each argv word (like bash) and emit.
 pub(crate) fn xtrace_print_raw(argv: &[VarStr]) {
   if shopt!(set.xtrace) {
     let words = argv
       .iter()
-      .map(|i| expand::xtrace_quote(&i.to_str_lossy()))
+      .map(|i| escape::xtrace_quote(&i.to_str_lossy()))
       .join(" ");
 
     xtrace_line(&words);
@@ -40,7 +41,7 @@ pub(crate) fn xtrace_print(argv: &[(VarStr, Span)]) {
   if shopt!(set.xtrace) {
     let words = argv
       .iter()
-      .map(|(word, _span)| expand::xtrace_quote(&word.to_str_lossy()))
+      .map(|(word, _span)| escape::xtrace_quote(&word.to_str_lossy()))
       .join(" ");
 
     xtrace_line(&words);
@@ -51,7 +52,7 @@ pub(crate) fn xtrace_print_tokens(argv: &[Tk]) {
   if shopt!(set.xtrace) {
     let words = argv
       .iter()
-      .map(|tk| expand::xtrace_quote(&tk.word().to_str_lossy()))
+      .map(|tk| escape::xtrace_quote(&tk.word().to_str_lossy()))
       .join(" ");
 
     xtrace_line(&words);
@@ -64,7 +65,7 @@ pub(crate) fn xtrace_line(rendered: &str) {
     return;
   }
 
-  let ps4 = state::util::get_ps4();
+  let ps4 = params::get_ps4();
   let prefix_char = ps4
     .chars()
     .next()
@@ -545,7 +546,7 @@ pub(crate) struct ShOptHist {
 }
 
 fn validate_leader(v: &String) -> Result<(), String> {
-  if expand_keymap(v).is_empty() {
+  if alias::expand_keymap(v).is_empty() {
     Err(format!("invalid leader key sequence '{v}'"))
   } else {
     Ok(())
@@ -571,7 +572,7 @@ impl Default for ReadLimit {
 impl FromStr for ReadLimit {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match util::parse_size(s) {
+    match strops::parse_size(s) {
       Err(e) => Err(e),
       Ok(0) => Err(sherr!(SyntaxErr, "invalid read limit value '{s}'")),
 
@@ -582,7 +583,7 @@ impl FromStr for ReadLimit {
 
 impl Display for ReadLimit {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    util::format_size(self.0, f)
+    strops::format_size(self.0, f)
   }
 }
 
@@ -621,7 +622,7 @@ impl From<f64> for IdleTime {
 
 impl Display for IdleTime {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}", format_time(self.0))
+    write!(f, "{}", strops::format_time(self.0))
   }
 }
 
@@ -713,7 +714,7 @@ pub(crate) struct ShOptStatLine {
 }
 
 fn validate_color(v: &String) -> Result<(), String> {
-  if ansi_from_description(v).is_err() {
+  if ui::ansi_from_description(v).is_err() {
     Err(format!("invalid color description '{v}'"))
   } else {
     Ok(())
