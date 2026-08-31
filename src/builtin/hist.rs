@@ -26,21 +26,36 @@ use crate::{
 use super::opt::OptSpec;
 
 /// Helper macro to reduce repetition when adding conditions to the query. It handles the '--not' logic and parameter binding.
-macro_rules! cond {
-  ($not:expr, $conditions:expr, $params:expr, $idx:expr, $query:expr, $param:expr) => {
-    let mut query = $query;
-    if *$not {
-      query = format!("NOT ({query})");
+struct WhereBuilder {
+  conditions: Vec<String>,
+  params: Vec<Box<dyn rusqlite::ToSql>>,
+  idx: usize,
+}
+
+impl WhereBuilder {
+  fn push(&mut self, not: bool, clause: &str, param: impl rusqlite::ToSql + 'static) {
+    let mut clause = format!("{clause} ?{}", self.idx);
+    if not {
+      clause = format!("NOT ({clause})");
     }
-    $conditions.push(query);
-    $params.push(Box::new($param));
-    $idx += 1;
-  };
+    self.conditions.push(clause);
+    self.params.push(Box::new(param));
+    self.idx += 1;
+  }
+  fn build(self) -> (Option<String>, Vec<Box<dyn rusqlite::ToSql>>) {
+    let where_clause = if self.conditions.is_empty() {
+      None
+    } else {
+      Some(format!("WHERE {}", self.conditions.join(" AND ")))
+    };
+    (where_clause, self.params)
+  }
 }
 
 #[expect(clippy::struct_excessive_bools)]
 #[derive(Debug, Default, Clone)]
 pub(super) struct HistQuery {
+  // 456 bytes by the way lol 8D
   after: (Option<VarStr>, bool),
   before: (Option<VarStr>, bool),
   contains: (Option<VarStr>, bool),
@@ -75,164 +90,10 @@ impl HistQuery {
   }
 
   pub(super) fn execute(&self, hist: &History) -> ShResult<Vec<(i64, HistEntry)>> {
-    let mut conditions: Vec<String> = vec![];
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
-    let mut idx = 1;
+    let b = self.build_conditions(hist)?;
 
-    if let (Some(after), not) = &self.after {
-      let ts = TimeReader::interpret(&after.to_str_lossy())
-        .map_err(|e| sherr!(ParseErr, "Failed to parse date for --after: {e}"))?;
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("timestamp >= ?{idx}"),
-        ts.timestamp()
-      );
-    }
-    if let (Some(before), not) = &self.before {
-      let ts = TimeReader::interpret(&before.to_str_lossy())
-        .map_err(|e| sherr!(ParseErr, "Failed to parse date for --before: {e}"))?;
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("timestamp <= ?{idx}"),
-        ts.timestamp()
-      );
-    }
-    if let (Some(prefix), not) = &self.ends_with {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("RTRIM(command) LIKE ?{idx}"),
-        format!("%{prefix}")
-      );
-    }
-    if let (Some(contains), not) = &self.contains {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("TRIM(command) LIKE ?{idx}"),
-        format!("%{contains}%")
-      );
-    }
-    if let (Some(prefix), not) = &self.starts_with {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("LTRIM(command) LIKE ?{idx}"),
-        format!("{prefix}%")
-      );
-    }
-    if let (Some(status), not) = &self.with_status {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("status = ?{idx}"),
-        *status
-      );
-    }
-    if let (Some(token), not) = &self.with_token {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("token = ?{idx}"),
-        token.clone()
-      );
-    }
-    if let (Some(dir), not) = &self.in_dir {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("cwd LIKE ?{idx}"),
-        dir.clone()
-      );
-    }
-    if let (Some(ceiling), not) = &self.lines_lt {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 < ?{idx}"),
-        (*ceiling).cast_signed()
-      );
-    }
-    if let (Some(floor), not) = &self.lines_gt {
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 > ?{idx}"),
-        (*floor).cast_signed()
-      );
-    }
-    if let (Some(duration), not) = &self.duration_gt {
-      let micros = TimeReader::parse_dur(&duration.to_str_lossy())
-        .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --longer-than: {e}"))?;
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("runtime >= ?{idx}"),
-        micros
-      );
-    }
-    if let (Some(duration), not) = &self.duration_lt {
-      let micros = TimeReader::parse_dur(&duration.to_str_lossy())
-        .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --shorter-than: {e}"))?;
-      cond!(
-        not,
-        conditions,
-        params,
-        idx,
-        format!("runtime <= ?{idx}"),
-        micros
-      );
-    }
-    if !self.specific_ids.is_empty() {
-      let mut id_strings = vec![];
-      let last_id = hist.last_id();
-
-      for id in &self.specific_ids {
-        let id = match id.cmp(&0) {
-          Ordering::Greater => *id, // positive number, literal ID
-
-          // user gave a negative number or 0
-          // negative -> go backwards from end
-          // zero -> lands on current command
-          _ => last_id + 1 + (*id - 1),
-        };
-
-        id_strings.push(format!("id = ?{idx}"));
-        params.push(Box::new(id));
-        idx += 1;
-      }
-      conditions.push(format!("({})", id_strings.join(" OR ")));
-    }
-
-    let where_clause = if conditions.is_empty() {
-      String::new()
-    } else {
-      format!("WHERE {}", conditions.join(" AND "))
-    };
+    let (where_clause, params) = b.build();
+    let where_clause = where_clause.unwrap_or_default();
 
     let limit = self.limit.map(|n| format!("LIMIT {n}")).unwrap_or_default();
 
@@ -265,6 +126,104 @@ impl HistQuery {
     }
 
     Ok(entries)
+  }
+
+  fn build_conditions(&self, hist: &History) -> ShResult<WhereBuilder> {
+    let mut b = WhereBuilder {
+      conditions: vec![],
+      params: vec![],
+      idx: 1,
+    };
+
+    if let (Some(after), not) = &self.after {
+      let ts = TimeReader::interpret(&after.to_str_lossy())
+        .map_err(|e| sherr!(ParseErr, "Failed to parse date for --after: {e}"))?;
+
+      b.push(*not, "timestamp >=", ts.timestamp());
+    }
+
+    if let (Some(before), not) = &self.before {
+      let ts = TimeReader::interpret(&before.to_str_lossy())
+        .map_err(|e| sherr!(ParseErr, "Failed to parse date for --before: {e}"))?;
+
+      b.push(*not, "timestamp <=", ts.timestamp());
+    }
+
+    if let (Some(prefix), not) = &self.ends_with {
+      b.push(*not, "RTRIM(command) LIKE", format!("%{prefix}"));
+    }
+
+    if let (Some(contains), not) = &self.contains {
+      b.push(*not, "TRIM(command) LIKE", format!("%{contains}%"));
+    }
+
+    if let (Some(prefix), not) = &self.starts_with {
+      b.push(*not, "LTRIM(command) LIKE", format!("{prefix}%"));
+    }
+
+    if let (Some(status), not) = &self.with_status {
+      b.push(*not, "status =", *status);
+    }
+
+    if let (Some(token), not) = &self.with_token {
+      b.push(*not, "token =", token.clone());
+    }
+
+    if let (Some(dir), not) = &self.in_dir {
+      b.push(*not, "cwd LIKE", dir.clone());
+    }
+
+    if let (Some(ceiling), not) = &self.lines_lt {
+      b.push(
+        *not,
+        "(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 <",
+        (*ceiling).cast_signed(),
+      );
+    }
+
+    if let (Some(floor), not) = &self.lines_gt {
+      b.push(
+        *not,
+        "(LENGTH(command) - LENGTH(REPLACE(command, char(10), ''))) + 1 >",
+        (*floor).cast_signed(),
+      );
+    }
+
+    if let (Some(duration), not) = &self.duration_gt {
+      let micros = TimeReader::parse_dur(&duration.to_str_lossy())
+        .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --longer-than: {e}"))?;
+
+      b.push(*not, "runtime >=", micros);
+    }
+
+    if let (Some(duration), not) = &self.duration_lt {
+      let micros = TimeReader::parse_dur(&duration.to_str_lossy())
+        .map_err(|e| sherr!(ParseErr, "Failed to parse duration for --shorter-than: {e}"))?;
+      b.push(*not, "runtime <=", micros);
+    }
+
+    if !self.specific_ids.is_empty() {
+      let mut id_strings = vec![];
+      let last_id = hist.last_id();
+
+      for id in &self.specific_ids {
+        let id = match id.cmp(&0) {
+          Ordering::Greater => *id, // positive number, literal ID
+
+          // user gave a negative number or 0
+          // negative -> go backwards from end
+          // zero -> lands on current command
+          _ => last_id + 1 + (*id - 1),
+        };
+
+        id_strings.push(format!("id = ?{}", b.idx));
+        b.params.push(Box::new(id));
+        b.idx += 1;
+      }
+      b.conditions.push(format!("({})", id_strings.join(" OR ")));
+    }
+
+    Ok(b)
   }
 
   pub(super) fn from_opts(opts: &[Opt]) -> ShResult<Self> {
@@ -319,32 +278,16 @@ impl HistQuery {
         }
         "import" => {
           let arg = opt.value()?;
+          let Some(home) = paths::get_home() else {
+            return Err(sherr!(
+              ParseErr,
+              "Cannot use {opt} without a valid home directory"
+            ));
+          };
           let path = match arg {
-            "bash" => {
-              let Some(home) = paths::get_home() else {
-                return Err(sherr!(
-                  ParseErr,
-                  "Cannot use {opt} without a valid home directory"
-                ));
-              };
-              home.join(".bash_history")
-            }
-            "zsh" => {
-              let Some(home) = paths::get_home() else {
-                return Err(sherr!(
-                  ParseErr,
-                  "Cannot use {opt} without a valid home directory"
-                ));
-              };
-              home.join(".zsh_history")
-            }
+            "bash" => home.join(".bash_history"),
+            "zsh" => home.join(".zsh_history"),
             "fish" => {
-              let Some(home) = paths::get_home() else {
-                return Err(sherr!(
-                  ParseErr,
-                  "Cannot use {opt} without a valid home directory"
-                ));
-              };
               let data_dir = paths::data_dir()
                 .unwrap_or_else(|| PathBuf::from(format!("{}/.local/share", home.display())));
               data_dir.join("fish").join("fish_history")
