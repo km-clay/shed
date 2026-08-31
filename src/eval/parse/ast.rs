@@ -432,15 +432,15 @@ macro_rules! arena_ranges {
           self.start.ast_id
         }
         #[allow(dead_code)]
-        pub fn is_empty(self) -> bool {
+        pub(crate) fn is_empty(self) -> bool {
           self.start.id == self.end.id
         }
         #[allow(dead_code)]
-        pub fn len(self) -> usize {
+        pub(crate) fn len(self) -> usize {
           (self.end.id - self.start.id) as usize
         }
         #[allow(dead_code)]
-        pub fn first(self) -> Option<$id> {
+        pub(crate) fn first(self) -> Option<$id> {
           if self.is_empty() {
             None
           } else {
@@ -448,7 +448,7 @@ macro_rules! arena_ranges {
           }
         }
         #[allow(dead_code)]
-        pub fn last(self) -> Option<$id> {
+        pub(crate) fn last(self) -> Option<$id> {
           if self.is_empty() {
             None
           } else {
@@ -461,13 +461,13 @@ macro_rules! arena_ranges {
           id < self.end.id
         }
         #[allow(dead_code)]
-        pub fn get(self, idx: usize) -> $id {
+        pub(crate) fn get(self, idx: usize) -> $id {
           let id = self.start.id + idx as u32;
           assert!(self.in_bounds(idx), "Index out of bounds");
           $id::new(id, self.ast_id())
         }
         #[allow(dead_code)]
-        pub fn ids(self) -> impl Iterator<Item = $id> {
+        pub(crate) fn ids(self) -> impl Iterator<Item = $id> {
           (self.start.id..self.end.id).map(move |id| $id::new(id, self.ast_id()))
         }
       }

@@ -388,14 +388,14 @@ mod tests {
   // to the byte-native `SegStream` (marker chars → real markers).
   #[allow(dead_code)]
   mod markers {
-    pub const DUB_QUOTE: char = '\u{fdd0}';
-    pub const SNG_QUOTE: char = '\u{fdd1}';
-    pub const NULL_EXPAND: char = '\u{fdd5}';
-    pub const ARG_SEP: char = '\u{fdd6}';
-    pub const SUBSH: char = '\u{fdd7}';
-    pub const ESCAPE: char = '\u{fdd9}';
-    pub const EXPAND_START: char = '\u{fde1}';
-    pub const EXPAND_END: char = '\u{fde2}';
+    pub(super) const DUB_QUOTE: char = '\u{fdd0}';
+    pub(super) const SNG_QUOTE: char = '\u{fdd1}';
+    pub(super) const NULL_EXPAND: char = '\u{fdd5}';
+    pub(super) const ARG_SEP: char = '\u{fdd6}';
+    pub(super) const SUBSH: char = '\u{fdd7}';
+    pub(super) const ESCAPE: char = '\u{fdd9}';
+    pub(super) const EXPAND_START: char = '\u{fde1}';
+    pub(super) const EXPAND_END: char = '\u{fde2}';
   }
   fn to_segstream(s: &str) -> stream::SegStream {
     use stream::{Marker, ProcSubKind, Quote};

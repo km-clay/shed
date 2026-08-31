@@ -148,7 +148,7 @@ pub(crate) fn get_db_conn() -> Option<Arc<Mutex<Connection>>> {
 }
 
 #[cfg(test)]
-pub fn init_test_db_conn() {
+pub(crate) fn init_test_db_conn() {
   *DB_CONN
     .write()
     .unwrap_or_else(std::sync::PoisonError::into_inner) = Connection::open_in_memory()

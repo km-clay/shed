@@ -78,7 +78,7 @@ impl super::Builtin for Source {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(super) mod tests {
   use std::io::Write;
 
   use crate::state::{self, Shed};

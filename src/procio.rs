@@ -1389,7 +1389,7 @@ pub(super) fn read_input() -> ShResult<Vec<u8>> {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
   use crate::tests::testutil::{TestGuard, has_cmd, has_cmds, test_input};
   use pretty_assertions::assert_eq;
 

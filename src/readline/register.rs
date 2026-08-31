@@ -24,7 +24,7 @@ thread_local! {
 }
 
 #[cfg(test)]
-pub fn save_registers() {
+pub(crate) fn save_registers() {
   SAVED_REGISTERS.with(|saved| {
     let mut saved = saved.borrow_mut();
     *saved = Some(REGISTERS.with(|regs| regs.borrow().clone()));
@@ -32,7 +32,7 @@ pub fn save_registers() {
 }
 
 #[cfg(test)]
-pub fn restore_registers() {
+pub(crate) fn restore_registers() {
   SAVED_REGISTERS.with(|saved| {
     let mut saved = saved.borrow_mut();
     if let Some(regs) = saved.take() {

@@ -269,6 +269,7 @@ pub(crate) fn display_path_bytes(path: &Path) -> Vec<u8> {
   }
 }
 
+#[derive(Debug, Clone, Copy)]
 enum Fallback {
   Dir(&'static str),
   Var(&'static str),

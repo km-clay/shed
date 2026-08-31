@@ -67,7 +67,7 @@ pub(super) use linebuf::{Hint, Lines, Pos};
 pub(super) use register::{restore_registers, save_registers};
 
 #[cfg(test)]
-pub mod tests;
+pub(crate) mod tests;
 pub(super) const DEFAULT_PS1: &str =
   "\\e[0m\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
 
@@ -2314,7 +2314,7 @@ impl ShedLine {
   }
 
   #[cfg(test)]
-  pub fn with_initial(mut self, initial: &str) -> Self {
+  pub(crate) fn with_initial(mut self, initial: &str) -> Self {
     self.core.editor = LineBuf::new().with_initial(initial, 0);
     {
       let s = self.core.editor.to_string();

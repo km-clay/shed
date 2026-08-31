@@ -20,7 +20,7 @@ mod compound;
 mod stream;
 
 #[cfg(test)]
-pub mod tests;
+pub(crate) mod tests;
 
 use crate::{
   eval::parse::{

@@ -169,7 +169,7 @@ pub(crate) struct TestGuard {
 }
 
 impl TestGuard {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     db::register_fork_marker();
     let pty = openpty(None, None).unwrap();
     let (pty_master, pty_slave) = (pty.master, pty.slave);
@@ -288,13 +288,13 @@ impl TestGuard {
     }
   }
 
-  pub fn add_cleanup(&mut self, f: impl FnOnce() + 'static) {
+  pub(crate) fn add_cleanup(&mut self, f: impl FnOnce() + 'static) {
     self.cleanups.push(Box::new(f));
   }
 
   /// Create a unique temp directory and cd into it.
   /// The directory is deleted and cwd is restored on drop.
-  pub fn in_temp_dir(&mut self) -> PathBuf {
+  pub(crate) fn in_temp_dir(&mut self) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
       "shed_test_{}",
       std::time::SystemTime::now()
@@ -311,7 +311,7 @@ impl TestGuard {
     dir
   }
 
-  pub fn feed_stdin(&mut self, data: &[u8]) {
+  pub(crate) fn feed_stdin(&mut self, data: &[u8]) {
     if let Some(fd) = self.stdin_write_pipe.take() {
       let borrowed = fd.as_fd();
       nix::unistd::write(borrowed, data).unwrap();
@@ -322,7 +322,7 @@ impl TestGuard {
   /// Write bytes to the pty master, which will appear as readable input on
   /// the pty slave that Shed's Terminal reads from. Use this to drive
   /// poll/read paths in tests.
-  pub fn feed_tty(&self, data: &[u8]) {
+  pub(crate) fn feed_tty(&self, data: &[u8]) {
     if let Some(master) = self.pty_master.as_ref() {
       nix::unistd::write(master.as_fd(), data).unwrap();
     }
@@ -331,18 +331,18 @@ impl TestGuard {
   /// Close the pty master fd. The slave (shed's tty) will then see POLLHUP
   /// on the next poll, exercising the disconnect-cleanup branch in
   /// `shed_loop_iter`.
-  pub fn close_tty_master(&mut self) {
+  pub(crate) fn close_tty_master(&mut self) {
     self.pty_master.take(); // drops, closes
   }
 
-  pub fn read_output(&self) -> String {
+  pub(crate) fn read_output(&self) -> String {
     String::from_utf8_lossy(&self.read_output_bytes()).to_string()
   }
 
   /// Like `read_output`, but returns the raw bytes without a lossy UTF-8
   /// conversion. Use this to assert byte-transparent output (e.g. `printf`
   /// emitting non-UTF-8 bytes), which `read_output` would mangle.
-  pub fn read_output_bytes(&self) -> Vec<u8> {
+  pub(crate) fn read_output_bytes(&self) -> Vec<u8> {
     // if we are here, then that means we have probably finished executing
     // our test. we now write this to the pty
     if let Some(slave) = self.pty_slave.as_ref() {
@@ -429,7 +429,7 @@ pub(crate) fn get_ast(input: &str) -> ShResult<Ast> {
 }
 
 impl Ast {
-  pub fn assert_structure(
+  pub(crate) fn assert_structure(
     &self,
     expected: &mut impl Iterator<Item = NdKind>,
   ) -> Result<(), String> {

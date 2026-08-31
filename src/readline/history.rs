@@ -938,7 +938,7 @@ impl History {
   }
 
   #[cfg(test)]
-  pub fn masked_entries(&self) -> &[HistEntry] {
+  pub(crate) fn masked_entries(&self) -> &[HistEntry] {
     &self.search_mask
   }
 
@@ -947,7 +947,7 @@ impl History {
   /// from earlier tests in the same process, breaking single-entry-count
   /// assumptions.
   #[cfg(test)]
-  pub fn clear_global_caches_for_test(table: &str) {
+  pub(crate) fn clear_global_caches_for_test(table: &str) {
     if let Ok(mut c) = HIST_ENTRIES.write() {
       c.remove(table);
     }
@@ -963,7 +963,7 @@ impl History {
   /// bypassing the in-memory caches — simulates another session's write that
   /// this session hasn't cached yet.
   #[cfg(test)]
-  pub fn insert_raw_for_test(&self, command: &str, timestamp: i64) {
+  pub(crate) fn insert_raw_for_test(&self, command: &str, timestamp: i64) {
     let table = &self.table;
     let conn = self.lock();
     let new_id = Self::last_id_conn(&conn, table) + 1;
@@ -980,7 +980,7 @@ impl History {
   /// Insert a row with an explicit id — simulates another session having
   /// committed a specific PRIMARY KEY out of band.
   #[cfg(test)]
-  pub fn insert_raw_with_id_for_test(&self, command: &str, id: i64, timestamp: i64) {
+  pub(crate) fn insert_raw_with_id_for_test(&self, command: &str, id: i64, timestamp: i64) {
     let table = &self.table;
     let conn = self.lock();
     conn
@@ -994,19 +994,19 @@ impl History {
   }
 
   #[cfg(test)]
-  pub fn set_max_size_for_test(&mut self, max: u32) {
+  pub(crate) fn set_max_size_for_test(&mut self, max: u32) {
     self.max_size = Some(max);
   }
 
   #[cfg(test)]
-  pub fn set_search_watermark_for_test(&self, ts: i64) {
+  pub(crate) fn set_search_watermark_for_test(&self, ts: i64) {
     if let Ok(mut wm) = SEARCH_WATERMARKS.write() {
       wm.insert(self.table.clone(), ts);
     }
   }
 
   #[cfg(test)]
-  pub fn sync_search_entries_for_test(&self) {
+  pub(crate) fn sync_search_entries_for_test(&self) {
     self.sync_search_entries();
   }
 
@@ -1052,7 +1052,7 @@ impl History {
   }
 
   #[cfg(test)]
-  pub fn search_cache_commands(&self) -> Vec<String> {
+  pub(crate) fn search_cache_commands(&self) -> Vec<String> {
     SEARCH_ENTRIES
       .read()
       .ok()
@@ -1064,7 +1064,7 @@ impl History {
   }
 
   #[cfg(test)]
-  pub fn scroll_cache_commands(&self) -> Vec<String> {
+  pub(crate) fn scroll_cache_commands(&self) -> Vec<String> {
     HIST_ENTRIES
       .read()
       .ok()
@@ -1230,7 +1230,7 @@ impl History {
   }
 
   #[cfg(test)]
-  pub fn entry_count(&self) -> i64 {
+  pub(crate) fn entry_count(&self) -> i64 {
     self
       .lock()
       .query_row(&format!("SELECT COUNT(*) FROM {}", self.table), [], |row| {

@@ -96,7 +96,7 @@ macro_rules! register_builtins {
       $(($name, &$ty)),*
     ];
 
-    pub const BUILTIN_NAMES: &[&[u8]] = &[
+    pub(crate) const BUILTIN_NAMES: &[&[u8]] = &[
       $($name),*
     ];
 
@@ -917,7 +917,7 @@ impl CommandBuiltin {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
   use std::env;
 
   use tempfile::TempDir;

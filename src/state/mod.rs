@@ -644,12 +644,12 @@ impl Shed {
   }
 
   #[cfg(test)]
-  pub fn save_state() {
+  pub(crate) fn save_state() {
     SHED.with(Shed::save);
   }
 
   #[cfg(test)]
-  pub fn restore_state() {
+  pub(crate) fn restore_state() {
     SHED.with(Shed::restore);
   }
 }
@@ -662,7 +662,7 @@ impl Default for Shed {
 
 #[cfg(test)]
 impl Shed {
-  pub fn save(&self) {
+  pub(crate) fn save(&self) {
     let saved = Self {
       jobs: RefCell::new(std::mem::take(&mut self.jobs.borrow_mut())),
       var_scopes: RefCell::new(self.var_scopes.borrow().clone()),
@@ -684,7 +684,7 @@ impl Shed {
     *self.saved.borrow_mut() = Some(Box::new(saved));
   }
 
-  pub fn restore(&self) {
+  pub(crate) fn restore(&self) {
     if let Some(saved) = self.saved.take() {
       *self.jobs.borrow_mut() = saved.jobs.into_inner();
       *self.var_scopes.borrow_mut() = saved.var_scopes.into_inner();

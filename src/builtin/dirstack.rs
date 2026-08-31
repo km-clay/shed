@@ -359,7 +359,7 @@ fn print_dirs() -> ShResult<()> {
 /// Collapse a leading `$HOME` in a path to `~` (test helper mirroring the
 /// byte-native [`display_path_bytes`]).
 #[cfg(test)]
-pub fn truncate_home_path(path: &str) -> String {
+pub(super) fn truncate_home_path(path: &str) -> String {
   String::from_utf8_lossy(&paths::display_path_bytes(std::path::Path::new(path))).into_owned()
 }
 
@@ -406,7 +406,7 @@ fn parse_stack_idx(arg: &str, blame: Span, cmd: &str) -> ShResult<StackIdx> {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(super) mod tests {
   use crate::{
     state::{self, Shed},
     tests::testutil::{TestGuard, canon, test_input},

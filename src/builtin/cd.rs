@@ -155,20 +155,20 @@ impl super::Builtin for Zd {
     let first = first.as_ref().map(|s| s.to_str_lossy());
     match first.as_deref() {
       // check subcommands
-      Some("add") => Self::add(args),
-      Some("remove") => Self::remove(args),
+      Some("add") => Self::add(&args),
+      Some("remove") => Self::remove(&args),
       Some("clean") => Self::clean(),
-      Some("list") => Self::list(args),
+      Some("list") => Self::list(&args),
 
       // normal case, querying for a directory
-      _ => Self::query(args),
+      _ => Self::query(&args),
     }
   }
 }
 
 impl Zd {
   /// zd add [-r] [dirs...] - add directories
-  fn add(args: super::BuiltinArgs) -> ShResult<()> {
+  fn add(args: &super::BuiltinArgs) -> ShResult<()> {
     let depth = match args.options().find_map(|o| match o.key() {
       "depth" => o.value().ok(),
       _ => None,
@@ -227,7 +227,7 @@ impl Zd {
   }
 
   /// zd add [-r] <dirs...> - remove directories
-  fn remove(args: super::BuiltinArgs) -> ShResult<()> {
+  fn remove(args: &super::BuiltinArgs) -> ShResult<()> {
     let recursive = args.options().any(|o| o.key() == "recursive");
     let targets: Vec<String> = args
       .arguments()
@@ -267,7 +267,7 @@ impl Zd {
     util::with_status(i32::from(removed == 0))
   }
 
-  fn list(args: super::BuiltinArgs) -> ShResult<()> {
+  fn list(args: &super::BuiltinArgs) -> ShResult<()> {
     let mut quoted = false;
     let mut json = false;
 
@@ -328,97 +328,107 @@ impl Zd {
       if descending { ord.reverse() } else { ord }
     });
 
-    if quoted {
-      // SQR serialization
-      let mut entries = vec![];
-
-      for row in &rows {
-        let mut entry = vec![];
-        let DirStat {
-          path,
-          visits,
-          last_visit,
-          frecency,
-        } = row;
-
-        // Same column order as the bare output (path last), just shell-quoted.
-        entry.push(escape::shell_quote(&visits.to_string()));
-        entry.push(escape::shell_quote(&last_visit.to_string()));
-        entry.push(escape::shell_quote(&frecency.to_string()));
-        entry.push(escape::shell_quote(path));
-
-        entries.push(entry.join(" ")); // SQR fields are separated by spaces
-      }
-
-      let output = entries.join("\n"); // SQR rows are separated by newlines
-
-      outln!("{output}");
+    let output = if quoted {
+      Self::fmt_entries_quoted(&rows)
     } else if json {
-      // JSON formatted output
-      let mut entries = vec![];
-
-      for row in &rows {
-        let mut map = serde_json::Map::new();
-        let DirStat {
-          path,
-          visits,
-          last_visit,
-          frecency,
-        } = row;
-
-        map.insert("path".to_string(), serde_json::Value::String(path.clone()));
-        map.insert(
-          "visits".to_string(),
-          serde_json::Value::Number((*visits).into()),
-        );
-        map.insert(
-          "last_visit".to_string(),
-          serde_json::Value::Number((*last_visit).into()),
-        );
-        map.insert(
-          "frecency".to_string(),
-          serde_json::Value::Number((*frecency).into()),
-        );
-
-        entries.push(serde_json::Value::Object(map));
-      }
-
-      let json_arr = serde_json::Value::Array(entries);
-      let output = serde_json::to_string_pretty(&json_arr).unwrap();
-
-      outln!("{output}");
+      Self::fmt_entries_json(&rows)
     } else {
-      // no format specified, use tab-separated values
-      let mut entries = vec![];
+      Self::fmt_entries(&rows)
+    };
 
-      for row in &rows {
-        let mut entry = vec![];
-        let DirStat {
-          path,
-          visits,
-          last_visit,
-          frecency,
-        } = row;
-
-        entry.push(visits.to_string());
-        entry.push(last_visit.to_string());
-        entry.push(frecency.to_string());
-        entry.push(path.clone()); // push the path last because it can be anything
-        // the previous stuff all follows a specific pattern (numbers)
-        // but the path can throw off cut/awk parsers if it's in the middle
-
-        entries.push(entry.join("\t"));
-      }
-
-      // we don't need to care about making sure the fields don't contain our separators here
-      // since --json and --quoted are used for that. so let's just naively separate by tabs and newlines
-      // when neither of those is passed.
-      let output = entries.join("\n");
-
-      outln!("{output}");
-    }
+    outln!("{output}");
 
     util::with_status(0)
+  }
+
+  fn fmt_entries(rows: &[DirStat]) -> String {
+    // no format specified, use tab-separated values
+    let mut entries = vec![];
+
+    for row in rows {
+      let mut entry = vec![];
+      let DirStat {
+        path,
+        visits,
+        last_visit,
+        frecency,
+      } = row;
+
+      entry.push(visits.to_string());
+      entry.push(last_visit.to_string());
+      entry.push(frecency.to_string());
+      entry.push(path.clone()); // push the path last because it can be anything
+      // the previous stuff all follows a specific pattern (numbers)
+      // but the path can throw off cut/awk parsers if it's in the middle
+
+      entries.push(entry.join("\t"));
+    }
+
+    // we don't need to care about making sure the fields don't contain our separators here
+    // since --json and --quoted are used for that. so let's just naively separate by tabs and newlines
+    // when neither of those is passed.
+    entries.join("\n")
+  }
+
+  fn fmt_entries_json(rows: &[DirStat]) -> String {
+    // JSON formatted output
+    let mut entries = vec![];
+
+    for row in rows {
+      let mut map = serde_json::Map::new();
+      let DirStat {
+        path,
+        visits,
+        last_visit,
+        frecency,
+      } = row;
+
+      map.insert("path".to_string(), serde_json::Value::String(path.clone()));
+      map.insert(
+        "visits".to_string(),
+        serde_json::Value::Number((*visits).into()),
+      );
+      map.insert(
+        "last_visit".to_string(),
+        serde_json::Value::Number((*last_visit).into()),
+      );
+      map.insert(
+        "frecency".to_string(),
+        serde_json::Value::Number((*frecency).into()),
+      );
+
+      entries.push(serde_json::Value::Object(map));
+    }
+
+    let json_arr = serde_json::Value::Array(entries);
+    serde_json::to_string_pretty(&json_arr).unwrap()
+  }
+
+  fn fmt_entries_quoted(rows: &[DirStat]) -> String {
+    // SQR serialization
+    let mut entries = vec![];
+
+    for row in rows {
+      let mut entry = vec![];
+      let DirStat {
+        path,
+        visits,
+        last_visit,
+        frecency,
+      } = row;
+
+      // Same column order as the bare output (path last), just shell-quoted.
+      entry.push(escape::shell_quote(&visits.to_string()));
+      entry.push(escape::shell_quote(&last_visit.to_string()));
+      entry.push(escape::shell_quote(&frecency.to_string()));
+      entry.push(escape::shell_quote(path));
+
+      entries.push(entry.join(" ")); // SQR fields are separated by spaces
+    }
+
+    let output = entries.join("\n"); // SQR rows are separated by newlines
+
+    output
   }
 
   /// `zd clean` - prune entries whose directory no longer exists.
@@ -458,7 +468,7 @@ impl Zd {
     util::with_status(0)
   }
 
-  fn query(args: super::BuiltinArgs) -> ShResult<()> {
+  fn query(args: &super::BuiltinArgs) -> ShResult<()> {
     // every positional is concatenated into one subsequence query, so
     // `zd pro fern` still finds `~/projects/fern`.
     let query: String = args.arguments().map(|(a, _)| a.to_str_lossy()).collect();
@@ -693,7 +703,7 @@ fn get_old_pwd() -> PathBuf {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(super) mod tests {
   use std::env;
   use std::fs;
 

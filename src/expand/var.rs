@@ -301,7 +301,7 @@ mod tests {
   }
   #[allow(dead_code)]
   mod markers {
-    pub const DUB_QUOTE: char = '\u{fdd0}';
+    pub(super) const DUB_QUOTE: char = '\u{fdd0}';
   }
   use crate::state::vars::VarStr;
   use crate::state::{Shed, vars::VarFlags, vars::VarKind};

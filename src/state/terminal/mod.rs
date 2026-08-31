@@ -1091,12 +1091,12 @@ impl Terminal {
   }
 
   #[cfg(test)]
-  pub fn set_fd_for_testing(&mut self, fd: Option<RawFd>) {
+  pub(crate) fn set_fd_for_testing(&mut self, fd: Option<RawFd>) {
     self.tty = fd;
     self.test_mode = fd.is_some();
   }
   #[cfg(test)]
-  pub fn feed_bytes(&mut self, bytes: &[u8]) {
+  pub(crate) fn feed_bytes(&mut self, bytes: &[u8]) {
     self.reader.feed_bytes(bytes);
   }
 

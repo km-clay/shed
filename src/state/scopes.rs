@@ -623,7 +623,7 @@ impl ScopeStack {
   }
 
   #[cfg(test)]
-  pub fn try_get_var_kind(&self, var_name: &str) -> Option<VarKind> {
+  pub(crate) fn try_get_var_kind(&self, var_name: &str) -> Option<VarKind> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)

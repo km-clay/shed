@@ -894,11 +894,11 @@ mod tests {
   }
   #[allow(dead_code)]
   mod markers {
-    pub const ESCAPE: char = '\u{fdd9}';
-    pub const SNG_QUOTE: char = '\u{fdd1}';
-    pub const DUB_QUOTE: char = '\u{fdd0}';
-    pub const VAR_SUB: char = '\u{fdd8}';
-    pub const TILDE_SUB: char = '\u{fdd2}';
+    pub(super) const ESCAPE: char = '\u{fdd9}';
+    pub(super) const SNG_QUOTE: char = '\u{fdd1}';
+    pub(super) const DUB_QUOTE: char = '\u{fdd0}';
+    pub(super) const VAR_SUB: char = '\u{fdd8}';
+    pub(super) const TILDE_SUB: char = '\u{fdd2}';
   }
 
   // ===================== unescape_str =====================
