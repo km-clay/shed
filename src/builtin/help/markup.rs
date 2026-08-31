@@ -1,3 +1,9 @@
+//! The markup language for the `help` pager
+//!
+//! This module contains the logic for parsing and rendering the markup language used in the `help` pager.
+//! The markup language supports inline styles, cross-references, and other formatting features.
+//! It is designed to be simple and human-readable, while also allowing for rich formatting in the terminal.
+
 use std::{iter::Peekable, ops::Range, str::Chars};
 
 use crate::{expand::markers, match_loop, util::strops::QuoteState};

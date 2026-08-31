@@ -1,3 +1,9 @@
+//! Command dispatch and execution
+//!
+//! This module contains the main command dispatch logic for the shell. It takes an AST produced by the parser and
+//! executes it, handling builtins, functions, pipelines, and external commands. It also manages job control, signal
+//! handling, and error propagation.
+
 use super::{
   lex::{self, KEYWORDS, Span, Tk, TkFlags},
   parse::{

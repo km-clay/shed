@@ -1,3 +1,11 @@
+//! The `help` builtin
+//!
+//! This module contains all of the components of the `help` builtin:
+//! * The interactive pager
+//! * The markup language used by the pager
+//! * The tag scoring and lookup logic
+//! * File import and caching of tags from `SHED_HPATH` and embedded help pages
+
 mod markup;
 mod pager;
 mod render;

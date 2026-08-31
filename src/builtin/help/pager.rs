@@ -1,3 +1,8 @@
+//! The `help` builtin's interactive pager
+//!
+//! This module implements the interactive pager used by the `help` builtin. It supports scrolling, searching, and following
+//! hypertext links within help pages.
+
 use std::io;
 
 use nix::unistd;

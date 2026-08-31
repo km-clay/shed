@@ -1,3 +1,9 @@
+//! Help pager render loop
+//!
+//! This module contains the logic for rendering help content with overlays applied. Overlays are used for search matches,
+//! mouse-hovered links, and link hints. The rendering process makes sure that the original content's structure is preserved
+//! while applying the specified styles and inserts.
+
 use std::ops::Range;
 
 use yansi::Style;
