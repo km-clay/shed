@@ -99,7 +99,7 @@ impl super::Builtin for Cd {
     if !target.is_dir() {
       return Err(sherr!(ExecFail @ span.clone(), "Not a directory"));
     }
-    if let Err(e) = cwd::change_dir_with_pwd(&target, logical_pwd) {
+    if let Err(e) = cwd::change_dir_with_pwd(&target, logical_pwd, true) {
       return Err(sherr!(ExecFail @ span.clone(), "Failed to change directory: {e}"));
     }
 

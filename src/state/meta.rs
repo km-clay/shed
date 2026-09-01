@@ -4,7 +4,7 @@
 //! `$PATH` table ([`PathTable`], [`Utility`]), and loop/fork depth guards.
 
 use std::{
-  collections::VecDeque,
+  collections::{VecDeque, vec_deque},
   ffi::CString,
   fmt::Write,
   os::fd::OwnedFd,
@@ -522,6 +522,53 @@ impl RegexCache {
   }
 }
 
+/// Directory jump table used by `prevd`/`nextd`
+#[derive(Debug, Clone, Default)]
+struct JumpTable {
+  table: VecDeque<Rc<PathBuf>>,
+  cursor: usize,
+}
+
+impl JumpTable {
+  fn new() -> Self {
+    let mut new = Self::default();
+    new.new_dir(std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
+    new
+  }
+  pub(crate) fn new_dir(&mut self, path: PathBuf) {
+    self.table.truncate(self.cursor + 1);
+    self.table.push_back(path.into());
+    if self.table.len() > 50 {
+      self.table.pop_front();
+    }
+    self.cursor = self.table.len() - 1;
+  }
+  pub(crate) fn peek_fwd(&self) -> Option<Rc<PathBuf>> {
+    self.table.get(self.cursor + 1).map(Rc::clone)
+  }
+  pub(crate) fn peek_back(&self) -> Option<Rc<PathBuf>> {
+    (self.cursor > 0).then(|| Rc::clone(&self.table[self.cursor - 1]))
+  }
+  pub(crate) fn commit_fwd(&mut self) {
+    if self.cursor + 1 < self.table.len() {
+      self.cursor += 1;
+    }
+  }
+  pub(crate) fn commit_back(&mut self) {
+    if self.cursor > 0 {
+      self.cursor -= 1;
+    }
+  }
+  pub(crate) fn fwd_dirs(&self) -> JumpTableDirs<'_> {
+    let start = (self.cursor + 1).min(self.table.len());
+    self.table.range(start..).cloned()
+  }
+  pub(crate) fn back_dirs(&self) -> JumpTableDirs<'_> {
+    self.table.range(..self.cursor).cloned()
+  }
+}
+pub(crate) type JumpTableDirs<'a> = std::iter::Cloned<vec_deque::Iter<'a, Rc<PathBuf>>>;
+
 /// Miscellaneous global data storage
 #[derive(Debug)]
 #[expect(clippy::struct_excessive_bools)]
@@ -584,6 +631,8 @@ pub(crate) struct MetaTab {
 
   /// The exit status of the most recent command substitution
   last_cmdsub_status: Option<i32>,
+
+  jump_table: JumpTable,
 }
 
 impl Clone for MetaTab {
@@ -611,6 +660,7 @@ impl Clone for MetaTab {
       ignore_hist: self.ignore_hist,
       current_cmd_recorded: self.current_cmd_recorded,
       last_cmdsub_status: self.last_cmdsub_status,
+      jump_table: self.jump_table.clone(),
 
       last_job: None,
       procsub_stack: vec![],
@@ -645,6 +695,7 @@ impl Default for MetaTab {
       ignore_hist: false,
       current_cmd_recorded: false,
       last_cmdsub_status: None,
+      jump_table: JumpTable::new(),
     }
   }
 }
@@ -675,6 +726,28 @@ impl MetaTab {
 
   pub(crate) fn set_last_cmdsub_status(&mut self, status: i32) {
     self.last_cmdsub_status = Some(status);
+  }
+
+  pub(crate) fn peek_fwd(&self) -> Option<Rc<PathBuf>> {
+    self.jump_table.peek_fwd()
+  }
+  pub(crate) fn peek_back(&self) -> Option<Rc<PathBuf>> {
+    self.jump_table.peek_back()
+  }
+  pub(crate) fn commit_fwd(&mut self) {
+    self.jump_table.commit_fwd();
+  }
+  pub(crate) fn commit_back(&mut self) {
+    self.jump_table.commit_back();
+  }
+  pub(crate) fn new_dir(&mut self, path: PathBuf) {
+    self.jump_table.new_dir(path);
+  }
+  pub(crate) fn fwd_dirs(&self) -> JumpTableDirs<'_> {
+    self.jump_table.fwd_dirs()
+  }
+  pub(crate) fn back_dirs(&self) -> JumpTableDirs<'_> {
+    self.jump_table.back_dirs()
   }
 
   pub(crate) fn take_last_cmdsub_status(&mut self) -> Option<i32> {
@@ -1329,6 +1402,167 @@ mod cmd_timer_tests {
     let t = stopped_timer();
     let out = t.format_report("ms=%m").unwrap();
     assert_eq!(out, "ms=");
+  }
+}
+
+#[cfg(test)]
+mod jump_table_tests {
+  use super::JumpTable;
+  use std::path::PathBuf;
+
+  fn seeded() -> JumpTable {
+    let mut jt = JumpTable::default();
+    jt.new_dir(PathBuf::from("/home"));
+    jt
+  }
+
+  fn cur(jt: &JumpTable) -> Option<String> {
+    jt.table
+      .get(jt.cursor)
+      .map(|p| p.to_string_lossy().into_owned())
+  }
+
+  fn opt(p: Option<std::rc::Rc<PathBuf>>) -> Option<String> {
+    p.map(|p| p.to_string_lossy().into_owned())
+  }
+
+  fn go_back(jt: &mut JumpTable) -> Option<String> {
+    let t = jt.peek_back();
+    if t.is_some() {
+      jt.commit_back();
+    }
+    t.map(|p| p.to_string_lossy().into_owned())
+  }
+
+  fn go_fwd(jt: &mut JumpTable) -> Option<String> {
+    let t = jt.peek_fwd();
+    if t.is_some() {
+      jt.commit_fwd();
+    }
+    t.map(|p| p.to_string_lossy().into_owned())
+  }
+
+  #[test]
+  fn record_advances_and_back_forward_walk() {
+    let mut jt = seeded();
+    jt.new_dir("/a".into());
+    jt.new_dir("/b".into());
+    assert_eq!(cur(&jt).as_deref(), Some("/b"));
+
+    assert_eq!(go_back(&mut jt).as_deref(), Some("/a"));
+    assert_eq!(go_back(&mut jt).as_deref(), Some("/home"));
+    assert_eq!(go_back(&mut jt), None, "seed is the floor");
+
+    assert_eq!(go_fwd(&mut jt).as_deref(), Some("/a"));
+    assert_eq!(go_fwd(&mut jt).as_deref(), Some("/b"));
+    assert_eq!(go_fwd(&mut jt), None, "no forward past the tip");
+  }
+
+  #[test]
+  fn new_dir_truncates_forward_history() {
+    let mut jt = seeded();
+    jt.new_dir("/a".into());
+    jt.new_dir("/b".into());
+    go_back(&mut jt); // now at /a, forward = [/b]
+
+    jt.new_dir("/x".into());
+    assert_eq!(cur(&jt).as_deref(), Some("/x"));
+    assert_eq!(
+      go_fwd(&mut jt),
+      None,
+      "branch dropped the old forward entry"
+    );
+    assert_eq!(
+      jt.back_dirs()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect::<Vec<_>>(),
+      vec!["/home", "/a"]
+    );
+  }
+
+  #[test]
+  fn peek_does_not_move_cursor() {
+    let mut jt = seeded();
+    jt.new_dir("/a".into());
+    assert_eq!(opt(jt.peek_back()).as_deref(), Some("/home"));
+    assert_eq!(
+      opt(jt.peek_back()).as_deref(),
+      Some("/home"),
+      "peek is idempotent"
+    );
+    assert_eq!(cur(&jt).as_deref(), Some("/a"), "cursor unmoved by peek");
+  }
+
+  #[test]
+  fn cd_records_into_live_jump_table() {
+    use crate::tests::testutil::{TestGuard, test_input};
+    let _g = TestGuard::new();
+    test_input("cd /").unwrap();
+    test_input("cd /tmp").unwrap();
+    let back = super::Shed::meta(|m| m.back_dirs().count());
+    assert!(
+      back > 0,
+      "cd did not record into the jump table (back={back})"
+    );
+  }
+
+  #[test]
+  fn failed_navigation_leaves_table_and_cwd_intact() {
+    use crate::tests::testutil::{TestGuard, test_input};
+    use std::fs;
+    use tempfile::TempDir;
+
+    let _g = TestGuard::new();
+    let root = TempDir::new().unwrap();
+    let (a, b, c) = (
+      root.path().join("a"),
+      root.path().join("b"),
+      root.path().join("c"),
+    );
+    for d in [&a, &b, &c] {
+      fs::create_dir(d).unwrap();
+    }
+
+    test_input(format!("cd {}", a.display())).unwrap();
+    test_input(format!("cd {}", b.display())).unwrap();
+    test_input(format!("cd {}", c.display())).unwrap();
+
+    // pull the back target out from under the jump table
+    fs::remove_dir(&b).unwrap();
+
+    let cwd_before = std::env::current_dir().unwrap();
+    let back_before = super::Shed::meta(|m| m.back_dirs().count());
+
+    // prevd into the now-missing dir must fail…
+    test_input("prevd").ok();
+    assert_ne!(
+      super::Shed::get_status(),
+      0,
+      "prevd into removed dir should fail"
+    );
+
+    // …without changing cwd or corrupting the table (commit-on-success).
+    assert_eq!(
+      std::env::current_dir().unwrap(),
+      cwd_before,
+      "cwd moved on a failed prevd"
+    );
+    assert_eq!(
+      super::Shed::meta(|m| m.back_dirs().count()),
+      back_before,
+      "jump table mutated on a failed prevd"
+    );
+  }
+
+  #[test]
+  fn empty_table_never_panics() {
+    let mut jt = JumpTable::default();
+    assert_eq!(jt.peek_fwd(), None);
+    assert_eq!(jt.peek_back(), None);
+    jt.commit_fwd();
+    jt.commit_back();
+    assert!(jt.fwd_dirs().count() == 0);
+    assert!(jt.back_dirs().count() == 0);
   }
 }
 

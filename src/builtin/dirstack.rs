@@ -148,7 +148,7 @@ impl super::Builtin for PopDir {
           let dir = Shed::meta_mut(MetaTab::pop_dir);
           if !parsed.no_cd {
             if let Some(dir) = dir {
-              cwd::change_dir(&dir).promote_err(blame)?;
+              cwd::change_dir(&*dir).promote_err(blame)?;
             } else {
               return Err(sherr!(
                 ExecFail @ blame,
@@ -195,7 +195,7 @@ impl super::Builtin for PopDir {
       }
 
       if let Some(dir) = dir {
-        cwd::change_dir(&dir).promote_err(blame)?;
+        cwd::change_dir(&*dir).promote_err(blame)?;
         print_dirs()?;
       } else {
         return Err(sherr!(

@@ -47,6 +47,7 @@ mod autocmd;
 mod autoload;
 mod cd;
 mod complete;
+mod dirjump;
 mod dirstack;
 mod echo;
 mod evaluate;
@@ -107,8 +108,6 @@ macro_rules! register_builtins {
 
 // these have to be in alphabetical order, because of the way lookup_builtin() works
 // if the list is unsorted, that is a compile error thanks to the const evaluation above
-// if you're using vim, you can visual select the block and filter it through ''<,'>:!LC_ALL=C sort'
-// if you're not using vim, idk. you know the alphabet right?
 register_builtins! {
   b"."        => source::Source,
   b":"        => Colon,
@@ -154,8 +153,10 @@ register_builtins! {
   b"listen"   => sock::Listen,
   b"local"    => varcmds::Local,
   b"msg"      => msg::Msg,
+  b"nextd"    => dirjump::NextD,
   b"pop"      => arrops::Pop,
   b"popd"     => dirstack::PopDir,
+  b"prevd"    => dirjump::PrevD,
   b"printf"   => printf::Printf,
   b"push"     => arrops::Push,
   b"pushd"    => dirstack::PushDir,
