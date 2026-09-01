@@ -1,3 +1,8 @@
+//! Command lookup and classification
+//!
+//! Resolve command names against `$PATH` ([`lookup_cmd`], [`which_util`]), maintain the
+//! hash cache ([`try_hash`]), and suggest corrections for mistyped commands ([`check_typo`]).
+
 use std::{path::PathBuf, rc::Rc};
 
 use crate::{

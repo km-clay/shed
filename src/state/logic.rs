@@ -1,3 +1,8 @@
+//! Aliases, functions, and autocommands
+//!
+//! The logic table's value types: [`ShAlias`], [`ShFunc`] (including autoloads and
+//! in-process classification via [`IsInternal`]), and [`AutoCmd`] event hooks.
+
 use nix::sys::signal::Signal;
 
 use std::fmt::{self, Display};

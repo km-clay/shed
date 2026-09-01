@@ -1,3 +1,7 @@
+//! Shell options
+//!
+//! contains [`ShOpts`] (the `set`/`shopt` toggles and their values) plus `set -x` trace
+//! rendering ([`xtrace_line`]).
 #![expect(clippy::struct_excessive_bools, clippy::trivially_copy_pass_by_ref)]
 
 use bstr::ByteSlice;

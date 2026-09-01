@@ -1,3 +1,8 @@
+//! The variable scope stack
+//!
+//! [`ScopeStack`] — the nested variable environments (globals, function locals, and
+//! `local` declarations) that variable lookups walk.
+
 use std::collections::{VecDeque, hash_map::Entry};
 use std::os::unix::ffi::OsStringExt;
 

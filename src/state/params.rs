@@ -1,3 +1,8 @@
+//! Shell parameter helpers
+//!
+//! Array-subscript parsing ([`parse_arr_bracket`], [`expand_arr_index`]), accessors for
+//! special parameters (`IFS`, `PS4`, …), and startup vars (`SHLVL`, version info).
+
 use crate::{
   HashMap,
   eval::lex::TkFlags,

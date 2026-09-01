@@ -1,10 +1,15 @@
+//! Working-directory changes
+//!
+//! Change the process working directory while keeping `$PWD`/`$OLDPWD` in sync
+//! ([`change_dir`], [`change_dir_with_pwd`]).
+
 use std::{
   path::{Path, PathBuf},
   time::SystemTime,
 };
 
 use crate::{
-  defer,
+  defer, sherr,
   state::{db, params, paths, terminal::Terminal},
   try_var,
   util::error::ShResult,
@@ -16,14 +21,38 @@ use super::{
   vars::{VarFlags, VarKind},
 };
 
-/// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
-pub(crate) fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
-  change_dir_with_pwd(dir, None)
+/// Change the working directory to the next directory in the jump table.
+pub(crate) fn next_dir() -> ShResult<()> {
+  let Some(target) = Shed::meta(MetaTab::peek_fwd) else {
+    return Err(sherr!(ExecFail, "nextd: no next directory"));
+  };
+  change_dir_with_pwd(target.as_path(), None, false)?;
+  Shed::meta_mut(MetaTab::commit_fwd);
+  Ok(())
 }
 
+/// Change the working directory to the previous directory in the jump table.
+pub(crate) fn prev_dir() -> ShResult<()> {
+  let Some(target) = Shed::meta(MetaTab::peek_back) else {
+    return Err(sherr!(ExecFail, "prevd: no previous directory"));
+  };
+  change_dir_with_pwd(target.as_path(), None, false)?;
+  Shed::meta_mut(MetaTab::commit_back);
+  Ok(())
+}
+
+/// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
+pub(crate) fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
+  change_dir_with_pwd(dir, None, true)
+}
+
+/// Change the working directory and update `$PWD`/`$OLDPWD`.
+///
+/// The `is_new_dir` parameter is false if we got here from the `prevd`/`nextd` builtins
 pub(crate) fn change_dir_with_pwd<P: AsRef<Path>>(
   dir: P,
   logical_pwd: Option<PathBuf>,
+  is_new_dir: bool,
 ) -> ShResult<()> {
   let dir = dir.as_ref();
   let dir_raw = paths::path_to_varstr(dir);
@@ -75,6 +104,10 @@ pub(crate) fn change_dir_with_pwd<P: AsRef<Path>>(
         rusqlite::params![dir_str.as_ref(), timestamp],
       )
       .ok();
+  }
+
+  if is_new_dir {
+    Shed::meta_mut(|m| m.new_dir(dir.to_path_buf()));
   }
 
   Shed::vars_mut(|v| {

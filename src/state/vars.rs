@@ -1,3 +1,11 @@
+//! Shell variables and their values
+//!
+//! Data structures/functions used for storing and interacting with shell variables:
+//!
+//! * [`Var`]: the main variable type, which contains a [`VarKind`] and [`VarFlags`],
+//! * [`VarKind`]: the type of the variable (string, integer, array, associative array, magic, or unset), and its value
+//! * [`VarFlags`]: the attributes of the variable (exported, local, readonly, integer)
+
 use std::{
   borrow::Cow,
   collections::VecDeque,
@@ -13,10 +21,6 @@ use std::{
 
 use bitflags::bitflags;
 use bstr::ByteSlice;
-// Rc-backed (thread-local) HipByt: `VarStr` never crosses a thread boundary on
-// the hot path, so we avoid the atomic refcount RMW of the thread-safe backend.
-// This is a `!Send` type — the compiler enforces the no-cross-threads invariant;
-// the few real thread boundaries do an owned String round-trip instead.
 use hipstr::LocalHipByt as HipByt;
 use nix::{
   sys::stat,
@@ -1128,9 +1132,6 @@ impl Deref for DeferredAst {
 
 #[derive(Default, Clone, Debug)]
 pub(crate) struct VarTab {
-  // Variable *names* are always valid identifiers (`[A-Za-z_]\w*`), never byte
-  // data — so they stay `String`, and `&str` lookups keep working without a
-  // `Borrow` shim. Only variable *values* (`Var`) carry arbitrary bytes.
   vars: HashMap<String, Var>,
   params: HashMap<ShellParam, VarStr>,
   sh_argv: VecDeque<VarStr>, /* Using a VecDeque makes the implementation of `shift` straightforward */

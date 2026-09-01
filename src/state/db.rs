@@ -1,3 +1,8 @@
+//! History database connections
+//!
+//! Owns the shared SQLite connection ([`get_db_conn`], [`query_db`]) with fork-child
+//! fencing ([`register_fork_marker`]), plus history-DB path resolution and migration.
+
 use super::try_var;
 
 use std::{

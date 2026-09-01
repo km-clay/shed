@@ -1,3 +1,8 @@
+//! Miscellaneous per-run shell metadata
+//!
+//! Assorted runtime state: command timing ([`CmdTimer`]), the resolved-utility and
+//! `$PATH` table ([`PathTable`], [`Utility`]), and loop/fork depth guards.
+
 use std::{
   collections::VecDeque,
   ffi::CString,

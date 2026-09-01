@@ -1,3 +1,8 @@
+//! Config-file generation and sourcing
+//!
+//! Locate ([`rc_file_path`]), generate ([`generate_default_rc`], [`compose_rc`]), and
+//! source the shell's rc, profile, and env files.
+
 use std::{
   fs::OpenOptions,
   io::{Read, Write},

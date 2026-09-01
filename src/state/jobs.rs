@@ -1,3 +1,8 @@
+//! Job control
+//!
+//! Tracks foreground and background jobs and their child processes ([`ChildProc`],
+//! [`JobStack`]), and renders their wait status ([`DisplayWaitStatus`]).
+
 use std::fmt;
 
 use crate::defer;

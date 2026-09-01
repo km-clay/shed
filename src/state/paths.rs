@@ -1,3 +1,8 @@
+//! `$PATH` scanning and caching
+//!
+//! Utilities for interacting with paths, like [`path_list_entries`], along with caching utilities for
+//! path-list-style env vars like `$SHED_HPATH`.
+
 use crate::{HashMap, state::vars::VarStr, util::strops};
 
 use super::try_var;
