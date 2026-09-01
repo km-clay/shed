@@ -1420,43 +1420,27 @@ pub(crate) mod tests {
     );
   }
 
-  #[test]
-  fn pipeline_simple() {
-    if !has_cmd("sed") {
-      return;
-    }
-    let g = TestGuard::new();
-
-    test_input("echo foo | sed 's/foo/bar/'").unwrap();
-
-    let out = g.read_output();
-    assert_eq!(out, "bar\n");
+  // Run a command line and assert its captured stdout. `needs` skips the test
+  // when the listed external commands aren't installed.
+  macro_rules! run_output {
+    ($( $name:ident : $cmd:literal => $out:literal $(, needs $($needs:literal),+)? ; )*) => {
+      $(
+        #[test]
+        fn $name() {
+          $( if !has_cmds(&[$($needs),+]) { return; } )?
+          let g = TestGuard::new();
+          test_input($cmd).unwrap();
+          assert_eq!(g.read_output(), $out, "{}", stringify!($name));
+        }
+      )*
+    };
   }
 
-  #[test]
-  fn pipeline_multi() {
-    if !has_cmds(&["cut", "sed"]) {
-      return;
-    }
-    let g = TestGuard::new();
-
-    test_input("echo foo bar baz | cut -d ' ' -f 2 | sed 's/a/A/'").unwrap();
-
-    let out = g.read_output();
-    assert_eq!(out, "bAr\n");
-  }
-
-  #[test]
-  fn rube_goldberg_pipeline() {
-    if !has_cmds(&["sed", "cat"]) {
-      return;
-    }
-    let g = TestGuard::new();
-
-    test_input("{ echo foo; echo bar } | if cat; then :; else echo failed; fi | (read line && echo $line | sed 's/foo/baz/'; sed 's/bar/buzz/')").unwrap();
-
-    let out = g.read_output();
-    assert_eq!(out, "baz\nbuzz\n");
+  run_output! {
+    pipeline_simple        : "echo foo | sed 's/foo/bar/'" => "bar\n", needs "sed";
+    pipeline_multi         : "echo foo bar baz | cut -d ' ' -f 2 | sed 's/a/A/'" => "bAr\n", needs "cut", "sed";
+    rube_goldberg_pipeline : "{ echo foo; echo bar } | if cat; then :; else echo failed; fi | (read line && echo $line | sed 's/foo/baz/'; sed 's/bar/buzz/')" => "baz\nbuzz\n", needs "sed", "cat";
+    pipe_and_stderr        : "echo on stderr >&2 |& cat" => "on stderr\n", needs "cat";
   }
 
   #[test]
@@ -1518,19 +1502,6 @@ pub(crate) mod tests {
   }
 
   #[test]
-  fn pipe_and_stderr() {
-    if !has_cmd("cat") {
-      return;
-    }
-    let g = TestGuard::new();
-
-    test_input("echo on stderr >&2 |& cat").unwrap();
-
-    let out = g.read_output();
-    assert_eq!(out, "on stderr\n");
-  }
-
-  #[test]
   fn output_redir_clobber() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("clobber.txt");
@@ -1584,75 +1555,35 @@ pub(crate) mod tests {
   use super::capture_command;
   use crate::state;
 
-  #[test]
-  fn capture_simple_echo() {
-    let _g = TestGuard::new();
-    let out = capture_command(b"echo hello", None, None).unwrap();
-    assert_eq!(out, "hello\n");
+  macro_rules! capture_test {
+    ($(
+      $name:ident : $cmd:literal $(, stdin $stdin:literal)? $(, needs $needs:literal)?
+          => $out:literal $(, $fail:ident)? ;
+    )*) => {
+      $(
+        #[test]
+        fn $name() {
+          let _g = TestGuard::new();
+          $( if !has_cmd($needs) { return; } )?
+          let stdin: Option<&[u8]> = None $(.or(Some($stdin.as_bytes())))?;
+          let out = capture_command($cmd.as_bytes(), stdin, None).unwrap();
+          assert_eq!(out, $out, "{}: output", stringify!($name));
+          $( let _ = stringify!($fail);
+             assert_ne!(state::Shed::get_status(), 0, "{}: status", stringify!($name)); )?
+        }
+      )*
+    };
   }
 
-  #[test]
-  fn capture_preserves_internal_newlines() {
-    let _g = TestGuard::new();
-    let out = capture_command(b"printf 'one\\ntwo\\nthree'", None, None).unwrap();
-    assert_eq!(out, "one\ntwo\nthree");
-  }
-
-  #[test]
-  fn capture_empty_output() {
-    let _g = TestGuard::new();
-    let out = capture_command(b"true", None, None).unwrap();
-    assert_eq!(out, "");
-  }
-
-  #[test]
-  fn capture_command_sets_exit_status() {
-    let _g = TestGuard::new();
-    // `false` exits 1; capture_command should propagate that into
-    // Shed::get_status while still returning captured output (empty).
-    let out = capture_command(b"false", None, None).unwrap();
-    assert_eq!(out, "");
-    assert_ne!(state::Shed::get_status(), 0);
-  }
-
-  #[test]
-  fn capture_nonzero_status_still_captures_output() {
-    let _g = TestGuard::new();
-    // Multi-statement: prints output then fails.
-    let out = capture_command(b"echo before-fail; false", None, None).unwrap();
-    assert_eq!(out, "before-fail\n");
-    assert_ne!(state::Shed::get_status(), 0);
-  }
-
-  // ─── With stdin piped to child ──────────────────────────────────────
-
-  #[test]
-  fn capture_feeds_stdin_to_command() {
-    let _g = TestGuard::new();
-    if !has_cmd("cat") {
-      return;
-    }
-    let out = capture_command(b"cat", Some(b"piped input"), None).unwrap();
-    assert_eq!(out, "piped input");
-  }
-
-  #[test]
-  fn capture_stdin_with_multiline_input() {
-    let _g = TestGuard::new();
-    if !has_cmd("cat") {
-      return;
-    }
-    let out = capture_command(b"cat", Some(b"line1\nline2\nline3\n"), None).unwrap();
-    assert_eq!(out, "line1\nline2\nline3\n");
-  }
-
-  #[test]
-  fn capture_stdin_seen_by_read_builtin() {
-    let _g = TestGuard::new();
-    // The child's `read` builtin should successfully consume the
-    // stdin we feed.
-    let out = capture_command(b"read x; echo \"got=$x\"", Some(b"hello world\n"), None).unwrap();
-    assert_eq!(out, "got=hello world\n");
+  capture_test! {
+    capture_simple_echo                          : "echo hello" => "hello\n";
+    capture_preserves_internal_newlines          : "printf 'one\\ntwo\\nthree'" => "one\ntwo\nthree";
+    capture_empty_output                         : "true" => "";
+    capture_command_sets_exit_status             : "false" => "", fails;
+    capture_nonzero_status_still_captures_output : "echo before-fail; false" => "before-fail\n", fails;
+    capture_feeds_stdin_to_command               : "cat", stdin "piped input", needs "cat" => "piped input";
+    capture_stdin_with_multiline_input           : "cat", stdin "line1\nline2\nline3\n", needs "cat" => "line1\nline2\nline3\n";
+    capture_stdin_seen_by_read_builtin           : "read x; echo \"got=$x\"", stdin "hello world\n" => "got=hello world\n";
   }
 
   // Note: there's no `no-stdin → child sees EOF` test because TestGuard
