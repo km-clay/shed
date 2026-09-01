@@ -113,14 +113,15 @@ impl super::Builtin for Cd {
 }
 
 fn search_cd_path(new_dir: impl AsRef<Path>) -> Option<PathBuf> {
-  let path = var!("CDPATH");
+  let path = try_var!("CDPATH")?;
   let path = path.to_str_lossy();
 
-  // find the first path that contains a directory matching `new_dir`
-  paths::split_path_list(&path).find_map(|p| {
-    let resolved = p.join(&new_dir);
-    resolved.is_dir().then_some(resolved)
-  })
+  paths::split_path_list(&path)
+    .filter(|p| !p.as_os_str().is_empty())
+    .find_map(|p| {
+      let resolved = p.join(&new_dir);
+      resolved.is_dir().then_some(resolved)
+    })
 }
 
 struct Sort {
@@ -1065,6 +1066,27 @@ pub(super) mod tests {
 
     let cwd = env::current_dir().unwrap();
     assert_eq!(cwd.display().to_string(), canon(&sub).display().to_string());
+  }
+
+  #[test]
+  fn cd_empty_cdpath_does_not_print() {
+    let g = TestGuard::new();
+    let temp_dir = TempDir::new().unwrap();
+    let sub = temp_dir.path().join("child");
+    fs::create_dir(&sub).unwrap();
+
+    test_input(format!("cd {}", temp_dir.path().display())).unwrap();
+
+    Shed::vars_mut(|v| v.set_var("CDPATH", VarKind::Str("".into()), VarFlags::EXPORT)).unwrap();
+    test_input("cd child").unwrap();
+
+    let cwd = env::current_dir().unwrap();
+    assert_eq!(cwd.display().to_string(), canon(&sub).display().to_string());
+    assert_eq!(
+      g.read_output(),
+      "",
+      "empty CDPATH must not trigger the print"
+    );
   }
 
   // ===================== -P option =====================
