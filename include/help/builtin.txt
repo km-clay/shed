@@ -41,7 +41,9 @@ The following builtins are available:
   `listen`      create a listening socket on a descriptor   |builtin-listen|
   `local`       declare variables local to a function       |builtin-local|
   `msg`         post a message to the status bar            |builtin-msg|
+  `nextd`       go forward in the directory history         |builtin-nextd|
   `popd`        pop the directory stack                     |builtin-popd|
+  `prevd`       go back in the directory history            |builtin-prevd|
   `printf`      formatted output                            |builtin-printf|
   `pushd`       push a directory onto the stack             |builtin-pushd|
   `pwd`         print the working directory                 |builtin-pwd|
@@ -1316,6 +1318,32 @@ MSG                                              *builtin-msg* *msg*
       `msg -sb "deploy started"`
 
 ==============================================================================
+NEXTD                                            *builtin-nextd* *nextd*
+
+  `nextd [-l | --list] [-n | --no-autocmd] [{count}]`
+
+  Move forward through the directory history, reversing earlier `prevd`
+  jumps. The history is the chronological trail of directories visited
+  with `cd`; `prevd` and `nextd` move a cursor along that trail without
+  changing it. This is separate from the `pushd`/`popd` directory stack
+  (see |builtin-dirs|).
+
+  With no argument, moves forward one entry. `{count}` moves that many
+  entries, stopping at the most recent directory; `nextd 0` does nothing.
+  Moving when already at the most recent directory is an error.
+
+  `-l` / `--list`         list the directories ahead of the cursor and
+                          exit without moving
+  `-n` / `--no-autocmd`   do not fire the `PreChangeDir`/`PostChangeDir`
+                          |autocmd|s for the jump
+
+  Examples:
+
+      `nextd`             move forward one directory
+      `nextd 3`           move forward three directories
+      `nextd -l`          list the forward history
+
+==============================================================================
 POPD                                             *builtin-popd* *popd*
 
   `popd [-n] [+N | -N]`
@@ -1337,6 +1365,31 @@ POPD                                             *builtin-popd* *popd*
       `popd`          pop top and cd to new top
       `popd -n`       remove top without cd
       `popd +1`       remove second stored entry, no cd
+
+==============================================================================
+PREVD                                            *builtin-prevd* *prevd*
+
+  `prevd [-l | --list] [-n | --no-autocmd] [{count}]`
+
+  Move backward through the directory history — the chronological trail of
+  directories visited with `cd`. `prevd` and `nextd` move a cursor along
+  that trail without changing it; use `nextd` to return. This is separate
+  from the `pushd`/`popd` directory stack (see |builtin-dirs|).
+
+  With no argument, moves back one entry. `{count}` moves that many
+  entries, stopping at the oldest recorded directory; `prevd 0` does
+  nothing. Moving when already at the oldest directory is an error.
+
+  `-l` / `--list`         list the directories behind the cursor and
+                          exit without moving
+  `-n` / `--no-autocmd`   do not fire the `PreChangeDir`/`PostChangeDir`
+                          |autocmd|s for the jump
+
+  Examples:
+
+      `prevd`             move back one directory
+      `prevd 2`           move back two directories
+      `prevd -l`          list the backward history
 
 ==============================================================================
 PRINTF                                           *builtin-printf* *printf*
