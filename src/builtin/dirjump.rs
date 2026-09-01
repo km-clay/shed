@@ -14,7 +14,7 @@ use crate::{
 use super::opt::OptSpec;
 
 type DirListFn = Box<dyn Fn(&MetaTab) -> JumpTableDirs>;
-type DirJumpFn = Box<dyn Fn(usize) -> ShResult<()>>;
+type DirJumpFn = Box<dyn Fn(usize, bool) -> ShResult<()>>;
 
 /// the [`prevd`](PrevD) and [`nextd`](NextD) builtins are essentially the same thing but mirrored
 /// so they both implement this trait that performs the same operation in a bidirectional way
@@ -34,6 +34,7 @@ trait DirJump {
   fn jump_opts(&self) -> Vec<OptSpec> {
     let mut other = self.other_opts();
     other.push(opt!("list" | b'l'));
+    other.push(opt!("no-autocmd" | b'n'));
     other
   }
 
@@ -41,6 +42,7 @@ trait DirJump {
   fn exec_jump(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let dir_list = self.dir_list();
     let dir_jump = self.dir_jump();
+    let fire_autocmds = !args.has_opt("no-autocmd");
 
     if args.has_opt("list") {
       let output = Shed::meta(|m| {
@@ -67,7 +69,7 @@ trait DirJump {
       return util::with_status(0);
     }
 
-    dir_jump(count).promote_err(args.cmd_span())?;
+    dir_jump(count, fire_autocmds).promote_err(args.cmd_span())?;
     util::with_status(0)
   }
 }

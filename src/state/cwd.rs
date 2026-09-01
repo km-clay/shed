@@ -22,28 +22,28 @@ use super::{
 };
 
 /// Change the working directory to the next directory in the jump table.
-pub(crate) fn next_dir(count: usize) -> ShResult<()> {
+pub(crate) fn next_dir(count: usize, fire_autocmds: bool) -> ShResult<()> {
   let Some(target) = Shed::meta(|m| m.peek_fwd(count)) else {
     return Err(sherr!(ExecFail, "nextd: no next directory"));
   };
-  change_dir_with_pwd(target.as_path(), None, false)?;
+  change_dir_with_pwd(target.as_path(), None, false, fire_autocmds)?;
   Shed::meta_mut(|m| m.commit_fwd(count));
   Ok(())
 }
 
 /// Change the working directory to the previous directory in the jump table.
-pub(crate) fn prev_dir(count: usize) -> ShResult<()> {
+pub(crate) fn prev_dir(count: usize, fire_autocmds: bool) -> ShResult<()> {
   let Some(target) = Shed::meta(|m| m.peek_back(count)) else {
     return Err(sherr!(ExecFail, "prevd: no previous directory"));
   };
-  change_dir_with_pwd(target.as_path(), None, false)?;
+  change_dir_with_pwd(target.as_path(), None, false, fire_autocmds)?;
   Shed::meta_mut(|m| m.commit_back(count));
   Ok(())
 }
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
 pub(crate) fn change_dir<P: AsRef<Path>>(dir: P) -> ShResult<()> {
-  change_dir_with_pwd(dir, None, true)
+  change_dir_with_pwd(dir, None, true, true)
 }
 
 /// Change the working directory and update `$PWD`/`$OLDPWD`.
@@ -53,10 +53,16 @@ pub(crate) fn change_dir_with_pwd<P: AsRef<Path>>(
   dir: P,
   logical_pwd: Option<PathBuf>,
   is_new_dir: bool,
+  fire_autocmds: bool,
 ) -> ShResult<()> {
   let dir = dir.as_ref();
   let dir_raw = paths::path_to_varstr(dir);
-  defer!(super::autocmd!(PostChangeDir));
+
+  defer! {
+    if fire_autocmds {
+      autocmd!(PostChangeDir)
+    }
+  };
 
   let current_dir = try_var!("PWD")
     .or_else(|| {
@@ -66,13 +72,15 @@ pub(crate) fn change_dir_with_pwd<P: AsRef<Path>>(
     })
     .unwrap_or_default();
 
-  params::with_vars(
-    [
-      ("NEW_DIR".into(), dir_raw.clone()),
-      ("OLD_DIR".into(), current_dir.clone()),
-    ],
-    || autocmd!(PreChangeDir),
-  );
+  if fire_autocmds {
+    params::with_vars(
+      [
+        ("NEW_DIR".into(), dir_raw.clone()),
+        ("OLD_DIR".into(), current_dir.clone()),
+      ],
+      || autocmd!(PreChangeDir),
+    );
+  }
 
   std::env::set_current_dir(dir)?;
 
