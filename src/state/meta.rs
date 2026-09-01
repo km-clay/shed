@@ -543,20 +543,39 @@ impl JumpTable {
     }
     self.cursor = self.table.len() - 1;
   }
-  pub(crate) fn peek_fwd(&self) -> Option<Rc<PathBuf>> {
-    self.table.get(self.cursor + 1).map(Rc::clone)
+  fn remaining_fwd(&self) -> usize {
+    self.table.len().saturating_sub(self.cursor + 1)
   }
-  pub(crate) fn peek_back(&self) -> Option<Rc<PathBuf>> {
-    (self.cursor > 0).then(|| Rc::clone(&self.table[self.cursor - 1]))
+  pub(crate) fn peek_fwd(&self, count: usize) -> Option<Rc<PathBuf>> {
+    let step = count.min(self.remaining_fwd());
+    if step == 0 {
+      return None;
+    }
+    self.table.get(self.cursor + step).map(Rc::clone)
   }
-  pub(crate) fn commit_fwd(&mut self) {
-    if self.cursor + 1 < self.table.len() {
-      self.cursor += 1;
+  pub(crate) fn peek_back(&self, count: usize) -> Option<Rc<PathBuf>> {
+    let step = count.min(self.cursor);
+    if step == 0 {
+      return None;
+    }
+    self.table.get(self.cursor - step).map(Rc::clone)
+  }
+  pub(crate) fn commit_fwd(&mut self, count: usize) {
+    for _ in 0..count {
+      if self.cursor + 1 < self.table.len() {
+        self.cursor += 1;
+      } else {
+        break;
+      }
     }
   }
-  pub(crate) fn commit_back(&mut self) {
-    if self.cursor > 0 {
-      self.cursor -= 1;
+  pub(crate) fn commit_back(&mut self, count: usize) {
+    for _ in 0..count {
+      if self.cursor > 0 {
+        self.cursor -= 1;
+      } else {
+        break;
+      }
     }
   }
   pub(crate) fn fwd_dirs(&self) -> JumpTableDirs<'_> {
@@ -728,17 +747,17 @@ impl MetaTab {
     self.last_cmdsub_status = Some(status);
   }
 
-  pub(crate) fn peek_fwd(&self) -> Option<Rc<PathBuf>> {
-    self.jump_table.peek_fwd()
+  pub(crate) fn peek_fwd(&self, count: usize) -> Option<Rc<PathBuf>> {
+    self.jump_table.peek_fwd(count)
   }
-  pub(crate) fn peek_back(&self) -> Option<Rc<PathBuf>> {
-    self.jump_table.peek_back()
+  pub(crate) fn peek_back(&self, count: usize) -> Option<Rc<PathBuf>> {
+    self.jump_table.peek_back(count)
   }
-  pub(crate) fn commit_fwd(&mut self) {
-    self.jump_table.commit_fwd();
+  pub(crate) fn commit_fwd(&mut self, count: usize) {
+    self.jump_table.commit_fwd(count);
   }
-  pub(crate) fn commit_back(&mut self) {
-    self.jump_table.commit_back();
+  pub(crate) fn commit_back(&mut self, count: usize) {
+    self.jump_table.commit_back(count);
   }
   pub(crate) fn new_dir(&mut self, path: PathBuf) {
     self.jump_table.new_dir(path);
@@ -1427,17 +1446,17 @@ mod jump_table_tests {
   }
 
   fn go_back(jt: &mut JumpTable) -> Option<String> {
-    let t = jt.peek_back();
+    let t = jt.peek_back(1);
     if t.is_some() {
-      jt.commit_back();
+      jt.commit_back(1);
     }
     t.map(|p| p.to_string_lossy().into_owned())
   }
 
   fn go_fwd(jt: &mut JumpTable) -> Option<String> {
-    let t = jt.peek_fwd();
+    let t = jt.peek_fwd(1);
     if t.is_some() {
-      jt.commit_fwd();
+      jt.commit_fwd(1);
     }
     t.map(|p| p.to_string_lossy().into_owned())
   }
@@ -1484,9 +1503,9 @@ mod jump_table_tests {
   fn peek_does_not_move_cursor() {
     let mut jt = seeded();
     jt.new_dir("/a".into());
-    assert_eq!(opt(jt.peek_back()).as_deref(), Some("/home"));
+    assert_eq!(opt(jt.peek_back(1)).as_deref(), Some("/home"));
     assert_eq!(
-      opt(jt.peek_back()).as_deref(),
+      opt(jt.peek_back(1)).as_deref(),
       Some("/home"),
       "peek is idempotent"
     );
@@ -1557,10 +1576,10 @@ mod jump_table_tests {
   #[test]
   fn empty_table_never_panics() {
     let mut jt = JumpTable::default();
-    assert_eq!(jt.peek_fwd(), None);
-    assert_eq!(jt.peek_back(), None);
-    jt.commit_fwd();
-    jt.commit_back();
+    assert_eq!(jt.peek_fwd(1), None);
+    assert_eq!(jt.peek_back(1), None);
+    jt.commit_fwd(1);
+    jt.commit_back(1);
     assert!(jt.fwd_dirs().count() == 0);
     assert!(jt.back_dirs().count() == 0);
   }

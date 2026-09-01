@@ -22,22 +22,22 @@ use super::{
 };
 
 /// Change the working directory to the next directory in the jump table.
-pub(crate) fn next_dir() -> ShResult<()> {
-  let Some(target) = Shed::meta(MetaTab::peek_fwd) else {
+pub(crate) fn next_dir(count: usize) -> ShResult<()> {
+  let Some(target) = Shed::meta(|m| m.peek_fwd(count)) else {
     return Err(sherr!(ExecFail, "nextd: no next directory"));
   };
   change_dir_with_pwd(target.as_path(), None, false)?;
-  Shed::meta_mut(MetaTab::commit_fwd);
+  Shed::meta_mut(|m| m.commit_fwd(count));
   Ok(())
 }
 
 /// Change the working directory to the previous directory in the jump table.
-pub(crate) fn prev_dir() -> ShResult<()> {
-  let Some(target) = Shed::meta(MetaTab::peek_back) else {
+pub(crate) fn prev_dir(count: usize) -> ShResult<()> {
+  let Some(target) = Shed::meta(|m| m.peek_back(count)) else {
     return Err(sherr!(ExecFail, "prevd: no previous directory"));
   };
   change_dir_with_pwd(target.as_path(), None, false)?;
-  Shed::meta_mut(MetaTab::commit_back);
+  Shed::meta_mut(|m| m.commit_back(count));
   Ok(())
 }
 
