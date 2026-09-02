@@ -1555,9 +1555,11 @@ PUSHD                                            *builtin-pushd* *pushd*
 ==============================================================================
 PWD                                              *builtin-pwd* *pwd*
 
-  `pwd`
+  `pwd [-t]`
 
   Print the absolute path of the current working directory.
+
+  `-t`   If the directory to be printed starts with your home directory (`$HOME`), replaces it with `~` instead.
 
 ==============================================================================
 QUOTE                                            *builtin-quote* *quote*
