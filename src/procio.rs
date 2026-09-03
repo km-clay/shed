@@ -3,20 +3,25 @@
 //! or nix system call wrappers.
 
 use std::{
-  collections::{BTreeMap, BTreeSet},
+  cell::{OnceCell, RefCell},
+  collections::VecDeque,
   fmt::Debug,
   fs::{File, OpenOptions},
-  io::{self, Cursor, Read, Write},
-  os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
+  io::{self, Cursor, IsTerminal, Read, Seek, Write},
+  ops::Deref,
+  os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
   path::Path,
+  rc::Rc,
 };
 
 use bstr::ByteSlice;
 use nix::{
   errno::Errno,
   fcntl::{FcntlArg, OFlag, fcntl, open},
-  libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
+  libc::{self, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
+  poll::{PollFd, PollFlags, PollTimeout},
   sys::{
+    resource::{self, Resource},
     stat::Mode,
     wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid},
   },
@@ -24,13 +29,14 @@ use nix::{
 };
 
 use crate::{
+  HashMap,
   eval::{
     execute,
     lex::{Span, Tk, TkFlags},
   },
   expand::Expander,
-  lifecycle, match_loop, sherr, shopt, signal, state,
-  state::{Shed, shopt::ReadLimit, terminal::Terminal, vars::VarStr},
+  lifecycle, match_loop, sherr, shopt, signal,
+  state::{self, Shed, shopt::ReadLimit, terminal::Terminal, vars::VarStr},
   util::{
     self,
     error::{ShErr, ShResult},
@@ -46,6 +52,24 @@ pub(crate) const MIN_INTERNAL_FD: RawFd = 10;
 /// The status code returned when a builtin command's output is truncated
 /// due to exceeding the maximum size of the `OutputSink`
 pub(crate) const SINK_TRUNCATED_STATUS: i32 = 122;
+
+// FIONREAD reports how many bytes are available to read on an fd. Unlike
+// `poll`, it distinguishes "data present" (n > 0) from "empty or EOF" (n == 0).
+nix::ioctl_read_bad!(fionread, nix::libc::FIONREAD, nix::libc::c_int);
+
+pub(crate) fn ebadf() -> io::Error {
+  io::Error::from_raw_os_error(libc::EBADF)
+}
+pub(crate) fn validate_fd(fd: RawFd) -> io::Result<()> {
+  if fd < 0 {
+    return Err(ebadf());
+  }
+  let (soft, _) = resource::getrlimit(Resource::RLIMIT_NOFILE).unwrap_or((1024, 1024));
+  if (fd as u64) >= soft {
+    return Err(ebadf());
+  }
+  Ok(())
+}
 
 /// Like `dup()`, but places the new fd at `MIN_INTERNAL_FD` or above so it
 /// doesn't collide with user-managed fds.
@@ -72,6 +96,19 @@ pub(crate) fn move_high(fd: OwnedFd) -> nix::Result<OwnedFd> {
 pub(crate) fn move_high_no_cloexec(fd: OwnedFd) -> nix::Result<OwnedFd> {
   let new_fd = dup_high_no_cloexec(fd.as_fd())?;
   Ok(new_fd)
+}
+
+/// Anonymous, seekable, cloexec file descriptor
+fn scratch_fd() -> io::Result<OwnedFd> {
+  #[cfg(linux_like)]
+  let fd = {
+    use nix::sys::memfd::{MFdFlags, memfd_create};
+    memfd_create("shed-scratch", MFdFlags::MFD_CLOEXEC)
+  };
+  #[cfg(not(linux_like))]
+  let fd = { Ok(OwnedFd::from(tempfile::tempfile()?)) };
+
+  move_high(fd?).map_err(|e| io::Error::from_raw_os_error(e as i32))
 }
 
 /// `SQLite` opens long-lived file descriptors on its own and we cant call `move_high` on them.
@@ -502,6 +539,7 @@ impl RedirSpec {
       RedirSpec::Buffer { .. } => RedirType::HereDoc,
     }
   }
+  /*
   pub(crate) fn into_redir(self) -> ShResult<Redir> {
     match self {
       RedirSpec::File { fd, path, mode } => {
@@ -570,30 +608,11 @@ impl RedirSpec {
       RedirSpec::Buffer { fd, buf, flags } => {
         use io::{Seek, SeekFrom, Write};
 
-        let file = tempfile::tempfile()
+        let file = scratch_fd()
           .map_err(|e| sherr!(InternalErr, "heredoc tempfile creation failed: {e}"))?;
-        let owned: OwnedFd = file.into();
-        let owned = move_high(owned)?;
 
-        let bytes: Vec<u8> = if flags.contains(TkFlags::HERESTRING) {
-          let mut expanded: Vec<u8> = Expander::from_raw(buf.as_bytes(), flags)
-            .no_glob()
-            .no_split()
-            .expand_no_split()?
-            .into();
-          expanded.push(b'\n');
-          expanded
-        } else if flags.contains(TkFlags::IS_HEREDOC) && !flags.contains(TkFlags::LIT_HEREDOC) {
-          Expander::from_raw(buf.as_bytes(), flags)
-            .no_glob()
-            .no_split()
-            .expand_no_split()?
-            .into()
-        } else {
-          buf.into()
-        };
 
-        let mut file = std::fs::File::from(owned);
+        let mut file = std::fs::File::from(file);
         file
           .write_all(&bytes)
           .map_err(|e| sherr!(InternalErr, "heredoc write failed: {e}"))?;
@@ -605,27 +624,42 @@ impl RedirSpec {
       }
     }
   }
-}
+  */
+  pub(crate) fn as_sink(&self, sinks: &mut Sinks) -> ShResult<Option<Rc<dyn Sink>>> {
+    let sink: Option<Rc<dyn Sink>> = match self {
+      RedirSpec::File { path, mode, .. } => {
+        Some(Rc::new(OsSink::new(open_redir_file(*mode, path)?)))
+      }
+      RedirSpec::Dup { from, .. } => Some(sinks.get(*from).ok_or_else(ebadf)?),
+      RedirSpec::DupExpr { word, .. } => match expand_fd(word)? {
+        None => None, // got '-' as the word
+        Some(fd) => Some(sinks.get(fd).ok_or_else(ebadf)?),
+      },
+      RedirSpec::Buffer { buf, flags, .. } => {
+        let bytes: Vec<u8> = if flags.contains(TkFlags::HERESTRING) {
+          let mut expanded: Vec<u8> = Expander::from_raw(buf.as_bytes(), *flags)
+            .no_glob()
+            .no_split()
+            .expand_no_split()?
+            .into();
+          expanded.push(b'\n');
+          expanded
+        } else if flags.contains(TkFlags::IS_HEREDOC) && !flags.contains(TkFlags::LIT_HEREDOC) {
+          Expander::from_raw(buf.as_bytes(), *flags)
+            .no_glob()
+            .no_split()
+            .expand_no_split()?
+            .into()
+        } else {
+          buf.as_bytes().to_vec()
+        };
 
-/// The result of attempting to apply a [`RedirSet`].
-pub(super) enum RedirResult {
-  Applied(RedirGuard),
-  NoRedirs,
-  Skipped,
-  Error(ShErr),
-}
+        Some(Rc::new(BufSink::from_bytes(&bytes)) as Rc<dyn Sink>)
+      }
+      RedirSpec::Close { .. } => None,
+    };
 
-impl RedirResult {
-  /// Collapse into a plain result, propagating any error. For callers where a
-  /// redirection failure is fatal (the pre-non-fatal default). Callers that can
-  /// continue should instead match the variants and handle [`Self::Skipped`].
-  pub(crate) fn or_fatal(self) -> ShResult<Option<RedirGuard>> {
-    match self {
-      RedirResult::Applied(guard) => Ok(Some(guard)),
-      // `apply()` never yields `Skipped`; proceed defensively if it somehow does.
-      RedirResult::NoRedirs | RedirResult::Skipped => Ok(None),
-      RedirResult::Error(e) => Err(e),
-    }
+    Ok(sink)
   }
 }
 
@@ -634,59 +668,10 @@ impl RedirResult {
 pub(super) struct RedirSet(pub Vec<RedirSpec>);
 
 impl RedirSet {
-  pub(crate) fn apply_persistent(self) -> ShResult<()> {
-    for spec in self.0 {
-      let mut redir = spec.into_redir()?;
-      redir.apply()?;
-    }
-    Ok(())
+  pub(crate) fn specs(&self) -> &[RedirSpec] {
+    &self.0
   }
-  /// Apply the redirections, classifying a failure as fatal or not. When
-  /// `fatal` is false, a failure is reported (printed + `$?` set) and turned
-  /// into [`RedirResult::Skipped`] so the caller can skip the command and
-  /// continue; when `fatal` is true, the error is left to propagate.
-  pub(crate) fn try_apply(self, fatal: bool) -> RedirResult {
-    match self.apply() {
-      RedirResult::Error(e) if !fatal => {
-        e.print_error();
-        Shed::set_status(1);
-        RedirResult::Skipped
-      }
-      // Applied / NoRedirs / (fatal) Error pass through unchanged.
-      res => res,
-    }
-  }
-  /// Apply the redirections, returning a guard that will restore the original fds when dropped.
-  pub(crate) fn apply(self) -> RedirResult {
-    if self.0.is_empty() {
-      return RedirResult::NoRedirs;
-    }
-    let targets: BTreeSet<RawFd> = self.0.iter().map(RedirSpec::target_fd).collect();
 
-    let guard = match RedirGuard::new(&targets) {
-      Ok(g) => g,
-      Err(e) => return RedirResult::Error(e),
-    };
-
-    // apply each redir
-    for spec in self.0 {
-      let span = spec.span();
-
-      let res = spec
-        .into_redir()
-        .map_err(|e| e.option_promote(span.clone()));
-
-      let mut redir = match res {
-        Ok(r) => r,
-        Err(e) => return RedirResult::Error(e),
-      };
-
-      if let Err(e) = redir.apply().map_err(|e| e.option_promote(span)) {
-        return RedirResult::Error(e);
-      }
-    }
-    RedirResult::Applied(guard)
-  }
   /// Separate input redirs and output redirs into two separate `RedirSet`s
   ///
   /// Returns (`in_redirs`, `out_redirs`)
@@ -727,365 +712,631 @@ impl From<RedirSpec> for RedirSet {
   }
 }
 
-/// A guard that restores the original file descriptors when dropped.
-#[derive(Debug)]
-pub(super) struct RedirGuard {
-  saved: Option<IoGroup>,
+/// A trait for abstracting over different types of I/O sinks (e.g., files, buffers, pipes).
+///
+/// This trait is used by the [`Sinks`] struct, which is `shed`'s virtual FD table. Having a virtual
+/// fd table allows us to also do I/O redirection internally, and keep pipelines in-process if forking
+/// is unnecessary (e.g. a pipeline with only builtins)
+pub(crate) trait Sink {
+  fn read(&self, buf: &mut [u8]) -> io::Result<usize>;
+  fn write(&self, buf: &[u8]) -> io::Result<usize>;
+  fn flush(&self) -> io::Result<()>;
+  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>>;
+  fn kind(&self) -> SinkKind;
+  fn poll(&self, timeout: Option<PollTimeout>) -> io::Result<usize>;
+  fn isatty(&self) -> bool {
+    matches!(self.kind(), SinkKind::Tty)
+  }
+
+  fn has_data(&self) -> bool {
+    false
+  }
+  fn was_truncated(&self) -> bool {
+    false
+  }
+  fn seek(&self, _pos: io::SeekFrom) -> io::Result<u64> {
+    Err(io::Error::new(
+      io::ErrorKind::Unsupported,
+      "seek not supported on this i/o sink",
+    ))
+  }
+}
+
+pub(crate) fn drain_sink(sink: &dyn Sink) -> io::Result<Vec<u8>> {
+  let mut buf = Vec::new();
+  let mut tmp = [0u8; 4096];
+  loop {
+    match sink.read(&mut tmp) {
+      Ok(0) => break,
+      Ok(n) => buf.extend_from_slice(&tmp[..n]),
+      Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+        // Sink is non-blocking and has no data available; stop draining.
+        break;
+      }
+      Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+        // Interrupted by a signal; retry the read.
+        // TODO: make sure this handles Ctrl+C and stuff
+      }
+      Err(e) => {
+        return Err(e);
+      }
+    }
+  }
+  Ok(buf)
+}
+
+pub(crate) struct BufSink {
+  buf: RefCell<Cursor<Vec<u8>>>,
+
+  /// If this buffer ever needs to be used across a fork/exec boundary, we can
+  /// lazily create an OS-level fd for it and cache it in this field.
+  os_fd: OnceCell<OwnedFd>,
+}
+
+impl BufSink {
+  pub(crate) fn from_bytes(bytes: &[u8]) -> Self {
+    Self {
+      buf: RefCell::new(Cursor::new(bytes.to_vec())),
+      os_fd: OnceCell::new(),
+    }
+  }
+}
+
+impl Sink for BufSink {
+  fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
+    self.buf.borrow_mut().read(buf)
+  }
+  fn write(&self, buf: &[u8]) -> io::Result<usize> {
+    self.buf.borrow_mut().write(buf)
+  }
+  fn flush(&self) -> io::Result<()> {
+    self.buf.borrow_mut().flush()
+  }
+  fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
+    // BufSink is a fixed-size buffer, so we don't use the timeout here.
+    // It either has data or it doesn't, it won't receive any more.
+    let cur = self.buf.borrow();
+    Ok(cur.get_ref().len().saturating_sub(cur.position() as usize))
+  }
+  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
+    match self.os_fd.get() {
+      None => {
+        let fd = {
+          let cur = self.buf.borrow();
+          let remaining = &cur.get_ref()[cur.position() as usize..];
+          let fd = scratch_fd()?;
+          write_all_to_fd(fd.as_fd(), remaining);
+          unistd::lseek(fd.as_fd(), 0, unistd::Whence::SeekSet)?;
+          fd
+        };
+        self.os_fd.set(fd).expect("we just checked that it's None");
+
+        self.as_os_fd() // try again
+      }
+      Some(fd) => Ok(fd.as_fd()),
+    }
+  }
+  fn seek(&self, pos: io::SeekFrom) -> io::Result<u64> {
+    self.buf.borrow_mut().seek(pos)
+  }
+  fn has_data(&self) -> bool {
+    let cur = self.buf.borrow();
+    (cur.position() as usize) < cur.get_ref().len()
+  }
+  fn kind(&self) -> SinkKind {
+    SinkKind::Buffer
+  }
+}
+
+pub(crate) struct PipeBuf {
+  queue: VecDeque<u8>,
+  writer_open: bool,
+  limit: usize,
+  truncated: bool,
+}
+
+pub(crate) enum PipeSink {
+  Write(Rc<RefCell<PipeBuf>>),
+  Read(Rc<RefCell<PipeBuf>>),
+}
+
+impl PipeSink {
+  fn new() -> (Self, Self) {
+    let buf = Rc::new(RefCell::new(PipeBuf {
+      queue: VecDeque::new(),
+      writer_open: true,
+      limit: *shopt!(core.max_read_limit) as usize,
+      truncated: false,
+    }));
+    (Self::Write(buf.clone()), Self::Read(buf))
+  }
+}
+
+impl Sink for PipeSink {
+  fn read(&self, out: &mut [u8]) -> io::Result<usize> {
+    match self {
+      Self::Read(buf) => {
+        let mut buf = buf.borrow_mut();
+        let n = out.len().min(buf.queue.len());
+        for (slot, byte) in out.iter_mut().zip(buf.queue.drain(..n)) {
+          *slot = byte;
+        }
+        Ok(n)
+      }
+      Self::Write(_) => Err(ebadf()),
+    }
+  }
+  fn write(&self, buf: &[u8]) -> io::Result<usize> {
+    match self {
+      Self::Write(b) => {
+        let mut b = b.borrow_mut();
+        // already capped: silently drop but report a full write so the producer
+        // doesn't error/retry (matches the old OutputSink behavior)
+        if b.truncated {
+          return Ok(buf.len());
+        }
+        if b.queue.len() + buf.len() > b.limit {
+          b.truncated = true;
+          let remaining = b.limit - b.queue.len();
+          b.queue.extend(&buf[..remaining]);
+        } else {
+          b.queue.extend(buf);
+        }
+        Ok(buf.len())
+      }
+      Self::Read(_) => Err(ebadf()),
+    }
+  }
+  fn was_truncated(&self) -> bool {
+    match self {
+      Self::Write(b) | Self::Read(b) => b.borrow().truncated,
+    }
+  }
+  fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
+    match self {
+      Self::Read(b) => Ok(b.borrow().queue.len()),
+      Self::Write(_) => Err(ebadf()),
+    }
+  }
+  fn flush(&self) -> io::Result<()> {
+    Ok(())
+  }
+  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
+    // PipeSink is an in-process-only construct
+    // cross-fork pipelines use real pipes backed by OsSink
+    Err(io::Error::new(
+      io::ErrorKind::Unsupported,
+      "PipeSink cannot be downcast to an OS-level file descriptor",
+    ))
+  }
+  fn kind(&self) -> SinkKind {
+    SinkKind::Pipe
+  }
+}
+
+impl Drop for PipeSink {
+  fn drop(&mut self) {
+    if let Self::Write(b) = self {
+      // EOF equivalent
+      b.borrow_mut().writer_open = false;
+    }
+  }
+}
+
+pub(crate) struct OsSink {
+  fd: OwnedFd,
+  is_tty: bool,
+}
+impl OsSink {
+  pub(crate) fn new(fd: OwnedFd) -> Self {
+    Self {
+      // cache the isatty() call, so further checks are trivial field reads instead of syscalls
+      // TODO: test whether calling this on every fd once is actually faster than just calling it on the fd when needed
+      is_tty: fd.is_terminal(),
+
+      fd,
+    }
+  }
+}
+impl Sink for OsSink {
+  fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
+    unistd::read(self.fd.as_fd(), buf).map_err(|e| io::Error::from_raw_os_error(e as i32))
+  }
+  fn write(&self, buf: &[u8]) -> io::Result<usize> {
+    unistd::write(self.fd.as_fd(), buf).map_err(|e| io::Error::from_raw_os_error(e as i32))
+  }
+  fn poll(&self, timeout: Option<PollTimeout>) -> io::Result<usize> {
+    let mut fds = [PollFd::new(self.fd.as_fd(), PollFlags::POLLIN)];
+
+    match nix::poll::poll(&mut fds, timeout) {
+      Ok(n) => Ok(n as usize),
+      Err(e) => Err(io::Error::from_raw_os_error(e as i32)),
+    }
+  }
+  fn flush(&self) -> io::Result<()> {
+    Ok(())
+  }
+  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
+    Ok(self.fd.as_fd())
+  }
+  fn has_data(&self) -> bool {
+    let mut nbytes: nix::libc::c_int = 0;
+    unsafe { fionread(self.fd.as_raw_fd(), &raw mut nbytes) }.is_ok() && nbytes > 0
+  }
+  fn kind(&self) -> SinkKind {
+    if self.is_tty {
+      SinkKind::Tty
+    } else {
+      SinkKind::Os
+    }
+  }
+  fn seek(&self, pos: io::SeekFrom) -> io::Result<u64> {
+    let (whence, off) = match pos {
+      io::SeekFrom::Current(o) => (unistd::Whence::SeekCur, o),
+      io::SeekFrom::Start(o) => (unistd::Whence::SeekSet, o as i64),
+      io::SeekFrom::End(o) => (unistd::Whence::SeekEnd, o),
+    };
+
+    unistd::lseek(self.fd.as_fd(), off, whence)
+      .map(|p| p as u64)
+      .map_err(|e| io::Error::from_raw_os_error(e as i32))
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SinkKind {
+  Buffer,
+  Os,
+  Tty,
+  Pipe,
+}
+
+/// Adapter struct for implementing `io::Write`, `io::Read`, and `fmt::Write` for [`Sink`].
+///
+/// Necessary because the signatures require `&mut self`, and `Sink` is immutable behind an Rc.
+pub(crate) struct SinkIo(pub Rc<dyn Sink>);
+
+impl io::Read for SinkIo {
+  fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    self.0.read(buf)
+  }
+}
+
+impl io::Write for SinkIo {
+  fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    self.0.write(buf)
+  }
+  fn flush(&mut self) -> io::Result<()> {
+    self.0.flush()
+  }
+}
+
+impl std::fmt::Write for SinkIo {
+  fn write_str(&mut self, s: &str) -> std::fmt::Result {
+    io::Write::write_all(self, s.as_bytes()).map_err(|_| std::fmt::Error)
+  }
+}
+
+#[derive(Clone)]
+pub(crate) struct Sinks {
+  table: HashMap<RawFd, Rc<dyn Sink>>,
+}
+
+impl Debug for Sinks {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    // dyn Sink doesn't implement Debug, so we can't print the table directly.
+    // Instead, we can print the fd and the kind of sink.
+    let table = self
+      .table
+      .iter()
+      .map(|(fd, sink)| (fd, sink.kind()))
+      .collect::<Vec<_>>();
+
+    f.debug_struct("Sinks").field("table", &table).finish()
+  }
+}
+
+impl Sinks {
+  pub(crate) fn new() -> Self {
+    let mut table: HashMap<RawFd, Rc<dyn Sink>> = HashMap::default();
+
+    // seed the standard streams; a stream that was closed at launch (e.g. the
+    // shell started with fd 1 shut) simply stays absent -> EBADF on use, which
+    // matches the inherited state. dup can't meaningfully fail otherwise.
+    for fd in [STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO] {
+      if let Ok(sink) = Self::base(fd) {
+        table.insert(fd, sink);
+      }
+    }
+
+    Self { table }
+  }
+  pub(crate) fn sink_pipes() -> (Rc<dyn Sink>, Rc<dyn Sink>) {
+    let (read, write) = PipeSink::new();
+    let read = Rc::new(read);
+    let write = Rc::new(write);
+    (read, write)
+  }
+  pub(crate) fn os_pipes() -> io::Result<(Rc<dyn Sink>, Rc<dyn Sink>)> {
+    let (r, w) = pipes_high()?;
+    let r = Rc::new(OsSink::new(r));
+    let w = Rc::new(OsSink::new(w));
+    Ok((r, w))
+  }
+  /// Get an empty redir guard
+  pub(crate) fn redir_scope() -> RedirGuard {
+    RedirGuard::new()
+  }
+  pub(crate) fn commit_redirects(&self) -> io::Result<()> {
+    for (target_fd, sink) in &self.table {
+      let sink_fd = sink.as_os_fd()?;
+
+      let _ = unsafe { unistd::dup2_raw(sink_fd, *target_fd)? }.into_raw_fd();
+    }
+    Ok(())
+  }
+  pub(crate) fn get(&mut self, fd: RawFd) -> Option<Rc<dyn Sink>> {
+    if let Some(s) = self.table.get(&fd) {
+      return Some(s.clone());
+    }
+
+    // Untracked but live at the kernel: adopt it by *duping* (own a copy), never
+    // by `from_raw_fd`. Stealing ownership of an fd that's owned elsewhere (the
+    // pty in tests, rusqlite's handle, a socket, ...) double-closes it and trips
+    // the io-safety abort. `dup_high` also fails (EBADF -> None) if fd is closed.
+    let owned = dup_high(unsafe { BorrowedFd::borrow_raw(fd) }).ok()?;
+    let sink: Rc<dyn Sink> = Rc::new(OsSink::new(owned));
+    self.table.insert(fd, sink.clone());
+    Some(sink)
+  }
+  pub(crate) fn get_stdin(&mut self) -> Option<Rc<dyn Sink>> {
+    self.get(0)
+  }
+  pub(crate) fn get_stdout(&mut self) -> Option<Rc<dyn Sink>> {
+    self.get(1)
+  }
+  pub(crate) fn get_stderr(&mut self) -> Option<Rc<dyn Sink>> {
+    self.get(2)
+  }
+  pub(crate) fn apply_sink(&mut self, sink: Rc<dyn Sink>, fd: RawFd) -> ShResult<RedirGuard> {
+    RedirGuard::from_sink(self, sink, fd)
+  }
+  pub(crate) fn apply_set(&mut self, s: &RedirSet) -> ShResult<RedirGuard> {
+    RedirGuard::from_redirs(self, s)
+  }
+  pub(crate) fn try_apply_set(
+    &mut self,
+    s: &RedirSet,
+    fatal: bool,
+  ) -> ShResult<Option<RedirGuard>> {
+    RedirGuard::try_from_redirs(self, s, fatal)
+  }
+  pub(crate) fn redirect(&mut self, fd: RawFd, chan: Option<Rc<dyn Sink>>) -> Option<Rc<dyn Sink>> {
+    // getting 'None' here is equivalent to closing the fd, which is valid
+    match chan {
+      Some(c) => self.table.insert(fd, c),
+      None => self.table.remove(&fd),
+    }
+  }
+  pub(crate) fn input_available(&mut self) -> bool {
+    match self.get_stdin() {
+      None => false,
+      Some(sink) => sink.has_data(),
+    }
+  }
+  fn base(fd: RawFd) -> io::Result<Rc<dyn Sink>> {
+    let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+    let owned = dup_high(borrowed)?;
+    Ok(Rc::new(OsSink::new(owned)))
+  }
+}
+
+enum RedirResult {
+  Success,
+  Fail,
+}
+
+impl RedirResult {
+  pub(crate) fn failed(&self) -> bool {
+    matches!(self, RedirResult::Fail)
+  }
+}
+
+pub(crate) struct RedirGuard {
+  saved: Vec<(RawFd, Option<Rc<dyn Sink>>)>,
+  active: bool,
+}
+
+impl Debug for RedirGuard {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    let saved = self
+      .saved
+      .iter()
+      .map(|(fd, sink)| (fd, sink.as_ref().map(|s| s.kind())))
+      .collect::<Vec<_>>();
+    f.debug_struct("RedirGuard")
+      .field("saved", &saved)
+      .field("active", &self.active)
+      .finish()
+  }
 }
 
 impl RedirGuard {
-  pub(crate) fn new(targets: &BTreeSet<RawFd>) -> ShResult<Self> {
-    let saved = Some(IoGroup::capture_targets(targets)?);
-    Ok(Self { saved })
+  fn new() -> Self {
+    Self {
+      saved: Vec::new(),
+
+      // if this is true and the redirguard drops inside of a Shed::sinks() call,
+      // then the program explodes. be careful!
+      active: true,
+    }
   }
-  /// Create a `RedirGuard` that captures the current state of stdin, stdout, and stderr (fd 0, 1, 2).
-  pub(crate) fn stdio() -> ShResult<Self> {
-    let stdio_fds = [0, 1, 2].iter().copied().collect();
-    Self::new(&stdio_fds)
+
+  fn from_sink(sinks: &mut Sinks, sink: Rc<dyn Sink>, fd: RawFd) -> ShResult<Self> {
+    let mut guard = Self::new();
+    guard.apply_sink(sinks, fd, Some(sink))?;
+    Ok(guard)
   }
-  /// Persist the redirections, preventing the guard from restoring the original fds when dropped.
+
+  fn from_redirs(sinks: &mut Sinks, redirs: &RedirSet) -> ShResult<Self> {
+    let mut guard = Self::new();
+    if let Err(e) = guard.apply_set(sinks, redirs) {
+      guard.restore_into(sinks);
+      return Err(e);
+    }
+    Ok(guard)
+  }
+
+  fn try_from_redirs(sinks: &mut Sinks, redirs: &RedirSet, fatal: bool) -> ShResult<Option<Self>> {
+    let mut guard = Self::new();
+    if guard.try_apply_set(sinks, redirs, fatal)?.failed() {
+      Ok(None)
+    } else {
+      Ok(Some(guard))
+    }
+  }
+
+  pub(crate) fn apply_sink(
+    &mut self,
+    sinks: &mut Sinks,
+    fd: RawFd,
+    sink: Option<Rc<dyn Sink>>,
+  ) -> ShResult<()> {
+    validate_fd(fd)?;
+
+    if !self.saved.iter().any(|(f, _)| *f == fd) {
+      // only save once
+      self.saved.push((fd, sinks.get(fd)));
+    }
+
+    sinks.redirect(fd, sink);
+
+    Ok(())
+  }
+
+  /// Apply a redirection spec
+  ///
+  /// Swaps the current sink for the target fd with the new sink specified by the redirection spec.
+  /// Swaps it back on drop, unless [`RedirGuard::persist()`] is called.
+  pub(crate) fn apply(&mut self, sinks: &mut Sinks, r: &RedirSpec) -> ShResult<()> {
+    let fd = r.target_fd();
+    let sink = r.as_sink(sinks)?;
+    validate_fd(fd)?;
+
+    self.apply_sink(sinks, fd, sink)
+  }
+
+  fn try_apply_set(
+    &mut self,
+    sinks: &mut Sinks,
+    s: &RedirSet,
+    fatal: bool,
+  ) -> ShResult<RedirResult> {
+    if let Err(e) = self.apply_set(sinks, s) {
+      // unwind the partially-applied redirs through `sinks` (not Drop), so a guard
+      // dropped inside this `Shed::sinks_mut` borrow can't re-enter it and panic
+      self.restore_into(sinks);
+      if fatal {
+        return Err(e);
+      }
+      e.print_error();
+      Shed::set_status(1);
+      return Ok(RedirResult::Fail);
+    }
+    Ok(RedirResult::Success)
+  }
+
+  pub(crate) fn apply_set(&mut self, sinks: &mut Sinks, s: &RedirSet) -> ShResult<()> {
+    for r in s.specs() {
+      self.apply(sinks, r)?;
+    }
+
+    Ok(())
+  }
+
+  /// Unwind the applied redirs immediately, using a `Sinks` we already hold, and
+  /// disarm so the eventual `Drop` is a no-op (and never re-enters `Shed::sinks_mut`).
+  fn restore_into(&mut self, sinks: &mut Sinks) {
+    for (fd, old) in self.saved.drain(..).rev() {
+      sinks.redirect(fd, old);
+    }
+    self.active = false;
+  }
+
+  /// Drop the guard without restoring the redirections
+  ///
+  /// Used by contexts like the `exec` builtin
   pub(crate) fn persist(mut self) {
-    use std::mem::{drop, take};
-    drop(take(&mut self.saved));
+    self.active = false;
+
+    // i know it happens anyway, just making it obvious that
+    // this is the intention
+    std::mem::drop(self);
   }
 }
 
 impl Drop for RedirGuard {
   fn drop(&mut self) {
-    if let Some(saved) = self.saved.take() {
-      saved.restore().ok();
-    }
-  }
-}
-
-/// A group of file descriptors that can be captured and restored.
-/// Stores them as (`RawFd`, `Option<OwnedFd>`) pairs, where the `Option` is `None` if the fd is to be closed.
-#[derive(Debug)]
-pub(super) struct IoGroup(BTreeMap<RawFd, Option<OwnedFd>>);
-
-impl IoGroup {
-  /// Capture the current state of the given file descriptors, saving them for later restoration.
-  pub(crate) fn capture_targets(targets: &BTreeSet<RawFd>) -> ShResult<Self> {
-    let mut saved = BTreeMap::new();
-
-    for &fd in targets {
-      let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-      match dup_high(borrowed) {
-        Ok(owned) => saved.insert(fd, Some(owned)),
-        Err(Errno::EBADF) => saved.insert(fd, None), // fd is not open
-        Err(e) => return Err(e.into()),
-      };
+    if !self.active {
+      return;
     }
 
-    Ok(Self(saved))
-  }
-  pub(crate) fn restore(&self) -> ShResult<()> {
-    for (&fd, saved) in &self.0 {
-      match saved {
-        Some(owned) => {
-          // we use libc::dup2() here instead of unistd::dup2()
-          // because unistd::dup2() requires an ownedfd for the right side
-          // libc::dup2() takes a raw fd instead
-          let ret = unsafe { nix::libc::dup2(owned.as_raw_fd(), fd) };
-          if ret < 0 {
-            return Err(nix::Error::last().into());
-          }
-        }
-        None => {
-          nix::unistd::close(fd).ok();
-        }
-      }
-    }
-    Ok(())
+    Shed::sinks(|s| self.restore_into(s));
   }
 }
 
-/// An iterator that lazily creates a specific number of pipes.
-pub(super) struct PipeGenerator {
-  num_cmds: usize, // The number of pipes to create
-  cursor: usize,
-  last_rpipe: Option<Redir>,
-}
-
-impl PipeGenerator {
-  pub(crate) fn new(num_cmds: usize) -> Self {
-    Self {
-      num_cmds,
-      cursor: 0,
-      last_rpipe: None,
-    }
-  }
-}
-
-impl Iterator for PipeGenerator {
-  type Item = (Option<Redir>, Option<Redir>, Option<RawFd>);
-  /// Returns a tuple of (read end of previous pipe, write end of current pipe, read end of current pipe).
-  fn next(&mut self) -> Option<Self::Item> {
-    if self.cursor >= self.num_cmds {
-      return None;
-    }
-
-    let needs_write = self.cursor + 1 < self.num_cmds; // this is not the last command
-
-    let rpipe = self.last_rpipe.take(); // None if this is the first command
-    let mut downstream_read = None;
-    let wpipe = needs_write
-      .then(|| {
-        let (r, w) = pipes_high().ok()?;
-        downstream_read = Some(r.as_raw_fd());
-        let read = Redir::new(0, r);
-        let write = Redir::new(1, w);
-        self.last_rpipe = Some(read);
-        Some(write)
-      })
-      .flatten();
-
-    self.cursor += 1;
-    Some((rpipe, wpipe, downstream_read))
-  }
-}
-
-/// A sink used for internal IO transfers.
-/// `shed` is capable of running builtin-only pipelines
-/// where the output of one builtin is fed into the input of another builtin
-/// and no intermediate system calls are necessary.
-#[derive(Debug, Clone)]
-pub(crate) struct OutputSink {
-  limit: ReadLimit,
-  buf: Vec<u8>,
-  truncated: bool,
-}
-
-impl Default for OutputSink {
-  fn default() -> Self {
-    Self {
-      limit: shopt!(core.max_read_limit),
-      buf: Vec::new(),
-      truncated: false,
-    }
-  }
-}
-
-impl OutputSink {
-  fn new() -> Self {
-    Self::default()
-  }
-
-  pub(crate) fn limit(&self) -> ReadLimit {
-    self.limit
-  }
-
-  pub(crate) fn was_truncated(&self) -> bool {
-    self.truncated
-  }
-
-  pub(crate) fn into_buf(self) -> Vec<u8> {
-    self.buf
-  }
-}
-
-impl io::Write for OutputSink {
-  fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-    if self.truncated {
-      return Ok(buf.len());
-    }
-    let limit = *self.limit as usize;
-
-    if self.buf.len() + buf.len() > limit {
-      self.truncated = true;
-      let remaining_space = limit - self.buf.len();
-      self.buf.extend_from_slice(&buf[..remaining_space]);
-      Ok(buf.len())
-    } else {
-      self.buf.extend_from_slice(buf);
-      Ok(buf.len())
-    }
-  }
-
-  fn flush(&mut self) -> io::Result<()> {
-    Ok(())
-  }
-}
-
-/// A sink used for internal IO transfers.
-/// Is readable in the same way as a regular file descriptor, but reads from an internal buffer.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct InputSink {
-  buf: Cursor<Vec<u8>>,
-}
-
-impl InputSink {
-  fn from_input(sink: OutputSink) -> Self {
-    Self {
-      buf: Cursor::new(sink.buf),
-    }
-  }
-}
-
-impl io::Read for InputSink {
-  fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-    self.buf.read(buf)
-  }
-}
-
-/// A collection of input and output sinks for internal IO transfers.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Sinks {
-  output_sinks: Vec<OutputSink>,
-  input_sinks: Vec<InputSink>,
-}
-
-impl Sinks {
-  pub(crate) const fn new() -> Self {
-    Self {
-      output_sinks: Vec::new(),
-      input_sinks: Vec::new(),
-    }
-  }
-
-  pub(crate) fn push_output(&mut self) {
-    self.output_sinks.push(OutputSink::new());
-  }
-  pub(crate) fn pop_output(&mut self) -> Option<OutputSink> {
-    self.output_sinks.pop()
-  }
-  pub(crate) fn has_output(&self) -> bool {
-    !self.output_sinks.is_empty()
-  }
-
-  pub(crate) fn push_input(&mut self, sink: OutputSink) {
-    self.input_sinks.push(InputSink::from_input(sink));
-  }
-  pub(crate) fn pop_input(&mut self) {
-    self.input_sinks.pop();
-  }
-  pub(crate) fn has_input(&self) -> bool {
-    !self.input_sinks.is_empty()
-  }
-
-  /// Whether the top input sink still has unread bytes. `None` if there is no
-  /// input sink frame (the caller should then check the real fd instead). Used
-  /// by `read -t 0` to poll for data without consuming it.
-  pub(crate) fn input_available(&self) -> Option<bool> {
-    self
-      .input_sinks
-      .last()
-      .map(|cur| (cur.buf.position() as usize) < cur.buf.get_ref().len())
-  }
-
-  /// Drain whatever is left in the top input cursor (from its current position)
-  /// so it can be handed to a forked child's fd 0. `None` if there is no input
-  /// sink frame.
-  pub(crate) fn drain_input(&mut self) -> Option<Vec<u8>> {
-    self.input_sinks.last_mut().map(|cur| {
-      let mut rest = Vec::new();
-      cur.read_to_end(&mut rest).ok();
-      rest
-    })
-  }
-}
-
-impl io::Read for Sinks {
-  fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-    if let Some(sink) = self.input_sinks.last_mut() {
-      return sink.read(buf);
-    }
-    unistd::read(stdin_fileno(), buf).map_err(|e| io::Error::from_raw_os_error(e as i32))
-  }
-}
-
-impl io::Write for Sinks {
-  fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-    if let Some(sink) = self.output_sinks.last_mut() {
-      return sink.write(buf);
-    }
-
-    unistd::write(stdout_fileno(), buf).map_err(|e| io::Error::from_raw_os_error(e as i32))
-  }
-
-  fn flush(&mut self) -> io::Result<()> {
-    Ok(())
-  }
-}
-
-impl std::fmt::Write for Sinks {
-  fn write_str(&mut self, s: &str) -> std::fmt::Result {
-    self.write_all(s.as_bytes()).map_err(|_| std::fmt::Error)
-  }
-}
-
-pub(crate) fn has_out_sink() -> bool {
-  Shed::sinks(|s| s.has_output())
-}
-
-pub(crate) fn has_in_sink() -> bool {
-  Shed::sinks(|s| s.has_input())
-}
-
-pub(crate) fn stdin_is_tty() -> bool {
-  isatty(stdin_fileno()).unwrap_or(false)
-}
-
-/// Drain the remaining piped stdin so it can be handed to a forked child. The
-/// in-process read path goes through `Shed::sinks` (`io::Read`) instead.
-pub(crate) fn take_stdin() -> Option<Vec<u8>> {
-  Shed::sinks(Sinks::drain_input)
-}
-
-pub(crate) struct SinkScope {
-  taken: bool,
-}
-impl SinkScope {
-  pub(crate) fn new() -> Self {
-    Shed::sinks(Sinks::push_output);
-    Self { taken: false }
-  }
-
-  pub(crate) fn take(mut self) -> OutputSink {
-    self.taken = true;
-    Shed::sinks(Sinks::pop_output).expect("SinkScope should have an out sink")
-  }
-}
-
-impl Drop for SinkScope {
-  fn drop(&mut self) {
-    if !self.taken {
-      Shed::sinks(Sinks::pop_output).expect("SinkScope should have an out sink");
-    }
-  }
-}
-
-/// A guard struct that pushes an input sink onto the `Shed` stack and pops it when dropped.
-pub(crate) struct StdinScope;
-impl StdinScope {
-  pub(crate) fn push(sink: OutputSink) -> Self {
-    Shed::sinks(|s| s.push_input(sink));
-    Self
-  }
-}
-
-impl Drop for StdinScope {
-  fn drop(&mut self) {
-    Shed::sinks(Sinks::pop_input);
-  }
-}
+// TODO: drop impl
 
 pub(super) fn stdin_fileno() -> BorrowedFd<'static> {
   unsafe { BorrowedFd::borrow_raw(STDIN_FILENO) }
+}
+
+pub(super) fn stdin_sink() -> ShResult<Rc<dyn Sink>> {
+  Shed::sinks(Sinks::get_stdin).ok_or_else(|| ShErr::from(ebadf()))
 }
 
 pub(super) fn stdout_fileno() -> BorrowedFd<'static> {
   unsafe { BorrowedFd::borrow_raw(STDOUT_FILENO) }
 }
 
+pub(crate) fn stdout_sink() -> ShResult<Rc<dyn Sink>> {
+  Shed::sinks(Sinks::get_stdout).ok_or_else(|| ShErr::from(ebadf()))
+}
+
 pub(super) fn stderr_fileno() -> BorrowedFd<'static> {
   unsafe { BorrowedFd::borrow_raw(STDERR_FILENO) }
 }
 
-/// Read all bytes from the given file descriptor into an `OutputSink`, respecting the `core.max_read_limit` shell option.
-/// Used for boundaries between builtins and external commands
-/// Returns an error if the read fails.
-pub(super) fn read_to_sink(fd: BorrowedFd) -> ShResult<OutputSink> {
+pub(crate) fn stderr_sink() -> ShResult<Rc<dyn Sink>> {
+  Shed::sinks(Sinks::get_stderr).ok_or_else(|| ShErr::from(ebadf()))
+}
+
+pub(crate) struct CappedRead {
+  buf: Vec<u8>,
+  limit: ReadLimit,
+  was_truncated: bool,
+}
+
+impl CappedRead {
+  pub(crate) fn was_truncated(&self) -> bool {
+    self.was_truncated
+  }
+  pub(crate) fn into_inner(self) -> Vec<u8> {
+    self.buf
+  }
+  pub(crate) fn limit(&self) -> ReadLimit {
+    self.limit
+  }
+}
+
+impl Deref for CappedRead {
+  type Target = Vec<u8>;
+  fn deref(&self) -> &Self::Target {
+    &self.buf
+  }
+}
+
+pub(crate) fn read_capped(fd: BorrowedFd) -> ShResult<CappedRead> {
   let limit = shopt!(core.max_read_limit);
 
   let mut out = Vec::new();
@@ -1115,10 +1366,10 @@ pub(super) fn read_to_sink(fd: BorrowedFd) -> ShResult<OutputSink> {
     }
   }
 
-  Ok(OutputSink {
-    limit,
+  Ok(CappedRead {
     buf: out,
-    truncated,
+    limit,
+    was_truncated: truncated,
   })
 }
 
@@ -1132,12 +1383,20 @@ pub(super) fn bytes_to_string(buf: Vec<u8>) -> String {
 
 /// Write raw bytes to the current output sink, byte-native counterpart to `out!`.
 pub(super) fn out_bytes(buf: &[u8]) {
-  let _ = Shed::sinks(|s| s.write_all(buf));
+  let Some(out) = Shed::sinks(Sinks::get_stdout) else {
+    return;
+  };
+  SinkIo(out).write_all(buf).ok();
 }
 
 /// Write raw bytes followed by a newline, byte-native counterpart to `outln!`.
 pub(super) fn outln_bytes(buf: &[u8]) {
-  let _ = Shed::sinks(|s| s.write_all(buf).and_then(|()| s.write_all(b"\n")));
+  let Some(out) = Shed::sinks(Sinks::get_stdout) else {
+    return;
+  };
+  let mut sink_io = SinkIo(out);
+  sink_io.write_all(buf).ok();
+  sink_io.write_all(b"\n").ok();
 }
 
 /// A pipe created before a fork to deliver stdin bytes to the child on fd 0.
@@ -1180,12 +1439,17 @@ impl StdinPipe {
 /// Read from the given file descriptor, then write the results to stdout
 /// This process loops until the read returns EOF or returns some error.
 pub(crate) fn stream_to_sink(fd: BorrowedFd) -> ShResult<()> {
+  let Some(out) = Shed::sinks(Sinks::get_stdout) else {
+    return Ok(());
+  };
   let mut buf = [0u8; 8192]; // 8 KiB
+  let mut sink = SinkIo(out);
+
   loop {
     match unistd::read(fd, &mut buf) {
       Ok(0) => break,
       Ok(n) => {
-        if Shed::sinks(|s| s.write_all(&buf[..n])).is_err() {
+        if sink.write_all(&buf[..n]).is_err() {
           break; // downstream closed
         }
       }
@@ -1235,15 +1499,6 @@ pub(crate) fn write_all_to_fd_checked(fd: BorrowedFd, bytes: &[u8]) -> ShResult<
   Ok(())
 }
 
-/// Feed `bytes` to `fd` from a background thread, closing `fd` (signalling EOF)
-/// when done. Read the child's output before joining the returned handle so a
-/// large payload can't deadlock.
-pub(crate) fn feed_fd_async(fd: OwnedFd, bytes: Vec<u8>) -> std::thread::JoinHandle<()> {
-  std::thread::spawn(move || {
-    write_all_to_fd(fd.as_fd(), &bytes);
-  })
-}
-
 /// Run a command in a child process, feeding it `stdin` if provided, and capturing its stdout into a string.
 /// Returns the captured output or an error if the command failed to execute or was terminated abnormally.
 pub(super) fn capture_command(
@@ -1266,7 +1521,8 @@ pub(super) fn capture_command(
       // Keep the read end alive until redirs.apply() dups it onto fd 0.
       let _stdin_r_keep_alive = stdin_pipe.map(|p| p.into_child(&mut specs));
       let redirs: RedirSet = specs.into();
-      let _guard = redirs.apply().or_fatal()?;
+      // TODO: make sure this is the correct migration for "or_fatal()?"
+      let _guard = Shed::sinks(|s| s.apply_set(&redirs));
 
       execute::catch_exit(
         || execute::exec_nonint(cmd.into(), name.cloned()),
@@ -1291,14 +1547,14 @@ pub(super) fn capture_command(
             // Closing the write end signals EOF to the child's stdin.
             drop(writer);
           });
-          read_to_sink(rpipe.as_fd())
+          read_capped(rpipe.as_fd())
         })?
       } else {
-        read_to_sink(rpipe.as_fd())?
+        read_capped(rpipe.as_fd())?
       };
       let truncated = sink.was_truncated();
       let size = sink.limit();
-      let captured = bytes_to_string(sink.into_buf());
+      let captured = bytes_to_string(sink.into_inner());
 
       let status = loop {
         match waitpid(child, Some(WtFlag::WUNTRACED)) {
@@ -1321,6 +1577,57 @@ pub(super) fn capture_command(
       }
     }
   }
+}
+fn expand_fd(word: &Tk) -> ShResult<Option<RawFd>> {
+  let span = word.span.clone();
+  let words = word
+    .clone()
+    .expand()
+    .map(|tk| tk.get_words())
+    .unwrap_or_default();
+
+  if words.len() != 1 {
+    return Err(sherr!(
+        ExecFail @ span,
+        "ambiguous redirect: file descriptor must expand to a single word"
+    ));
+  }
+  let word_val = words.iter().next().unwrap();
+  let word_val = word_val.to_str_lossy();
+  let src = word_val.trim();
+
+  // A word that expands to `-` closes the target fd, mirroring `>&-`.
+  if src == "-" {
+    return Ok(None);
+  }
+
+  let from = src.parse::<RawFd>().map_err(|_| {
+    sherr!(
+      ExecFail @ span.clone(),
+      "ambiguous redirect: `{src}` is not a valid file descriptor"
+    )
+  })?;
+
+  Ok(Some(from))
+}
+/// Open a file for redirection, respecting the `noclobber` shell option for output redirections.
+pub(super) fn open_redir_file(class: RedirType, path: &Tk) -> ShResult<OwnedFd> {
+  let span = path.span.clone();
+  let path = path
+    .clone()
+    .expand()
+    .map(|tk| tk.get_words())
+    .unwrap_or_default();
+
+  if path.len() != 1 {
+    return Err(sherr!(ExecFail @ span, "Redirection path must expand to exactly one word"));
+  }
+
+  let path = path.iter().next().unwrap();
+
+  let file: OwnedFd = get_redir_file(class, path)?.into();
+  let file = move_high(file)?;
+  Ok(file)
 }
 
 /// Open a file for redirection, respecting the `noclobber` shell option for output redirections.

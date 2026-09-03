@@ -1,21 +1,15 @@
-use std::{
-  io::Read as _,
-  os::fd::{AsRawFd, BorrowedFd},
-  time::Duration,
-};
+use std::{io, time::Duration};
 
 use bitflags::bitflags;
-use nix::{
-  errno::Errno,
-  poll::{PollFd, PollFlags, PollTimeout, poll},
-  unistd::{self, read},
-};
+use nix::{poll::PollTimeout, unistd};
 
 use crate::{
   builtin::quote,
   eval::lex::Span,
   expand::alias,
-  match_loop, out, procio, sherr, signal,
+  match_loop, out,
+  procio::{self, Sink},
+  sherr, signal,
   state::{
     self, Shed, params,
     terminal::Terminal,
@@ -29,23 +23,9 @@ use crate::{
   varstr,
 };
 
-use super::opt::OptSpec;
+use super::{super::procio::Sinks, opt::OptSpec};
 
 const CHUNK_SIZE: usize = 4096; // 4kb
-
-// FIONREAD reports how many bytes are available to read on an fd. Unlike
-// `poll`, it distinguishes "data present" (n > 0) from "empty or EOF" (n == 0).
-nix::ioctl_read_bad!(fionread, nix::libc::FIONREAD, nix::libc::c_int);
-
-/// Whether stdin currently has data available, without consuming any. Used by
-/// `read -t 0` to poll non-destructively.
-fn stdin_has_data() -> bool {
-  if let Some(has) = Shed::sinks(|s| s.input_available()) {
-    return has;
-  }
-  let mut nbytes: nix::libc::c_int = 0;
-  unsafe { fionread(procio::stdin_fileno().as_raw_fd(), &raw mut nbytes) }.is_ok() && nbytes > 0
-}
 
 bitflags! {
   pub struct ReadFlags: u32 {
@@ -123,7 +103,8 @@ impl super::Builtin for Read {
     // `read -t 0` polls without consuming or assigning: status 0 if input is
     // available on stdin right now, non-zero otherwise (matches bash).
     if timeout == Some(0) {
-      return util::with_status(i32::from(!stdin_has_data()));
+      let has_data = Shed::sinks(Sinks::input_available);
+      return util::with_status(i32::from(has_data));
     }
 
     if let Some(p) = prompt {
@@ -169,79 +150,62 @@ fn do_read(
   timeout: Option<i32>,
   max_bytes: Option<usize>,
 ) -> ShResult<Vec<u8>> {
-  let fd = procio::stdin_fileno();
+  let sink = procio::stdin_sink()?;
 
-  if !procio::has_in_sink()
-    && timeout.is_none()
-    && unistd::lseek(fd, 0, unistd::Whence::SeekCur).is_ok()
-  {
-    seeking_read(fd, delim, escape_aware, max_bytes)
+  if timeout.is_none() && sink.seek(io::SeekFrom::Current(0)).is_ok() {
+    seeking_read(&*sink, delim, escape_aware, max_bytes)
   } else {
-    walking_read(fd, delim, escape_aware, timeout, max_bytes)
+    walking_read(&*sink, delim, escape_aware, timeout, max_bytes)
   }
 }
 
 fn walking_read(
-  fd: BorrowedFd,
+  sink: &dyn Sink,
   delim: u8,
   escape_aware: bool,
   timeout: Option<i32>,
   max_bytes: Option<usize>,
 ) -> ShResult<Vec<u8>> {
-  let use_sink = procio::has_in_sink();
   let mut buf = vec![];
   let mut escaped = false;
-  let poll_fd = PollFd::new(fd, PollFlags::POLLIN);
-  let timeout = timeout
-    .map(PollTimeout::try_from)
-    .and_then(Result::ok)
-    .unwrap_or(PollTimeout::NONE);
+  let timeout = timeout.map(PollTimeout::try_from).and_then(Result::ok);
 
   loop {
-    if !use_sink {
-      let ready = match poll(&mut [poll_fd.clone()], timeout) {
-        Ok(n) => n,
-        Err(Errno::EINTR) => {
-          if signal::sigint_pending() {
-            state::Shed::set_status(130);
-            return Ok(Vec::new());
-          }
-          if signal::has_actionable_pending() {
-            state::Shed::set_status(1);
-            return Ok(buf);
-          }
-          continue; // untrapped SIGCHLD/SIGWINCH etc., retry the poll
+    let ready = match sink.poll(timeout) {
+      Ok(n) => n,
+      Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+        if signal::sigint_pending() {
+          state::Shed::set_status(130);
+          return Ok(Vec::new());
         }
-        Err(e) => return Err(e.into()),
-      };
-      if ready == 0 {
-        state::Shed::set_status(1);
-        return Ok(buf); // timeout
+        if signal::has_actionable_pending() {
+          state::Shed::set_status(1);
+          return Ok(buf);
+        }
+        continue; // untrapped SIGCHLD/SIGWINCH etc., retry the poll
       }
+      Err(e) => return Err(e.into()),
+    };
+    if ready == 0 {
+      state::Shed::set_status(1);
+      return Ok(buf); // timeout
     }
 
     let mut in_buf = [0u8; 1];
-    let n = if use_sink {
-      match Shed::sinks(|s| s.read(&mut in_buf)) {
-        Ok(n) => n,
-        Err(e) => return Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}")),
-      }
-    } else {
-      match read(fd, &mut in_buf) {
-        Ok(n) => n,
-        Err(Errno::EINTR) => {
-          if signal::sigint_pending() {
-            state::Shed::set_status(130);
-            return Ok(Vec::new());
-          }
-          if signal::has_actionable_pending() {
-            state::Shed::set_status(1);
-            return Ok(buf);
-          }
-          continue;
+    let n = match sink.read(&mut in_buf) {
+      Ok(n) => n,
+      Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+        if signal::sigint_pending() {
+          state::Shed::set_status(130);
+          return Ok(Vec::new());
         }
-        Err(e) => return Err(sherr!(ExecFail, "read: Failed to read from stdin: {e}")),
+        if signal::has_actionable_pending() {
+          state::Shed::set_status(1);
+          return Ok(buf);
+        }
+        continue; // untrapped SIGCHLD/SIGWINCH etc., retry the read
       }
+      Err(e) => return Err(e.into()),
     };
 
     if n == 0 {
@@ -294,7 +258,7 @@ fn delim_scan(delim: u8, slice: &[u8], escape_aware: bool) -> Option<usize> {
 }
 
 fn seeking_read(
-  fd: BorrowedFd,
+  sink: &dyn Sink,
   delim: u8,
   escape_aware: bool,
   max_bytes: Option<usize>,
@@ -306,7 +270,7 @@ fn seeking_read(
   loop {
     let scan_start = usize::from(last_was_escaped && escape_aware);
 
-    let n = match read(fd, &mut buf) {
+    let n = match sink.read(&mut buf) {
       Ok(0) => {
         if line.is_empty() {
           state::Shed::set_status(1);
@@ -316,7 +280,7 @@ fn seeking_read(
       }
       Ok(n) => n,
 
-      Err(Errno::EINTR) => {
+      Err(e) if e.kind() == io::ErrorKind::Interrupted => {
         if signal::sigint_pending() {
           // we got ctrl+c
           state::Shed::set_status(130);
@@ -342,7 +306,7 @@ fn seeking_read(
       if leftover > 0 {
         // lseek backwards to the delimiter's position
         // next read starts there
-        unistd::lseek(fd, -(leftover as i64), unistd::Whence::SeekCur)?;
+        sink.seek(io::SeekFrom::Current(-(leftover as i64)))?;
       }
       return finalize(line, escape_aware);
     }
@@ -371,7 +335,7 @@ fn seeking_read(
     {
       let leftover = line.len() - max;
       if leftover > 0 {
-        unistd::lseek(fd, -(leftover as i64), unistd::Whence::SeekCur)?;
+        sink.seek(io::SeekFrom::Current(-(leftover as i64)))?;
         line.truncate(max);
       }
       return finalize(line, escape_aware);

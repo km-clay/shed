@@ -23,7 +23,7 @@ use crate::{
   },
   expand::{arithmetic, escape},
   outln,
-  procio::{self, RedirResult, RedirSet},
+  procio::{self, RedirSet, SinkIo},
   sherr, signal,
   state::{
     Shed, cmd,
@@ -283,21 +283,25 @@ pub(super) trait Builtin: Sync {
     if !should_slurp(args) {
       return None;
     }
-    // Nothing to slurp if stdin is the bare interactive terminal (no piped sink
-    if !procio::has_in_sink() && procio::stdin_is_tty() {
+    let stdin = procio::stdin_sink().ok()?;
+
+    // Nothing to slurp if stdin is the bare interactive terminal
+    if stdin.isatty() {
       return None;
     }
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
+    let mut sink = SinkIo(stdin);
+
     loop {
-      match Shed::sinks(|s| s.read(&mut chunk)) {
+      match sink.read(&mut chunk) {
         Ok(0) => break,
         Ok(n) => buf.extend_from_slice(&chunk[..n]),
         Err(e) if e.kind() == io::ErrorKind::Interrupted => {
           if signal::sigint_pending() {
             return None; // abort; the still-pending SIGINT aborts the command
           }
-          // benign signal (SIGCHLD/SIGWINCH/…): retry the read
+          // benign signal (SIGCHLD/SIGWINCH/...): retry the read
         }
         Err(_) => break,
       }
@@ -346,11 +350,10 @@ pub(super) trait Builtin: Sync {
     // Set up redirections here so we can attach the guard to propagated errors.
     let redirs: RedirSet = RedirSet::from(&tree[node.redirs]);
     let fatal = self.is_special() && !Shed::term(Terminal::interactive);
-    let guard = match redirs.try_apply(fatal) {
-      RedirResult::Applied(guard) => Some(guard),
-      RedirResult::NoRedirs => None,
-      RedirResult::Skipped => return Ok(()),
-      RedirResult::Error(e) => return Err(e),
+    let guard = match Shed::sinks(|s| s.try_apply_set(&redirs, fatal)) {
+      Ok(Some(g)) => g,
+      Ok(None) => return Ok(()), // non-fatal error, skip
+      Err(e) => return Err(e),   // fatal error, propagate
     };
 
     if fork_builtins {
@@ -374,9 +377,7 @@ pub(super) trait Builtin: Sync {
     }
 
     // Handle exec specially - persist redirections before dispatch
-    if cmd_raw == b"exec"
-      && let Some(guard) = guard
-    {
+    if cmd_raw == b"exec" {
       guard.persist();
     }
 
@@ -522,12 +523,15 @@ enum ThruSource {
   File(fs::File),
   Stdin,
 }
-impl ThruSource {
+impl std::io::Read for ThruSource {
   /// Read bytes from the source into the provided buffer, returning the number of bytes read.
   fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
     match self {
       ThruSource::File(f) => f.read(buf),
-      ThruSource::Stdin => Shed::sinks(|s| s.read(buf)),
+      ThruSource::Stdin => {
+        let stdin = procio::stdin_sink().map_err(|_| procio::ebadf())?;
+        SinkIo(stdin).read(buf)
+      }
     }
   }
 }

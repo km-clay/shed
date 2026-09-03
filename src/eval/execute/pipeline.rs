@@ -9,7 +9,12 @@
 //! * `last`: the last command executes in-process if it is a builtin
 //! * `all`: every command forks, no matter what.
 
-use nix::unistd::{self, Pid};
+use std::rc::Rc;
+
+use nix::{
+  libc::STDIN_FILENO,
+  unistd::{self, Pid},
+};
 
 use crate::{
   errln,
@@ -17,7 +22,7 @@ use crate::{
     lex::{Span, Tk},
     parse::{NdFlags, Node, node},
   },
-  procio::{self, OutputSink, PipeGenerator, RedirGuard, RedirSet, SinkScope, StdinScope},
+  procio::{self, RedirSet, Sink, Sinks},
   shopt,
   state::{
     Shed,
@@ -45,11 +50,9 @@ impl super::Dispatcher {
 
     let mut cmds: Vec<NodeId> = tree[*cmds].to_vec();
 
-    let has_redirs = !pipeline.redirs_empty();
     let is_bg = pipeline_flags.contains(NdFlags::BACKGROUND);
     let interactive = Shed::term(Terminal::interactive);
     let num_cmds = cmds.len();
-    let last = num_cmds.saturating_sub(1);
     let mut tty_attached = false;
 
     // closure that tells us if a pipeline segment should fork
@@ -77,7 +80,7 @@ impl super::Dispatcher {
 
     let redirs = RedirSet::from(&tree[pipeline.redirs]);
 
-    let (mut in_rdrs, mut out_rdrs) = redirs.split_by_channel();
+    let (in_rdrs, out_rdrs) = redirs.split_by_channel();
     let mut result = Ok(());
 
     let mut spans = vec![];
@@ -108,33 +111,24 @@ impl super::Dispatcher {
       }
     };
 
-    let pipes = PipeGenerator::new((tail_start + 1).min(num_cmds));
-    let cmds_and_pipes = cmds.iter().enumerate().zip(pipes);
-
     // Per-stage statuses of the in-process tail, captured for the PIPESTATUS
     // splice and pipefail blame after the forked prefix is waited on.
     let mut tail_statuses: Vec<(i32, Span)> = vec![];
 
-    for ((i, cmd), (r, w, downstream_read)) in cmds_and_pipes {
-      let has_redirs = has_redirs || (r.is_some() || w.is_some());
+    let mut prev_read: Option<Rc<dyn Sink>> = None;
+    for (i, cmd) in cmds.iter().enumerate() {
+      let mut guard = Sinks::redir_scope();
 
       // builtins must fork in the middle of multi-command pipelines
       let fork_builtins = num_cmds > 1 && i != tail_start;
       let _fork = Shed::meta_mut(|m| m.enter_fork(fork_builtins));
 
-      let _guard = (has_redirs).then(RedirGuard::stdio);
-
-      if i == 0 {
-        std::mem::take(&mut in_rdrs).apply_persistent().ok();
-      }
-
-      if let Some(mut r) = r {
-        r.apply()?;
-      }
-
       if i == tail_start {
         // the rest of these are non-forking builtins
-        std::mem::take(&mut out_rdrs).apply_persistent().ok();
+        if let Some(read) = prev_read.take() {
+          Shed::sinks(|s| guard.apply_sink(s, STDIN_FILENO, Some(read)))?;
+        }
+        Shed::sinks(|s| guard.apply_set(s, &out_rdrs))?;
         if is_bg {
           let tail: Vec<NodeId> = cmds[i..].to_vec();
           let name = tail
@@ -163,19 +157,26 @@ impl super::Dispatcher {
         break;
       }
 
-      if let Some(mut w) = w {
-        w.apply()?;
+      match (i, prev_read.take()) {
+        (0, _) => Shed::sinks(|s| guard.apply_set(s, &in_rdrs))?,
+        (_, Some(read)) => Shed::sinks(|s| guard.apply_sink(s, 0, Some(read)))?,
+        _ => {}
       }
 
-      if i == last {
-        std::mem::take(&mut out_rdrs).apply_persistent().ok();
+      if i + 1 < num_cmds {
+        // middle segment, get pipes
+        let (read, write) = Sinks::os_pipes()?;
+        Shed::sinks(|s| guard.apply_sink(s, 1, Some(write)))?;
+        prev_read = Some(read);
+      } else {
+        // last segment, apply output redirs
+        Shed::sinks(|s| guard.apply_set(s, &out_rdrs))?;
       }
 
       let cmd_node = &tree[*cmd];
 
       spans.push(tree.span_for(*cmd));
 
-      self.fork_close_fd = downstream_read;
       result = if should_fork_segment(cmd_node) {
         let name = tree
           .command_for(*cmd)
@@ -188,7 +189,6 @@ impl super::Dispatcher {
       } else {
         self.dispatch_node(tree, *cmd)
       };
-      self.fork_close_fd = None;
 
       if !tty_attached && let Some(pgid) = tty_controller(self) {
         Shed::term_mut(|t| t.attach(pgid)).ok();
@@ -266,15 +266,22 @@ impl super::Dispatcher {
     tree: &Ast,
     cmds: &[NodeId],
   ) -> ShResult<Vec<(i32, Span)>> {
-    let mut prev: Option<OutputSink> = None;
-    let num_cmds = cmds.len();
-    let last = num_cmds.saturating_sub(1);
-    let mut statuses = Vec::with_capacity(num_cmds);
+    let last = cmds.len().saturating_sub(1);
+    let mut statuses = Vec::with_capacity(cmds.len());
+    let mut prev_read: Option<Rc<dyn Sink>> = None;
 
     for (i, cmd) in cmds.iter().enumerate() {
-      let is_last = i == last;
-      let out_scope = (!is_last).then(SinkScope::new);
-      let _in_scope = prev.take().map(StdinScope::push);
+      let mut guard = Sinks::redir_scope();
+
+      if let Some(read) = prev_read.take() {
+        Shed::sinks(|s| guard.apply_sink(s, 0, Some(read)))?;
+      }
+
+      if i != last {
+        let (read, write) = Sinks::sink_pipes();
+        Shed::sinks(|s| guard.apply_sink(s, 1, Some(write)))?;
+        prev_read = Some(read);
+      }
 
       let result = match &tree[*cmd].class {
         NdRule::Subshell { body } => {
@@ -297,18 +304,16 @@ impl super::Dispatcher {
 
       statuses.push((Shed::get_status(), tree.span_for(*cmd)));
 
-      if let Some(scope) = out_scope {
-        let scope = scope.take();
-        if scope.was_truncated() {
-          Shed::set_status(procio::SINK_TRUNCATED_STATUS);
-          let size = scope.limit();
-
-          errln!("shed: pipeline output truncated (exceeded {size})");
-        }
-        prev = Some(scope);
+      if prev_read.as_ref().is_some_and(|r| r.was_truncated()) {
+        Shed::set_status(procio::SINK_TRUNCATED_STATUS);
+        errln!(
+          "shed: pipeline output truncated (exceeded {})",
+          *shopt!(core.max_read_limit)
+        );
       }
 
       result?;
+      // guard drops here, fd 0/1 restored, write end closes
     }
 
     Ok(statuses)

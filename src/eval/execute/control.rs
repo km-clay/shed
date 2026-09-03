@@ -7,7 +7,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{
   defer, errln,
   expand::case,
-  procio::{RedirResult, RedirSet},
+  procio::RedirSet,
   sherr, shopt, shopt_mut, signal,
   state::{
     Shed,
@@ -234,11 +234,10 @@ impl super::Dispatcher {
     let redirs = &tree[node.redirs];
 
     let redirs = RedirSet::from(redirs);
-    let guard = match redirs.try_apply(false) {
-      RedirResult::Applied(guard) => Some(guard),
-      RedirResult::NoRedirs => None,
-      RedirResult::Skipped => return Ok(()),
-      RedirResult::Error(e) => return Err(e),
+    let guard = match Shed::sinks(|s| s.try_apply_set(&redirs, false)) {
+      Ok(Some(g)) => g,
+      Ok(None) => return Ok(()),
+      Err(e) => return Err(e),
     };
 
     if fork_builtins {
@@ -250,7 +249,7 @@ impl super::Dispatcher {
     } else {
       logic(self, tree)
         .try_blame(blame)
-        .map_err(|e| e.with_redirs(guard))
+        .map_err(|e| e.with_redirs(Some(guard)))
     }
   }
   pub(super) fn exec_brc_grp(&mut self, tree: &Ast, brc_grp_id: NodeId) -> ShResult<()> {
@@ -277,11 +276,10 @@ impl super::Dispatcher {
     let span = tree.span_for(*body);
 
     let redirs = RedirSet::from(&tree[subsh.redirs]);
-    let _guard = match redirs.try_apply(false) {
-      RedirResult::Applied(guard) => Some(guard),
-      RedirResult::NoRedirs => None,
-      RedirResult::Skipped => return Ok(()),
-      RedirResult::Error(e) => return Err(e),
+    let _guard = match Shed::sinks(|s| s.try_apply_set(&redirs, false)) {
+      Ok(Some(g)) => g,
+      Ok(None) => return Ok(()),
+      Err(e) => return Err(e),
     };
 
     let body_raw = span.to_str_lossy();

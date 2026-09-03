@@ -20,15 +20,13 @@ use crate::{
   HashSet, autocmd,
   builtin::{self, Builtin},
   eval::parse::NdFlags,
-  lifecycle,
-  procio::{RedirResult, RedirSet},
-  sherr, signal, socket,
+  lifecycle, sherr, signal, socket,
   state::{
     Shed, cmd, jobs::ChildProc, meta::MetaTab, params, shopt, terminal::Terminal, vars::VarStr,
   },
   util::{
     error::{ShErr, ShResult},
-    guards, posix,
+    guards, posix, with_status,
   },
   varstr,
 };
@@ -71,18 +69,20 @@ impl super::Dispatcher {
           return Ok(());
         }
       }
-      match RedirSet::from(&tree[cmd.redirs]).try_apply(false) {
-        RedirResult::Applied(_) | RedirResult::NoRedirs => {
-          // command with only redirections: status 0 unless assignments
-          // already produced one.
+      match Shed::sinks(|s| s.try_apply_set(&tree[cmd.redirs].into(), false)) {
+        Ok(Some(_)) => {
+          // command has only redirections: status 0 if it succeeded
+          // then throw the guard away and return here
+
           if assignments.is_empty() {
-            Shed::set_status(0);
+            return with_status(0);
           }
+          // keep status
+          return Ok(());
         }
-        RedirResult::Skipped => {}
-        RedirResult::Error(e) => return Err(e),
+        Ok(None) => return Ok(()),
+        Err(e) => return Err(e), // fatal error, propagate
       }
-      return Ok(());
     }
     // argv is not empty. let's set this stuff here.
     let cmd_tk = &tree[argv.get(0)];
@@ -94,11 +94,10 @@ impl super::Dispatcher {
     // POSIX 2.8.1: a redirection failure on an ordinary command is non-fatal
     let fatal = !Shed::term(Terminal::interactive)
       && builtin::lookup_builtin(cmd_name.as_bytes()).is_some_and(Builtin::is_special);
-    let _guard = match RedirSet::from(&tree[cmd.redirs]).try_apply(fatal) {
-      RedirResult::Applied(guard) => Some(guard),
-      RedirResult::NoRedirs => None,
-      RedirResult::Skipped => return Ok(()),
-      RedirResult::Error(e) => return Err(e),
+    let _guard = match Shed::sinks(|s| s.try_apply_set(&tree[cmd.redirs].into(), fatal)) {
+      Ok(Some(g)) => g,
+      Ok(None) => return Ok(()),
+      Err(e) => return Err(e),
     };
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
 
@@ -160,6 +159,14 @@ impl super::Dispatcher {
 
       if interactive || !no_fork {
         signal::reset_signals(fg_job);
+      }
+
+      // Materialize the virtual fd table onto real fds before exec, so the
+      // command inherits the redirs/pipe ends the parent wired up instead of
+      // stale fds. Internal fds are CLOEXEC and drop out at exec.
+      if let Err(e) = Shed::sinks(|s| s.commit_redirects()) {
+        ShErr::from(e).print_error();
+        unsafe { nix::libc::_exit(1) };
       }
 
       let cmd = &exec_args.cmd.0;

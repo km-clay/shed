@@ -409,39 +409,41 @@ macro_rules! two_way_display {
 #[macro_export]
 macro_rules! outln {
   ($($arg:tt)*) => {{
-    $crate::_write_inner!(out, writeln, $crate::procio::stdout_fileno(), $($arg)*)
+    $crate::_write_inner!(out, writeln, $($arg)*)
   }};
 }
 #[macro_export]
 macro_rules! out {
   ($($arg:tt)*) => {{
-    $crate::_write_inner!(out, write, $crate::procio::stdout_fileno(), $($arg)*)
+    $crate::_write_inner!(out, write, $($arg)*)
   }};
 }
 #[macro_export]
 macro_rules! errln {
   ($($arg:tt)*) => {{
-    $crate::_write_inner!(err, writeln, $crate::procio::stderr_fileno(), $($arg)*)
+    $crate::_write_inner!(err, writeln, $($arg)*)
   }};
 }
 #[macro_export]
 macro_rules! err {
   ($($arg:tt)*) => {{
-    $crate::_write_inner!(err, write, $crate::procio::stderr_fileno(), $($arg)*)
+    $crate::_write_inner!(err, write, $($arg)*)
   }};
 }
 
 #[macro_export]
 macro_rules! _write_inner {
-  (out, $macro:tt, $fd:expr, $($arg:tt)*) => {{
-    $crate::state::Shed::sinks(|s| {
-      let s: &mut dyn ::std::io::Write = s;
+  (out, $macro:tt, $($arg:tt)*) => {{
+    if let Ok(out) = $crate::procio::stdout_sink() {
+      let s: &mut dyn ::std::io::Write = &mut $crate::procio::SinkIo(out);
       $macro!(s, $($arg)*).ok();
-    });
+    }
   }};
-  (err, $macro:tt, $fd:expr, $($arg:tt)*) => {{
-    use ::std::io::Write;
-    $macro!($crate::util::FdWriter($fd), $($arg)*).ok();
+  (err, $macro:tt, $($arg:tt)*) => {{
+    if let Ok(err) = $crate::procio::stderr_sink() {
+      let s: &mut dyn ::std::io::Write = &mut $crate::procio::SinkIo(err);
+      $macro!(s, $($arg)*).ok();
+    }
   }};
 }
 

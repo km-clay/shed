@@ -1,4 +1,7 @@
-use std::os::fd::{AsFd, AsRawFd};
+use std::{
+  os::fd::{AsFd, AsRawFd},
+  rc::Rc,
+};
 
 use crate::{
   errln,
@@ -8,17 +11,17 @@ use crate::{
   },
   expand::arithmetic,
   lifecycle,
-  procio::{self, RedirSet, RedirSpec, RedirType, SinkScope, StdinPipe},
+  procio::{self, OsSink, RedirType, Sinks},
   readline::{self, NestedSub},
-  sherr,
+  sherr, shopt,
   state::{Shed, meta::MetaTab, terminal::Terminal, vars::VarStr},
   util::{error::ShResult, guards},
 };
 
 use bstr::ByteSlice;
-use nix::errno::Errno;
 use nix::sys::wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid};
 use nix::unistd::{ForkResult, fork};
+use nix::{errno::Errno, libc::STDOUT_FILENO};
 
 pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
   let (rpipe, wpipe) = procio::pipes_high_no_cloexec()?;
@@ -47,9 +50,6 @@ pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
     _ => unreachable!(),
   };
 
-  let sink_stdin = (target_fd != 0).then(procio::take_stdin).flatten();
-  let stdin_pipe = sink_stdin.is_some().then(StdinPipe::new).transpose()?;
-
   match unsafe { fork()? } {
     ForkResult::Child => {
       lifecycle::setup_child();
@@ -61,14 +61,10 @@ pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       Shed::term_mut(Terminal::detach_tty);
       drop(register_fd);
 
-      let mut specs = vec![RedirSpec::dup(
-        proc_fd.as_raw_fd(),
-        target_fd,
-        RedirType::Output,
-      )];
-      let _stdin_r_keep = stdin_pipe.map(|p| p.into_child(&mut specs));
-      let redir: RedirSet = specs.into();
-      let _guard = redir.apply().or_fatal()?;
+      Shed::sinks(|s| {
+        s.redirect(target_fd, Some(Rc::new(OsSink::new(proc_fd))));
+        s.commit_redirects()
+      })?;
 
       if let Err(e) = execute::exec_nonint(raw.into(), Some("process_sub".into())) {
         e.print_error();
@@ -80,11 +76,6 @@ pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
     }
     ForkResult::Parent { .. } => {
       Shed::meta_mut(|m| m.save_procsub_fd(register_fd));
-      // Feed the sink in the background; the procsub child is not waited on, so
-      // the feeder thread is detached and ends on its own at EOF/EPIPE.
-      if let (Some(pipe), Some(bytes)) = (stdin_pipe, sink_stdin) {
-        procio::feed_fd_async(pipe.into_writer(), bytes);
-      }
       // Do not wait; process may run in background
       Ok(path)
     }
@@ -117,25 +108,33 @@ pub(crate) fn is_internal(raw: &str) -> bool {
 }
 
 pub(crate) fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
-  let sink_scope = SinkScope::new();
-  let _ceiling = guards::isolation_guard(None);
+  // create read and write out here
+  let (read, write) = Sinks::sink_pipes();
 
-  if let Err(e) = execute::exec_nonint(raw.into(), Some("command_sub".into())) {
-    e.print_error();
+  {
+    // apply write in here
+    Shed::sinks(|s| s.apply_sink(write, STDOUT_FILENO))?;
+    let _ceiling = guards::isolation_guard(None);
+
+    if let Err(e) = execute::exec_nonint(raw.into(), Some("command_sub".into())) {
+      e.print_error();
+    }
+    // write drops here, which is EOF
   }
 
-  let scope = sink_scope.take();
+  let truncated = read.was_truncated();
+  let bytes = procio::drain_sink(&*read)?;
 
-  if scope.was_truncated() {
+  if truncated {
     Shed::set_status(procio::SINK_TRUNCATED_STATUS);
-    let size = scope.limit();
-
-    errln!("shed: command sub truncated (exceeded {size})");
+    errln!(
+      "shed: command sub truncated (exceeded {})",
+      *shopt!(core.max_read_limit)
+    );
   }
 
   Shed::meta_mut(|m| m.set_last_cmdsub_status(Shed::get_status()));
-
-  let output = VarStr::from(scope.into_buf().trim_end_with(|c| c == '\n'));
+  let output = VarStr::from(bytes.trim_end_with(|c| c == '\n'));
 
   Ok(output)
 }
@@ -154,20 +153,14 @@ pub(crate) fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
 
   let (rpipe, wpipe) = procio::pipes_high()?;
 
-  // If this fork happens while an in-process pipeline stdin sink is live,
-  // materialize it onto the child's fd 0 so a forked child (e.g. an external
-  // command inside the sub) can still read the piped input.
-  let sink_stdin = procio::take_stdin();
-  let stdin_pipe = sink_stdin.is_some().then(StdinPipe::new).transpose()?;
-
   match unsafe { fork()? } {
     ForkResult::Child => {
       lifecycle::setup_child();
 
-      let mut specs = vec![RedirSpec::dup(wpipe.as_raw_fd(), 1, RedirType::Output)];
-      let _stdin_r_keep = stdin_pipe.map(|p| p.into_child(&mut specs));
-      let redir: RedirSet = specs.into();
-      let _redir_guard = redir.apply().or_fatal()?;
+      Shed::sinks(|s| {
+        s.redirect(STDOUT_FILENO, Some(Rc::new(OsSink::new(wpipe))));
+        s.commit_redirects()
+      })?;
 
       execute::catch_exit(
         || execute::exec_input(raw.into(), Some("command_sub".into())),
@@ -180,20 +173,12 @@ pub(crate) fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
     ForkResult::Parent { child } => {
       drop(wpipe);
 
-      let feeder = match (stdin_pipe, sink_stdin) {
-        (Some(pipe), Some(bytes)) => Some(procio::feed_fd_async(pipe.into_writer(), bytes)),
-        _ => None,
-      };
-
       // Read output first (before waiting) to avoid deadlock if
       // child fills pipe buffer
-      let sink = procio::read_to_sink(rpipe.as_fd())?;
-      if let Some(handle) = feeder {
-        let _ = handle.join();
-      }
+      let sink = procio::read_capped(rpipe.as_fd())?;
       let truncated = sink.was_truncated();
       let size = sink.limit();
-      let output = VarStr::from(sink.into_buf().trim_end_with(|c| c == '\n'));
+      let output = VarStr::from(sink.trim_end_with(|c| c == '\n'));
 
       // Wait for child with EINTR retry
       let status = loop {

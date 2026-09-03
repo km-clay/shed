@@ -2,19 +2,19 @@ use std::{
   fs::OpenOptions,
   io::Write,
   path::PathBuf,
+  rc::Rc,
   sync::atomic::{AtomicUsize, Ordering},
 };
 
 use crate::{
   HashSet, autocmd, defer,
-  eval::{execute, lex::TkFlags},
+  eval::execute,
   motion,
-  procio::{self, RedirSet, RedirSpec},
+  procio::{self, BufSink, Sink},
   sherr, shopt,
-  state::vars::VarStr,
   state::{
     Shed, paths,
-    vars::{VarFlags, VarKind},
+    vars::{VarFlags, VarKind, VarStr},
   },
   status_msg, system_msg, try_var,
   util::{self, error::ShResult, guards, pos::Pos, strops},
@@ -589,15 +589,9 @@ impl super::LineBuf {
         return Ok(());
       }
       WriteDest::Cmd(cmd) => {
-        let buf: VarStr = self.to_string().into();
-        let spec = RedirSpec::Buffer {
-          fd: STDIN_FILENO,
-          buf,
-          flags: TkFlags::empty(),
-        };
-
-        let redirs = RedirSet::from(spec);
-        let _guard = redirs.apply().or_fatal()?;
+        let buf = self.to_string();
+        let sink: Rc<dyn Sink> = Rc::new(BufSink::from_bytes(buf.as_bytes()));
+        let _guard = Shed::sinks(|s| s.apply_sink(sink, STDIN_FILENO))?;
 
         autocmd!(PreCmd);
         {

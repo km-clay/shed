@@ -2,8 +2,8 @@ use crate::{
   errln,
   expand::escape,
   opt, out, outln,
+  procio::{self, SinkIo},
   readline::FuzzyBuilder,
-  state::Shed,
   util::{self, error::ShResult},
 };
 
@@ -67,8 +67,8 @@ impl super::Builtin for Scry {
 
     match selector.pick()? {
       Some(item) => {
-        if quote_out {
-          Shed::sinks(|s| escape::shell_quote_fmt(&item, s)).ok();
+        if quote_out && let Some(out) = procio::stdout_sink().ok() {
+          escape::shell_quote_fmt(&item, &mut SinkIo(out)).ok();
         } else if no_newline {
           out!("{item}");
         } else {

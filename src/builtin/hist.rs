@@ -12,6 +12,7 @@ use crate::{
   errln,
   expand::escape,
   opt,
+  procio::{self, SinkIo},
   readline::{self, HistEntry, History},
   sherr,
   state::{Shed, db, paths, vars::VarStr},
@@ -515,7 +516,8 @@ impl super::Builtin for Hist {
         .map(|(i, e)| ((i as u64).cast_signed(), e))
         .collect();
 
-      Shed::sinks(|s| query.format_entries(&entries, s)).ok();
+      let mut out = SinkIo(procio::stdout_sink()?);
+      query.format_entries(&entries, &mut out).ok();
       let mut count = 0;
 
       hist.transaction(|conn| {
@@ -533,7 +535,8 @@ impl super::Builtin for Hist {
     }
 
     let entries = query.execute(&hist).promote_err(span.clone())?;
-    Shed::sinks(|s| query.format_entries(&entries, s)).ok();
+    let mut out = SinkIo(procio::stdout_sink()?);
+    query.format_entries(&entries, &mut out).ok();
 
     if query.delete {
       let num_deleted = entries.len();

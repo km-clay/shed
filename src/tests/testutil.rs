@@ -14,7 +14,7 @@ use nix::{
   poll::{PollFd, PollFlags, PollTimeout, poll},
   pty::openpty,
   sys::termios::{OutputFlags, SetArg, tcgetattr, tcsetattr},
-  unistd::pipe,
+  unistd,
 };
 
 use crate::{
@@ -226,7 +226,7 @@ impl TestGuard {
       }
     });
 
-    let (stdin_read, stdin_write) = pipe().unwrap();
+    let (stdin_read, stdin_write) = unistd::pipe().unwrap();
 
     let redirs: RedirSet = vec![
       RedirSpec::dup(stdin_read.as_raw_fd(), 0, RedirType::Input),
@@ -234,8 +234,7 @@ impl TestGuard {
       RedirSpec::dup(pty_slave.as_raw_fd(), 2, RedirType::Output),
     ]
     .into();
-
-    let redir_guard = redirs.apply().or_fatal().ok().flatten().unwrap();
+    let redir_guard = Shed::sinks(|s| s.apply_set(&redirs)).unwrap();
 
     let old_cwd = env::current_dir().unwrap();
     let saved_env = env::vars().collect();

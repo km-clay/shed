@@ -224,7 +224,9 @@ fn sweep_inner(atoms: &[Atom], text: &[u8], mode: SweepMode, ci: bool) -> Option
    * and if we aren't, we return the index immediately.
    *
    * Here's an example run:
-   *
+   *                           *     *
+   *                           |     |
+   *                          v-v   v-v
    * glob: af*ota*b, input: afbarotabizb
    * atoms: One(a), One(f), Star, One(o), One(t), One(a), Star, One(b)
    *

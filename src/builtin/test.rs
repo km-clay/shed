@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fs::metadata, os::fd::BorrowedFd, path::PathBuf, str::FromStr};
+use std::{collections::VecDeque, fs, path::PathBuf, str::FromStr};
 
 use crate::{
   eval::{
@@ -6,7 +6,7 @@ use crate::{
     lex::{Span, Tk, TkVecUtils},
   },
   expand::glob,
-  procio, sherr,
+  sherr,
   state::{
     Shed,
     vars::{VarFlags, VarKind, VarStr},
@@ -19,7 +19,7 @@ use crate::{
 
 use nix::{
   sys::stat::{self, SFlag},
-  unistd::{AccessFlags, isatty},
+  unistd::AccessFlags,
 };
 
 #[derive(Debug, Clone)]
@@ -126,7 +126,7 @@ fn eval_unary(op: &UnaryOp, operand: &str) -> bool {
     UnaryOp::Readable => nix::unistd::access(operand, AccessFlags::R_OK).is_ok(),
     UnaryOp::Writable => nix::unistd::access(operand, AccessFlags::W_OK).is_ok(),
     UnaryOp::Executable => nix::unistd::access(operand, AccessFlags::X_OK).is_ok(),
-    UnaryOp::NonEmpty => metadata(operand).is_ok_and(|m| m.len() > 0),
+    UnaryOp::NonEmpty => fs::metadata(operand).is_ok_and(|m| m.len() > 0),
     UnaryOp::NamedPipe => stat::stat(operand)
       .is_ok_and(|s| SFlag::from_bits_truncate(s.st_mode).contains(SFlag::S_IFIFO)),
     UnaryOp::Socket => stat::stat(operand)
@@ -148,15 +148,7 @@ fn eval_unary(op: &UnaryOp, operand: &str) -> bool {
     UnaryOp::SetUID => stat::stat(operand).is_ok_and(|s| s.st_mode & nix::libc::S_ISUID != 0),
     UnaryOp::SetGID => stat::stat(operand).is_ok_and(|s| s.st_mode & nix::libc::S_ISGID != 0),
     UnaryOp::Terminal => match operand.parse::<i32>() {
-      Ok(fd) => match fd {
-        1 => {
-          !procio::has_out_sink() && isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false)
-        }
-        0 => {
-          !procio::has_in_sink() && isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false)
-        }
-        _ => isatty(unsafe { BorrowedFd::borrow_raw(fd) }).unwrap_or(false),
-      },
+      Ok(fd) => Shed::sinks(|s| s.get(fd).is_some_and(|s| s.isatty())),
       Err(_) => false,
     },
     UnaryOp::NonNull => !operand.is_empty(),

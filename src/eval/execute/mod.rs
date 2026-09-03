@@ -487,6 +487,15 @@ impl Dispatcher {
         }
         signal::reset_signals(self.fg_job);
 
+        // Materialize the virtual fd table onto this child's real fds so an
+        // exec'd command sees the redirs the parent set up (otherwise it runs
+        // with stale inherited fds — e.g. reads the terminal instead of a pipe).
+        // Internal high fds are CLOEXEC, so exec closes the leftovers.
+        if let Err(e) = Shed::sinks(|s| s.commit_redirects()) {
+          ShErr::from(e).print_error();
+          lifecycle::exit_shed(true, 1);
+        }
+
         if let Some(fd) = self.fork_close_fd {
           let _ = nix::unistd::close(fd);
         }
