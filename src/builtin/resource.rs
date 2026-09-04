@@ -298,6 +298,9 @@ fn format_symbolic(bits: stat::mode_t) -> String {
 
 pub(super) struct UMask;
 impl super::Builtin for UMask {
+  fn fork_behavior(&self) -> super::ForkBehavior {
+    super::ForkBehavior::Subshell
+  }
   fn opts(&self) -> Vec<OptSpec> {
     vec![OptSpec::new_short("symbolic", b'S')]
   }

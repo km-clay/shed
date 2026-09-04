@@ -17,8 +17,8 @@ impl super::Builtin for Trap {
     true
   }
 
-  fn always_forks(&self) -> bool {
-    true
+  fn fork_behavior(&self) -> super::ForkBehavior {
+    super::ForkBehavior::Always
   }
 
   fn strict_opts(&self) -> bool {

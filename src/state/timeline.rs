@@ -3,34 +3,41 @@ use std::sync::{Arc, atomic::Ordering};
 use nix::sys::signal::Signal;
 
 use crate::{
-  eval::{lex::Span, parse::ast::Ast},
+  eval::parse::ast::Ast,
   procio::Sinks,
-  state::{jobs::SIG_EXIT_OFFSET, scopes, shopt::ShOpts, vars::VarTab},
-  util::error::{LabelBuilder, ShErr},
+  state::{jobs::SIG_EXIT_OFFSET, logic::LogTab, scopes, shopt::ShOpts, vars::VarTab},
+  util::error::LabelBuilder,
 };
 
-struct ForkSpec {
+pub(crate) struct ForkSpec {
   frame: VarTab,
   sinks: Sinks,
   ast: Arc<Ast>,
   shopts: ShOpts,
   status: i32,
   context: Vec<LabelBuilder>,
+  logic: LogTab,
 }
 
+#[derive(Debug)]
 pub(crate) struct StageResult {
   status: i32,
-  span: Span,
-  err: Option<ShErr>,
 }
 
 impl Default for StageResult {
   fn default() -> Self {
     Self {
       status: SIG_EXIT_OFFSET + Signal::SIGABRT as i32,
-      span: Span::default(),
-      err: None,
     }
+  }
+}
+
+impl StageResult {
+  pub(crate) fn new(status: i32) -> Self {
+    Self { status }
+  }
+  pub(crate) fn status(&self) -> i32 {
+    self.status
   }
 }
 
@@ -43,6 +50,7 @@ impl super::Shed {
       shopts: shed.shopts.borrow().clone(),
       status: shed.status_code.load(Ordering::Relaxed),
       context: shed.call_context.borrow().clone(),
+      logic: shed.logic.borrow().clone(),
     })
   }
   pub(crate) fn install(spec: ForkSpec) -> Arc<Ast> {
@@ -53,12 +61,14 @@ impl super::Shed {
       shopts,
       status,
       context,
+      logic,
     } = spec;
     super::SHED.with(|shed| {
       *shed.var_scopes.borrow_mut() = scopes::ScopeStack::from_frame(frame);
       *shed.sinks.borrow_mut() = sinks;
       *shed.shopts.borrow_mut() = shopts;
       *shed.call_context.borrow_mut() = context;
+      *shed.logic.borrow_mut() = logic;
       shed.status_code.store(status, Ordering::Relaxed);
     });
 

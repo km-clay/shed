@@ -5,7 +5,7 @@ use bstr::ByteSlice;
 use crate::{
   expand::{escape, subshell, var},
   match_loop, shopt, shopt_mut,
-  state::{Shed, paths, vars::VarStr},
+  state::{Shed, jobs::Outcome, paths, vars::VarStr},
   status_msg,
   util::{
     self,
@@ -16,7 +16,6 @@ use crate::{
   var,
 };
 
-use nix::sys::wait::WaitStatus as WtStat;
 use smol_str::format_smolstr;
 
 #[derive(Debug)]
@@ -292,7 +291,7 @@ fn job_count(out: &mut String) {
         j.as_ref().is_some_and(|j| {
           j.get_stats()
             .iter()
-            .all(|st| matches!(st, WtStat::StillAlive))
+            .all(|st| matches!(st, Outcome::Running))
         })
       })
       .count()

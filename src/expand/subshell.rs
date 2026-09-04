@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::{
+  builtin::ForkBehavior,
   errln,
   eval::{
     execute,
@@ -82,29 +83,30 @@ pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
   }
 }
 
-pub(crate) fn is_internal(raw: &str) -> bool {
+pub(crate) fn is_internal(raw: &str) -> Option<ForkBehavior> {
   let mut parser = ParsedSrc::new(raw.into()).with_name("is_internal check".into());
 
   if parser.parse_src().is_err() {
-    return false;
+    return None;
   }
 
   let ast = parser.into_ast();
   let roots = ast.roots();
 
-  if !node::nodes_have_only_builtins(&ast, roots.iter().copied()) {
-    return false;
+  let mut behavior = ForkBehavior::Never;
+  for root in roots.iter().copied() {
+    behavior = behavior.max(node::node_fork_behavior(&ast, root)?);
   }
 
   let has_forking_sub = readline::nested_subs(raw).into_iter().any(|sub| match sub {
     NestedSub::Proc => true,
-    NestedSub::Cmd(body) => !is_internal(&body.to_str_lossy()),
+    NestedSub::Cmd(body) => is_internal(&body.to_str_lossy()).is_none(),
   });
   if has_forking_sub {
-    return false;
+    return None;
   }
 
-  true
+  Some(behavior)
 }
 
 pub(crate) fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
@@ -147,7 +149,7 @@ pub(crate) fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
   // command subs add an xtrace layer
   let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
 
-  if is_internal(raw) {
+  if is_internal(raw).is_some() {
     return internal_cmd_sub(raw);
   }
 
@@ -231,24 +233,24 @@ mod tests {
   #[test]
   fn is_internal_plain_builtin_body() {
     let _g = TestGuard::new();
-    assert!(is_internal("echo hi"));
-    assert!(is_internal("printf '%s' x"));
+    assert!(is_internal("echo hi").is_some());
+    assert!(is_internal("printf '%s' x").is_some());
   }
 
   #[test]
   fn is_internal_all_builtin_nesting_stays_inprocess() {
     let _g = TestGuard::new();
-    assert!(is_internal(r#"echo "$(echo 1)""#));
-    assert!(is_internal(r#"echo "$(( 2 + 3 ))""#));
-    assert!(is_internal(r#"echo "$( { echo y; } )""#));
+    assert!(is_internal(r#"echo "$(echo 1)""#).is_some());
+    assert!(is_internal(r#"echo "$(( 2 + 3 ))""#).is_some());
+    assert!(is_internal(r#"echo "$( { echo y; } )""#).is_some());
   }
 
   #[test]
   fn is_internal_nested_external_forks() {
     let _g = TestGuard::new();
-    assert!(!is_internal(r#"echo "$(echo 1 | cat)""#));
-    assert!(!is_internal(r#"echo "$(echo "$(echo 1 | cat)")""#));
-    assert!(!is_internal(r#"echo "`echo 7 | cat`""#));
+    assert!(is_internal(r#"echo "$(echo 1 | cat)""#).is_none());
+    assert!(is_internal(r#"echo "$(echo "$(echo 1 | cat)")""#).is_none());
+    assert!(is_internal(r#"echo "`echo 7 | cat`""#).is_none());
   }
 
   #[test]
@@ -256,22 +258,22 @@ mod tests {
     // Subshell and redirect both fork despite containing only builtins — the
     // holes an "external command present" heuristic would miss.
     let _g = TestGuard::new();
-    assert!(!is_internal(r#"echo "$( (echo x) )""#));
-    assert!(!is_internal(r#"echo "$(read v < /dev/null; echo $v)""#));
+    assert!(is_internal(r#"echo "$( (echo x) )""#).is_none());
+    assert!(is_internal(r#"echo "$(read v < /dev/null; echo $v)""#).is_none());
   }
 
   #[test]
   fn is_internal_sub_in_param_exp_and_arith() {
     let _g = TestGuard::new();
-    assert!(!is_internal(r#"echo "${foo:+$(echo 1 | cat)}""#));
-    assert!(!is_internal(r#"echo "$(( $(echo 3 | cat) + 1 ))""#));
+    assert!(is_internal(r#"echo "${foo:+$(echo 1 | cat)}""#).is_none());
+    assert!(is_internal(r#"echo "$(( $(echo 3 | cat) + 1 ))""#).is_none());
   }
 
   #[test]
   fn is_internal_single_quoted_sub_is_literal() {
     // A `$(…)` inside single quotes is literal text, not a substitution.
     let _g = TestGuard::new();
-    assert!(is_internal(r"echo '$(echo nope | cat)'"));
+    assert!(is_internal(r"echo '$(echo nope | cat)'").is_some());
   }
 
   #[test]
@@ -280,17 +282,17 @@ mod tests {
     // caller — the AST walk alone can't see into the body's word tokens. (#145)
     let _g = TestGuard::new();
     expand_cmd_sub(r#"f() { echo "$(echo 1 | cat)"; }"#).unwrap();
-    assert!(!is_internal("f"));
+    assert!(is_internal("f").is_none());
 
     expand_cmd_sub(r#"g() { echo "$( (echo x) )"; }"#).unwrap();
-    assert!(!is_internal("g"));
+    assert!(is_internal("g").is_none());
   }
 
   #[test]
   fn is_internal_all_builtin_function_stays_inprocess() {
     let _g = TestGuard::new();
     expand_cmd_sub(r#"h() { echo "$(echo 1)"; }"#).unwrap();
-    assert!(is_internal("h"));
+    assert!(is_internal("h").is_some());
   }
 
   #[test]

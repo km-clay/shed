@@ -1846,7 +1846,7 @@ impl ShedLine {
   }
 
   pub(crate) fn print_line(&mut self, final_draw: bool) -> ShResult<()> {
-    if Shed::term_mut(|t| t.take_prompt_cleared()) {
+    if Shed::term_mut(Terminal::take_prompt_cleared) {
       // A `:!` command erased our prompt block; don't clear_rows a stale layout.
       self.old_layout = None;
     }

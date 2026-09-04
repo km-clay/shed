@@ -33,7 +33,11 @@ use super::{
   util::error::ShResult,
 };
 
-use crate::{HashMap, state::vars::VarStr, varstr};
+use crate::{
+  HashMap,
+  state::{jobs::Outcome, vars::VarStr},
+  varstr,
+};
 
 /// A bitset representing all signals that have been received but not yet handled by `check_signals`.
 /// "indexed" by bit shifting the signal number (e.g. `1 << SIGINT` for SIGINT).
@@ -388,7 +392,7 @@ pub(crate) fn wait_child() -> ShResult<()> {
 pub(crate) fn child_signaled(pid: Pid, sig: Signal) {
   Shed::jobs_mut(|j| {
     if let Some(job) = j.query_mut(JobID::Pid(pid))
-      && let Some(child) = job.children_mut().iter_mut().find(|chld| pid == chld.pid())
+      && let Some(child) = job.processes_mut().find(|chld| pid == chld.pid())
     {
       child.set_stat(WtStat::Signaled(pid, sig, false));
     }
@@ -403,11 +407,11 @@ pub(crate) fn child_stopped(pid: Pid, sig: Signal) -> ShResult<()> {
   let child_pgid = getpgid(Some(pid)).unwrap_or(pid);
   Shed::jobs_mut(|j| {
     if let Some(job) = j.query_mut(JobID::Pgid(child_pgid)) {
-      if let Some(child) = job.children_mut().iter_mut().find(|chld| pid == chld.pid()) {
+      if let Some(child) = job.processes_mut().find(|chld| pid == chld.pid()) {
         child.set_stat(WtStat::Stopped(pid, sig));
       }
     } else if j.get_fg_mut().is_some_and(|fg| fg.pgid() == child_pgid) {
-      j.fg_to_bg(WtStat::Stopped(pid, sig)).unwrap();
+      j.fg_to_bg(sig).unwrap();
     }
   });
   take_term()?;
@@ -446,7 +450,7 @@ pub(crate) fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
       job.update_by_id(JobID::Pid(pid), status);
       let is_finished = !job.running();
 
-      if let Some(child) = job.children_mut().iter_mut().find(|chld| pid == chld.pid()) {
+      if let Some(child) = job.processes_mut().find(|chld| pid == chld.pid()) {
         child.set_stat(status);
       }
 
@@ -486,7 +490,7 @@ pub(crate) fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   };
 
   for status in &stats {
-    if let WtStat::Signaled(_, Signal::SIGINT, _) = status {
+    if let Outcome::Signaled(Signal::SIGINT) = status {
       // Inherit SIGINT
       handle_signal(Signal::SIGINT as i32);
     }
@@ -509,8 +513,8 @@ pub(crate) fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   }
 
   let status_strs = stats.iter().map(|s| match s {
-    WtStat::Exited(_, code) => varstr!("{code}"),
-    WtStat::Signaled(_, sig, _) => varstr!("{}", 128 + *sig as i32),
+    Outcome::Exited(code) => varstr!("{code}"),
+    Outcome::Signaled(sig) => varstr!("{}", 128 + *sig as i32),
     _ => "1".into(),
   });
 

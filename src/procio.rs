@@ -18,7 +18,6 @@
 //! * Redirection must be materialized before it can be used, via [`Sinks::commit_redirects()`], which is another thing to remember when forking processes.
 
 use std::{
-  cell::{OnceCell, RefCell},
   collections::VecDeque,
   fmt::Debug,
   fs::{File, OpenOptions},
@@ -26,7 +25,6 @@ use std::{
   ops::Deref,
   os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
   path::Path,
-  rc::Rc,
   sync::{Arc, Mutex, OnceLock},
 };
 

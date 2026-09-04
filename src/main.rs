@@ -2,6 +2,7 @@
 #![warn(unreachable_pub)]
 #![expect(
   clippy::unnecessary_wraps,
+  clippy::too_many_lines,
   clippy::cast_sign_loss,
   clippy::cast_possible_wrap,
   clippy::cast_possible_truncation,
@@ -41,7 +42,6 @@ SOFTWARE.
 use std::process::ExitCode;
 use std::sync::atomic::Ordering;
 
-use nix::sys::wait::WaitStatus as WtStat;
 use rustc_hash::FxHashMap as HashMap;
 use rustc_hash::FxHashSet as HashSet;
 

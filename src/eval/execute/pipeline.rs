@@ -17,6 +17,7 @@ use nix::{
 };
 
 use crate::{
+  builtin::ForkBehavior,
   errln,
   eval::{
     lex::{Span, Tk},
@@ -119,6 +120,17 @@ impl super::Dispatcher {
     for (i, cmd) in cmds.iter().enumerate() {
       let mut guard = Sinks::redir_scope();
 
+      let cmd_name = tree.command_for(*cmd).map(Tk::as_bytes).unwrap_or_default();
+
+      // now we decide if we are threading this pipeline stage or not
+      // builtins get a thread instead of a fork
+      let cmd_node = &tree[*cmd];
+      let thread_this_stage = num_cmds > 1
+        && !interactive
+        && !is_bg
+        && !should_fork_segment(cmd_node)
+        && node::node_fork_behavior(tree, *cmd) == Some(ForkBehavior::Never);
+
       // builtins must fork in the middle of multi-command pipelines
       let fork_builtins = num_cmds > 1 && i != tail_start;
       let _fork = Shed::meta_mut(|m| m.enter_fork(fork_builtins));
@@ -177,13 +189,17 @@ impl super::Dispatcher {
 
       spans.push(tree.span_for(*cmd));
 
-      result = if should_fork_segment(cmd_node) {
-        let name = tree
-          .command_for(*cmd)
-          .map(Tk::to_str_lossy)
-          .unwrap_or_default();
-
-        self.run_fork(name.as_bytes(), |s| {
+      result = if thread_this_stage {
+        let stage_sinks = Shed::sinks(|s| s.clone());
+        let handle = self.spawn_stage(tree, *cmd, stage_sinks);
+        self
+          .job_stack
+          .curr_job_mut()
+          .unwrap()
+          .push_member(jobs::JobMember::Thread(handle));
+        Ok(())
+      } else if should_fork_segment(cmd_node) {
+        self.run_fork(cmd_name, |s| {
           super::catch_exit(|| s.dispatch_node(tree, *cmd), super::exit_with);
         })
       } else {

@@ -10,8 +10,8 @@ impl super::Builtin for Eval {
     true
   }
 
-  fn always_forks(&self) -> bool {
-    true
+  fn fork_behavior(&self) -> super::ForkBehavior {
+    super::ForkBehavior::Always
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {

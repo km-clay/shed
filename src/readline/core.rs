@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 
+use super::super::state::terminal::Terminal;
 use super::editcmd::{Cmd, CmdFlags, EditCmd, Motion, Verb, invert_char_motion};
 use super::editmode::{
   CmdReplay, EditMode, Emacs, ModeReport, RemoteMode, ViEx, ViInsert, ViNormal, ViReplace,
@@ -147,11 +148,11 @@ impl EditorCore {
     // A bare `:!cmd` writes straight to the terminal: erase the prompt block
     // first so its output lands where the prompt was, then re-anchor below it.
     if terminal_shell {
-      Shed::term_mut(|t| t.clear_prompt_block());
+      Shed::term_mut(Terminal::clear_prompt_block);
     }
     let res = self.editor.exec_cmd(cmd);
     if terminal_shell {
-      Shed::term_mut(|t| t.reanchor_after_output());
+      Shed::term_mut(Terminal::reanchor_after_output);
     }
     self.needs_redraw = true;
     res

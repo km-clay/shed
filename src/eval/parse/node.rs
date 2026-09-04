@@ -19,6 +19,7 @@ use super::{
 };
 
 use crate::{
+  builtin::{ForkBehavior, fork_behavior_for},
   expand::subshell,
   state::{
     Shed,
@@ -290,16 +291,16 @@ pub(crate) enum NdRule {
   },
 }
 
-pub(crate) fn node_has_only_builtins(tree: &Ast, node_id: NodeId) -> bool {
-  let mut res = None;
+pub(crate) fn node_fork_behavior(tree: &Ast, node_id: NodeId) -> Option<ForkBehavior> {
+  let mut acc: Option<ForkBehavior> = Some(ForkBehavior::Never);
   tree.walk_tree(node_id, &mut |id, tree| {
     let node = &tree[id];
-    if let Some(false) = res {
+    if acc.is_none() {
       return;
     }
 
     if node.redirs.is_some_and(|r| !r.is_empty()) {
-      res = Some(false);
+      acc = None;
       return;
     }
 
@@ -307,7 +308,7 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node_id: NodeId) -> bool {
       .flags
       .contains(NdFlags::BACKGROUND | NdFlags::FORK_BUILTINS)
     {
-      res = Some(false);
+      acc = None;
       return;
     }
 
@@ -315,11 +316,18 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node_id: NodeId) -> bool {
       NdRule::Command { argv, .. } => {
         if argv.is_empty() {
           // assignment-only command (e.g. `a=1`); runs in-process, never forks
-          res = Some(true);
           return;
         }
         if !classify::is_func_node(id, tree) {
-          res = Some(classify::is_builtin(id, tree));
+          if classify::is_builtin(id, tree) {
+            let behavior = node
+              .get_command()
+              .and_then(|name| fork_behavior_for(tree[name].as_bytes()))
+              .unwrap_or(ForkBehavior::Never);
+            acc = acc.map(|cur| cur.max(behavior));
+          } else {
+            acc = None;
+          }
           return;
         }
         let name = node.get_command().unwrap();
@@ -339,27 +347,33 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node_id: NodeId) -> bool {
         if let Some(src) = autoload_src
           && src.source().is_err()
         {
-          res = Some(false);
+          acc = None;
           return;
         }
 
-        let short_circuit = Shed::logic(|l| {
+        // Cached verdict: outer None means cache miss (compute below); outer
+        // Some(inner) short-circuits, with inner None = not internal.
+        let cached = Shed::logic(|l| {
           let Some(func) = l.get_func_ref(&tree[name].to_str_lossy()) else {
-            return Some(false);
+            return Some(None);
           };
 
           match func {
             ShFunc::Defined { is_internal, .. } => match is_internal {
-              Some(IsInternal::No) => Some(false),
-              Some(IsInternal::Yes | IsInternal::Checking) => Some(true),
+              Some(IsInternal::No) => Some(None),
+              Some(IsInternal::Yes(b)) => Some(Some(*b)),
+              Some(IsInternal::Checking) => Some(Some(ForkBehavior::Never)),
               None => None,
             },
-            ShFunc::Autoload(_) => Some(false),
+            ShFunc::Autoload(_) => Some(None),
           }
         });
 
-        if let Some(verdict) = short_circuit {
-          res = Some(verdict);
+        if let Some(verdict) = cached {
+          match verdict {
+            Some(b) => acc = acc.map(|cur| cur.max(b)),
+            None => acc = None,
+          }
           return;
         }
 
@@ -377,34 +391,34 @@ pub(crate) fn node_has_only_builtins(tree: &Ast, node_id: NodeId) -> bool {
           return;
         };
         let Some(root) = logic.get_root() else {
-          res = Some(false);
+          acc = None;
           return;
         };
 
         let body_src = logic.span_for(root);
-        let is = subshell::is_internal(&body_src.to_str_lossy());
-        let verdict = if is { IsInternal::Yes } else { IsInternal::No };
+        let behavior = subshell::is_internal(&body_src.to_str_lossy());
+        let verdict = match behavior {
+          Some(b) => IsInternal::Yes(b),
+          None => IsInternal::No,
+        };
         Shed::logic_mut(|l| {
           if let Some(func) = l.get_func_mut(&tree[name].to_str_lossy()) {
             func.set_is_internal(verdict).ok();
           }
         });
-        res = Some(is);
+        match behavior {
+          Some(b) => acc = acc.map(|cur| cur.max(b)),
+          None => acc = None,
+        }
       }
-      NdRule::Subshell { .. } => res = Some(false),
-      _ => res = Some(true),
+      NdRule::Subshell { .. } => acc = None,
+      _ => {}
     }
   });
 
-  res.unwrap_or(false)
+  acc
 }
 
-pub(crate) fn nodes_have_only_builtins(tree: &Ast, nodes: impl Iterator<Item = NodeId>) -> bool {
-  for node in nodes {
-    if !node_has_only_builtins(tree, node) {
-      return false;
-    }
-  }
-
-  true
+pub(crate) fn node_has_only_builtins(tree: &Ast, node_id: NodeId) -> bool {
+  node_fork_behavior(tree, node_id).is_some()
 }

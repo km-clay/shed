@@ -8,7 +8,7 @@
 //!
 //! It also includes error handling for common execution errors such as command not found, permission denied, and exec format errors.
 
-use std::ffi::CString;
+use std::{ffi::CString, sync::Arc, thread};
 
 use itertools::Itertools;
 use nix::{
@@ -19,12 +19,18 @@ use nix::{
 use crate::{
   HashSet, autocmd,
   builtin::{self, Builtin},
-  eval::parse::NdFlags,
+  eval::{lex::Tk, parse::NdFlags},
   lifecycle,
   procio::Sinks,
   sherr, signal, socket,
   state::{
-    Shed, cmd, jobs::ChildProc, meta::MetaTab, params, shopt, terminal::Terminal, vars::VarStr,
+    Shed, cmd,
+    jobs::{ChildProc, StageThread},
+    meta::MetaTab,
+    params, shopt,
+    terminal::Terminal,
+    timeline::StageResult,
+    vars::VarStr,
   },
   util::{
     error::{ShErr, ShResult},
@@ -281,5 +287,30 @@ impl super::Dispatcher {
     }
 
     Ok(())
+  }
+
+  pub(super) fn spawn_stage(&self, tree: &Ast, node: NodeId, sinks: Sinks) -> StageThread {
+    let ast = Arc::new(tree.break_off(node));
+    let spec = Shed::fork_spec(sinks, ast);
+    let source = self.source_name.clone();
+    let handle = thread::spawn(move || {
+      let ast = Shed::install(spec);
+      let root = ast.get_root().unwrap();
+      let mut d = super::Dispatcher::new(source);
+      d.job_stack.new_job();
+      if let Err(e) = d.dispatch_node(&ast, root)
+        && !e.is_flow_control()
+      {
+        e.print_error();
+      }
+      if let Some(job) = d.job_stack.finalize_job() {
+        crate::state::jobs::dispatch_job(job, false, false).ok();
+      }
+      StageResult::new(Shed::get_status())
+    });
+
+    let cmd_name = tree.command_for(node).map(Tk::as_bytes).map(VarStr::from);
+
+    StageThread::new(handle).with_name(cmd_name)
   }
 }

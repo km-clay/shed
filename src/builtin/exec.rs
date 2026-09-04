@@ -12,8 +12,8 @@ impl super::Builtin for Exec {
     true
   }
 
-  fn always_forks(&self) -> bool {
-    true
+  fn fork_behavior(&self) -> super::ForkBehavior {
+    super::ForkBehavior::Always
   }
 
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {

@@ -1056,6 +1056,7 @@ fn parse_op_body(
   arg_end
 }
 
+#[expect(clippy::too_many_arguments)]
 fn get_subtoken(
   chars: &mut Peekable<CharIndices>,
   span: &Span,

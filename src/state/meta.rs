@@ -1580,8 +1580,8 @@ mod jump_table_tests {
     assert_eq!(jt.peek_back(1), None);
     jt.commit_fwd(1);
     jt.commit_back(1);
-    assert!(jt.fwd_dirs().count() == 0);
-    assert!(jt.back_dirs().count() == 0);
+    assert_eq!(jt.fwd_dirs().count(), 0);
+    assert_eq!(jt.back_dirs().count(), 0);
   }
 }
 

@@ -60,7 +60,7 @@ pub(crate) fn change_dir_with_pwd<P: AsRef<Path>>(
 
   defer! {
     if fire_autocmds {
-      autocmd!(PostChangeDir)
+      autocmd!(PostChangeDir);
     }
   };
 

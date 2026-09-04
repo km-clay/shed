@@ -203,6 +203,17 @@ pub(super) fn lookup_builtin(name: &[u8]) -> Option<&'static dyn Builtin> {
     .map(|idx| BUILTIN_TABLE[idx].1 as &dyn Builtin)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum ForkBehavior {
+  Never,
+  Subshell,
+  Always,
+}
+
+pub(crate) fn fork_behavior_for(name: &[u8]) -> Option<ForkBehavior> {
+  lookup_builtin(name).map(Builtin::fork_behavior)
+}
+
 /// A trait that provides a common interface for all builtin commands.
 ///
 /// Has exactly one required member: `execute()`, which is called to run the builtin.
@@ -247,8 +258,8 @@ pub(super) trait Builtin: Sync {
   /// `false` by default, so that builtins are eligible for the in-process fast path by default.
   /// Overridden by commands like `eval` and `command` that result in forking execution as a side effect.
   /// `exit` also overrides this, so it doesn't stop the parent shell in subshells
-  fn always_forks(&self) -> bool {
-    false
+  fn fork_behavior(&self) -> ForkBehavior {
+    ForkBehavior::Never
   }
 
   /// The way that the builtin parses its options. Some of them are weird, like `set`
@@ -738,8 +749,8 @@ fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
 /// This is a special builtin that always forks, because it needs to run the command in a new process to avoid shadowing.
 pub(crate) struct CommandBuiltin;
 impl Builtin for CommandBuiltin {
-  fn always_forks(&self) -> bool {
-    true
+  fn fork_behavior(&self) -> ForkBehavior {
+    ForkBehavior::Always
   }
 
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {

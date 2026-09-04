@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::{defer, procio};
+use crate::{defer, procio, state::timeline::StageResult};
 use ariadne::Fmt;
 use bitflags::bitflags;
 use itertools::izip;
@@ -49,35 +49,22 @@ bitflags! {
 }
 
 #[derive(Debug)]
-pub(crate) struct DisplayWaitStatus(pub WtStat);
+pub(crate) struct DisplayWaitStatus(pub Outcome);
 
 impl fmt::Display for DisplayWaitStatus {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match &self.0 {
-      WtStat::Exited(_, code) => match code {
+      Outcome::Exited(code) => match code {
         0 => write!(f, "done"),
         _ => write!(f, "failed: {code}"),
       },
-      WtStat::Signaled(_, signal, _) => {
+      Outcome::Signaled(signal) => {
         write!(f, "signaled: {signal:?}")
       }
-      WtStat::Stopped(_, signal) => {
+      Outcome::Stopped(signal) => {
         write!(f, "stopped: {signal:?}")
       }
-      #[cfg(linux_like)]
-      WtStat::PtraceEvent(_, signal, _) => {
-        write!(f, "ptrace event: {signal:?}")
-      }
-      #[cfg(linux_like)]
-      WtStat::PtraceSyscall(_) => {
-        write!(f, "ptrace syscall")
-      }
-      WtStat::Continued(_) => {
-        write!(f, "continued")
-      }
-      WtStat::StillAlive => {
-        write!(f, "running")
-      }
+      Outcome::Running => write!(f, "running"),
     }
   }
 }
@@ -96,6 +83,135 @@ pub(crate) enum JobID {
   Pid(Pid),
   TableID(usize),
   Command(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Outcome {
+  Running,
+  Exited(i32),
+  Signaled(Signal),
+  Stopped(Signal),
+}
+
+impl Outcome {
+  pub(crate) fn code(self) -> Option<i32> {
+    match self {
+      Outcome::Exited(code) => Some(code),
+      Outcome::Signaled(sig) | Outcome::Stopped(sig) => Some(SIG_EXIT_OFFSET + sig as i32),
+      Outcome::Running => None,
+    }
+  }
+}
+
+impl From<WtStat> for Outcome {
+  fn from(value: WtStat) -> Self {
+    match value {
+      WtStat::Exited(_, code) => Outcome::Exited(code),
+      WtStat::Signaled(_, sig, _) => Outcome::Signaled(sig),
+      WtStat::Stopped(_, sig) => Outcome::Stopped(sig),
+      _ => Outcome::Running,
+    }
+  }
+}
+
+#[derive(Debug)]
+pub(crate) enum JobMember {
+  Process(ChildProc),  // reaped via waitpid
+  Thread(StageThread), // reaped via join
+}
+
+impl JobMember {
+  pub(crate) fn set_stat(&mut self, stat: WtStat) {
+    if let JobMember::Process(child_proc) = self {
+      child_proc.set_stat(stat);
+    }
+  }
+  pub(crate) fn wait(&mut self, flags: Option<WtFlag>) -> Result<Outcome, Errno> {
+    match self {
+      JobMember::Process(child_proc) => Ok(child_proc.wait(flags)?.into()),
+      JobMember::Thread(stage_thread) => {
+        stage_thread.join();
+        Ok(stage_thread.outcome())
+      }
+    }
+  }
+  pub(crate) fn take_timer(&mut self) -> Option<CmdTimer> {
+    match self {
+      JobMember::Process(child_proc) => child_proc.timer.take(),
+      JobMember::Thread(stage_thread) => stage_thread.timer.take(),
+    }
+  }
+  pub(crate) fn terminated(&self) -> bool {
+    match self {
+      JobMember::Process(child_proc) => child_proc.terminated(),
+      JobMember::Thread(stage_thread) => stage_thread.is_finished(),
+    }
+  }
+  pub(crate) fn cmd(&self) -> Option<VarStr> {
+    match self {
+      JobMember::Process(child_proc) => child_proc.cmd(),
+      JobMember::Thread(stage_thread) => stage_thread.command.clone(),
+    }
+  }
+  pub(crate) fn outcome(&self) -> Outcome {
+    match self {
+      JobMember::Process(child_proc) => child_proc.stat().into(),
+      JobMember::Thread(stage_thread) => stage_thread.outcome(),
+    }
+  }
+}
+
+#[derive(Debug)]
+enum StageStatus {
+  Running(std::thread::JoinHandle<StageResult>),
+  Complete(Box<StageResult>),
+  Panicked,
+}
+
+#[derive(Debug)]
+pub(crate) struct StageThread {
+  status: Option<StageStatus>,
+  command: Option<VarStr>,
+  timer: Option<CmdTimer>,
+}
+
+impl StageThread {
+  pub(crate) fn new(handle: std::thread::JoinHandle<StageResult>) -> Self {
+    Self {
+      status: Some(StageStatus::Running(handle)),
+      command: None,
+      timer: None,
+    }
+  }
+  pub(crate) fn with_name(mut self, name: Option<VarStr>) -> Self {
+    self.command = name;
+    self
+  }
+  fn is_finished(&self) -> bool {
+    matches!(
+      self.status,
+      Some(StageStatus::Complete(_) | StageStatus::Panicked)
+    )
+  }
+  fn outcome(&self) -> Outcome {
+    match &self.status {
+      Some(StageStatus::Complete(result)) => Outcome::Exited(result.status()),
+      Some(StageStatus::Panicked) => Outcome::Signaled(Signal::SIGABRT),
+      _ => Outcome::Running,
+    }
+  }
+  fn join(&mut self) {
+    if !matches!(self.status, Some(StageStatus::Running(_))) {
+      return;
+    }
+    let Some(StageStatus::Running(handle)) = self.status.take() else {
+      return;
+    };
+    self.status = Some(match handle.join() {
+      Ok(result) => StageStatus::Complete(Box::new(result)),
+      Err(_) => StageStatus::Panicked,
+    });
+  }
 }
 
 #[derive(Debug)]
@@ -160,9 +276,6 @@ impl ChildProc {
   pub(crate) fn set_stat(&mut self, stat: WtStat) {
     self.stat = stat;
   }
-  pub(crate) fn exited(&self) -> bool {
-    matches!(self.stat, WtStat::Exited(..))
-  }
   pub(crate) fn terminated(&self) -> bool {
     matches!(self.stat, WtStat::Exited(..) | WtStat::Signaled(..))
   }
@@ -184,7 +297,7 @@ impl Clone for ChildProc {
 pub(crate) struct JobBldr {
   table_id: Option<usize>,
   pgid: Option<Pid>,
-  children: Vec<ChildProc>,
+  children: Vec<JobMember>,
   send_hup: bool,
 }
 
@@ -203,8 +316,11 @@ impl JobBldr {
       send_hup: true,
     }
   }
+  pub(crate) fn push_member(&mut self, member: JobMember) {
+    self.children.push(member);
+  }
   pub(crate) fn push_child(&mut self, child: ChildProc) {
-    self.children.push(child);
+    self.children.push(JobMember::Process(child));
   }
   pub(crate) fn set_pgid(&mut self, pgid: Pid) {
     self.pgid = Some(pgid);
@@ -246,7 +362,7 @@ impl JobStack {
 pub(crate) struct JobData {
   pub table_id: VarStr,
   pub notify: bool,
-  pub stats: Vec<WtStat>,
+  pub stats: Vec<Outcome>,
   pub cmds: Vec<VarStr>,
   pub display: String,
   pub timer: Option<CmdTimer>,
@@ -256,7 +372,7 @@ pub(crate) struct JobData {
 pub(crate) struct Job {
   table_id: Option<usize>,
   pgid: Pid,
-  children: Vec<ChildProc>,
+  children: Vec<JobMember>,
   notify: bool,
   send_hup: bool,
 }
@@ -278,7 +394,7 @@ impl Job {
     self.notify
   }
   pub(crate) fn running(&self) -> bool {
-    !self.children.iter().all(ChildProc::terminated)
+    !self.children.iter().all(JobMember::terminated)
   }
   pub(crate) fn tabid(&self) -> Option<usize> {
     self.table_id
@@ -302,8 +418,7 @@ impl Job {
       display: self.display(job_order, JobCmdFlags::PIDS).clone(),
       timer: pid.and_then(|pid| {
         self
-          .children_mut()
-          .iter_mut()
+          .processes_mut()
           .find(|chld| chld.pid() == pid)
           .and_then(ChildProc::take_timer)
       }),
@@ -314,61 +429,49 @@ impl Job {
   }
   pub(crate) fn set_stats(&mut self, stat: WtStat) {
     for child in &mut self.children {
-      child.set_stat(stat);
+      if let JobMember::Process(child_proc) = child {
+        child_proc.set_stat(stat);
+      }
     }
   }
-  pub(crate) fn get_stats(&self) -> Vec<WtStat> {
-    self.children.iter().map(ChildProc::stat).collect()
+  pub(crate) fn get_stats(&self) -> Vec<Outcome> {
+    self.children.iter().map(JobMember::outcome).collect()
   }
-  pub(crate) fn pipe_status(stats: &[WtStat]) -> Option<Vec<i32>> {
-    if stats.iter().any(|stat| {
-      if let WtStat::StillAlive | WtStat::Continued(_) = stat {
-        return true;
-      }
-
-      #[cfg(linux_like)]
-      if let WtStat::PtraceSyscall(_) = stat {
-        return true;
-      }
-
-      false
-    }) || stats.len() <= 1
+  pub(crate) fn pipe_status(stats: &[Outcome]) -> Option<Vec<i32>> {
+    if stats
+      .iter()
+      .any(|s| matches!(s, Outcome::Running | Outcome::Stopped(_)))
+      || stats.len() <= 1
     {
       return None;
     }
-    Some(
-      stats
-        .iter()
-        .map(|stat| match stat {
-          WtStat::Exited(_, code) => *code,
-          WtStat::Signaled(_, signal, _) => SIG_EXIT_OFFSET + *signal as i32,
-          WtStat::Stopped(_, signal) => SIG_EXIT_OFFSET + *signal as i32,
-          #[cfg(linux_like)]
-          WtStat::PtraceEvent(_, signal, _) => SIG_EXIT_OFFSET + *signal as i32,
-          #[cfg(linux_like)]
-          WtStat::PtraceSyscall(_) => unreachable!(),
-          WtStat::Continued(_) | WtStat::StillAlive => unreachable!(),
-        })
-        .collect(),
-    )
+    let pipe_status = stats.iter().map(|stat| match stat {
+      Outcome::Exited(code) => *code,
+      Outcome::Signaled(sig) => SIG_EXIT_OFFSET + *sig as i32,
+      Outcome::Running | Outcome::Stopped(_) => unreachable!(),
+    });
+    Some(pipe_status.collect())
   }
   pub(crate) fn get_pids(&self) -> Vec<Pid> {
-    self
-      .children
-      .iter()
-      .map(ChildProc::pid)
-      .collect::<Vec<Pid>>()
+    self.processes().map(ChildProc::pid).collect::<Vec<Pid>>()
   }
-  pub(crate) fn children(&self) -> &[ChildProc] {
+  pub(crate) fn children(&self) -> &[JobMember] {
     &self.children
   }
-  pub(crate) fn children_mut(&mut self) -> &mut Vec<ChildProc> {
-    &mut self.children
+  pub(crate) fn processes(&self) -> impl Iterator<Item = &ChildProc> {
+    self.children.iter().filter_map(|m| match m {
+      JobMember::Process(child) => Some(child),
+      JobMember::Thread(_) => None,
+    })
+  }
+  pub(crate) fn processes_mut(&mut self) -> impl Iterator<Item = &mut ChildProc> {
+    self.children.iter_mut().filter_map(|m| match m {
+      JobMember::Process(child) => Some(child),
+      JobMember::Thread(_) => None,
+    })
   }
   pub(crate) fn is_done(&self) -> bool {
-    self.children.iter().all(|chld| {
-      chld.exited() || chld.stat() == WtStat::Signaled(chld.pid(), Signal::SIGHUP, true)
-    })
+    self.children.iter().all(JobMember::terminated)
   }
   pub(crate) fn killpg(&mut self, sig: Signal) -> ShResult<()> {
     let stat = match sig {
@@ -380,7 +483,7 @@ impl Job {
     // if the job has our pgrp, we need to signal the job's processes individually
     // or else the shell itself will get hit.
     if self.pgid == getpgrp() {
-      for child in &self.children {
+      for child in self.processes() {
         let _ = kill(child.pid(), sig);
       }
       Ok(())
@@ -388,12 +491,12 @@ impl Job {
       Ok(killpg(self.pgid, sig)?)
     }
   }
-  pub(crate) fn wait_pgrp(&mut self) -> ShResult<Vec<WtStat>> {
+  pub(crate) fn wait_pgrp(&mut self) -> ShResult<Vec<Outcome>> {
     let mut stats = vec![];
     for child in &mut self.children {
-      if child.pid == Pid::this() {
+      if matches!(child, JobMember::Process(c) if c.pid() == Pid::this()) {
         let code = Shed::get_status();
-        stats.push(WtStat::Exited(child.pid, code));
+        stats.push(Outcome::Exited(code));
         child.take_timer();
         continue;
       }
@@ -406,9 +509,11 @@ impl Job {
             break;
           }
           Err(Errno::ECHILD) => {
-            // we already reaped this somewhere else
-            if matches!(child.stat(), WtStat::Exited(..) | WtStat::Signaled(..)) {
-              stats.push(child.stat());
+            // already reaped elsewhere; only record an actually-terminal status,
+            // never fabricate one for a still-running/stopped child
+            let outcome = child.outcome();
+            if matches!(outcome, Outcome::Exited(_) | Outcome::Signaled(_)) {
+              stats.push(outcome);
             }
             break;
           }
@@ -422,8 +527,7 @@ impl Job {
   pub(crate) fn update_by_id(&mut self, id: JobID, stat: WtStat) {
     match id {
       JobID::Pid(pid) => {
-        let query_result = self.children.iter_mut().find(|chld| chld.pid == pid);
-        if let Some(child) = query_result {
+        if let Some(child) = self.processes_mut().find(|c| c.pid() == pid) {
           child.set_stat(stat);
         }
       }
@@ -454,7 +558,7 @@ impl Job {
     }
   }
   pub(crate) fn name(&self) -> Option<VarStr> {
-    self.children().first().and_then(ChildProc::cmd)
+    self.children().first().and_then(JobMember::cmd)
   }
   /// Lossy `String` rendering for UI/notification paths (system messages, the
   /// stored `JobData.display` field). For the `jobs` builtin's actual stdout,
@@ -513,9 +617,9 @@ impl Job {
 
       // Wrap in the status color (escape codes are ASCII, content stays raw).
       let color = match job_stat {
-        WtStat::Stopped(..) | WtStat::Signaled(..) => Color::Magenta,
-        WtStat::Exited(_, 0) => Color::Green,
-        WtStat::Exited(..) => Color::Red,
+        Outcome::Signaled(..) => Color::Magenta,
+        Outcome::Exited(0) => Color::Green,
+        Outcome::Exited(..) => Color::Red,
         _ => Color::Cyan,
       };
       let (pre, suf) = fg_color_codes(color);
@@ -595,15 +699,12 @@ pub(crate) fn wait_bg(id: &JobID) -> ShResult<()> {
     let pipefail = shopt!(set.pipefail);
 
     for status in &statuses {
-      let stage_code = code_from_status(status).unwrap_or(0);
+      let stage_code = status.code().unwrap_or(0);
       if !pipefail || stage_code != 0 {
         code = stage_code;
       }
       match status {
-        WtStat::Stopped(_, _) => {
-          was_stopped = true;
-        }
-        WtStat::Signaled(_, sig, _) if *sig == Signal::SIGTSTP => {
+        Outcome::Signaled(sig) if *sig == Signal::SIGTSTP => {
           was_stopped = true;
         }
         _ => {}
@@ -641,24 +742,21 @@ pub(crate) fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
   let pipefail = shopt!(set.pipefail);
 
   for status in &statuses {
-    let stage_code = code_from_status(status).unwrap_or(0);
+    let stage_code = status.code().unwrap_or(0);
     if !pipefail || stage_code != 0 {
       code = stage_code;
     }
-    match status {
-      WtStat::Stopped(_, _) => {
-        was_stopped = true;
-        Shed::jobs_mut(|j| j.fg_to_bg(*status))?;
-      }
-      WtStat::Signaled(_, sig, _) => {
-        if *sig == Signal::SIGINT {
-          kill(getpid(), Signal::SIGINT)?;
-        } else if *sig == Signal::SIGTSTP {
+    if let Outcome::Signaled(sig) = status {
+      match sig {
+        Signal::SIGTSTP if interactive => {
           was_stopped = true;
-          Shed::jobs_mut(|j| j.fg_to_bg(*status))?;
+          Shed::jobs_mut(|j| j.fg_to_bg(*sig))?;
         }
+        Signal::SIGINT => {
+          kill(getpid(), Signal::SIGINT)?;
+        }
+        _ => {}
       }
-      _ => {}
     }
   }
   Shed::set_pipe_status(&statuses)?;
@@ -752,7 +850,7 @@ impl JobTab {
       self.next_open_pos()
     };
     job.set_tabid(tab_pos);
-    let last_pid = job.children().last().map(ChildProc::pid);
+    let last_pid = job.processes().last().map(ChildProc::pid);
     self.order.push(tab_pos);
     if tab_pos >= self.jobs.len() {
       self.jobs.resize_with(tab_pos + 1, || None);
@@ -786,7 +884,7 @@ impl JobTab {
       JobID::Pid(pid) => self.jobs.iter().find_map(|job| {
         job
           .as_ref()
-          .filter(|j| j.children().iter().any(|child| child.pid() == pid))
+          .filter(|j| j.processes().any(|c| c.pid() == pid))
       }),
       JobID::TableID(id) => self.jobs.get(id).and_then(|job| job.as_ref()),
       JobID::Command(cmd) => self.jobs.iter().find_map(|job| {
@@ -807,10 +905,9 @@ impl JobTab {
     };
     match id {
       JobID::Pid(pid) => {
-        let Some(child) = job.children_mut().iter_mut().find(|c| c.pid() == *pid) else {
-          return;
-        };
-        child.set_stat(stat);
+        if let Some(child) = job.processes_mut().find(|c| c.pid() == *pid) {
+          child.set_stat(stat);
+        }
       }
       JobID::Pgid(_) | JobID::TableID(_) | JobID::Command(_) => {
         job.set_stats(stat);
@@ -826,7 +923,7 @@ impl JobTab {
       JobID::Pid(pid) => self.jobs.iter_mut().find_map(|job| {
         job
           .as_mut()
-          .filter(|j| j.children().iter().any(|child| child.pid() == pid))
+          .filter(|j| j.processes().any(|c| c.pid() == pid))
       }),
       JobID::TableID(id) => self.jobs.get_mut(id).and_then(|job| job.as_mut()),
       JobID::Command(cmd) => self.jobs.iter_mut().find_map(|job| {
@@ -847,19 +944,19 @@ impl JobTab {
   pub(crate) fn get_fg_mut(&mut self) -> Option<&mut Job> {
     self.fg.as_mut()
   }
-  pub(crate) fn new_fg(&mut self, job: Job) -> ShResult<Vec<WtStat>> {
+  pub(crate) fn new_fg(&mut self, job: Job) -> ShResult<Vec<Outcome>> {
     self.fg = Some(job);
     let statuses = self.fg.as_mut().unwrap().wait_pgrp()?;
     Ok(statuses)
   }
-  pub(crate) fn fg_to_bg(&mut self, stat: WtStat) -> ShResult<()> {
+  pub(crate) fn fg_to_bg(&mut self, sig: Signal) -> ShResult<()> {
     if self.fg.is_none() {
       return Ok(());
     }
     take_term()?;
     let fg = std::mem::take(&mut self.fg);
     if let Some(mut job) = fg {
-      job.set_stats(stat);
+      job.set_stats(WtStat::Stopped(job.pgid(), sig));
       self.insert_job(job, false);
     }
     Ok(())
@@ -873,7 +970,7 @@ impl JobTab {
     for job in &mut self.jobs {
       let Some(job) = job else { continue };
       let statuses = job.wait_pgrp()?;
-      code = statuses.last().and_then(code_from_status).unwrap_or(0);
+      code = statuses.last().and_then(|o| o.code()).unwrap_or(0);
     }
     Shed::set_status(code);
     Ok(())
@@ -911,14 +1008,12 @@ impl JobTab {
       let id = job.tabid().unwrap();
       let stats = job.get_stats();
       if flags.contains(JobCmdFlags::RUNNING)
-        && !stats
-          .iter()
-          .any(|s| matches!(s, WtStat::StillAlive | WtStat::Continued(_)))
+        && !stats.iter().any(|s| matches!(s, Outcome::Running))
       {
         continue;
       }
       if flags.contains(JobCmdFlags::STOPPED)
-        && !stats.iter().any(|s| matches!(s, WtStat::Stopped(_, _)))
+        && !stats.iter().any(|s| matches!(s, Outcome::Stopped(_)))
       {
         continue;
       }
@@ -928,7 +1023,7 @@ impl JobTab {
       if job
         .get_stats()
         .iter()
-        .all(|stat| matches!(stat, WtStat::Exited(_, _) | WtStat::Signaled(_, _, _)))
+        .all(|stat| matches!(stat, Outcome::Exited(_) | Outcome::Signaled(..)))
       {
         jobs_to_remove.push(JobID::TableID(id));
       }
@@ -1097,6 +1192,7 @@ mod tests {
 
   fn mk_job(table_id: usize, children: Vec<ChildProc>) -> Job {
     let pgid = children.first().map_or(Pid::from_raw(0), |c| c.pid);
+    let children = children.into_iter().map(JobMember::Process).collect();
     Job {
       table_id: Some(table_id),
       pgid,
@@ -1418,7 +1514,7 @@ mod tests {
       )],
     );
     let stats = job.wait_pgrp().unwrap();
-    assert_eq!(stats, vec![WtStat::Exited(Pid::from_raw(31_001), 3)]);
+    assert_eq!(stats, vec![Outcome::Exited(3)]);
   }
 
   #[test]
@@ -1432,14 +1528,7 @@ mod tests {
       )],
     );
     let stats = job.wait_pgrp().unwrap();
-    assert_eq!(
-      stats,
-      vec![WtStat::Signaled(
-        Pid::from_raw(31_002),
-        Signal::SIGTERM,
-        false
-      )]
-    );
+    assert_eq!(stats, vec![Outcome::Signaled(Signal::SIGTERM)]);
   }
 
   #[test]
@@ -1475,9 +1564,9 @@ mod tests {
     job.update_by_id(JobID::Pid(Pid::from_raw(200)), new_stat);
     let stats = job.get_stats();
     // Only the child with pid=200 should be updated.
-    assert_eq!(stats[0], WtStat::StillAlive);
-    assert_eq!(stats[1], new_stat);
-    assert_eq!(stats[2], WtStat::StillAlive);
+    assert_eq!(stats[0], Outcome::Running);
+    assert_eq!(stats[1], Outcome::Exited(0));
+    assert_eq!(stats[2], Outcome::Running);
   }
 
   #[test]
@@ -1488,7 +1577,7 @@ mod tests {
       WtStat::Exited(Pid::from_raw(9999), 1),
     );
     for stat in job.get_stats() {
-      assert_eq!(stat, WtStat::StillAlive);
+      assert_eq!(stat, Outcome::Running);
     }
   }
 
@@ -1501,9 +1590,9 @@ mod tests {
     // "alpha" matches "alpha cmd" (substring).
     job.update_by_id(JobID::Command("alpha".into()), new_stat);
     let stats = job.get_stats();
-    assert_eq!(stats[0], new_stat);
-    assert_eq!(stats[1], WtStat::StillAlive);
-    assert_eq!(stats[2], WtStat::StillAlive);
+    assert_eq!(stats[0], new_stat.into());
+    assert_eq!(stats[1], Outcome::Running);
+    assert_eq!(stats[2], Outcome::Running);
   }
 
   #[test]
@@ -1514,9 +1603,9 @@ mod tests {
     let new_stat = WtStat::Exited(Pid::from_raw(100), 1);
     job.update_by_id(JobID::Command("cmd".into()), new_stat);
     let stats = job.get_stats();
-    assert_eq!(stats[0], new_stat);
-    assert_eq!(stats[1], WtStat::StillAlive);
-    assert_eq!(stats[2], WtStat::StillAlive);
+    assert_eq!(stats[0], new_stat.into());
+    assert_eq!(stats[1], Outcome::Running);
+    assert_eq!(stats[2], Outcome::Running);
   }
 
   #[test]
@@ -1527,7 +1616,7 @@ mod tests {
       WtStat::Exited(Pid::from_raw(100), 1),
     );
     for stat in job.get_stats() {
-      assert_eq!(stat, WtStat::StillAlive);
+      assert_eq!(stat, Outcome::Running);
     }
   }
 
@@ -1540,7 +1629,7 @@ mod tests {
     job.update_by_id(JobID::TableID(5), new_stat);
     // table_id matched → every child gets the new stat.
     for stat in job.get_stats() {
-      assert_eq!(stat, new_stat);
+      assert_eq!(stat, new_stat.into());
     }
   }
 
@@ -1549,7 +1638,7 @@ mod tests {
     let mut job = three_child_job();
     job.update_by_id(JobID::TableID(99), WtStat::Exited(Pid::from_raw(0), 1));
     for stat in job.get_stats() {
-      assert_eq!(stat, WtStat::StillAlive);
+      assert_eq!(stat, Outcome::Running);
     }
   }
 
@@ -1561,7 +1650,7 @@ mod tests {
     let mut job = mk_job(0, vec![mk_child(100, "x", WtStat::StillAlive)]);
     job.set_tabid(usize::MAX); // ensure it's Some but doesn't collide
     let () = job.update_by_id(JobID::TableID(0), WtStat::Exited(Pid::from_raw(0), 99));
-    assert_eq!(job.get_stats()[0], WtStat::StillAlive);
+    assert_eq!(job.get_stats()[0], Outcome::Running);
   }
 
   // ─── JobID::Pgid ─────────────────────────────────────────────────
@@ -1573,7 +1662,7 @@ mod tests {
     let new_stat = WtStat::Exited(Pid::from_raw(100), 0);
     job.update_by_id(JobID::Pgid(Pid::from_raw(100)), new_stat);
     for stat in job.get_stats() {
-      assert_eq!(stat, new_stat);
+      assert_eq!(stat, new_stat.into());
     }
   }
 
@@ -1585,7 +1674,7 @@ mod tests {
       WtStat::Exited(Pid::from_raw(9999), 1),
     );
     for stat in job.get_stats() {
-      assert_eq!(stat, WtStat::StillAlive);
+      assert_eq!(stat, Outcome::Running);
     }
   }
 

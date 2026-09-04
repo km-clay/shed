@@ -7,7 +7,12 @@ use std::{os::unix::fs::PermissionsExt, path::Path};
 
 use bstr::ByteSlice;
 
-use crate::{builtin, shopt, state::Shed, try_var, var};
+use crate::{
+  builtin::{self, ForkBehavior},
+  shopt,
+  state::Shed,
+  try_var, var,
+};
 
 use super::{
   lex::{Tk, TkFlags},
@@ -103,7 +108,8 @@ pub(crate) fn is_builtin(cmd: NodeId, tree: &Ast) -> bool {
   };
 
   !is_func(&cmd_word.to_str_lossy())
-    && builtin::lookup_builtin(cmd_word.as_bytes()).is_some_and(|b| !b.always_forks())
+    && builtin::fork_behavior_for(cmd_word.as_bytes())
+      .is_some_and(|b| !matches!(b, ForkBehavior::Always))
     && cmd_word.flags.contains(TkFlags::BUILTIN)
 }
 

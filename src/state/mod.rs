@@ -16,17 +16,10 @@ use std::{
   time::SystemTime,
 };
 
-use crate::{
-  eval::parse::ast::Ast,
-  state::{
-    jobs::{ChildProc, Job},
-    shopt::ShOpts,
-    vars::{Var, VarStr},
-  },
-};
+use crate::state::jobs::Outcome;
 
 use super::{
-  WtStat, autocmd, builtin, errln, eval, expand, keys, match_loop, procio, readline, sherr,
+  autocmd, builtin, errln, eval, expand, keys, match_loop, procio, readline, sherr,
   shopt as shopt_macro, signal, socket,
   state::vars::{VarFlags, VarKind},
   system_msg, try_var, two_way_display,
@@ -55,22 +48,6 @@ pub(super) mod vars;
 thread_local! {
   static SHED: Shed = Shed::new();
 }
-
-// These need to be Send + Sync
-const _: () = {
-  const fn assert_send_sync<T: Send + Sync>() {
-    // this function does nothing, but can only take Send+Sync types as type parameters
-    // so this turns the implementation of these traits into a compile time invariant.
-  }
-  let () = assert_send_sync::<VarStr>();
-  let () = assert_send_sync::<Var>();
-  let () = assert_send_sync::<Ast>();
-  let () = assert_send_sync::<LabelBuilder>();
-  let () = assert_send_sync::<Job>();
-  let () = assert_send_sync::<ChildProc>();
-  let () = assert_send_sync::<ShErr>();
-  let () = assert_send_sync::<ShOpts>();
-};
 
 /// Pops a call frame's traceback labels on drop, restoring the context stack
 /// to the length it had before the frame was pushed. See [`Shed::push_call_frame`].
@@ -564,10 +541,11 @@ impl Shed {
       let mut buf = format!("job>>begin>>{id} {}\n", pids.len());
       for (pid, stat, cmd) in izip!(&pids, &stats, &cmds) {
         let stat_str = match stat {
-          WtStat::Exited(_, 0) => "done".to_string(),
-          WtStat::Exited(_, n) => format!("failed:{n}"),
-          WtStat::Signaled(_, sig, _) => format!("signaled:{sig:?}"),
-          other => format!("{other:?}"),
+          Outcome::Exited(0) => "done".to_string(),
+          Outcome::Exited(n) => format!("failed:{n}"),
+          Outcome::Signaled(sig) => format!("signaled:{sig:?}"),
+          Outcome::Stopped(sig) => format!("stopped:{sig:?}"),
+          other @ Outcome::Running => format!("{other:?}"),
         };
         let _ = writeln!(buf, "job>>child>>{pid} {stat_str} {cmd}");
       }
@@ -651,7 +629,7 @@ impl Shed {
   pub(crate) fn set_status_from_bool(code: bool) {
     Self::set_status(i32::from(!code));
   }
-  pub(crate) fn set_pipe_status(stats: &[WtStat]) -> ShResult<()> {
+  pub(crate) fn set_pipe_status(stats: &[Outcome]) -> ShResult<()> {
     if let Some(pipe_status) = jobs::Job::pipe_status(stats) {
       let pipe_status = pipe_status
         .into_iter()

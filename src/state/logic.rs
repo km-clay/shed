@@ -6,8 +6,9 @@
 use nix::sys::signal::Signal;
 
 use std::fmt::{self, Display};
-use std::rc::Rc;
+use std::sync::Arc;
 
+use crate::builtin::ForkBehavior;
 use crate::util::error::{LabelBuilder, ShResult};
 use crate::{
   HashMap,
@@ -56,7 +57,7 @@ impl super::vars::ValueBytes for ShAlias {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IsInternal {
-  Yes,
+  Yes(ForkBehavior),
   No,
   Checking,
 }
@@ -69,7 +70,7 @@ pub(crate) enum IsInternal {
 #[derive(Clone, Debug)]
 pub(crate) enum ShFunc {
   Defined {
-    logic: Rc<Ast>, // immutable
+    logic: Arc<Ast>, // immutable
     source: Span,
     ctx: Option<LabelBuilder>,
     is_internal: Option<IsInternal>,
@@ -80,7 +81,7 @@ pub(crate) enum ShFunc {
 impl ShFunc {
   pub(crate) fn defined(logic: Ast, source: Span) -> Self {
     Self::Defined {
-      logic: Rc::new(logic),
+      logic: Arc::new(logic),
       source,
       ctx: None,
       is_internal: None,
@@ -123,12 +124,21 @@ impl ShFunc {
   pub(crate) fn set_is_internal(&mut self, is_internal: IsInternal) -> ShResult<()> {
     match self {
       Self::Defined { is_internal: i, .. } => {
-        *i = Some(is_internal);
+        match i {
+          Some(IsInternal::No | IsInternal::Checking) | None => *i = Some(is_internal),
+          Some(IsInternal::Yes(i)) => {
+            if let IsInternal::Yes(fork_behavior) = is_internal
+              && (*i) < fork_behavior
+            {
+              *i = fork_behavior;
+            }
+          }
+        }
         Ok(())
       }
       Self::Autoload(_) => Err(sherr!(
         InternalErr,
-        "Cannot set is_internal on autoload function"
+        "Cannot set fork_behavior on autoload function"
       )),
     }
   }
