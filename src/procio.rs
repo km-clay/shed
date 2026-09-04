@@ -25,7 +25,7 @@ use std::{
   ops::Deref,
   os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
   path::Path,
-  sync::{Arc, Mutex, OnceLock},
+  sync::{Arc, Condvar, Mutex, OnceLock},
 };
 
 use bstr::ByteSlice;
@@ -788,8 +788,30 @@ impl Sink for BufSink {
 pub(crate) struct PipeBuf {
   queue: VecDeque<u8>,
   writer_open: bool,
+  reader_open: bool,
   limit: usize,
   truncated: bool,
+}
+
+impl PipeBuf {
+  pub(crate) fn new() -> Self {
+    Self {
+      queue: VecDeque::new(),
+      writer_open: true,
+      reader_open: true,
+      limit: *shopt!(core.max_read_limit) as usize,
+      truncated: false,
+    }
+  }
+  pub(crate) fn with_limit(limit: usize) -> Self {
+    Self {
+      queue: VecDeque::new(),
+      writer_open: true,
+      reader_open: true,
+      limit,
+      truncated: false,
+    }
+  }
 }
 
 pub(crate) enum PipeSink {
@@ -799,12 +821,7 @@ pub(crate) enum PipeSink {
 
 impl PipeSink {
   fn new() -> (Self, Self) {
-    let buf = Arc::new(Mutex::new(PipeBuf {
-      queue: VecDeque::new(),
-      writer_open: true,
-      limit: *shopt!(core.max_read_limit) as usize,
-      truncated: false,
-    }));
+    let buf = Arc::new(Mutex::new(PipeBuf::new()));
     (Self::Read(buf.clone()), Self::Write(buf))
   }
 }
@@ -877,6 +894,117 @@ impl Drop for PipeSink {
       // EOF equivalent
       b.lock().unwrap().writer_open = false;
     }
+  }
+}
+
+pub(crate) struct ThreadPipe {
+  buf: Mutex<PipeBuf>,
+  notif: Condvar,
+}
+
+impl ThreadPipe {
+  pub(crate) fn new() -> Self {
+    Self {
+      buf: Mutex::new(PipeBuf::new()),
+      notif: Condvar::new(),
+    }
+  }
+}
+
+pub(crate) enum ThreadSink {
+  Read(Arc<ThreadPipe>),
+  Write(Arc<ThreadPipe>),
+}
+
+impl ThreadSink {
+  pub(crate) fn new() -> (Self, Self) {
+    let r = Arc::new(ThreadPipe::new());
+    let w = Arc::clone(&r);
+    (Self::Read(r), Self::Write(w))
+  }
+}
+
+impl Sink for ThreadSink {
+  fn read(&self, out: &mut [u8]) -> io::Result<usize> {
+    let Self::Read(pipe) = self else {
+      return Err(ebadf());
+    };
+    let mut buf = pipe.buf.lock().unwrap();
+
+    // keep calling notif.wait until we have data or the writer is closed
+    while buf.queue.is_empty() && buf.writer_open {
+      buf = pipe.notif.wait(buf).unwrap();
+    }
+    if buf.queue.is_empty() {
+      return Ok(0); // buf.writer_open is false, so we got EOF
+    }
+
+    let n = out.len().min(buf.queue.len());
+    for (slot, byte) in out.iter_mut().zip(buf.queue.drain(..n)) {
+      *slot = byte;
+    }
+    pipe.notif.notify_all();
+    Ok(n)
+  }
+  fn write(&self, data: &[u8]) -> io::Result<usize> {
+    let Self::Write(pipe) = self else {
+      return Err(ebadf());
+    };
+    let mut buf = pipe.buf.lock().unwrap();
+
+    if !buf.reader_open {
+      return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+    }
+
+    while buf.queue.len() >= buf.limit && buf.reader_open {
+      // backpressure, wait for the reader to drain some data
+      buf = pipe.notif.wait(buf).unwrap();
+    }
+
+    if !buf.reader_open {
+      return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+    }
+
+    buf.queue.extend(data);
+    pipe.notif.notify_all();
+    Ok(data.len())
+  }
+  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
+    Err(io::Error::new(
+      io::ErrorKind::Unsupported,
+      "ThreadSink is in-process only",
+    ))
+  }
+  fn kind(&self) -> SinkKind {
+    SinkKind::Pipe
+  }
+  fn flush(&self) -> io::Result<()> {
+    Ok(())
+  }
+  fn was_truncated(&self) -> bool {
+    false
+  }
+  fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
+    match self {
+      Self::Read(pipe) => Ok(pipe.buf.lock().unwrap().queue.len()),
+      Self::Write(_) => Err(ebadf()),
+    }
+  }
+}
+
+impl Drop for ThreadSink {
+  fn drop(&mut self) {
+    let (pipe, writer) = match self {
+      Self::Write(p) => (p, true),
+      Self::Read(p) => (p, false),
+    };
+    let mut buf = pipe.buf.lock().unwrap();
+    if writer {
+      buf.writer_open = false;
+    } else {
+      buf.reader_open = false;
+    }
+    pipe.notif.notify_all();
   }
 }
 
@@ -1031,6 +1159,12 @@ impl Sinks {
     let r = Arc::new(OsSink::new(r));
     let w = Arc::new(OsSink::new(w));
     Ok((r, w))
+  }
+  pub(crate) fn thread_pipes() -> (Arc<dyn Sink>, Arc<dyn Sink>) {
+    let (read, write) = ThreadSink::new();
+    let read = Arc::new(read);
+    let write = Arc::new(write);
+    (read, write)
   }
   /// Get an empty redir guard
   pub(crate) fn redir_scope() -> RedirGuard {

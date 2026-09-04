@@ -115,9 +115,10 @@ impl super::Dispatcher {
     // Per-stage statuses of the in-process tail, captured for the PIPESTATUS
     // splice and pipefail blame after the forked prefix is waited on.
     let mut tail_statuses: Vec<(i32, Span)> = vec![];
+    let mut cmd_iter = cmds.iter().enumerate().peekable();
 
     let mut prev_read: Option<Arc<dyn Sink>> = None;
-    for (i, cmd) in cmds.iter().enumerate() {
+    while let Some((i, cmd)) = cmd_iter.next() {
       let mut guard = Sinks::redir_scope();
 
       let cmd_name = tree.command_for(*cmd).map(Tk::as_bytes).unwrap_or_default();
@@ -130,6 +131,17 @@ impl super::Dispatcher {
         && !is_bg
         && !should_fork_segment(cmd_node)
         && node::node_fork_behavior(tree, *cmd) == Some(ForkBehavior::Never);
+
+      // if the next stage is also threaded, we can use our threaded in-process pipes
+      // instead of using a syscall to create os pipes
+      let use_thread_pipes = if let Some((_, n_cmd)) = cmd_iter.peek() {
+        let next_node = &tree[**n_cmd];
+        thread_this_stage
+          && !should_fork_segment(next_node)
+          && node::node_fork_behavior(tree, **n_cmd) == Some(ForkBehavior::Never)
+      } else {
+        false
+      };
 
       // builtins must fork in the middle of multi-command pipelines
       let fork_builtins = num_cmds > 1 && i != tail_start;
@@ -177,7 +189,11 @@ impl super::Dispatcher {
 
       if i + 1 < num_cmds {
         // middle segment, get pipes
-        let (read, write) = Sinks::os_pipes()?;
+        let (read, write) = if use_thread_pipes {
+          Sinks::thread_pipes()
+        } else {
+          Sinks::os_pipes()?
+        };
         guard.apply_sink(1, Some(write))?;
         prev_read = Some(read);
       } else {
