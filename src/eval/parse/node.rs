@@ -299,11 +299,6 @@ pub(crate) fn node_fork_behavior(tree: &Ast, node_id: NodeId) -> Option<ForkBeha
       return;
     }
 
-    if node.redirs.is_some_and(|r| !r.is_empty()) {
-      acc = None;
-      return;
-    }
-
     if node
       .flags
       .contains(NdFlags::BACKGROUND | NdFlags::FORK_BUILTINS)
@@ -417,8 +412,4 @@ pub(crate) fn node_fork_behavior(tree: &Ast, node_id: NodeId) -> Option<ForkBeha
   });
 
   acc
-}
-
-pub(crate) fn node_has_only_builtins(tree: &Ast, node_id: NodeId) -> bool {
-  node_fork_behavior(tree, node_id).is_some()
 }

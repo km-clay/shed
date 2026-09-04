@@ -31,7 +31,7 @@ use std::{
 use bstr::ByteSlice;
 use nix::{
   errno::Errno,
-  fcntl::{FcntlArg, OFlag, fcntl, open},
+  fcntl::{FcntlArg, FdFlag, OFlag, fcntl, open},
   libc::{self, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
   poll::{PollFd, PollFlags, PollTimeout},
   sys::{
@@ -803,15 +803,6 @@ impl PipeBuf {
       truncated: false,
     }
   }
-  pub(crate) fn with_limit(limit: usize) -> Self {
-    Self {
-      queue: VecDeque::new(),
-      writer_open: true,
-      reader_open: true,
-      limit,
-      truncated: false,
-    }
-  }
 }
 
 pub(crate) enum PipeSink {
@@ -984,11 +975,39 @@ impl Sink for ThreadSink {
   fn was_truncated(&self) -> bool {
     false
   }
-  fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
-    match self {
-      Self::Read(pipe) => Ok(pipe.buf.lock().unwrap().queue.len()),
-      Self::Write(_) => Err(ebadf()),
+  fn poll(&self, timeout: Option<PollTimeout>) -> io::Result<usize> {
+    let Self::Read(pipe) = self else {
+      return Err(ebadf());
+    };
+    let mut buf = pipe.buf.lock().unwrap();
+
+    // a blocking poll waits for data or the writer's close instead of reporting
+    // the queue as empty. A concurrent writer thread has usually not produced yet
+    // when the reader first polls.
+    match timeout
+      .filter(PollTimeout::is_some)
+      .and_then(|t| t.duration())
+    {
+      None => {
+        while buf.queue.is_empty() && buf.writer_open {
+          buf = pipe.notif.wait(buf).unwrap();
+        }
+      }
+      Some(dur) => {
+        let start = std::time::Instant::now();
+        while buf.queue.is_empty() && buf.writer_open {
+          let Some(remaining) = dur.checked_sub(start.elapsed()) else {
+            break;
+          };
+          let (b, wt) = pipe.notif.wait_timeout(buf, remaining).unwrap();
+          buf = b;
+          if wt.timed_out() {
+            break;
+          }
+        }
+      }
     }
+    Ok(buf.queue.len())
   }
 }
 
@@ -1181,6 +1200,43 @@ impl Sinks {
       let _ = unsafe { unistd::dup2_raw(sink_fd, *target_fd)? }.into_raw_fd();
     }
     Ok(())
+  }
+
+  /// Close inherited pipe leftovers by hand; fds this table still references are kept.
+  pub(crate) fn close_orphan_pipes(&self) {
+    let keep: crate::HashSet<RawFd> = self
+      .table
+      .values()
+      .filter_map(|s| s.as_os_fd().ok().map(|fd| fd.as_raw_fd()))
+      .collect();
+
+    let Ok(entries) = std::fs::read_dir("/proc/self/fd") else {
+      return;
+    };
+    let orphans: Vec<RawFd> = entries
+      .filter_map(Result::ok)
+      .filter_map(|e| e.file_name().to_str()?.parse::<RawFd>().ok())
+      .filter(|fd| *fd >= MIN_INTERNAL_FD && !keep.contains(fd))
+      .collect();
+
+    for fd in orphans {
+      let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+
+      let cloexec = fcntl(borrowed, FcntlArg::F_GETFD)
+        .is_ok_and(|f| FdFlag::from_bits_truncate(f).contains(FdFlag::FD_CLOEXEC));
+      if !cloexec {
+        continue;
+      }
+
+      let mut st: libc::stat = unsafe { std::mem::zeroed() };
+
+      let is_pipe =
+        unsafe { libc::fstat(fd, &raw mut st) } == 0 && st.st_mode & libc::S_IFMT == libc::S_IFIFO;
+
+      if is_pipe {
+        let _ = unistd::close(fd);
+      }
+    }
   }
   pub(crate) fn get(&mut self, fd: RawFd) -> Option<Arc<dyn Sink>> {
     if let Some(s) = self.table.get(&fd) {

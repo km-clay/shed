@@ -243,6 +243,7 @@ mod tests {
     assert!(is_internal(r#"echo "$(echo 1)""#).is_some());
     assert!(is_internal(r#"echo "$(( 2 + 3 ))""#).is_some());
     assert!(is_internal(r#"echo "$( { echo y; } )""#).is_some());
+    assert!(is_internal(r#"echo "$(read v < /dev/null; echo $v)""#).is_some());
   }
 
   #[test]
@@ -255,11 +256,11 @@ mod tests {
 
   #[test]
   fn is_internal_nested_sub_forks_without_external() {
-    // Subshell and redirect both fork despite containing only builtins — the
-    // holes an "external command present" heuristic would miss.
+    // A subshell forks despite containing only builtins — a hole an "external
+    // command present" heuristic would miss. Redirects, by contrast, apply
+    // through the fd table and stay in-process.
     let _g = TestGuard::new();
     assert!(is_internal(r#"echo "$( (echo x) )""#).is_none());
-    assert!(is_internal(r#"echo "$(read v < /dev/null; echo $v)""#).is_none());
   }
 
   #[test]

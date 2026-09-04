@@ -18,17 +18,16 @@ use nix::{
 
 use crate::{
   builtin::ForkBehavior,
-  errln,
   eval::{
     lex::{Span, Tk},
     parse::{NdFlags, Node, node},
   },
-  procio::{self, RedirSet, Sink, Sinks},
+  procio::{RedirSet, Sink, Sinks},
   shopt,
   state::{
     Shed,
     jobs::{self},
-    shopt,
+    shopt::PipeStyle,
     terminal::Terminal,
     vars::{VarFlags, VarKind},
   },
@@ -49,7 +48,7 @@ impl super::Dispatcher {
       unreachable!()
     };
 
-    let mut cmds: Vec<NodeId> = tree[*cmds].to_vec();
+    let cmds: Vec<NodeId> = tree[*cmds].to_vec();
 
     let is_bg = pipeline_flags.contains(NdFlags::BACKGROUND);
     let interactive = Shed::term(Terminal::interactive);
@@ -86,35 +85,12 @@ impl super::Dispatcher {
 
     let mut spans = vec![];
 
-    // calculate when we should stop forking, based on `core.pipeline_style`
-    // tail -> the longest tail sequence of builtins executes in-process
-    // last -> the last command executes in-process if it is a builtin
-    // all -> every command forks, no matter what
-    let tail_start = match shopt!(core.pipeline_style) {
-      shopt::PipeStyle::All => num_cmds,
-      style @ (shopt::PipeStyle::Last | shopt::PipeStyle::Tail) => {
-        // start of the trailing run of builtin-only stages
-        let builtin_tail = match cmds
-          .iter_mut()
-          .rev()
-          .position(|n| !node::node_has_only_builtins(tree, *n))
-        {
-          Some(pos) => num_cmds - pos,
-          None => 0,
-        };
-
-        if matches!(style, shopt::PipeStyle::Last) {
-          // keep only the last stage in-process (or all-fork if it isn't a builtin)
-          builtin_tail.max(num_cmds - 1)
-        } else {
-          builtin_tail
-        }
-      }
-    };
+    let lastpipe = shopt!(core.lastpipe);
+    let pipe_style = shopt!(core.pipeline_style);
 
     // Per-stage statuses of the in-process tail, captured for the PIPESTATUS
     // splice and pipefail blame after the forked prefix is waited on.
-    let mut tail_statuses: Vec<(i32, Span)> = vec![];
+    let mut tail_status: Option<(i32, Span)> = None;
     let mut cmd_iter = cmds.iter().enumerate().peekable();
 
     let mut prev_read: Option<Arc<dyn Sink>> = None;
@@ -130,7 +106,8 @@ impl super::Dispatcher {
         && !interactive
         && !is_bg
         && !should_fork_segment(cmd_node)
-        && node::node_fork_behavior(tree, *cmd) == Some(ForkBehavior::Never);
+        && node::node_fork_behavior(tree, *cmd) == Some(ForkBehavior::Never)
+        && !matches!(pipe_style, PipeStyle::Fork);
 
       // if the next stage is also threaded, we can use our threaded in-process pipes
       // instead of using a syscall to create os pipes
@@ -143,37 +120,36 @@ impl super::Dispatcher {
         false
       };
 
-      // builtins must fork in the middle of multi-command pipelines
-      let fork_builtins = num_cmds > 1 && i != tail_start;
-      let _fork = Shed::meta_mut(|m| m.enter_fork(fork_builtins));
+      let run_in_shell = lastpipe
+        && i == num_cmds - 1
+        && node::node_fork_behavior(tree, *cmd) == Some(ForkBehavior::Never);
+      let will_fork = !thread_this_stage && !run_in_shell;
+      let _fork = Shed::meta_mut(|m| m.enter_fork(will_fork));
 
-      if i == tail_start {
-        // the rest of these are non-forking builtins
+      if run_in_shell {
         if let Some(read) = prev_read.take() {
           guard.apply_sink(STDIN_FILENO, Some(read))?;
         }
         guard.apply_set(&out_rdrs)?;
         if is_bg {
-          let tail: Vec<NodeId> = cmds[i..].to_vec();
-          let name = tail
-            .first()
-            .and_then(|id| tree.command_for(*id))
+          let name = tree
+            .command_for(cmds[i])
             .map(Tk::to_str_lossy)
             .unwrap_or_default();
           result = self.run_fork(name.as_bytes(), move |s| {
             super::catch_exit(
-              || s.exec_internal_pipeline(tree, &tail).map(|_| ()),
+              || s.exec_internal_segment(tree, cmds[i]).map(|_| ()),
               super::exit_with,
             );
           });
           break;
         }
-        if tail_start > 0 && Shed::term(Terminal::interactive) {
+        if Shed::term(Terminal::interactive) {
           Shed::term_mut(|t| t.attach(unistd::getpgrp())).ok();
         }
-        result = match self.exec_internal_pipeline(tree, &cmds[i..]) {
-          Ok(statuses) => {
-            tail_statuses = statuses;
+        result = match self.exec_internal_segment(tree, cmds[i]) {
+          Ok(status) => {
+            tail_status = Some(status);
             Ok(())
           }
           Err(e) => Err(e),
@@ -238,23 +214,19 @@ impl super::Dispatcher {
     // The in-process tail ran inline, so its statuses never reached the wait.
     // Splice them onto the forked prefix's (which the wait left in PIPESTATUS)
     // and recompute $? across the whole pipeline.
-    if !tail_statuses.is_empty() {
+    if let Some((status, span)) = tail_status {
       // The forked prefix's per-stage codes: the wait only fills PIPESTATUS for
       // a multi-stage job (`Job::pipe_status` bails at len <= 1), so a lone
       // prefix stage's code is just `$?`.
-      let mut codes: Vec<i32> = match tail_start {
-        0 => vec![],
-        1 => vec![Shed::get_status()],
-        _ => Shed::vars(|v| v.try_get_arr_elems("PIPESTATUS"))
-          .map(|elems| {
-            elems
-              .iter()
-              .filter_map(|s| s.to_string().parse().ok())
-              .collect()
-          })
-          .unwrap_or_default(),
-      };
-      codes.extend(tail_statuses.iter().map(|(code, _)| *code));
+      let mut codes: Vec<i32> = Shed::vars(|v| v.try_get_arr_elems("PIPESTATUS"))
+        .map(|elems| {
+          elems
+            .iter()
+            .filter_map(|s| s.to_string().parse().ok())
+            .collect()
+        })
+        .unwrap_or_default();
+      codes.push(status);
 
       let status = if shopt!(set.pipefail) {
         codes.iter().rev().find(|c| **c != 0).copied()
@@ -274,7 +246,7 @@ impl super::Dispatcher {
       Shed::set_status(status);
 
       // keep `spans` aligned with PIPESTATUS so pipefail blame indexes correctly
-      spans.extend(tail_statuses.iter().map(|(_, span)| span.clone()));
+      spans.push(span);
     }
 
     result?;
@@ -289,66 +261,33 @@ impl super::Dispatcher {
     super::check_err(pipeline_flags, None, blame_span, &tree[pipeline_context])?;
     Ok(())
   }
-  /// Run a contiguous run of in-process builtins, wiring them together with
-  /// string sinks instead of pipes. Returns each stage's exit status and span
-  /// so the caller can fold them into PIPESTATUS and the pipefail blame; the
-  /// first hard error short-circuits the run.
-  pub(super) fn exec_internal_pipeline(
-    &mut self,
-    tree: &Ast,
-    cmds: &[NodeId],
-  ) -> ShResult<Vec<(i32, Span)>> {
-    let last = cmds.len().saturating_sub(1);
-    let mut statuses = Vec::with_capacity(cmds.len());
-    let mut prev_read: Option<Arc<dyn Sink>> = None;
 
-    for (i, cmd) in cmds.iter().enumerate() {
-      let mut guard = Sinks::redir_scope();
+  pub(super) fn exec_internal_segment(&mut self, tree: &Ast, cmd: NodeId) -> ShResult<(i32, Span)> {
+    let result = match &tree[cmd].class {
+      NdRule::Subshell { body } => {
+        let _ceiling = guards::isolation_guard(None);
 
-      if let Some(read) = prev_read.take() {
-        guard.apply_sink(0, Some(read))?;
-      }
-
-      if i != last {
-        let (read, write) = Sinks::sink_pipes();
-        guard.apply_sink(1, Some(write))?;
-        prev_read = Some(read);
-      }
-
-      let result = match &tree[*cmd].class {
-        NdRule::Subshell { body } => {
-          let _ceiling = guards::isolation_guard(None);
-
-          match self.dispatch_node(tree, *body) {
-            Err(e) => {
-              if let ShErrKind::CleanExit(code) = e.kind() {
-                Shed::set_status(*code);
-                Ok(())
-              } else {
-                Err(e)
-              }
+        match self.dispatch_node(tree, *body) {
+          Err(e) => {
+            if let ShErrKind::CleanExit(code) = e.kind() {
+              Shed::set_status(*code);
+              Ok(())
+            } else {
+              Err(e)
             }
-            res => res,
           }
+          res => res,
         }
-        _ => self.dispatch_node(tree, *cmd),
-      };
-
-      statuses.push((Shed::get_status(), tree.span_for(*cmd)));
-
-      if prev_read.as_ref().is_some_and(|r| r.was_truncated()) {
-        Shed::set_status(procio::SINK_TRUNCATED_STATUS);
-        errln!(
-          "shed: pipeline output truncated (exceeded {})",
-          *shopt!(core.max_read_limit)
-        );
       }
+      _ => self.dispatch_node(tree, cmd),
+    };
 
-      result?;
-      // guard drops here, fd 0/1 restored, write end closes
+    let status = (Shed::get_status(), tree.span_for(cmd));
+
+    match result {
+      Ok(()) => Ok(status),
+      Err(e) => Err(e),
     }
-
-    Ok(statuses)
   }
 
   pub(super) fn exec_one(

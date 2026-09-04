@@ -464,15 +464,13 @@ fn validate_bell_style(v: &String) -> Result<(), String> {
 #[derive(Default, Debug, Copy, Clone)]
 pub(crate) enum PipeStyle {
   #[default]
-  All, // all commands in a pipeline will fork (default; matches bash)
-  Tail, // entire tail of builtins is executed in-process, enables no-fork pipelines
-  Last, // only the last command in a pipeline is executed in-process
+  Fork,
+  Thread,
 }
 
 two_way_display! {PipeStyle,
-  Tail <=> "tail";
-  Last <=> "last";
-  All <=> "all";
+  Fork <=> "fork";
+  Thread <=> "thread";
 }
 
 #[derive(Clone, Debug, ShOptGroup)]
@@ -519,9 +517,13 @@ pub(crate) struct ShOptCore {
   #[default(ReadLimit::default())]
   pub max_read_limit: ReadLimit,
 
-  /// Which pipeline forking strategy to use: tail | last | none
+  /// Which pipeline forking strategy to use: fork = fork all segments, thread = spawn threads for builtins
   #[default(PipeStyle::default())]
   pub pipeline_style: PipeStyle,
+
+  /// If set, the last segment of a pipeline runs in the current shell instead of a subshell
+  #[default(true)]
+  pub lastpipe: bool,
 }
 
 #[derive(Clone, Debug, ShOptGroup)]
