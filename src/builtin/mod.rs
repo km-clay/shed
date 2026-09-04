@@ -23,7 +23,7 @@ use crate::{
   },
   expand::{arithmetic, escape},
   outln,
-  procio::{self, RedirSet, SinkIo},
+  procio::{self, RedirSet, SinkIo, Sinks},
   sherr, signal,
   state::{
     Shed, cmd,
@@ -350,7 +350,7 @@ pub(super) trait Builtin: Sync {
     // Set up redirections here so we can attach the guard to propagated errors.
     let redirs: RedirSet = RedirSet::from(&tree[node.redirs]);
     let fatal = self.is_special() && !Shed::term(Terminal::interactive);
-    let guard = match Shed::sinks(|s| s.try_apply_set(&redirs, fatal)) {
+    let guard = match Sinks::try_apply_set(&redirs, fatal) {
       Ok(Some(g)) => g,
       Ok(None) => return Ok(()), // non-fatal error, skip
       Err(e) => return Err(e),   // fatal error, propagate

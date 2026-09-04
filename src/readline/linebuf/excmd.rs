@@ -10,7 +10,7 @@ use crate::{
   HashSet, autocmd, defer,
   eval::execute,
   motion,
-  procio::{self, BufSink, Sink},
+  procio::{self, BufSink, Sink, Sinks},
   sherr, shopt,
   state::{
     Shed, paths,
@@ -591,7 +591,7 @@ impl super::LineBuf {
       WriteDest::Cmd(cmd) => {
         let buf = self.to_string();
         let sink: Rc<dyn Sink> = Rc::new(BufSink::from_bytes(buf.as_bytes()));
-        let _guard = Shed::sinks(|s| s.apply_sink(sink, STDIN_FILENO))?;
+        let _guard = Sinks::apply_sink(sink, STDIN_FILENO)?;
 
         autocmd!(PreCmd);
         {

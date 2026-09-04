@@ -1,6 +1,21 @@
 //! This module contains our IO redirection primitives.
-//! Everything we use is basically just a thin wrapper around the std Fd types,
-//! or nix system call wrappers.
+//!
+//! `shed`'s IO model revolves around the [`Sinks`] struct and the [`Sink`] trait. It is a virtual file descriptor table that allows us to
+//! redirect IO to arbitrary sinks, including in-memory buffers.
+//!
+//! This has some pros and cons:
+//!
+//! Pros:
+//! * We can use our own IO primitives the same way that we use actual file descriptors, meaning we can arbitrarily create
+//!   new types of redirection targets, if we so choose.
+//! * Redirection is O(1) and syscall-free until the redirections are actually needed.
+//! * Redirection lifetimes are tied to [`RedirGuard`], so we can safely redirect IO without worrying about the underlying
+//!   file descriptors being closed or reused.
+//!
+//! Cons:
+//! * Direct interaction with file descriptors risks desyncing the virtual table and the actual process file descriptors.
+//!   Safe IO operation requires disciplined use of the [`Sinks`] table and the [`Sink`] trait.
+//! * Redirection must be materialized before it can be used, via [`Sinks::commit_redirects()`], which is another thing to remember when forking processes.
 
 use std::{
   cell::{OnceCell, RefCell},
@@ -25,7 +40,7 @@ use nix::{
     stat::Mode,
     wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid},
   },
-  unistd::{self, ForkResult, fork, isatty, read, write},
+  unistd::{self, ForkResult, fork, write},
 };
 
 use crate::{
@@ -153,47 +168,6 @@ pub(crate) fn pipes_high_no_cloexec() -> nix::Result<(OwnedFd, OwnedFd)> {
   Ok((move_high_no_cloexec(r)?, move_high_no_cloexec(w)?))
 }
 
-/// Basically just a fancy deferred `dup2()` call.
-///
-/// If constructed using `Redir::close()`, this will close the target fd when applied.
-#[derive(Debug)]
-pub(crate) struct Redir {
-  fd: RawFd,
-  from: Option<OwnedFd>,
-}
-
-impl Redir {
-  pub(crate) fn new(fd: RawFd, from: OwnedFd) -> Self {
-    Self {
-      fd,
-      from: Some(from),
-    }
-  }
-  pub(crate) fn close(fd: RawFd) -> Self {
-    Self { fd, from: None }
-  }
-  /// Trigger the redirection by calling [`nix::libc::dup2`] or closing the target fd.
-  /// Returns an error if the redirection fails.
-  pub(crate) fn apply(&mut self) -> ShResult<()> {
-    if let Some(from) = &self.from {
-      let ret = unsafe { nix::libc::dup2(from.as_raw_fd(), self.fd) };
-      if ret < 0 {
-        return Err(nix::Error::last().into());
-      }
-    } else if let Err(e) = nix::unistd::close(self.fd) {
-      match e {
-        Errno::EBADF => {
-          // fd is already closed; ignore
-        }
-        _ => {
-          return Err(e.into());
-        }
-      }
-    }
-    Ok(())
-  }
-}
-
 /// Step one of our redirection building pipeline.
 ///
 /// The parser uses these to create `RedirSpecs`.
@@ -253,10 +227,8 @@ impl RedirBldr {
 
     match target {
       RedirTarget::Path(path) if class.is_file_op() => Ok(RedirSpec::file(fd, path, class)),
-      RedirTarget::Close => Ok(RedirSpec::close(fd, self.span.clone())),
-      RedirTarget::Fd(src_fd) if class.is_dup_op() => {
-        Ok(RedirSpec::dup_spanned(src_fd, fd, class, self.span.clone()))
-      }
+      RedirTarget::Close => Ok(RedirSpec::close(fd)),
+      RedirTarget::Fd(src_fd) if class.is_dup_op() => Ok(RedirSpec::dup_spanned(src_fd, fd, class)),
       RedirTarget::FdExpr(word) if class.is_dup_op() => Ok(RedirSpec::dup_expr(word, fd, class)),
       RedirTarget::HereDoc { body, flags } => {
         // Strip leading tabs per line BEFORE expansion (POSIX order).
@@ -465,7 +437,6 @@ pub(super) enum RedirSpec {
     from: RawFd,
     to: RawFd,
     mode: RedirType,
-    span: Option<Span>,
   },
   DupExpr {
     word: Tk,
@@ -474,7 +445,6 @@ pub(super) enum RedirSpec {
   },
   Close {
     fd: RawFd,
-    span: Option<Span>,
   },
   Buffer {
     fd: RawFd,
@@ -488,37 +458,19 @@ impl RedirSpec {
     Self::File { fd, path, mode }
   }
   pub(crate) fn dup(from: RawFd, to: RawFd, mode: RedirType) -> Self {
-    Self::Dup {
-      from,
-      to,
-      mode,
-      span: None,
-    }
+    Self::Dup { from, to, mode }
   }
-  pub(crate) fn dup_spanned(from: RawFd, to: RawFd, mode: RedirType, span: Option<Span>) -> Self {
-    Self::Dup {
-      from,
-      to,
-      mode,
-      span,
-    }
+  pub(crate) fn dup_spanned(from: RawFd, to: RawFd, mode: RedirType) -> Self {
+    Self::Dup { from, to, mode }
   }
   pub(crate) fn dup_expr(word: Tk, to: RawFd, mode: RedirType) -> Self {
     Self::DupExpr { word, to, mode }
   }
-  pub(crate) fn close(fd: RawFd, span: Option<Span>) -> Self {
-    Self::Close { fd, span }
+  pub(crate) fn close(fd: RawFd) -> Self {
+    Self::Close { fd }
   }
   /// The span of the redirection operator, if this spec carries one. Used to
   /// point errors at the offending redirect.
-  pub(crate) fn span(&self) -> Option<Span> {
-    match self {
-      RedirSpec::File { path, .. } => Some(path.span.clone()),
-      RedirSpec::DupExpr { word, .. } => Some(word.span.clone()),
-      RedirSpec::Dup { span, .. } | RedirSpec::Close { span, .. } => span.clone(),
-      RedirSpec::Buffer { .. } => None,
-    }
-  }
   pub(crate) fn buffer(fd: RawFd, buf: VarStr, flags: TkFlags) -> Self {
     Self::Buffer { fd, buf, flags }
   }
@@ -625,15 +577,21 @@ impl RedirSpec {
     }
   }
   */
-  pub(crate) fn as_sink(&self, sinks: &mut Sinks) -> ShResult<Option<Rc<dyn Sink>>> {
+  /// Resolve this spec into its target sink.
+  ///
+  /// Runs any expansion (heredoc bodies, redirect paths, dup-target words), so
+  /// it must be called *outside* a [`Shed::sinks()`] borrow: expansion can run
+  /// command substitutions that re-enter the table. The dup arms take their own
+  /// brief borrow to read the current fd.
+  pub(crate) fn as_sink(&self) -> ShResult<Option<Rc<dyn Sink>>> {
     let sink: Option<Rc<dyn Sink>> = match self {
       RedirSpec::File { path, mode, .. } => {
         Some(Rc::new(OsSink::new(open_redir_file(*mode, path)?)))
       }
-      RedirSpec::Dup { from, .. } => Some(sinks.get(*from).ok_or_else(ebadf)?),
+      RedirSpec::Dup { from, .. } => Some(Shed::sinks(|s| s.get(*from)).ok_or_else(ebadf)?),
       RedirSpec::DupExpr { word, .. } => match expand_fd(word)? {
         None => None, // got '-' as the word
-        Some(fd) => Some(sinks.get(fd).ok_or_else(ebadf)?),
+        Some(fd) => Some(Shed::sinks(|s| s.get(fd)).ok_or_else(ebadf)?),
       },
       RedirSpec::Buffer { buf, flags, .. } => {
         let bytes: Vec<u8> = if flags.contains(TkFlags::HERESTRING) {
@@ -848,7 +806,7 @@ impl PipeSink {
       limit: *shopt!(core.max_read_limit) as usize,
       truncated: false,
     }));
-    (Self::Write(buf.clone()), Self::Read(buf))
+    (Self::Read(buf.clone()), Self::Write(buf))
   }
 }
 
@@ -1017,6 +975,18 @@ impl std::fmt::Write for SinkIo {
   }
 }
 
+/// The virtual fd table that `shed` uses for I/O redirection
+///
+/// The wrapped `table` is a [`HashMap`] of [`RawFd`] -> [`Rc<dyn Sink>`]. The `RawFd` is the target fd (e.g. 0 for stdin, 1 for stdout, etc.), and the [`Sink`] is the source of data for that fd.
+/// The Sink can be an OS-level fd (e.g. a file or pipe), or it can be an in-process buffer (e.g. a heredoc or here-string).
+/// The Sink trait allows us to use our own I/O channels in the same way that we use file descriptors.
+///
+/// The table itself is interacted with arbitrarily using [`Shed::sinks()`] which allows for passing a closure that operates
+/// on a mutable reference to the [`Shed`] struct's `Sinks` instance.
+/// In general, the table operates by passing out [`RedirGuard`]s whenever a redirection happens. Any existing Rc<dyn Sink> for a given fd is stored on the `RedirGuard`, and when the `RedirGuard` is dropped, the old Sink is restored to the table. This allows for arbitrarily nested redirections.
+///
+/// The table's held redirections are not actually applied until a child forks; this keeps the parent process's fds intact,
+/// similar to how exported variables are not actually applied to the environment until a child process is spawned.
 #[derive(Clone)]
 pub(crate) struct Sinks {
   table: HashMap<RawFd, Rc<dyn Sink>>,
@@ -1067,6 +1037,10 @@ impl Sinks {
   pub(crate) fn redir_scope() -> RedirGuard {
     RedirGuard::new()
   }
+  /// Applies the stored redirections to the shell process' kernel fd table.
+  ///
+  /// This is called after a child is forked, so that the child inherits the redirected fds.
+  /// The parent process's fds are not affected in this case.
   pub(crate) fn commit_redirects(&self) -> io::Result<()> {
     for (target_fd, sink) in &self.table {
       let sink_fd = sink.as_os_fd()?;
@@ -1098,18 +1072,14 @@ impl Sinks {
   pub(crate) fn get_stderr(&mut self) -> Option<Rc<dyn Sink>> {
     self.get(2)
   }
-  pub(crate) fn apply_sink(&mut self, sink: Rc<dyn Sink>, fd: RawFd) -> ShResult<RedirGuard> {
-    RedirGuard::from_sink(self, sink, fd)
+  pub(crate) fn apply_sink(sink: Rc<dyn Sink>, fd: RawFd) -> ShResult<RedirGuard> {
+    RedirGuard::from_sink(sink, fd)
   }
-  pub(crate) fn apply_set(&mut self, s: &RedirSet) -> ShResult<RedirGuard> {
-    RedirGuard::from_redirs(self, s)
+  pub(crate) fn apply_set(s: &RedirSet) -> ShResult<RedirGuard> {
+    RedirGuard::from_redirs(s)
   }
-  pub(crate) fn try_apply_set(
-    &mut self,
-    s: &RedirSet,
-    fatal: bool,
-  ) -> ShResult<Option<RedirGuard>> {
-    RedirGuard::try_from_redirs(self, s, fatal)
+  pub(crate) fn try_apply_set(s: &RedirSet, fatal: bool) -> ShResult<Option<RedirGuard>> {
+    RedirGuard::try_from_redirs(s, fatal)
   }
   pub(crate) fn redirect(&mut self, fd: RawFd, chan: Option<Rc<dyn Sink>>) -> Option<Rc<dyn Sink>> {
     // getting 'None' here is equivalent to closing the fd, which is valid
@@ -1165,51 +1135,42 @@ impl RedirGuard {
   fn new() -> Self {
     Self {
       saved: Vec::new(),
-
-      // if this is true and the redirguard drops inside of a Shed::sinks() call,
-      // then the program explodes. be careful!
       active: true,
     }
   }
 
-  fn from_sink(sinks: &mut Sinks, sink: Rc<dyn Sink>, fd: RawFd) -> ShResult<Self> {
+  fn from_sink(sink: Rc<dyn Sink>, fd: RawFd) -> ShResult<Self> {
     let mut guard = Self::new();
-    guard.apply_sink(sinks, fd, Some(sink))?;
+    guard.apply_sink(fd, Some(sink))?;
     Ok(guard)
   }
 
-  fn from_redirs(sinks: &mut Sinks, redirs: &RedirSet) -> ShResult<Self> {
+  fn from_redirs(redirs: &RedirSet) -> ShResult<Self> {
     let mut guard = Self::new();
-    if let Err(e) = guard.apply_set(sinks, redirs) {
-      guard.restore_into(sinks);
-      return Err(e);
-    }
+    // on error the guard drops here and its Drop restores the partial redirs.
+    guard.apply_set(redirs)?;
     Ok(guard)
   }
 
-  fn try_from_redirs(sinks: &mut Sinks, redirs: &RedirSet, fatal: bool) -> ShResult<Option<Self>> {
+  fn try_from_redirs(redirs: &RedirSet, fatal: bool) -> ShResult<Option<Self>> {
     let mut guard = Self::new();
-    if guard.try_apply_set(sinks, redirs, fatal)?.failed() {
+    if guard.try_apply_set(redirs, fatal)?.failed() {
       Ok(None)
     } else {
       Ok(Some(guard))
     }
   }
 
-  pub(crate) fn apply_sink(
-    &mut self,
-    sinks: &mut Sinks,
-    fd: RawFd,
-    sink: Option<Rc<dyn Sink>>,
-  ) -> ShResult<()> {
+  pub(crate) fn apply_sink(&mut self, fd: RawFd, sink: Option<Rc<dyn Sink>>) -> ShResult<()> {
     validate_fd(fd)?;
 
-    if !self.saved.iter().any(|(f, _)| *f == fd) {
-      // only save once
-      self.saved.push((fd, sinks.get(fd)));
-    }
-
-    sinks.redirect(fd, sink);
+    Shed::sinks(|sinks| {
+      if !self.saved.iter().any(|(f, _)| *f == fd) {
+        // only save once
+        self.saved.push((fd, sinks.get(fd)));
+      }
+      sinks.redirect(fd, sink);
+    });
 
     Ok(())
   }
@@ -1218,24 +1179,17 @@ impl RedirGuard {
   ///
   /// Swaps the current sink for the target fd with the new sink specified by the redirection spec.
   /// Swaps it back on drop, unless [`RedirGuard::persist()`] is called.
-  pub(crate) fn apply(&mut self, sinks: &mut Sinks, r: &RedirSpec) -> ShResult<()> {
+  pub(crate) fn apply(&mut self, r: &RedirSpec) -> ShResult<()> {
     let fd = r.target_fd();
-    let sink = r.as_sink(sinks)?;
-    validate_fd(fd)?;
-
-    self.apply_sink(sinks, fd, sink)
+    // resolve before taking the borrow: as_sink runs expansion, which can run
+    // command substitutions that re-enter the table.
+    let sink = r.as_sink()?;
+    self.apply_sink(fd, sink)
   }
 
-  fn try_apply_set(
-    &mut self,
-    sinks: &mut Sinks,
-    s: &RedirSet,
-    fatal: bool,
-  ) -> ShResult<RedirResult> {
-    if let Err(e) = self.apply_set(sinks, s) {
-      // unwind the partially-applied redirs through `sinks` (not Drop), so a guard
-      // dropped inside this `Shed::sinks_mut` borrow can't re-enter it and panic
-      self.restore_into(sinks);
+  fn try_apply_set(&mut self, s: &RedirSet, fatal: bool) -> ShResult<RedirResult> {
+    if let Err(e) = self.apply_set(s) {
+      self.restore_into();
       if fatal {
         return Err(e);
       }
@@ -1246,20 +1200,22 @@ impl RedirGuard {
     Ok(RedirResult::Success)
   }
 
-  pub(crate) fn apply_set(&mut self, sinks: &mut Sinks, s: &RedirSet) -> ShResult<()> {
+  pub(crate) fn apply_set(&mut self, s: &RedirSet) -> ShResult<()> {
     for r in s.specs() {
-      self.apply(sinks, r)?;
+      self.apply(r)?;
     }
 
     Ok(())
   }
 
-  /// Unwind the applied redirs immediately, using a `Sinks` we already hold, and
-  /// disarm so the eventual `Drop` is a no-op (and never re-enters `Shed::sinks_mut`).
-  fn restore_into(&mut self, sinks: &mut Sinks) {
-    for (fd, old) in self.saved.drain(..).rev() {
-      sinks.redirect(fd, old);
-    }
+  /// Unwind the applied redirs immediately and disarm, so the eventual `Drop`
+  /// is a no-op.
+  fn restore_into(&mut self) {
+    Shed::sinks(|sinks| {
+      for (fd, old) in self.saved.drain(..).rev() {
+        sinks.redirect(fd, old);
+      }
+    });
     self.active = false;
   }
 
@@ -1281,8 +1237,12 @@ impl Drop for RedirGuard {
       return;
     }
 
-    Shed::sinks(|s| self.restore_into(s));
+    self.restore_into();
   }
+}
+
+pub(crate) fn stdin_is_tty() -> bool {
+  Shed::sinks(Sinks::get_stdin).is_some_and(|s| s.isatty())
 }
 
 // TODO: drop impl
@@ -1295,16 +1255,8 @@ pub(super) fn stdin_sink() -> ShResult<Rc<dyn Sink>> {
   Shed::sinks(Sinks::get_stdin).ok_or_else(|| ShErr::from(ebadf()))
 }
 
-pub(super) fn stdout_fileno() -> BorrowedFd<'static> {
-  unsafe { BorrowedFd::borrow_raw(STDOUT_FILENO) }
-}
-
 pub(crate) fn stdout_sink() -> ShResult<Rc<dyn Sink>> {
   Shed::sinks(Sinks::get_stdout).ok_or_else(|| ShErr::from(ebadf()))
-}
-
-pub(super) fn stderr_fileno() -> BorrowedFd<'static> {
-  unsafe { BorrowedFd::borrow_raw(STDERR_FILENO) }
 }
 
 pub(crate) fn stderr_sink() -> ShResult<Rc<dyn Sink>> {
@@ -1522,7 +1474,7 @@ pub(super) fn capture_command(
       let _stdin_r_keep_alive = stdin_pipe.map(|p| p.into_child(&mut specs));
       let redirs: RedirSet = specs.into();
       // TODO: make sure this is the correct migration for "or_fatal()?"
-      let _guard = Shed::sinks(|s| s.apply_set(&redirs));
+      let _guard = Sinks::apply_set(&redirs);
 
       execute::catch_exit(
         || execute::exec_nonint(cmd.into(), name.cloned()),
@@ -1669,18 +1621,17 @@ pub(super) fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShRes
 /// Read all bytes from stdin into a vector, returning an error if the read fails.
 /// If a SIGINT is pending, set the status to 130 and return an empty vector.
 pub(super) fn read_input() -> ShResult<Vec<u8>> {
-  let _guard = isatty(stdin_fileno())
-    .unwrap_or(false)
-    .then(|| Shed::term_mut(Terminal::prepare_for_exec));
+  let _guard = stdin_is_tty().then(|| Shed::term_mut(Terminal::prepare_for_exec));
+  let sink = stdin_sink()?;
 
   let mut input = vec![];
   let mut read_buf = [0u8; 4096];
 
   loop {
-    match read(stdin_fileno(), &mut read_buf) {
+    match sink.read(&mut read_buf) {
       Ok(0) => break,
       Ok(n) => input.extend_from_slice(&read_buf[..n]),
-      Err(Errno::EINTR) => {
+      Err(e) if e.kind() == io::ErrorKind::Interrupted => {
         if signal::sigint_pending() {
           state::Shed::set_status(130);
           return Ok(vec![]);
@@ -1699,33 +1650,6 @@ pub(super) fn read_input() -> ShResult<Vec<u8>> {
 pub(crate) mod tests {
   use crate::tests::testutil::{TestGuard, has_cmd, has_cmds, test_input};
   use pretty_assertions::assert_eq;
-
-  // A dup/close redirection error (e.g. `>&9` on a closed fd) must be able to
-  // point at the operator, like file redirects do, so user-facing specs carry
-  // the operator span. Internally synthesized specs (pipe wiring, `|&`
-  // desugaring) have no source location and carry none.
-  #[test]
-  fn dup_and_close_specs_carry_operator_span() {
-    use super::{RedirSpec, RedirType};
-    use crate::eval::lex::Span;
-
-    let span = Span::new(0..3, "2>&".into());
-
-    assert!(
-      RedirSpec::dup_spanned(1, 2, RedirType::Output, Some(span.clone()))
-        .span()
-        .is_some(),
-      "a dup built from source should retain its operator span"
-    );
-    assert!(
-      RedirSpec::close(3, Some(span)).span().is_some(),
-      "a close built from source should retain its operator span"
-    );
-    assert!(
-      RedirSpec::dup(1, 2, RedirType::Output).span().is_none(),
-      "an internally synthesized dup has no source span"
-    );
-  }
 
   // Run a command line and assert its captured stdout. `needs` skips the test
   // when the listed external commands aren't installed.

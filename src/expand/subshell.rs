@@ -113,7 +113,7 @@ pub(crate) fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
 
   {
     // apply write in here
-    Shed::sinks(|s| s.apply_sink(write, STDOUT_FILENO))?;
+    let _guard = Sinks::apply_sink(write, STDOUT_FILENO)?;
     let _ceiling = guards::isolation_guard(None);
 
     if let Err(e) = execute::exec_nonint(raw.into(), Some("command_sub".into())) {

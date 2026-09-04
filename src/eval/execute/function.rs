@@ -14,7 +14,7 @@ use super::{AssignBehavior, Ast, KEYWORDS, NdRule, NodeId, Tk};
 use crate::{
   defer,
   eval::parse::NdFlags,
-  procio::RedirSet,
+  procio::{RedirSet, Sinks},
   sherr,
   state::{
     Shed,
@@ -163,7 +163,7 @@ impl super::Dispatcher {
     Self::set_assignments(tree, &tree[*assignments], AssignBehavior::Export)?;
 
     let redirs = RedirSet::from(&tree[func.redirs]);
-    let _guard = match Shed::sinks(|s| s.try_apply_set(&redirs, false)) {
+    let _guard = match Sinks::try_apply_set(&redirs, false) {
       Ok(Some(g)) => g,
       Ok(None) => return Ok(()),
       Err(e) => return Err(e),

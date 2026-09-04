@@ -18,8 +18,6 @@ use crate::{
   varstr,
 };
 
-use super::FdWriter;
-
 pub(crate) type ShResult<T> = Result<T, ShErr>;
 
 pub(crate) struct ColorRng {
@@ -548,7 +546,9 @@ impl ShErr {
       with_frames
     };
 
-    error.print_error_internal(&mut FdWriter(procio::stderr_fileno()));
+    if let Ok(sink) = procio::stderr_sink() {
+      error.print_error_internal(&mut procio::SinkIo(sink));
+    }
   }
 }
 

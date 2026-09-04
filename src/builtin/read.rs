@@ -1,7 +1,7 @@
 use std::{io, time::Duration};
 
 use bitflags::bitflags;
-use nix::{poll::PollTimeout, unistd};
+use nix::poll::PollTimeout;
 
 use crate::{
   builtin::quote,
@@ -111,15 +111,13 @@ impl super::Builtin for Read {
       out!("{p}");
     }
 
-    let _guard = unistd::isatty(procio::stdin_fileno())
-      .unwrap_or(false)
-      .then(|| {
-        if flags.contains(ReadFlags::NO_ECHO) {
-          Shed::term_mut(Terminal::cooked_no_echo_guard)
-        } else {
-          Shed::term_mut(Terminal::cooked_mode_guard)
-        }
-      });
+    let _guard = procio::stdin_is_tty().then(|| {
+      if flags.contains(ReadFlags::NO_ECHO) {
+        Shed::term_mut(Terminal::cooked_no_echo_guard)
+      } else {
+        Shed::term_mut(Terminal::cooked_mode_guard)
+      }
+    });
 
     let input = do_read(
       delim,

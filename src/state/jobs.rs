@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::defer;
+use crate::{defer, procio};
 use ariadne::Fmt;
 use bitflags::bitflags;
 use itertools::izip;
@@ -15,7 +15,7 @@ use nix::{
     signal::{Signal, kill, killpg},
     wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid},
   },
-  unistd::{Pid, getpgrp, getpid, setpgid, write},
+  unistd::{Pid, getpgrp, getpid, setpgid},
 };
 use yansi::Color;
 
@@ -28,7 +28,6 @@ use crate::{
 use super::{
   ShResult, Shed,
   meta::CmdTimer,
-  procio::stdout_fileno,
   sherr,
   signal::{disable_reaping, enable_reaping},
   system_msg,
@@ -925,7 +924,7 @@ impl JobTab {
       }
       let mut line = job.display_bytes(&marker_order, flags);
       line.push(b'\n');
-      write(stdout_fileno(), &line)?;
+      procio::out_bytes(&line);
       if job
         .get_stats()
         .iter()

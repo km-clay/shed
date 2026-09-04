@@ -91,7 +91,7 @@ macro_rules! assert_status_ne {
 
 use crate::{
   eval::{NdKind, execute::exec_nonint, lex::LexFlags},
-  procio::{RedirGuard, RedirSet, RedirSpec, RedirType},
+  procio::{RedirGuard, RedirSet, RedirSpec, RedirType, Sinks},
   readline::{restore_registers, save_registers},
   state::{self, Shed, meta::MetaTab},
 };
@@ -234,7 +234,7 @@ impl TestGuard {
       RedirSpec::dup(pty_slave.as_raw_fd(), 2, RedirType::Output),
     ]
     .into();
-    let redir_guard = Shed::sinks(|s| s.apply_set(&redirs)).unwrap();
+    let redir_guard = Sinks::apply_set(&redirs).unwrap();
 
     let old_cwd = env::current_dir().unwrap();
     let saved_env = env::vars().collect();

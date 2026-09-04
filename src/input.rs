@@ -5,8 +5,6 @@
 
 use std::{path::Path, sync::atomic::Ordering};
 
-use nix::unistd;
-
 use crate::{
   errln,
   eval::execute,
@@ -49,7 +47,7 @@ fn execute_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
     // script path argument
     let path = args.script_args.remove(0);
     run_script(path, args.script_args)
-  } else if !unistd::isatty(procio::stdin_fileno()).unwrap_or(false) {
+  } else if !procio::stdin_is_tty() {
     // piped input
     read_commands(args.script_args)
   } else {
@@ -68,7 +66,7 @@ fn collect_input(args: &mut lifecycle::ShedArgs) -> ShResult<Option<String>> {
   } else if !args.script_args.is_empty() {
     // script path argument
     std::fs::read_to_string(args.script_args.remove(0))?
-  } else if !unistd::isatty(procio::stdin_fileno()).unwrap_or(false) {
+  } else if !procio::stdin_is_tty() {
     // piped input
     procio::bytes_to_string(procio::read_input()?)
   } else {

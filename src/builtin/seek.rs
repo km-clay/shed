@@ -1,8 +1,6 @@
-use std::os::fd::BorrowedFd;
+use std::io;
 
-use nix::unistd::{Whence, lseek};
-
-use crate::{outln, sherr, util, util::error::ShResult};
+use crate::{outln, sherr, state::Shed, util, util::error::ShResult};
 
 use super::opt::OptSpec;
 
@@ -55,20 +53,19 @@ impl super::Builtin for Seek {
       );
     };
 
-    let whence = if cursor_rel {
-      Whence::SeekCur
+    let seek_from = if cursor_rel {
+      io::SeekFrom::Current(offset)
     } else if end_rel {
-      Whence::SeekEnd
+      io::SeekFrom::End(offset)
     } else {
-      Whence::SeekSet
+      io::SeekFrom::Start(offset.cast_unsigned())
     };
 
-    let new_off = lseek(
-      unsafe { BorrowedFd::borrow_raw(fd.cast_signed()) }, // lseek will validate this for us
-      offset,
-      whence,
-    )
-    .map_err(|e| sherr!(ExecFail @ span, "lseek failed: {e}"))?;
+    let sink = Shed::sinks(|s| s.get(fd.cast_signed()))
+      .ok_or_else(|| sherr!(ExecFail @ span.clone(), "lseek failed: EBADF: Bad file number"))?;
+    let new_off = sink
+      .seek(seek_from)
+      .map_err(|e| sherr!(ExecFail @ span.clone(), "lseek failed: {e}"))?;
 
     outln!("{new_off}");
 

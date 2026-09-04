@@ -5,7 +5,6 @@
 
 use std::io;
 
-use nix::unistd;
 use regex::Regex;
 
 use yansi::Style;
@@ -111,11 +110,11 @@ pub(super) struct HelpPager {
 
 impl HelpPager {
   pub(super) fn new(content: &str, scroll_offset: usize, filename: Option<String>) -> Option<Self> {
-    if !unistd::isatty(procio::stdout_fileno()).unwrap_or(false) {
+    if !procio::stdout_sink().is_ok_and(|s| s.isatty()) {
       // If we're not in a terminal, just print the content and exit
       // Someone could be piping the output, like `help | grep foo`
-      unistd::write(procio::stdout_fileno(), content.as_bytes()).ok();
-      unistd::write(procio::stdout_fileno(), b"\n").ok();
+      procio::out_bytes(content.as_bytes());
+      procio::out_bytes(b"\n");
       return None;
     }
     let mut content = StyledHelp::new(content);

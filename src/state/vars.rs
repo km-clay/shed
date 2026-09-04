@@ -1192,7 +1192,9 @@ impl VarTab {
     let pathbuf_to_string =
       |pb: Result<PathBuf, std::io::Error>| pb.unwrap_or_default().to_string_lossy().to_string();
 
-    let term = if unistd::isatty(procio::stdin_fileno()).unwrap_or_default() {
+    // real fd, not the sink table: this runs during Shed construction, before
+    // the fd table exists — stdin_is_tty() -> Shed::sinks would re-enter init.
+    let term = if unistd::isatty(procio::stdin_fileno()).unwrap_or(false) {
       std::env::var("TERM").unwrap_or_else(|_| "linux".to_string())
     } else {
       "xterm-256color".to_string()

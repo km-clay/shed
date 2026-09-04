@@ -7,7 +7,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{
   defer, errln,
   expand::case,
-  procio::RedirSet,
+  procio::{RedirSet, Sinks},
   sherr, shopt, shopt_mut, signal,
   state::{
     Shed,
@@ -234,7 +234,7 @@ impl super::Dispatcher {
     let redirs = &tree[node.redirs];
 
     let redirs = RedirSet::from(redirs);
-    let guard = match Shed::sinks(|s| s.try_apply_set(&redirs, false)) {
+    let guard = match Sinks::try_apply_set(&redirs, false) {
       Ok(Some(g)) => g,
       Ok(None) => return Ok(()),
       Err(e) => return Err(e),
@@ -276,7 +276,7 @@ impl super::Dispatcher {
     let span = tree.span_for(*body);
 
     let redirs = RedirSet::from(&tree[subsh.redirs]);
-    let _guard = match Shed::sinks(|s| s.try_apply_set(&redirs, false)) {
+    let _guard = match Sinks::try_apply_set(&redirs, false) {
       Ok(Some(g)) => g,
       Ok(None) => return Ok(()),
       Err(e) => return Err(e),

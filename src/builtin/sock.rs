@@ -2,13 +2,14 @@ use std::{
   io,
   net::{TcpListener, TcpStream},
   os::{
-    fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
+    fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd},
     unix::{
       fs::FileTypeExt,
       net::{UnixListener, UnixStream},
     },
   },
   path::PathBuf,
+  rc::Rc,
 };
 
 // The abstract namespace only exists on Linux-like platforms, so the address
@@ -29,7 +30,9 @@ use nix::{
 
 use super::opt::{Opt, OptSpec};
 use crate::{
-  eval, lifecycle, procio, sherr, shopt, signal,
+  eval, lifecycle,
+  procio::{self, OsSink, Sink},
+  sherr, shopt, signal,
   state::{
     Shed,
     vars::{VarFlags, VarKind, VarStr},
@@ -351,15 +354,10 @@ fn install_socket_fd(
   var_name: Option<VarStr>,
   default_var: &str,
 ) -> ShResult<()> {
-  let fd = if let Some(fd) = target_fd {
-    // Stage high first so the user asking for e.g. `3` can't collide with the
-    // fd the socket happened to be allocated on.
-    let staged = procio::move_high_no_cloexec(owned)?;
-    procio::Redir::new(fd, staged).apply()?;
-    fd
-  } else {
-    procio::move_high_no_cloexec(owned)?.into_raw_fd()
-  };
+  let staged = procio::move_high(owned)?;
+  let fd = target_fd.unwrap_or_else(|| staged.as_raw_fd());
+  let sink: Rc<dyn Sink> = Rc::new(OsSink::new(staged));
+  Shed::sinks(|s| s.redirect(fd, Some(sink)));
 
   match (target_fd, var_name) {
     (None, None) => {
@@ -457,9 +455,12 @@ impl Accept {
       ForkResult::Child => {
         lifecycle::setup_child();
 
-        nix::unistd::dup2_stdin(&conn).ok();
-        nix::unistd::dup2_stdout(&conn).ok();
-        std::mem::drop(conn);
+        let conn_sink: Rc<dyn Sink> = Rc::new(OsSink::new(conn));
+        Shed::sinks(|s| {
+          s.redirect(libc::STDIN_FILENO, Some(conn_sink.clone()));
+          s.redirect(libc::STDOUT_FILENO, Some(conn_sink));
+          s.commit_redirects().ok();
+        });
         nix::unistd::close(listen).ok();
 
         nix::unistd::setpgid(Pid::from_raw(0), Pid::from_raw(0)).ok();

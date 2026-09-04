@@ -20,7 +20,9 @@ use crate::{
   HashSet, autocmd,
   builtin::{self, Builtin},
   eval::parse::NdFlags,
-  lifecycle, sherr, signal, socket,
+  lifecycle,
+  procio::Sinks,
+  sherr, signal, socket,
   state::{
     Shed, cmd, jobs::ChildProc, meta::MetaTab, params, shopt, terminal::Terminal, vars::VarStr,
   },
@@ -69,7 +71,7 @@ impl super::Dispatcher {
           return Ok(());
         }
       }
-      match Shed::sinks(|s| s.try_apply_set(&tree[cmd.redirs].into(), false)) {
+      match Sinks::try_apply_set(&tree[cmd.redirs].into(), false) {
         Ok(Some(_)) => {
           // command has only redirections: status 0 if it succeeded
           // then throw the guard away and return here
@@ -94,7 +96,7 @@ impl super::Dispatcher {
     // POSIX 2.8.1: a redirection failure on an ordinary command is non-fatal
     let fatal = !Shed::term(Terminal::interactive)
       && builtin::lookup_builtin(cmd_name.as_bytes()).is_some_and(Builtin::is_special);
-    let _guard = match Shed::sinks(|s| s.try_apply_set(&tree[cmd.redirs].into(), fatal)) {
+    let _guard = match Sinks::try_apply_set(&tree[cmd.redirs].into(), fatal) {
       Ok(Some(g)) => g,
       Ok(None) => return Ok(()),
       Err(e) => return Err(e),

@@ -73,9 +73,6 @@ impl Node {
     };
     argv.first()
   }
-  pub(crate) fn redirs_empty(&self) -> bool {
-    self.redirs.is_none_or(RedirRange::is_empty)
-  }
   /// Mark this node as exempt from `set -e`
   ///
   /// Unless it is already marked as `IS_ERR`, in which case do nothing

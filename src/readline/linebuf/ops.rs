@@ -1,4 +1,4 @@
-use nix::{libc::STDIN_FILENO, unistd::isatty};
+use nix::libc::STDIN_FILENO;
 use std::fmt::{Display, Write};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
@@ -82,7 +82,7 @@ impl super::LineBuf {
       } else if let Some(pre) = height.strip_suffix('%')
         && let Ok(num) = pre.parse::<usize>()
       {
-        if !isatty(procio::stdin_fileno()).unwrap_or_default() {
+        if !procio::stdin_is_tty() {
           return DEFAULT_VIEWPORT_HEIGHT;
         }
         let (_, rows) = terminal::get_win_size(STDIN_FILENO);
@@ -91,7 +91,7 @@ impl super::LineBuf {
         log::warn!(
           "Invalid viewport height shopt value: '{height}', using 50% of terminal height as default",
         );
-        if !isatty(procio::stdin_fileno()).unwrap_or_default() {
+        if !procio::stdin_is_tty() {
           return DEFAULT_VIEWPORT_HEIGHT;
         }
         let (_, rows) = terminal::get_win_size(STDIN_FILENO);

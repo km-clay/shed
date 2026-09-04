@@ -186,8 +186,7 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
     }
   }
 
-  let stdin = procio::stdin_fileno();
-  let is_tty = unistd::isatty(stdin).unwrap_or(false);
+  let is_tty = procio::stdin_is_tty();
   let _guard = Shed::term_mut(|t| t.interactive_guard(is_tty));
   let name = args
     .first()

@@ -126,9 +126,9 @@ impl super::Dispatcher {
       if i == tail_start {
         // the rest of these are non-forking builtins
         if let Some(read) = prev_read.take() {
-          Shed::sinks(|s| guard.apply_sink(s, STDIN_FILENO, Some(read)))?;
+          guard.apply_sink(STDIN_FILENO, Some(read))?;
         }
-        Shed::sinks(|s| guard.apply_set(s, &out_rdrs))?;
+        guard.apply_set(&out_rdrs)?;
         if is_bg {
           let tail: Vec<NodeId> = cmds[i..].to_vec();
           let name = tail
@@ -158,19 +158,19 @@ impl super::Dispatcher {
       }
 
       match (i, prev_read.take()) {
-        (0, _) => Shed::sinks(|s| guard.apply_set(s, &in_rdrs))?,
-        (_, Some(read)) => Shed::sinks(|s| guard.apply_sink(s, 0, Some(read)))?,
+        (0, _) => guard.apply_set(&in_rdrs)?,
+        (_, Some(read)) => guard.apply_sink(0, Some(read))?,
         _ => {}
       }
 
       if i + 1 < num_cmds {
         // middle segment, get pipes
         let (read, write) = Sinks::os_pipes()?;
-        Shed::sinks(|s| guard.apply_sink(s, 1, Some(write)))?;
+        guard.apply_sink(1, Some(write))?;
         prev_read = Some(read);
       } else {
         // last segment, apply output redirs
-        Shed::sinks(|s| guard.apply_set(s, &out_rdrs))?;
+        guard.apply_set(&out_rdrs)?;
       }
 
       let cmd_node = &tree[*cmd];
@@ -274,12 +274,12 @@ impl super::Dispatcher {
       let mut guard = Sinks::redir_scope();
 
       if let Some(read) = prev_read.take() {
-        Shed::sinks(|s| guard.apply_sink(s, 0, Some(read)))?;
+        guard.apply_sink(0, Some(read))?;
       }
 
       if i != last {
         let (read, write) = Sinks::sink_pipes();
-        Shed::sinks(|s| guard.apply_sink(s, 1, Some(write)))?;
+        guard.apply_sink(1, Some(write))?;
         prev_read = Some(read);
       }
 
