@@ -11,7 +11,7 @@ pub(crate) mod stream;
 pub(crate) mod subshell;
 pub(crate) mod var;
 
-use std::{convert::Into, rc::Rc};
+use std::{convert::Into, sync::Arc};
 
 use crate::{
   eval::lex::{Tk, TkFlags, TkRule},
@@ -48,7 +48,7 @@ impl Tk {
     let class = TkRule::Expanded { exp: exp.into() };
     Ok(Self { class, span, flags })
   }
-  pub(crate) fn expand_to_words(&self) -> ShResult<Rc<[VarStr]>> {
+  pub(crate) fn expand_to_words(&self) -> ShResult<Arc<[VarStr]>> {
     if let TkRule::Expanded { exp } = &self.class {
       return Ok(exp.clone());
     }
@@ -100,7 +100,7 @@ impl Tk {
     Ok(exp)
   }
   /// Perform word splitting
-  pub(crate) fn get_words(&self) -> Rc<[VarStr]> {
+  pub(crate) fn get_words(&self) -> Arc<[VarStr]> {
     match &self.class {
       TkRule::Expanded { exp } => exp.clone(),
       _ => [self.as_bytes().into()].into(),

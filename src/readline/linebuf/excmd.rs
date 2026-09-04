@@ -2,8 +2,10 @@ use std::{
   fs::OpenOptions,
   io::Write,
   path::PathBuf,
-  rc::Rc,
-  sync::atomic::{AtomicUsize, Ordering},
+  sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+  },
 };
 
 use crate::{
@@ -590,7 +592,7 @@ impl super::LineBuf {
       }
       WriteDest::Cmd(cmd) => {
         let buf = self.to_string();
-        let sink: Rc<dyn Sink> = Rc::new(BufSink::from_bytes(buf.as_bytes()));
+        let sink: Arc<dyn Sink> = Arc::new(BufSink::from_bytes(buf.as_bytes()));
         let _guard = Sinks::apply_sink(sink, STDIN_FILENO)?;
 
         autocmd!(PreCmd);

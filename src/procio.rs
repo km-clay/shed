@@ -27,6 +27,7 @@ use std::{
   os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
   path::Path,
   rc::Rc,
+  sync::{Arc, Mutex, OnceLock},
 };
 
 use bstr::ByteSlice;
@@ -583,10 +584,10 @@ impl RedirSpec {
   /// it must be called *outside* a [`Shed::sinks()`] borrow: expansion can run
   /// command substitutions that re-enter the table. The dup arms take their own
   /// brief borrow to read the current fd.
-  pub(crate) fn as_sink(&self) -> ShResult<Option<Rc<dyn Sink>>> {
-    let sink: Option<Rc<dyn Sink>> = match self {
+  pub(crate) fn as_sink(&self) -> ShResult<Option<Arc<dyn Sink>>> {
+    let sink: Option<Arc<dyn Sink>> = match self {
       RedirSpec::File { path, mode, .. } => {
-        Some(Rc::new(OsSink::new(open_redir_file(*mode, path)?)))
+        Some(Arc::new(OsSink::new(open_redir_file(*mode, path)?)))
       }
       RedirSpec::Dup { from, .. } => Some(Shed::sinks(|s| s.get(*from)).ok_or_else(ebadf)?),
       RedirSpec::DupExpr { word, .. } => match expand_fd(word)? {
@@ -612,7 +613,7 @@ impl RedirSpec {
           buf.as_bytes().to_vec()
         };
 
-        Some(Rc::new(BufSink::from_bytes(&bytes)) as Rc<dyn Sink>)
+        Some(Arc::new(BufSink::from_bytes(&bytes)) as Arc<dyn Sink>)
       }
       RedirSpec::Close { .. } => None,
     };
@@ -675,7 +676,7 @@ impl From<RedirSpec> for RedirSet {
 /// This trait is used by the [`Sinks`] struct, which is `shed`'s virtual FD table. Having a virtual
 /// fd table allows us to also do I/O redirection internally, and keep pipelines in-process if forking
 /// is unnecessary (e.g. a pipeline with only builtins)
-pub(crate) trait Sink {
+pub(crate) trait Sink: Send + Sync {
   fn read(&self, buf: &mut [u8]) -> io::Result<usize>;
   fn write(&self, buf: &[u8]) -> io::Result<usize>;
   fn flush(&self) -> io::Result<()>;
@@ -724,43 +725,43 @@ pub(crate) fn drain_sink(sink: &dyn Sink) -> io::Result<Vec<u8>> {
 }
 
 pub(crate) struct BufSink {
-  buf: RefCell<Cursor<Vec<u8>>>,
+  buf: Mutex<Cursor<Vec<u8>>>,
 
   /// If this buffer ever needs to be used across a fork/exec boundary, we can
   /// lazily create an OS-level fd for it and cache it in this field.
-  os_fd: OnceCell<OwnedFd>,
+  os_fd: OnceLock<OwnedFd>,
 }
 
 impl BufSink {
   pub(crate) fn from_bytes(bytes: &[u8]) -> Self {
     Self {
-      buf: RefCell::new(Cursor::new(bytes.to_vec())),
-      os_fd: OnceCell::new(),
+      buf: Mutex::new(Cursor::new(bytes.to_vec())),
+      os_fd: OnceLock::new(),
     }
   }
 }
 
 impl Sink for BufSink {
   fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-    self.buf.borrow_mut().read(buf)
+    self.buf.lock().unwrap().read(buf)
   }
   fn write(&self, buf: &[u8]) -> io::Result<usize> {
-    self.buf.borrow_mut().write(buf)
+    self.buf.lock().unwrap().write(buf)
   }
   fn flush(&self) -> io::Result<()> {
-    self.buf.borrow_mut().flush()
+    self.buf.lock().unwrap().flush()
   }
   fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
     // BufSink is a fixed-size buffer, so we don't use the timeout here.
     // It either has data or it doesn't, it won't receive any more.
-    let cur = self.buf.borrow();
+    let cur = self.buf.lock().unwrap();
     Ok(cur.get_ref().len().saturating_sub(cur.position() as usize))
   }
   fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
     match self.os_fd.get() {
       None => {
         let fd = {
-          let cur = self.buf.borrow();
+          let cur = self.buf.lock().unwrap();
           let remaining = &cur.get_ref()[cur.position() as usize..];
           let fd = scratch_fd()?;
           write_all_to_fd(fd.as_fd(), remaining);
@@ -775,10 +776,10 @@ impl Sink for BufSink {
     }
   }
   fn seek(&self, pos: io::SeekFrom) -> io::Result<u64> {
-    self.buf.borrow_mut().seek(pos)
+    self.buf.lock().unwrap().seek(pos)
   }
   fn has_data(&self) -> bool {
-    let cur = self.buf.borrow();
+    let cur = self.buf.lock().unwrap();
     (cur.position() as usize) < cur.get_ref().len()
   }
   fn kind(&self) -> SinkKind {
@@ -794,13 +795,13 @@ pub(crate) struct PipeBuf {
 }
 
 pub(crate) enum PipeSink {
-  Write(Rc<RefCell<PipeBuf>>),
-  Read(Rc<RefCell<PipeBuf>>),
+  Write(Arc<Mutex<PipeBuf>>),
+  Read(Arc<Mutex<PipeBuf>>),
 }
 
 impl PipeSink {
   fn new() -> (Self, Self) {
-    let buf = Rc::new(RefCell::new(PipeBuf {
+    let buf = Arc::new(Mutex::new(PipeBuf {
       queue: VecDeque::new(),
       writer_open: true,
       limit: *shopt!(core.max_read_limit) as usize,
@@ -814,7 +815,7 @@ impl Sink for PipeSink {
   fn read(&self, out: &mut [u8]) -> io::Result<usize> {
     match self {
       Self::Read(buf) => {
-        let mut buf = buf.borrow_mut();
+        let mut buf = buf.lock().unwrap();
         let n = out.len().min(buf.queue.len());
         for (slot, byte) in out.iter_mut().zip(buf.queue.drain(..n)) {
           *slot = byte;
@@ -827,7 +828,7 @@ impl Sink for PipeSink {
   fn write(&self, buf: &[u8]) -> io::Result<usize> {
     match self {
       Self::Write(b) => {
-        let mut b = b.borrow_mut();
+        let mut b = b.lock().unwrap();
         // already capped: silently drop but report a full write so the producer
         // doesn't error/retry (matches the old OutputSink behavior)
         if b.truncated {
@@ -847,12 +848,12 @@ impl Sink for PipeSink {
   }
   fn was_truncated(&self) -> bool {
     match self {
-      Self::Write(b) | Self::Read(b) => b.borrow().truncated,
+      Self::Write(b) | Self::Read(b) => b.lock().unwrap().truncated,
     }
   }
   fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
     match self {
-      Self::Read(b) => Ok(b.borrow().queue.len()),
+      Self::Read(b) => Ok(b.lock().unwrap().queue.len()),
       Self::Write(_) => Err(ebadf()),
     }
   }
@@ -876,7 +877,7 @@ impl Drop for PipeSink {
   fn drop(&mut self) {
     if let Self::Write(b) = self {
       // EOF equivalent
-      b.borrow_mut().writer_open = false;
+      b.lock().unwrap().writer_open = false;
     }
   }
 }
@@ -952,7 +953,7 @@ pub(crate) enum SinkKind {
 /// Adapter struct for implementing `io::Write`, `io::Read`, and `fmt::Write` for [`Sink`].
 ///
 /// Necessary because the signatures require `&mut self`, and `Sink` is immutable behind an Rc.
-pub(crate) struct SinkIo(pub Rc<dyn Sink>);
+pub(crate) struct SinkIo(pub Arc<dyn Sink>);
 
 impl io::Read for SinkIo {
   fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
@@ -977,19 +978,19 @@ impl std::fmt::Write for SinkIo {
 
 /// The virtual fd table that `shed` uses for I/O redirection
 ///
-/// The wrapped `table` is a [`HashMap`] of [`RawFd`] -> [`Rc<dyn Sink>`]. The `RawFd` is the target fd (e.g. 0 for stdin, 1 for stdout, etc.), and the [`Sink`] is the source of data for that fd.
+/// The wrapped `table` is a [`HashMap`] of [`RawFd`] -> [`Arc<dyn Sink>`]. The `RawFd` is the target fd (e.g. 0 for stdin, 1 for stdout, etc.), and the [`Sink`] is the source of data for that fd.
 /// The Sink can be an OS-level fd (e.g. a file or pipe), or it can be an in-process buffer (e.g. a heredoc or here-string).
 /// The Sink trait allows us to use our own I/O channels in the same way that we use file descriptors.
 ///
 /// The table itself is interacted with arbitrarily using [`Shed::sinks()`] which allows for passing a closure that operates
 /// on a mutable reference to the [`Shed`] struct's `Sinks` instance.
-/// In general, the table operates by passing out [`RedirGuard`]s whenever a redirection happens. Any existing Rc<dyn Sink> for a given fd is stored on the `RedirGuard`, and when the `RedirGuard` is dropped, the old Sink is restored to the table. This allows for arbitrarily nested redirections.
+/// In general, the table operates by passing out [`RedirGuard`]s whenever a redirection happens. Any existing Arc<dyn Sink> for a given fd is stored on the `RedirGuard`, and when the `RedirGuard` is dropped, the old Sink is restored to the table. This allows for arbitrarily nested redirections.
 ///
 /// The table's held redirections are not actually applied until a child forks; this keeps the parent process's fds intact,
 /// similar to how exported variables are not actually applied to the environment until a child process is spawned.
 #[derive(Clone)]
 pub(crate) struct Sinks {
-  table: HashMap<RawFd, Rc<dyn Sink>>,
+  table: HashMap<RawFd, Arc<dyn Sink>>,
 }
 
 impl Debug for Sinks {
@@ -1008,7 +1009,7 @@ impl Debug for Sinks {
 
 impl Sinks {
   pub(crate) fn new() -> Self {
-    let mut table: HashMap<RawFd, Rc<dyn Sink>> = HashMap::default();
+    let mut table: HashMap<RawFd, Arc<dyn Sink>> = HashMap::default();
 
     // seed the standard streams; a stream that was closed at launch (e.g. the
     // shell started with fd 1 shut) simply stays absent -> EBADF on use, which
@@ -1021,16 +1022,16 @@ impl Sinks {
 
     Self { table }
   }
-  pub(crate) fn sink_pipes() -> (Rc<dyn Sink>, Rc<dyn Sink>) {
+  pub(crate) fn sink_pipes() -> (Arc<dyn Sink>, Arc<dyn Sink>) {
     let (read, write) = PipeSink::new();
-    let read = Rc::new(read);
-    let write = Rc::new(write);
+    let read = Arc::new(read);
+    let write = Arc::new(write);
     (read, write)
   }
-  pub(crate) fn os_pipes() -> io::Result<(Rc<dyn Sink>, Rc<dyn Sink>)> {
+  pub(crate) fn os_pipes() -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
     let (r, w) = pipes_high()?;
-    let r = Rc::new(OsSink::new(r));
-    let w = Rc::new(OsSink::new(w));
+    let r = Arc::new(OsSink::new(r));
+    let w = Arc::new(OsSink::new(w));
     Ok((r, w))
   }
   /// Get an empty redir guard
@@ -1049,7 +1050,7 @@ impl Sinks {
     }
     Ok(())
   }
-  pub(crate) fn get(&mut self, fd: RawFd) -> Option<Rc<dyn Sink>> {
+  pub(crate) fn get(&mut self, fd: RawFd) -> Option<Arc<dyn Sink>> {
     if let Some(s) = self.table.get(&fd) {
       return Some(s.clone());
     }
@@ -1059,20 +1060,20 @@ impl Sinks {
     // pty in tests, rusqlite's handle, a socket, ...) double-closes it and trips
     // the io-safety abort. `dup_high` also fails (EBADF -> None) if fd is closed.
     let owned = dup_high(unsafe { BorrowedFd::borrow_raw(fd) }).ok()?;
-    let sink: Rc<dyn Sink> = Rc::new(OsSink::new(owned));
+    let sink: Arc<dyn Sink> = Arc::new(OsSink::new(owned));
     self.table.insert(fd, sink.clone());
     Some(sink)
   }
-  pub(crate) fn get_stdin(&mut self) -> Option<Rc<dyn Sink>> {
+  pub(crate) fn get_stdin(&mut self) -> Option<Arc<dyn Sink>> {
     self.get(0)
   }
-  pub(crate) fn get_stdout(&mut self) -> Option<Rc<dyn Sink>> {
+  pub(crate) fn get_stdout(&mut self) -> Option<Arc<dyn Sink>> {
     self.get(1)
   }
-  pub(crate) fn get_stderr(&mut self) -> Option<Rc<dyn Sink>> {
+  pub(crate) fn get_stderr(&mut self) -> Option<Arc<dyn Sink>> {
     self.get(2)
   }
-  pub(crate) fn apply_sink(sink: Rc<dyn Sink>, fd: RawFd) -> ShResult<RedirGuard> {
+  pub(crate) fn apply_sink(sink: Arc<dyn Sink>, fd: RawFd) -> ShResult<RedirGuard> {
     RedirGuard::from_sink(sink, fd)
   }
   pub(crate) fn apply_set(s: &RedirSet) -> ShResult<RedirGuard> {
@@ -1081,7 +1082,11 @@ impl Sinks {
   pub(crate) fn try_apply_set(s: &RedirSet, fatal: bool) -> ShResult<Option<RedirGuard>> {
     RedirGuard::try_from_redirs(s, fatal)
   }
-  pub(crate) fn redirect(&mut self, fd: RawFd, chan: Option<Rc<dyn Sink>>) -> Option<Rc<dyn Sink>> {
+  pub(crate) fn redirect(
+    &mut self,
+    fd: RawFd,
+    chan: Option<Arc<dyn Sink>>,
+  ) -> Option<Arc<dyn Sink>> {
     // getting 'None' here is equivalent to closing the fd, which is valid
     match chan {
       Some(c) => self.table.insert(fd, c),
@@ -1094,10 +1099,10 @@ impl Sinks {
       Some(sink) => sink.has_data(),
     }
   }
-  fn base(fd: RawFd) -> io::Result<Rc<dyn Sink>> {
+  fn base(fd: RawFd) -> io::Result<Arc<dyn Sink>> {
     let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
     let owned = dup_high(borrowed)?;
-    Ok(Rc::new(OsSink::new(owned)))
+    Ok(Arc::new(OsSink::new(owned)))
   }
 }
 
@@ -1113,7 +1118,7 @@ impl RedirResult {
 }
 
 pub(crate) struct RedirGuard {
-  saved: Vec<(RawFd, Option<Rc<dyn Sink>>)>,
+  saved: Vec<(RawFd, Option<Arc<dyn Sink>>)>,
   active: bool,
 }
 
@@ -1139,7 +1144,7 @@ impl RedirGuard {
     }
   }
 
-  fn from_sink(sink: Rc<dyn Sink>, fd: RawFd) -> ShResult<Self> {
+  fn from_sink(sink: Arc<dyn Sink>, fd: RawFd) -> ShResult<Self> {
     let mut guard = Self::new();
     guard.apply_sink(fd, Some(sink))?;
     Ok(guard)
@@ -1161,7 +1166,7 @@ impl RedirGuard {
     }
   }
 
-  pub(crate) fn apply_sink(&mut self, fd: RawFd, sink: Option<Rc<dyn Sink>>) -> ShResult<()> {
+  pub(crate) fn apply_sink(&mut self, fd: RawFd, sink: Option<Arc<dyn Sink>>) -> ShResult<()> {
     validate_fd(fd)?;
 
     Shed::sinks(|sinks| {
@@ -1251,15 +1256,15 @@ pub(super) fn stdin_fileno() -> BorrowedFd<'static> {
   unsafe { BorrowedFd::borrow_raw(STDIN_FILENO) }
 }
 
-pub(super) fn stdin_sink() -> ShResult<Rc<dyn Sink>> {
+pub(super) fn stdin_sink() -> ShResult<Arc<dyn Sink>> {
   Shed::sinks(Sinks::get_stdin).ok_or_else(|| ShErr::from(ebadf()))
 }
 
-pub(crate) fn stdout_sink() -> ShResult<Rc<dyn Sink>> {
+pub(crate) fn stdout_sink() -> ShResult<Arc<dyn Sink>> {
   Shed::sinks(Sinks::get_stdout).ok_or_else(|| ShErr::from(ebadf()))
 }
 
-pub(crate) fn stderr_sink() -> ShResult<Rc<dyn Sink>> {
+pub(crate) fn stderr_sink() -> ShResult<Arc<dyn Sink>> {
   Shed::sinks(Sinks::get_stderr).ok_or_else(|| ShErr::from(ebadf()))
 }
 

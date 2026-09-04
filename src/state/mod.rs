@@ -16,6 +16,15 @@ use std::{
   time::SystemTime,
 };
 
+use crate::{
+  eval::parse::ast::Ast,
+  state::{
+    jobs::{ChildProc, Job},
+    shopt::ShOpts,
+    vars::{Var, VarStr},
+  },
+};
+
 use super::{
   WtStat, autocmd, builtin, errln, eval, expand, keys, match_loop, procio, readline, sherr,
   shopt as shopt_macro, signal, socket,
@@ -40,11 +49,28 @@ pub(super) mod rc;
 pub(super) mod scopes;
 pub(crate) mod shopt;
 pub(super) mod terminal;
+pub(super) mod timeline;
 pub(super) mod vars;
 
 thread_local! {
   static SHED: Shed = Shed::new();
 }
+
+// These need to be Send + Sync
+const _: () = {
+  const fn assert_send_sync<T: Send + Sync>() {
+    // this function does nothing, but can only take Send+Sync types as type parameters
+    // so this turns the implementation of these traits into a compile time invariant.
+  }
+  let () = assert_send_sync::<VarStr>();
+  let () = assert_send_sync::<Var>();
+  let () = assert_send_sync::<Ast>();
+  let () = assert_send_sync::<LabelBuilder>();
+  let () = assert_send_sync::<Job>();
+  let () = assert_send_sync::<ChildProc>();
+  let () = assert_send_sync::<ShErr>();
+  let () = assert_send_sync::<ShOpts>();
+};
 
 /// Pops a call frame's traceback labels on drop, restoring the context stack
 /// to the length it had before the frame was pushed. See [`Shed::push_call_frame`].

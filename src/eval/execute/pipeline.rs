@@ -9,7 +9,7 @@
 //! * `last`: the last command executes in-process if it is a builtin
 //! * `all`: every command forks, no matter what.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use nix::{
   libc::STDIN_FILENO,
@@ -115,7 +115,7 @@ impl super::Dispatcher {
     // splice and pipefail blame after the forked prefix is waited on.
     let mut tail_statuses: Vec<(i32, Span)> = vec![];
 
-    let mut prev_read: Option<Rc<dyn Sink>> = None;
+    let mut prev_read: Option<Arc<dyn Sink>> = None;
     for (i, cmd) in cmds.iter().enumerate() {
       let mut guard = Sinks::redir_scope();
 
@@ -268,7 +268,7 @@ impl super::Dispatcher {
   ) -> ShResult<Vec<(i32, Span)>> {
     let last = cmds.len().saturating_sub(1);
     let mut statuses = Vec::with_capacity(cmds.len());
-    let mut prev_read: Option<Rc<dyn Sink>> = None;
+    let mut prev_read: Option<Arc<dyn Sink>> = None;
 
     for (i, cmd) in cmds.iter().enumerate() {
       let mut guard = Sinks::redir_scope();

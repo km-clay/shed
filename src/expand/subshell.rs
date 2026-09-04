@@ -1,6 +1,6 @@
 use std::{
   os::fd::{AsFd, AsRawFd},
-  rc::Rc,
+  sync::Arc,
 };
 
 use crate::{
@@ -62,7 +62,7 @@ pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       drop(register_fd);
 
       Shed::sinks(|s| {
-        s.redirect(target_fd, Some(Rc::new(OsSink::new(proc_fd))));
+        s.redirect(target_fd, Some(Arc::new(OsSink::new(proc_fd))));
         s.commit_redirects()
       })?;
 
@@ -158,7 +158,7 @@ pub(crate) fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
       lifecycle::setup_child();
 
       Shed::sinks(|s| {
-        s.redirect(STDOUT_FILENO, Some(Rc::new(OsSink::new(wpipe))));
+        s.redirect(STDOUT_FILENO, Some(Arc::new(OsSink::new(wpipe))));
         s.commit_redirects()
       })?;
 

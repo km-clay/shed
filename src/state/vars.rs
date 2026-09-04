@@ -16,12 +16,13 @@ use std::{
   path::{Path, PathBuf},
   rc::Rc,
   str::FromStr,
+  sync::Arc,
   time::{Duration, Instant},
 };
 
 use bitflags::bitflags;
 use bstr::ByteSlice;
-use hipstr::LocalHipByt as HipByt;
+use hipstr::HipByt;
 use nix::{
   sys::stat,
   unistd::{self, Pid, User},
@@ -470,11 +471,11 @@ impl VarName {
 }
 
 #[derive(Clone)]
-pub(crate) struct MagicVar(Rc<dyn Fn() -> Option<VarStr>>);
+pub(crate) struct MagicVar(Arc<dyn Fn() -> Option<VarStr> + Send + Sync>);
 
-impl<F: Fn() -> Option<VarStr> + 'static> From<F> for MagicVar {
+impl<F: Fn() -> Option<VarStr> + 'static + Send + Sync> From<F> for MagicVar {
   fn from(value: F) -> Self {
-    Self(Rc::new(value))
+    Self(Arc::new(value))
   }
 }
 
@@ -757,8 +758,8 @@ pub(crate) enum VarKind {
   Arr(VecDeque<VarStr>),
   AssocArr(Vec<(VarStr, VarStr)>),
 
-  /// A "magic" variable. Lazily evaluated on access by calling the wrapped function, which can return `None`vars
-  /// It wraps an `Rc<dyn Fn() -> Option<String>>`
+  /// A "magic" variable. Lazily evaluated on access by calling the wrapped function, which can return `None`
+  /// It wraps an `Arc<dyn Fn() -> Option<String>>`
   ///
   /// You can put call parens on the wrapped value directly to obtain the value of the variable.
   /// These aren't currently exposed in the user-facing syntax.
@@ -1530,6 +1531,13 @@ impl VarTab {
       }
       _ => Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name)),
     }
+  }
+  pub(crate) fn put_var(&mut self, name: &str, var: Var) {
+    // zero-validation insertion of variables
+    self.vars.insert(name.to_string(), var);
+  }
+  pub(crate) fn params(&self) -> &HashMap<ShellParam, VarStr> {
+    &self.params
   }
   pub(crate) fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     if let Some(var) = self.vars.get_mut(var_name) {

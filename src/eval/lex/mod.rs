@@ -10,7 +10,7 @@ use std::{
   collections::VecDeque,
   fmt::Display,
   ops::{Bound, Index, Range, RangeBounds, RangeFrom, RangeTo, RangeToInclusive},
-  rc::Rc,
+  sync::Arc,
 };
 
 use bitflags::bitflags;
@@ -355,7 +355,7 @@ pub(crate) enum TkRule {
   /// These are only used as an intermediate state for tokens that are in the process of being expanded.
   /// You can be confident that any token you are working on does not have this rule.
   Expanded {
-    exp: Rc<[VarStr]>,
+    exp: Arc<[VarStr]>,
   },
 }
 

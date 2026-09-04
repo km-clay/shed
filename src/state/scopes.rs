@@ -35,8 +35,11 @@ pub(crate) struct ScopeStack {
 
 impl ScopeStack {
   pub(crate) fn new() -> Self {
+    Self::from_frame(VarTab::new())
+  }
+  pub(crate) fn from_frame(frame: VarTab) -> Self {
     let mut new = Self::default();
-    new.scopes.push(VarTab::new());
+    new.scopes.push(frame);
     let shell_name = std::env::args_os()
       .next()
       .map_or_else(|| VarStr::from("shed"), |a| VarStr::from(a.into_vec()));
@@ -168,6 +171,23 @@ impl ScopeStack {
     }
 
     flat_vars
+  }
+  pub(crate) fn flatten_to_frame(&self) -> VarTab {
+    let mut frame = VarTab::bare();
+
+    for scope in self.scopes_rev() {
+      for (var_name, var) in scope.vars() {
+        frame.put_var(var_name, var.clone());
+      }
+    }
+
+    let argv_scope = self.sh_argv_scope();
+    for (param, val) in argv_scope.params() {
+      frame.set_param(*param, val);
+    }
+    frame.sh_argv_mut().clone_from(argv_scope.sh_argv());
+
+    frame
   }
   pub(crate) fn has_deferred_cmds(&self) -> bool {
     self.cur_scope().has_deferred_cmds()

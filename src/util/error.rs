@@ -6,7 +6,7 @@ use nix::errno::Errno;
 use std::cell::RefCell;
 use std::fmt::{self, Debug, Display};
 use std::io::Write;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::{
   HashMap,
@@ -180,7 +180,7 @@ impl<T> ShResultExt for Result<T, ShErr> {
 #[derive(Clone)]
 pub(crate) enum LabelMsg {
   Eager(VarStr),
-  Lazy(Rc<dyn Fn() -> VarStr>),
+  Lazy(Arc<dyn Fn() -> VarStr + Send + Sync>),
 }
 
 impl Display for LabelMsg {
@@ -210,8 +210,8 @@ impl LabelMsg {
     }
   }
 
-  pub(crate) fn lazy(f: impl Fn() -> VarStr + 'static) -> Self {
-    LabelMsg::Lazy(Rc::new(f))
+  pub(crate) fn lazy(f: impl Fn() -> VarStr + 'static + Send + Sync) -> Self {
+    LabelMsg::Lazy(Arc::new(f))
   }
 }
 
@@ -221,8 +221,8 @@ impl From<VarStr> for LabelMsg {
   }
 }
 
-impl From<Rc<dyn Fn() -> VarStr>> for LabelMsg {
-  fn from(msg: Rc<dyn Fn() -> VarStr>) -> Self {
+impl From<Arc<dyn Fn() -> VarStr + Send + Sync>> for LabelMsg {
+  fn from(msg: Arc<dyn Fn() -> VarStr + Send + Sync>) -> Self {
     LabelMsg::Lazy(msg)
   }
 }
