@@ -68,6 +68,7 @@ _shopt_comp() {
       compact_errors
       max_read_limit
       pipeline_style
+      lastpipe
     )
     local core_desc=(
       "glob patterns match on hidden files"
@@ -79,7 +80,8 @@ _shopt_comp() {
       "whether or not 'echo' expands escape sequences by default"
       "collapse error stack traces to a single call-site label"
       "byte cap for command substitution / pipeline output before truncation"
-      "how pipeline stages run: 'last', 'tail', or 'all'"
+      "how pipeline stages run: 'fork' or 'thread'"
+      "run the last pipeline stage in the current shell if it's a builtin/function"
     )
     local history=(
       auto_save

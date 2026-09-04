@@ -33,7 +33,7 @@ EXTENSIONS                                                  *shed-extensions*
   Utilities ~                                              *shed-ext-util*
 
     `printf %r`   repeat the argument string N times          |builtin-printf|
-    `thru`        fork-free `cat`/`tee` replacement           |builtin-thru|
+    `thru`        fork-free `cat`/`tee` replacement               |builtin-thru|
     `width`       display width of a string in columns        |builtin-width|
     `flog`        write a formatted log message               |builtin-flog|
     `seek`        seek a file descriptor to an offset (lseek) |builtin-seek|
@@ -43,12 +43,13 @@ EXTENSIONS                                                  *shed-extensions*
 
     `arrops`      array push/pop/rotate operations            |builtin-arrops|
     `raise`       raise a user-facing error                   |builtin-raise|
-    `try`/`catch` guarded block, forces errexit + pipefail    |script-try|
+    `try`/`catch` guarded block, forces errexit + pipefail      |script-try|
     `defer`       run a command when the scope exits          |script-defer|
-    `test -i/-F`  integer & float type checks for `[`         |test-numeric|
+    `test -i/-F`  integer & float type checks for `[`           |test-numeric|
     `~uid`        tilde expansion by numeric UID              |tilde-uid|
-    `${...}`      expansion sets `$?` to changed/no-op        |param-status|
-    `core.pipeline_style`  which pipeline stages run in-process  |shopt|
+    `${...}`      expansion sets `$?` to changed/no-op          |param-status|
+    `core.pipeline_style`
+                  thread builtin pipeline stages            |shopt|
 
   Interactive & shell ~                                    *shed-ext-interactive*
 
@@ -73,11 +74,11 @@ DEVIATIONS                                                  *shed-deviations*
                   as its own element. This lets colored, column-
                   aligned command output (`eza`, `ls`, `ps`) split
                   cleanly. Genuine empty fields (zero bytes) are
-                  preserved.                                   |builtin-read|
+                  preserved.                                |builtin-read|
 
   arrays          A bare `$arr` expands to every element of the array,
                   and `${#arr}` is the element count. In `bash`, `$arr`
                   is just `${arr[0]}` and `${#arr}` is the length of
-                  that first element.                          |variables|
+                  that first element.                       |variables|
 
 ==============================================================================

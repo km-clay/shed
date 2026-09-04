@@ -263,9 +263,14 @@
                   description = "Caps the bytes a command substitution or in-process pipeline will buffer before its output is truncated. Accepts a raw byte count or a human-readable size like \"512mb\" or \"1gib\". On truncation, $? is set to 122.";
                 };
                 pipeline_style = lib.mkOption {
-                  type = lib.types.enum ["last" "tail" "all"];
-                  default = "all";
-                  description = "How pipeline stages run relative to the current shell. \"last\": only the final stage runs in-process (earlier stages fork), so variables set in the last stage persist (like bash's lastpipe). \"tail\": the whole trailing run of builtin-only stages runs in-process, enabling fork-free pipelines. \"all\": every stage forks into its own subshell for full POSIX isolation.";
+                  type = lib.types.enum ["fork" "thread"];
+                  default = "fork";
+                  description = "How pipeline stages run. \"fork\": every stage runs in its own forked subshell (matches bash). \"thread\": builtin stages run as in-process threads instead of forking, enabling fork-free pipelines; external stages still fork.";
+                };
+                lastpipe = lib.mkOption {
+                  type = lib.types.bool;
+                  default = true;
+                  description = "Run the final stage of a pipeline in the current shell when it is a builtin or function, so its variable assignments and other side effects persist after the pipeline ends (like bash's \"shopt -s lastpipe\"). When false, the last stage is isolated like every other stage.";
                 };
               };
             };

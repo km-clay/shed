@@ -68,6 +68,7 @@ lib: cfg: let
     "shopt core.compact_errors=${boolToString cfg.shopts.core.compact_errors}"
     "shopt core.max_read_limit=${toString cfg.shopts.core.max_read_limit}"
     "shopt core.pipeline_style='${cfg.shopts.core.pipeline_style}'"
+    "shopt core.lastpipe=${boolToString cfg.shopts.core.lastpipe}"
 
     "shopt history.auto_save=${boolToString cfg.shopts.history.auto_save}"
     "shopt history.ignore_dupes=${boolToString cfg.shopts.history.ignore_dupes}"
