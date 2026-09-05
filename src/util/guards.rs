@@ -96,13 +96,40 @@ pub(crate) fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
   let cwd_guard = cwd_guard();
   let umask_guard = umask_guard();
   let shopt_guard = shopt_guard();
+  let logic_guard = logic_guard();
+  let positional_guard = positional_guard();
   let fork = Shed::meta_mut(|m| m.enter_fork(false));
   guard((), move |()| {
     drop(shopt_guard);
     drop(cwd_guard);
     drop(umask_guard);
+    drop(positional_guard);
+    drop(logic_guard);
     drop(ceiling_guard);
     drop(fork);
+  })
+}
+
+/// Snapshot the function/trap table, restoring it on drop.
+pub(crate) fn logic_guard() -> impl Drop {
+  let saved = Shed::logic(Clone::clone);
+  guard(saved, |saved| {
+    Shed::logic_mut(|l| *l = saved);
+  })
+}
+
+/// Snapshot the positional parameters, restoring them on drop.
+pub(crate) fn positional_guard() -> impl Drop {
+  let saved = Shed::vars(|v| v.sh_argv().clone());
+  guard(saved, |saved| {
+    // restore positional args
+    Shed::vars_mut(|v| {
+      let scope = v.sh_argv_scope_mut();
+      scope.clear_args();
+      for arg in saved.into_iter().skip(1) {
+        scope.bpush_arg(arg);
+      }
+    });
   })
 }
 

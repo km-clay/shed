@@ -668,6 +668,17 @@ fn func_body_brace_grp_leaks_state() {
 }
 
 #[test]
+fn indirect_function_call_runs_in_process() {
+  // Regression: a function invoked through a variable command word (`"$c"`)
+  // must run in the current shell, not a forked subshell — indirect dispatch
+  // and callback patterns depend on it. A fork would lose the assignment.
+  let g = TestGuard::new();
+  test_input("x=outer; f() { x=inner; }; c=f; \"$c\"; echo $x").unwrap();
+  let out = g.read_output();
+  assert_eq!(out, "inner\n");
+}
+
+#[test]
 fn func_body_if() {
   let g = TestGuard::new();
   test_input("f() if true; then echo yes; else echo no; fi; f").unwrap();

@@ -461,11 +461,14 @@ fn validate_bell_style(v: &String) -> Result<(), String> {
   }
 }
 
+/// Controls pipeline forking behavior
 #[derive(Default, Debug, Copy, Clone)]
 pub(crate) enum PipeStyle {
+  /// External commands fork new processes, builtin commands spawn new threads and execute in-process
   #[default]
-  Fork,
   Thread,
+  /// Pipeline segments always fork
+  Fork,
 }
 
 two_way_display! {PipeStyle,

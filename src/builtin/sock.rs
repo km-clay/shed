@@ -357,7 +357,7 @@ fn install_socket_fd(
   let staged = procio::move_high(owned)?;
   let fd = target_fd.unwrap_or_else(|| staged.as_raw_fd());
   let sink: Arc<dyn Sink> = Arc::new(OsSink::new(staged));
-  Shed::sinks(|s| s.redirect(fd, Some(sink)));
+  Shed::sinks(|s| s.redirect(fd, sink));
 
   match (target_fd, var_name) {
     (None, None) => {
@@ -457,8 +457,8 @@ impl Accept {
 
         let conn_sink: Arc<dyn Sink> = Arc::new(OsSink::new(conn));
         Shed::sinks(|s| {
-          s.redirect(libc::STDIN_FILENO, Some(conn_sink.clone()));
-          s.redirect(libc::STDOUT_FILENO, Some(conn_sink));
+          s.redirect(libc::STDIN_FILENO, conn_sink.clone());
+          s.redirect(libc::STDOUT_FILENO, conn_sink);
           s.commit_redirects().ok();
         });
         nix::unistd::close(listen).ok();

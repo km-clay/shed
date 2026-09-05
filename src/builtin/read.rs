@@ -104,7 +104,7 @@ impl super::Builtin for Read {
     // available on stdin right now, non-zero otherwise (matches bash).
     if timeout == Some(0) {
       let has_data = Shed::sinks(Sinks::input_available);
-      return util::with_status(i32::from(has_data));
+      return util::with_status(i32::from(!has_data));
     }
 
     if let Some(p) = prompt {
@@ -861,6 +861,22 @@ mod tests {
     let _g = TestGuard::new();
     // Empty input / EOF should set status 1
     test_input("read < <(echo -n '')").unwrap();
+    assert_eq!(state::Shed::get_status(), 1);
+  }
+
+  #[test]
+  fn read_t0_status_data_available() {
+    // Regression: `read -t 0` must exit 0 when input is available (a refactor
+    // once inverted this, hanging `read -t 0 <fifo || break` FIFO drains).
+    let _g = TestGuard::new();
+    test_input("read -t 0 <<< hello").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn read_t0_status_no_data() {
+    let _g = TestGuard::new();
+    test_input("read -t 0 < <(echo -n '')").unwrap();
     assert_eq!(state::Shed::get_status(), 1);
   }
 

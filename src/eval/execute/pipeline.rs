@@ -123,12 +123,12 @@ impl super::Dispatcher {
       let run_in_shell = lastpipe
         && i == num_cmds - 1
         && node::node_fork_behavior(tree, *cmd) == Some(ForkBehavior::Never);
-      let will_fork = !thread_this_stage && !run_in_shell;
+      let will_fork = (num_cmds > 1 || is_bg) && !thread_this_stage && !run_in_shell;
       let _fork = Shed::meta_mut(|m| m.enter_fork(will_fork));
 
       if run_in_shell {
         if let Some(read) = prev_read.take() {
-          guard.apply_sink(STDIN_FILENO, Some(read))?;
+          guard.apply_sink(STDIN_FILENO, read)?;
         }
         guard.apply_set(&out_rdrs)?;
         if is_bg {
@@ -159,7 +159,7 @@ impl super::Dispatcher {
 
       match (i, prev_read.take()) {
         (0, _) => guard.apply_set(&in_rdrs)?,
-        (_, Some(read)) => guard.apply_sink(0, Some(read))?,
+        (_, Some(read)) => guard.apply_sink(0, read)?,
         _ => {}
       }
 
@@ -170,7 +170,7 @@ impl super::Dispatcher {
         } else {
           Sinks::os_pipes()?
         };
-        guard.apply_sink(1, Some(write))?;
+        guard.apply_sink(1, write)?;
         prev_read = Some(read);
       } else {
         // last segment, apply output redirs
@@ -218,14 +218,18 @@ impl super::Dispatcher {
       // The forked prefix's per-stage codes: the wait only fills PIPESTATUS for
       // a multi-stage job (`Job::pipe_status` bails at len <= 1), so a lone
       // prefix stage's code is just `$?`.
-      let mut codes: Vec<i32> = Shed::vars(|v| v.try_get_arr_elems("PIPESTATUS"))
-        .map(|elems| {
-          elems
-            .iter()
-            .filter_map(|s| s.to_string().parse().ok())
-            .collect()
-        })
-        .unwrap_or_default();
+      let mut codes: Vec<i32> = match num_cmds - 1 {
+        0 => vec![],
+        1 => vec![Shed::get_status()],
+        _ => Shed::vars(|v| v.try_get_arr_elems("PIPESTATUS"))
+          .map(|elems| {
+            elems
+              .iter()
+              .filter_map(|s| s.to_string().parse().ok())
+              .collect()
+          })
+          .unwrap_or_default(),
+      };
       codes.push(status);
 
       let status = if shopt!(set.pipefail) {

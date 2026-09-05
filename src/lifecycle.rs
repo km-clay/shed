@@ -63,6 +63,8 @@ pub(super) struct ShedArgs {
   pub(super) rc_path: Option<String>,
   /// Input is read as a keymap for the line editor (`--edit-script`)
   pub(super) edit_script: bool,
+  /// `group.name=value` shopt assignments to apply at startup (`--shopt`)
+  pub(super) shopts: Vec<String>,
 }
 
 /// Print a short usage synopsis for `--help`.
@@ -79,6 +81,7 @@ fn print_usage() {
      \x1b[1m-w\x1b[0m                      print the welcome message\n  \
      \x1b[1m-o\x1b[0m NAME / +o NAME       enable/disable a `set` option (e.g. -o errexit)\n  \
      \x1b[1m-e\x1b[0m -x -u ...            any short `set` option (see `help set`)\n  \
+     \x1b[1m--shopt\x1b[0m GROUP.NAME=VAL  set a shopt at startup (e.g. core.pipeline_style=thread)\n  \
      \x1b[1m--no-rc\x1b[0m                 skip runtime command files\n  \
      \x1b[1m--rc-path\x1b[0m PATH          use PATH as the runtime commands file\n  \
      \x1b[1m--version\x1b[0m               print version info\n  \
@@ -172,6 +175,12 @@ where
       cfg.rc_path = Some(val);
     }
     "--edit-script" | "--script" => cfg.edit_script = true,
+    "--shopt" => {
+      let val = words.next().map(|(w, _)| w.to_string()).ok_or_else(
+        || sherr!(ParseErr @ span, "shed: --shopt requires a group.name=value argument"),
+      )?;
+      cfg.shopts.push(val);
+    }
     other => return Err(sherr!(ParseErr @ span, "shed: unrecognized option '{other}'")),
   }
   Ok(())
@@ -272,6 +281,14 @@ pub(super) fn setup() -> Option<ShedArgs> {
       Shed::vars_mut(|v| v.set_var("SHED_RC", VarKind::string(path.into()), VarFlags::EXPORT)).ok();
     }
     if let Err(e) = rc::source_env() {
+      e.print_error();
+    }
+  }
+
+  // Apply `--shopt group.name=value` overrides after rc, so an explicit
+  // invocation-time setting wins over whatever the rc configured.
+  for assign in &args.shopts {
+    if let Err(e) = Shed::shopts_mut(|s| s.query(assign)) {
       e.print_error();
     }
   }

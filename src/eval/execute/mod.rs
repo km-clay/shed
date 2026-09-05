@@ -498,7 +498,13 @@ impl Dispatcher {
         if let Some(fd) = self.fork_close_fd {
           let _ = nix::unistd::close(fd);
         }
-        Shed::sinks(|s| s.close_orphan_pipes());
+        if self
+          .job_stack
+          .curr_job_mut()
+          .is_some_and(|j| j.has_thread_members())
+        {
+          Shed::sinks(|s| s.close_orphan_pipes());
+        }
         let _guard = Shed::term_mut(|t| t.interactive_guard(false));
         f(self);
 

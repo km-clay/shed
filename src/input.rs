@@ -160,6 +160,7 @@ mod dispatch_input_tests {
       rc_path: None,
       no_rc: true,
       edit_script: false,
+      shopts: vec![],
     }
   }
 

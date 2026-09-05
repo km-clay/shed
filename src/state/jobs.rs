@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::{defer, procio, state::timeline::StageResult};
+use crate::{defer, procio, state::thread::StageResult};
 use ariadne::Fmt;
 use bitflags::bitflags;
 use itertools::izip;
@@ -315,6 +315,12 @@ impl JobBldr {
       children: vec![],
       send_hup: true,
     }
+  }
+  pub(crate) fn has_thread_members(&self) -> bool {
+    self
+      .children
+      .iter()
+      .any(|m| matches!(m, JobMember::Thread(_)))
   }
   pub(crate) fn push_member(&mut self, member: JobMember) {
     self.children.push(member);

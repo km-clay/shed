@@ -63,7 +63,7 @@ pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       drop(register_fd);
 
       Shed::sinks(|s| {
-        s.redirect(target_fd, Some(Arc::new(OsSink::new(proc_fd))));
+        s.redirect(target_fd, Arc::new(OsSink::new(proc_fd)));
         s.commit_redirects()
       })?;
 
@@ -160,7 +160,7 @@ pub(crate) fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
       lifecycle::setup_child();
 
       Shed::sinks(|s| {
-        s.redirect(STDOUT_FILENO, Some(Arc::new(OsSink::new(wpipe))));
+        s.redirect(STDOUT_FILENO, Arc::new(OsSink::new(wpipe)));
         s.commit_redirects()
       })?;
 
@@ -212,7 +212,7 @@ pub(crate) fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::tests::testutil::TestGuard;
+  use crate::tests::testutil::{TestGuard, test_input};
 
   // ===================== Command Substitution (TestGuard) =====================
 
@@ -282,17 +282,17 @@ mod tests {
     // A function whose body embeds a forking sub in a word must disqualify the
     // caller — the AST walk alone can't see into the body's word tokens. (#145)
     let _g = TestGuard::new();
-    expand_cmd_sub(r#"f() { echo "$(echo 1 | cat)"; }"#).unwrap();
+    test_input(r#"f() { echo "$(echo 1 | cat)"; }"#).unwrap();
     assert!(is_internal("f").is_none());
 
-    expand_cmd_sub(r#"g() { echo "$( (echo x) )"; }"#).unwrap();
+    test_input(r#"g() { echo "$( (echo x) )"; }"#).unwrap();
     assert!(is_internal("g").is_none());
   }
 
   #[test]
   fn is_internal_all_builtin_function_stays_inprocess() {
     let _g = TestGuard::new();
-    expand_cmd_sub(r#"h() { echo "$(echo 1)"; }"#).unwrap();
+    test_input(r#"h() { echo "$(echo 1)"; }"#).unwrap();
     assert!(is_internal("h").is_some());
   }
 

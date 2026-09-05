@@ -29,7 +29,7 @@ use crate::{
     meta::MetaTab,
     params, shopt,
     terminal::Terminal,
-    timeline::StageResult,
+    thread::StageResult,
     vars::VarStr,
   },
   util::{

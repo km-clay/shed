@@ -31,7 +31,7 @@ use std::{
 use bstr::ByteSlice;
 use nix::{
   errno::Errno,
-  fcntl::{FcntlArg, FdFlag, OFlag, fcntl, open},
+  fcntl::{self, FcntlArg, FdFlag, OFlag, fcntl},
   libc::{self, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
   poll::{PollFd, PollFlags, PollTimeout},
   sys::{
@@ -43,7 +43,7 @@ use nix::{
 };
 
 use crate::{
-  HashMap,
+  HashMap, HashSet,
   eval::{
     execute,
     lex::{Span, Tk, TkFlags},
@@ -143,7 +143,7 @@ where
   let _dummies = (3..min_fd)
     .filter_map(|_| {
       // painful to write
-      open(
+      fcntl::open(
         "/dev/null",
         OFlag::O_RDONLY | OFlag::O_CLOEXEC,
         Mode::empty(),
@@ -490,108 +490,53 @@ impl RedirSpec {
       RedirSpec::Buffer { .. } => RedirType::HereDoc,
     }
   }
-  /*
-  pub(crate) fn into_redir(self) -> ShResult<Redir> {
-    match self {
-      RedirSpec::File { fd, path, mode } => {
-        let span = path.span.clone();
-        let path = path
-          .clone()
-          .expand()
-          .map(|tk| tk.get_words())
-          .unwrap_or_default();
-
-        if path.len() != 1 {
-          return Err(sherr!(ExecFail @ span, "Redirection path must expand to exactly one word"));
-        }
-
-        let path = path.iter().next().unwrap();
-
-        let file: OwnedFd = get_redir_file(mode, path)?.into();
-        let file = move_high(file)?;
-        Ok(Redir::new(fd, file))
-      }
-      RedirSpec::Dup { from, to, .. } => {
-        let borrowed = unsafe { BorrowedFd::borrow_raw(from) };
-        let owned = borrowed
-          .try_clone_to_owned()
-          .map_err(|e| sherr!(InternalErr, "Failed to duplicate fd {}: {}", from, e))?;
-        let owned = move_high(owned)?;
-        Ok(Redir::new(to, owned))
-      }
-      RedirSpec::DupExpr { word, to, mode: _ } => {
-        let span = word.span.clone();
-        let words = word
-          .clone()
-          .expand()
-          .map(|tk| tk.get_words())
-          .unwrap_or_default();
-
-        if words.len() != 1 {
-          return Err(sherr!(
-            ExecFail @ span,
-            "ambiguous redirect: file descriptor must expand to a single word"
-          ));
-        }
-        let word_val = words.iter().next().unwrap();
-        let word_val = word_val.to_str_lossy();
-        let src = word_val.trim();
-
-        // A word that expands to `-` closes the target fd, mirroring `>&-`.
-        if src == "-" {
-          return Ok(Redir::close(to));
-        }
-
-        let from = src.parse::<RawFd>().map_err(|_| {
-          sherr!(
-            ExecFail @ span.clone(),
-            "ambiguous redirect: `{src}` is not a valid file descriptor"
-          )
-        })?;
-        let borrowed = unsafe { BorrowedFd::borrow_raw(from) };
-        let owned = borrowed
-          .try_clone_to_owned()
-          .map_err(|e| sherr!(InternalErr @ span, "Failed to duplicate fd {from}: {e}"))?;
-        let owned = move_high(owned)?;
-        Ok(Redir::new(to, owned))
-      }
-      RedirSpec::Close { fd, .. } => Ok(Redir::close(fd)),
-      RedirSpec::Buffer { fd, buf, flags } => {
-        use io::{Seek, SeekFrom, Write};
-
-        let file = scratch_fd()
-          .map_err(|e| sherr!(InternalErr, "heredoc tempfile creation failed: {e}"))?;
-
-
-        let mut file = std::fs::File::from(file);
-        file
-          .write_all(&bytes)
-          .map_err(|e| sherr!(InternalErr, "heredoc write failed: {e}"))?;
-        file
-          .seek(SeekFrom::Start(0))
-          .map_err(|e| sherr!(InternalErr, "heredoc seek failed: {e}"))?;
-
-        Ok(Redir::new(fd, file.into()))
-      }
-    }
-  }
-  */
   /// Resolve this spec into its target sink.
   ///
   /// Runs any expansion (heredoc bodies, redirect paths, dup-target words), so
   /// it must be called *outside* a [`Shed::sinks()`] borrow: expansion can run
   /// command substitutions that re-enter the table. The dup arms take their own
   /// brief borrow to read the current fd.
-  pub(crate) fn as_sink(&self) -> ShResult<Option<Arc<dyn Sink>>> {
-    let sink: Option<Arc<dyn Sink>> = match self {
-      RedirSpec::File { path, mode, .. } => {
-        Some(Arc::new(OsSink::new(open_redir_file(*mode, path)?)))
+  pub(crate) fn as_sink(&self) -> ShResult<Arc<dyn Sink>> {
+    let sink: Arc<dyn Sink> = match self {
+      RedirSpec::Dup { from, .. } => {
+        let sink = Shed::sinks(|s| s.get(*from)).ok_or_else(ebadf)?;
+        if sink.kind() == SinkKind::Close {
+          return Err(ebadf().into());
+        }
+        sink
       }
-      RedirSpec::Dup { from, .. } => Some(Shed::sinks(|s| s.get(*from)).ok_or_else(ebadf)?),
+      RedirSpec::Close { .. } => Arc::new(CloseSink),
       RedirSpec::DupExpr { word, .. } => match expand_fd(word)? {
-        None => None, // got '-' as the word
-        Some(fd) => Some(Shed::sinks(|s| s.get(fd)).ok_or_else(ebadf)?),
+        None => Arc::new(CloseSink), // got '-' as the word
+        Some(fd) => {
+          let sink = Shed::sinks(|s| s.get(fd)).ok_or_else(ebadf)?;
+          if sink.kind() == SinkKind::Close {
+            return Err(ebadf().into());
+          }
+          sink
+        }
       },
+      RedirSpec::File { path, mode, .. } => {
+        let span = path.span.clone();
+        let path = path
+          .clone()
+          .expand()
+          .map(|tk| tk.get_words())
+          .unwrap_or_default();
+        if path.len() != 1 {
+          return Err(sherr!(
+            ExecFail @ span,
+            "Redirection path must expand to exactly one word"
+          ));
+        }
+        let path = path.iter().next().unwrap();
+
+        if path.as_bytes() == b"/dev/null" {
+          Arc::new(NullSink::new())
+        } else {
+          Arc::new(OsSink::new(open_redir_file(*mode, path)?))
+        }
+      }
       RedirSpec::Buffer { buf, flags, .. } => {
         let bytes: Vec<u8> = if flags.contains(TkFlags::HERESTRING) {
           let mut expanded: Vec<u8> = Expander::from_raw(buf.as_bytes(), *flags)
@@ -611,9 +556,8 @@ impl RedirSpec {
           buf.as_bytes().to_vec()
         };
 
-        Some(Arc::new(BufSink::from_bytes(&bytes)) as Arc<dyn Sink>)
+        Arc::new(BufSink::from_bytes(&bytes)) as Arc<dyn Sink>
       }
-      RedirSpec::Close { .. } => None,
     };
 
     Ok(sink)
@@ -1087,12 +1031,92 @@ impl Sink for OsSink {
   }
 }
 
+/// Internal `/dev/null` equivalent
+///
+/// Redirections to `/dev/null` create one of these
+pub(crate) struct NullSink {
+  devnull_fd: OnceLock<OwnedFd>,
+}
+impl NullSink {
+  pub(crate) fn new() -> Self {
+    Self {
+      devnull_fd: OnceLock::new(),
+    }
+  }
+}
+impl Sink for NullSink {
+  fn read(&self, _buf: &mut [u8]) -> io::Result<usize> {
+    Ok(0)
+  }
+
+  fn write(&self, buf: &[u8]) -> io::Result<usize> {
+    Ok(buf.len())
+  }
+
+  fn flush(&self) -> io::Result<()> {
+    Ok(())
+  }
+
+  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
+    match self.devnull_fd.get() {
+      None => {
+        let devnull = fcntl::open("/dev/null", OFlag::O_RDWR | OFlag::O_CLOEXEC, Mode::empty())?;
+        let _ = self.devnull_fd.set(devnull);
+        self.as_os_fd()
+      }
+      Some(fd) => Ok(fd.as_fd()),
+    }
+  }
+
+  fn kind(&self) -> SinkKind {
+    SinkKind::Null
+  }
+
+  fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
+    Ok(0)
+  }
+}
+
+/// A sink that always returns EBADF for all operations.
+///
+/// Used for `N>&-` redirections, and redirs that open new file descriptors
+/// are replaced with this after closing in the fd table, instead of having their
+/// entries removed.
+pub(crate) struct CloseSink;
+impl Sink for CloseSink {
+  fn read(&self, _buf: &mut [u8]) -> io::Result<usize> {
+    Err(ebadf())
+  }
+
+  fn write(&self, _buf: &[u8]) -> io::Result<usize> {
+    Err(ebadf())
+  }
+
+  fn flush(&self) -> io::Result<()> {
+    Err(ebadf())
+  }
+
+  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
+    Err(ebadf())
+  }
+
+  fn kind(&self) -> SinkKind {
+    SinkKind::Close
+  }
+
+  fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
+    Err(ebadf())
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SinkKind {
   Buffer,
   Os,
   Tty,
   Pipe,
+  Null,
+  Close,
 }
 
 /// Adapter struct for implementing `io::Write`, `io::Read`, and `fmt::Write` for [`Sink`].
@@ -1195,22 +1219,34 @@ impl Sinks {
   /// The parent process's fds are not affected in this case.
   pub(crate) fn commit_redirects(&self) -> io::Result<()> {
     for (target_fd, sink) in &self.table {
+      if sink.kind() == SinkKind::Close {
+        // try closing it
+        let _ = unistd::close(*target_fd);
+        continue;
+      }
       let sink_fd = sink.as_os_fd()?;
 
+      // call into_raw_fd() here to get the fd out of OwnedFd so it doesn't close on drop
       let _ = unsafe { unistd::dup2_raw(sink_fd, *target_fd)? }.into_raw_fd();
     }
     Ok(())
   }
 
-  /// Close inherited pipe leftovers by hand; fds this table still references are kept.
+  /// Close inherited pipe leftovers by hand
   pub(crate) fn close_orphan_pipes(&self) {
-    let keep: crate::HashSet<RawFd> = self
+    // Per-process fd directory: procfs on Linux, fdescfs on the BSDs/macOS.
+    #[cfg(linux_like)]
+    const FD_DIR: &str = "/proc/self/fd";
+    #[cfg(not(linux_like))]
+    const FD_DIR: &str = "/dev/fd";
+
+    let keep: HashSet<RawFd> = self
       .table
       .values()
       .filter_map(|s| s.as_os_fd().ok().map(|fd| fd.as_raw_fd()))
       .collect();
 
-    let Ok(entries) = std::fs::read_dir("/proc/self/fd") else {
+    let Ok(entries) = std::fs::read_dir(FD_DIR) else {
       return;
     };
     let orphans: Vec<RawFd> = entries
@@ -1229,11 +1265,11 @@ impl Sinks {
       }
 
       let mut st: libc::stat = unsafe { std::mem::zeroed() };
+      if unsafe { libc::fstat(fd, &raw mut st) } != 0 {
+        continue;
+      }
 
-      let is_pipe =
-        unsafe { libc::fstat(fd, &raw mut st) } == 0 && st.st_mode & libc::S_IFMT == libc::S_IFIFO;
-
-      if is_pipe {
+      if st.st_mode & libc::S_IFMT == libc::S_IFIFO {
         let _ = unistd::close(fd);
       }
     }
@@ -1243,10 +1279,6 @@ impl Sinks {
       return Some(s.clone());
     }
 
-    // Untracked but live at the kernel: adopt it by *duping* (own a copy), never
-    // by `from_raw_fd`. Stealing ownership of an fd that's owned elsewhere (the
-    // pty in tests, rusqlite's handle, a socket, ...) double-closes it and trips
-    // the io-safety abort. `dup_high` also fails (EBADF -> None) if fd is closed.
     let owned = dup_high(unsafe { BorrowedFd::borrow_raw(fd) }).ok()?;
     let sink: Arc<dyn Sink> = Arc::new(OsSink::new(owned));
     self.table.insert(fd, sink.clone());
@@ -1270,16 +1302,9 @@ impl Sinks {
   pub(crate) fn try_apply_set(s: &RedirSet, fatal: bool) -> ShResult<Option<RedirGuard>> {
     RedirGuard::try_from_redirs(s, fatal)
   }
-  pub(crate) fn redirect(
-    &mut self,
-    fd: RawFd,
-    chan: Option<Arc<dyn Sink>>,
-  ) -> Option<Arc<dyn Sink>> {
+  pub(crate) fn redirect(&mut self, fd: RawFd, sink: Arc<dyn Sink>) -> Option<Arc<dyn Sink>> {
     // getting 'None' here is equivalent to closing the fd, which is valid
-    match chan {
-      Some(c) => self.table.insert(fd, c),
-      None => self.table.remove(&fd),
-    }
+    self.table.insert(fd, sink)
   }
   pub(crate) fn input_available(&mut self) -> bool {
     match self.get_stdin() {
@@ -1306,7 +1331,7 @@ impl RedirResult {
 }
 
 pub(crate) struct RedirGuard {
-  saved: Vec<(RawFd, Option<Arc<dyn Sink>>)>,
+  saved: Vec<(RawFd, Arc<dyn Sink>)>,
   active: bool,
 }
 
@@ -1315,7 +1340,7 @@ impl Debug for RedirGuard {
     let saved = self
       .saved
       .iter()
-      .map(|(fd, sink)| (fd, sink.as_ref().map(|s| s.kind())))
+      .map(|(fd, sink)| (fd, sink.kind()))
       .collect::<Vec<_>>();
     f.debug_struct("RedirGuard")
       .field("saved", &saved)
@@ -1334,7 +1359,7 @@ impl RedirGuard {
 
   fn from_sink(sink: Arc<dyn Sink>, fd: RawFd) -> ShResult<Self> {
     let mut guard = Self::new();
-    guard.apply_sink(fd, Some(sink))?;
+    guard.apply_sink(fd, sink)?;
     Ok(guard)
   }
 
@@ -1354,13 +1379,15 @@ impl RedirGuard {
     }
   }
 
-  pub(crate) fn apply_sink(&mut self, fd: RawFd, sink: Option<Arc<dyn Sink>>) -> ShResult<()> {
+  pub(crate) fn apply_sink(&mut self, fd: RawFd, sink: Arc<dyn Sink>) -> ShResult<()> {
     validate_fd(fd)?;
 
     Shed::sinks(|sinks| {
       if !self.saved.iter().any(|(f, _)| *f == fd) {
         // only save once
-        self.saved.push((fd, sinks.get(fd)));
+        self
+          .saved
+          .push((fd, sinks.get(fd).unwrap_or_else(|| Arc::new(CloseSink))));
       }
       sinks.redirect(fd, sink);
     });
@@ -1756,20 +1783,7 @@ fn expand_fd(word: &Tk) -> ShResult<Option<RawFd>> {
   Ok(Some(from))
 }
 /// Open a file for redirection, respecting the `noclobber` shell option for output redirections.
-pub(super) fn open_redir_file(class: RedirType, path: &Tk) -> ShResult<OwnedFd> {
-  let span = path.span.clone();
-  let path = path
-    .clone()
-    .expand()
-    .map(|tk| tk.get_words())
-    .unwrap_or_default();
-
-  if path.len() != 1 {
-    return Err(sherr!(ExecFail @ span, "Redirection path must expand to exactly one word"));
-  }
-
-  let path = path.iter().next().unwrap();
-
+pub(super) fn open_redir_file(class: RedirType, path: &VarStr) -> ShResult<OwnedFd> {
   let file: OwnedFd = get_redir_file(class, path)?.into();
   let file = move_high(file)?;
   Ok(file)
