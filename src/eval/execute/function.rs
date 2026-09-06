@@ -10,7 +10,7 @@
 use bstr::ByteSlice;
 use shed_macros::styled_format;
 
-use super::{AssignBehavior, Ast, KEYWORDS, NdRule, NodeId, Tk};
+use super::{AssignBehavior, Ast, KEYWORDS, NdRule, NodeId};
 use crate::{
   defer,
   eval::parse::NdFlags,
@@ -43,7 +43,8 @@ impl super::Dispatcher {
     };
     let body = tree.break_off(*body);
 
-    let func_name = tree[*name].span.as_bytes();
+    let func_name = tree[*name].span.slice();
+    let func_name = func_name.as_bytes();
     let func_name = func_name.strip_suffix(b"()").unwrap_or(func_name);
 
     if KEYWORDS.contains(&func_name) || matches!(func_name, b"builtin" | b"command") {
@@ -83,7 +84,7 @@ impl super::Dispatcher {
 
       let name = func_body
         .command_for(root)
-        .map(Tk::to_str_lossy)
+        .map(|tk| tk.slice())
         .unwrap_or_default();
 
       return self.run_fork(name.as_bytes(), |s| {
@@ -92,7 +93,7 @@ impl super::Dispatcher {
     }
 
     // need to do this in a new scope so we can borrow func safely
-    let (func_name, mut blame) = {
+    let (func_name, blame) = {
       let borrow = &func;
 
       // borrow func.class to avoid partial move
@@ -169,7 +170,13 @@ impl super::Dispatcher {
       Err(e) => return Err(e),
     };
 
-    blame.rename(func_name.clone());
+    let mut frame = caller_contexts;
+    frame.push(call_ctx);
+    if let Some(ctx) = func_src_ctx {
+      frame.push(ctx.clone());
+    }
+
+    let _ctx_frame = Shed::push_call_frame(frame);
 
     let argv = super::prepare_argv(&tree[*argv]).try_blame(blame.clone())?;
 
@@ -200,13 +207,6 @@ impl super::Dispatcher {
           "Function body has no root node",
       ));
     };
-
-    let mut frame = caller_contexts;
-    frame.push(call_ctx);
-    if let Some(ctx) = func_src_ctx {
-      frame.push(ctx.clone());
-    }
-    let _ctx_frame = Shed::push_call_frame(frame);
 
     let _timer = self.take_timer();
     match self.dispatch_node(&func_body, root) {

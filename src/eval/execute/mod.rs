@@ -72,7 +72,7 @@ pub(crate) fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(Va
     let span = arg.span.clone();
     if no_split {
       // this is the bash regex thing, not a tilde expansion
-      if arg.span.as_bytes() == b"=~" {
+      if arg.span.slice().as_bytes() == b"=~" {
         out.push(("=~".into(), span));
         continue;
       }
@@ -209,9 +209,8 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
   });
 
   let expanded = alias::expand_aliases(input);
-  let mut parser = ParsedSrc::new(expanded.into())
-    .with_lex_flags(super::lex::LexFlags::empty())
-    .with_name(name.clone());
+  let mut parser = ParsedSrc::with_name(name.clone(), expanded.into())
+    .with_lex_flags(super::lex::LexFlags::empty());
 
   if let Err(errors) = parser.parse_src() {
     for error in errors {
@@ -275,10 +274,10 @@ pub(crate) fn exec_input(mut input: VarStr, source_name: Option<VarStr>) -> ShRe
   } else {
     super::lex::LexFlags::empty()
   };
+
   let source_name = source_name.unwrap_or("<unknown>".into());
-  let mut parser = ParsedSrc::new(input)
-    .with_lex_flags(lex_flags)
-    .with_name(source_name.clone());
+  let mut parser = ParsedSrc::with_name(source_name.clone(), input).with_lex_flags(lex_flags);
+
   if let Err(errors) = parser.parse_src() {
     for error in errors {
       error.print_error();
@@ -370,7 +369,7 @@ impl Dispatcher {
     Ok(())
   }
   pub(crate) fn dispatch_cmd(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
-    let (line, _) = tree.span_for(node).clone().line_and_col();
+    let (line, _) = tree.span_for(node).clone().line_and_col().unwrap_or((0, 0));
     Shed::vars_mut(|v| v.set_var("LINENO", VarKind::Int((line + 1) as i32), VarFlags::empty()))?;
 
     let result = self.route_command(tree, node, true);
@@ -422,7 +421,7 @@ impl Dispatcher {
       Self::exec_arith(tree, node)
     } else if classify::can_autocd(cmd) {
       // autocd
-      let cd_call = [b"cd ", cmd.span.as_bytes()].concat();
+      let cd_call = [b"cd ", cmd.span.slice().as_bytes()].concat();
       exec_input(cd_call.into(), Some(self.source_name.clone()))
     } else {
       // normal external
@@ -433,7 +432,7 @@ impl Dispatcher {
     let NdRule::Arithmetic { body } = &tree[arith].class else {
       unreachable!()
     };
-    let result = arithmetic::expand_arithmetic_wrapped(tree[*body].as_bytes())?;
+    let result = arithmetic::expand_arithmetic_wrapped(tree[*body].slice().as_bytes())?;
     let val: f64 = result.to_str_lossy().parse().unwrap_or(0.0);
     Shed::set_status_from_bool(val != 0.0);
     Ok(())

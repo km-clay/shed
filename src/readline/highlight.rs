@@ -78,7 +78,7 @@ impl Palette {
     let class = tk.class();
     match class {
       CtxTkRule::ValidCommand(kind) => {
-        if ["break", "continue", "return"].contains(&tk.span().to_str_lossy().as_ref()) {
+        if matches!(tk.as_bytes(), b"break" | b"continue" | b"return") {
           self.control_flow_keyword
         } else {
           match kind {
@@ -99,9 +99,8 @@ impl Palette {
       | CtxTkRule::AssignmentRight
       | CtxTkRule::ArrayLiteral => self.argument,
       CtxTkRule::ArgumentFile => {
-        let range = tk.span().range();
-        let inclusive = range.start..=range.end;
-        if inclusive.contains(&editor_cursor_pos) {
+        let range = tk.range_inclusive();
+        if range.contains(&editor_cursor_pos) {
           self.argument_file
         } else {
           self.argument
@@ -168,6 +167,7 @@ pub(super) fn highlight<W: std::fmt::Write>(
   for tk in tks {
     paint(
       out,
+      input,
       tk,
       PaletteEntry::new(),
       &mut cursor,
@@ -187,6 +187,7 @@ pub(super) fn highlight<W: std::fmt::Write>(
 /// now we can just paint the spans that it put together.
 fn paint<W: std::fmt::Write>(
   out: &mut W,
+  src: &str,
   node: &CtxTk,
   parent: PaletteEntry,
   cursor: &mut usize,       // our position in the input
@@ -194,13 +195,11 @@ fn paint<W: std::fmt::Write>(
   palette: &Palette,
   selections: &[Range<usize>],
 ) {
-  let span = node.span().range();
-  let src = node.span().get_source();
-  let src = src.to_str_lossy();
+  let span = node.range();
 
   // leading bytes inherit the parent style
   if *cursor < span.start {
-    emit_with_selection(out, &src, *cursor..span.start, parent, selections);
+    emit_with_selection(out, src, *cursor..span.start, parent, selections);
     *cursor = span.start;
   }
 
@@ -209,12 +208,13 @@ fn paint<W: std::fmt::Write>(
   style.set_decor(decor);
 
   if node.sub_tokens().is_empty() {
-    emit_with_selection(out, &src, span.clone(), style, selections);
+    emit_with_selection(out, src, span.clone(), style, selections);
     *cursor = span.end;
   } else {
     for child in node.sub_tokens() {
       paint(
         out,
+        src,
         child,
         style,
         cursor,
@@ -225,7 +225,7 @@ fn paint<W: std::fmt::Write>(
     }
     // trailing bytes maintain the current style
     if *cursor < span.end {
-      emit_with_selection(out, &src, *cursor..span.end, style, selections);
+      emit_with_selection(out, src, *cursor..span.end, style, selections);
       *cursor = span.end;
     }
   }

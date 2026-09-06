@@ -1075,15 +1075,14 @@ mod is_in_path_tests {
   use super::super::classify::is_in_path;
   use super::super::{Span, Tk};
   use crate::eval::lex::TkRule;
+  use crate::state::{self, SourceHandle};
   use crate::tests::testutil::{TestGuard, test_input};
   use std::os::unix::fs::PermissionsExt;
   use std::path::Path;
-  use std::rc::Rc;
   use tempfile::TempDir;
 
-  fn tk(s: &str) -> Tk {
-    let src: Rc<str> = s.into();
-    let span = Span::new(0..s.len(), src.as_bytes().into());
+  fn tk(s: &SourceHandle) -> Tk {
+    let span = Span::new(0, s.len(), s.get_id());
     Tk::new(TkRule::Str, span)
   }
 
@@ -1112,20 +1111,23 @@ mod is_in_path_tests {
     let _g = TestGuard::new();
     let dir = TempDir::new().unwrap();
     let exe = make_exec(dir.path(), "prog");
-    assert!(is_in_path(&tk(&exe.to_string_lossy())));
+    let handle = state::register_source(exe.to_string_lossy());
+    assert!(is_in_path(&tk(&handle)));
   }
 
   #[test]
   fn abs_path_to_nonexistent_returns_false() {
     let _g = TestGuard::new();
-    assert!(!is_in_path(&tk("/this/path/should/never/exist/xyz123")));
+    let handle = state::register_source("/this/path/should/never/exist/xyz123");
+    assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
   fn abs_path_to_directory_returns_false() {
     let _g = TestGuard::new();
     let dir = TempDir::new().unwrap();
-    assert!(!is_in_path(&tk(&dir.path().to_string_lossy())));
+    let handle = state::register_source(dir.path().to_string_lossy());
+    assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1133,7 +1135,8 @@ mod is_in_path_tests {
     let _g = TestGuard::new();
     let dir = TempDir::new().unwrap();
     let p = make_non_exec(dir.path(), "data.txt");
-    assert!(!is_in_path(&tk(&p.to_string_lossy())));
+    let handle = state::register_source(p.to_string_lossy());
+    assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1146,7 +1149,8 @@ mod is_in_path_tests {
     let mut perms = std::fs::metadata(&p).unwrap().permissions();
     perms.set_mode(0o010); // group-execute only
     std::fs::set_permissions(&p, perms).unwrap();
-    assert!(is_in_path(&tk(&p.to_string_lossy())));
+    let handle = state::register_source(p.to_string_lossy());
+    assert!(is_in_path(&tk(&handle)));
   }
 
   // ─── bare names searched in PATH ─────────────────────────────────
@@ -1157,7 +1161,8 @@ mod is_in_path_tests {
     let dir = TempDir::new().unwrap();
     make_exec(dir.path(), "myprog");
     test_input(format!("PATH={}", dir.path().display())).unwrap();
-    assert!(is_in_path(&tk("myprog")));
+    let handle = state::register_source("myprog");
+    assert!(is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1165,7 +1170,8 @@ mod is_in_path_tests {
     let _g = TestGuard::new();
     let dir = TempDir::new().unwrap();
     test_input(format!("PATH={}", dir.path().display())).unwrap();
-    assert!(!is_in_path(&tk("definitely_not_a_program_xyz")));
+    let handle = state::register_source("definitely_not_a_program_xyz");
+    assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1180,7 +1186,8 @@ mod is_in_path_tests {
       d2.path().display()
     ))
     .unwrap();
-    assert!(is_in_path(&tk("second")));
+    let handle = state::register_source("second");
+    assert!(is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1198,7 +1205,8 @@ mod is_in_path_tests {
       d2.path().display()
     ))
     .unwrap();
-    assert!(is_in_path(&tk("dup")));
+    let handle = state::register_source("dup");
+    assert!(is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1208,7 +1216,8 @@ mod is_in_path_tests {
     // Create a *directory* with the program name — should not match.
     std::fs::create_dir(dir.path().join("subprog")).unwrap();
     test_input(format!("PATH={}", dir.path().display())).unwrap();
-    assert!(!is_in_path(&tk("subprog")));
+    let handle = state::register_source("subprog");
+    assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1217,7 +1226,8 @@ mod is_in_path_tests {
     let dir = TempDir::new().unwrap();
     make_non_exec(dir.path(), "noexec");
     test_input(format!("PATH={}", dir.path().display())).unwrap();
-    assert!(!is_in_path(&tk("noexec")));
+    let handle = state::register_source("noexec");
+    assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1226,7 +1236,8 @@ mod is_in_path_tests {
     let dir = TempDir::new().unwrap();
     make_exec(dir.path(), "real");
     test_input(format!("PATH=/nonexistent/xyz:{}", dir.path().display())).unwrap();
-    assert!(is_in_path(&tk("real")));
+    let handle = state::register_source("real");
+    assert!(is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1234,7 +1245,8 @@ mod is_in_path_tests {
     let _g = TestGuard::new();
     // Use `unset` so try_var!("PATH") returns None.
     test_input("unset PATH").unwrap();
-    assert!(!is_in_path(&tk("ls")));
+    let handle = state::register_source("ls");
+    assert!(!is_in_path(&tk(&handle)));
   }
 
   // ─── relative paths ──────────────────────────────────────────────
@@ -1244,14 +1256,16 @@ mod is_in_path_tests {
     let mut g = TestGuard::new();
     let dir = g.in_temp_dir();
     make_exec(&dir, "prog");
-    assert!(is_in_path(&tk("./prog")));
+    let handle = state::register_source("./prog");
+    assert!(is_in_path(&tk(&handle)));
   }
 
   #[test]
   fn dot_slash_nonexistent_returns_false() {
     let mut g = TestGuard::new();
     let _dir = g.in_temp_dir();
-    assert!(!is_in_path(&tk("./nope_xyz")));
+    let handle = state::register_source("./nope_xyz");
+    assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1259,7 +1273,8 @@ mod is_in_path_tests {
     let mut g = TestGuard::new();
     let dir = g.in_temp_dir();
     make_non_exec(&dir, "data.txt");
-    assert!(!is_in_path(&tk("./data.txt")));
+    let handle = state::register_source("./data.txt");
+    assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1267,7 +1282,8 @@ mod is_in_path_tests {
     let mut g = TestGuard::new();
     let dir = g.in_temp_dir();
     std::fs::create_dir(dir.join("subdir")).unwrap();
-    assert!(!is_in_path(&tk("./subdir")));
+    let handle = state::register_source("./subdir");
+    assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1278,7 +1294,8 @@ mod is_in_path_tests {
     let inner = dir.join("inner");
     std::fs::create_dir(&inner).unwrap();
     std::env::set_current_dir(&inner).unwrap();
-    assert!(is_in_path(&tk("../outerprog")));
+    let handle = state::register_source("../outerprog");
+    assert!(is_in_path(&tk(&handle)));
   }
 
   // ─── absolute paths take precedence over PATH ────────────────────
@@ -1290,7 +1307,8 @@ mod is_in_path_tests {
     let dir = TempDir::new().unwrap();
     let exe = make_exec(dir.path(), "prog");
     test_input("PATH=/nonexistent/xyz").unwrap();
-    assert!(is_in_path(&tk(&exe.to_string_lossy())));
+    let handle = state::register_source(exe.to_string_lossy());
+    assert!(is_in_path(&tk(&handle)));
   }
 
   // ─── expansion behavior ──────────────────────────────────────────
@@ -1301,7 +1319,8 @@ mod is_in_path_tests {
     let dir = TempDir::new().unwrap();
     let exe = make_exec(dir.path(), "prog");
     test_input(format!("MYEXE={}", exe.display())).unwrap();
-    assert!(is_in_path(&tk("$MYEXE")));
+    let handle = state::register_source("$MYEXE");
+    assert!(is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1311,7 +1330,8 @@ mod is_in_path_tests {
     make_exec(dir.path(), "myprog");
     test_input(format!("PATH={}", dir.path().display())).unwrap();
     test_input("NAME=myprog").unwrap();
-    assert!(is_in_path(&tk("$NAME")));
+    let handle = state::register_source("$NAME");
+    assert!(is_in_path(&tk(&handle)));
   }
 
   #[test]
@@ -1319,7 +1339,8 @@ mod is_in_path_tests {
     let _g = TestGuard::new();
     // An unset, unquoted var expands to nothing; first word is None,
     // so the function bails out with false.
-    assert!(!is_in_path(&tk("$UNSET_VAR_FOR_ISINPATH_TEST_xyz")));
+    let handle = state::register_source("$UNSET_VAR_FOR_ISINPATH_TEST_xyz");
+    assert!(!is_in_path(&tk(&handle)));
   }
 }
 

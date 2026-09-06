@@ -84,7 +84,7 @@ impl Display for Opt {
       span.merge_inplace(arg_span);
     }
 
-    write!(f, "{}", span.to_str_lossy())
+    write!(f, "{}", span.slice().to_str_lossy())
   }
 }
 
@@ -296,9 +296,9 @@ pub(super) fn parse_opts_raw(tokens: &[Tk], specs: &[OptSpec]) -> (Vec<Opt>, Vec
   let mut end_of_opts = false;
 
   for tk in tokens {
-    let raw = tk.span.as_bytes();
+    let raw = tk.span.slice();
 
-    if !end_of_opts && raw == b"--" {
+    if !end_of_opts && *raw == *b"--" {
       end_of_opts = true;
       continue;
     }

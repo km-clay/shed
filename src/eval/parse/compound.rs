@@ -55,7 +55,7 @@ impl ParseStream {
     let ctx = error::get_context(
       VarStr::from(styled_format!(
         "in function '{}' defined here",
-        name.to_str_lossy()
+        name.slice()
       )),
       &span.clone().unwrap_or_default(),
     );
@@ -104,7 +104,7 @@ impl ParseStream {
             self,
             span.clone(),
             "Unexpected token '{}' in subshell body",
-            tk.to_str_lossy()
+            tk.slice()
           )),
           None => Err(parse_err!(
             self,
@@ -172,7 +172,7 @@ impl ParseStream {
             self,
             span.clone(),
             "Unexpected token '{}' in brace group body",
-            tk.to_str_lossy()
+            tk.slice()
           )),
           None => Err(parse_err!(
             self,
@@ -230,7 +230,7 @@ impl ParseStream {
       return Err(pat_err);
     };
 
-    if matches!(pat_tk.class, TkRule::Sep) || pat_tk.span.as_bytes() == b"in" {
+    if matches!(pat_tk.class, TkRule::Sep) || pat_tk.slice().as_bytes() == b"in" {
       return Err(pat_err);
     }
 
@@ -602,9 +602,9 @@ impl ParseStream {
     let mut positional = true;
     let array_checks = |this: &Self| {
       this.peek_tk().map(|tk| {
-        let is_in = tk.as_bytes() == b"in";
+        let is_in = *tk.slice() == *b"in";
         let is_sep = tk.class == TkRule::Sep;
-        let is_do = tk.as_bytes() == b"do";
+        let is_do = *tk.slice() == *b"do";
         (is_in, is_sep, is_do)
       })
     };
@@ -644,7 +644,7 @@ impl ParseStream {
         "Expected a variable name for this for loop"
       );
     }
-    if self.peek_tk().is_none_or(|tk| tk.as_bytes() != b"do") {
+    if self.peek_tk().is_none_or(|tk| *tk.slice() != *b"do") {
       bail!(
         self,
         span.clone(),
@@ -713,7 +713,7 @@ impl ParseStream {
     let mut redirs = vec![];
 
     let loop_tk = self.next_tk().unwrap();
-    let loop_kind: LoopKind = util::parse_bytes(loop_tk.as_bytes()) // LoopKind implements FromStr
+    let loop_kind: LoopKind = util::parse_bytes(loop_tk.slice().as_bytes()) // LoopKind implements FromStr
       .unwrap();
 
     extend_span!(span, loop_tk.span);
@@ -829,7 +829,7 @@ impl ParseStream {
       .walk_tree_mut(body, &mut |id, tree| tree[id].is_err());
 
     let try_span = self.tree.span_for(body).merge_with(&try_tk_span).unwrap();
-    let try_span = if try_span.as_bytes().contains(&b'\n') {
+    let try_span = if try_span.slice().contains(&b'\n') {
       try_span
     } else {
       try_tk_span
@@ -845,7 +845,7 @@ impl ParseStream {
 
     while let Some(tk) = self.peek_tk() {
       let is_sep = tk.class == TkRule::Sep;
-      let is_done = tk.flags.contains(TkFlags::KEYWORD) && tk.as_bytes() == b"done";
+      let is_done = tk.flags.contains(TkFlags::KEYWORD) && tk.slice().as_bytes() == b"done";
       let is_terminator = matches!(tk.class, TkRule::Eoi | TkRule::Comment);
       if is_sep || is_done || is_terminator {
         break;
@@ -951,7 +951,7 @@ impl ParseStream {
     };
 
     let body_span = self.tree.span_for(body);
-    let defer_span = if body_span.as_bytes().contains(&b'\n') {
+    let defer_span = if body_span.slice().contains(&b'\n') {
       body_span.merge_with(&defer_tk_span).unwrap()
     } else {
       defer_tk_span

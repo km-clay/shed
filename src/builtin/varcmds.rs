@@ -43,8 +43,8 @@ trait VarCmd: super::Builtin {
       .iter()
       .map(|w| match w {
         Word::Arg(value, _) => value.clone(),
-        Word::Opt(opt) => opt.span().as_bytes().into(),
-        Word::Sep(span) => span.as_bytes().into(),
+        Word::Opt(opt) => opt.span().slice().into(),
+        Word::Sep(span) => span.slice().into(),
       })
       .collect();
 
@@ -66,7 +66,8 @@ pub(super) fn is_array_literal_assignment(raw: &[u8]) -> bool {
 pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
   let mut out = vec![];
   for tk in argv {
-    let raw = tk.span.as_bytes();
+    let slice = tk.span.slice();
+    let raw = slice.as_bytes();
     let eq_pos = strops::split_at_unescaped(raw, b"=").map(|(pos, _)| pos);
 
     if is_array_literal_assignment(raw) {
@@ -159,7 +160,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
       continue;
     }
     let val = match (kind, raw_val) {
-      (DeclareKind::Str, Some(v)) => assignment_value(v, span.as_bytes()),
+      (DeclareKind::Str, Some(v)) => assignment_value(v, span.slice().as_bytes()),
       (DeclareKind::Int, Some(v)) => {
         let evaluated = arithmetic::expand_arithmetic(v).promote_err(span.clone())?;
         let n = evaluated
@@ -294,7 +295,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
           }
           // Function source is shell text, which may contain non-UTF-8 bytes;
           // emit it verbatim rather than lossily through `str`.
-          out.extend_from_slice(source.as_bytes());
+          out.extend_from_slice(source.slice().as_bytes());
           out.push(b'\n');
         }
         out
@@ -353,7 +354,7 @@ impl super::Builtin for Readonly {
     }
 
     for (arg, span) in arg_vec {
-      let (var, val) = split_assignment(&arg, span.as_bytes());
+      let (var, val) = split_assignment(&arg, span.slice().as_bytes());
       let var = &var.to_str_lossy();
       Shed::vars_mut(|v| match val {
         Some(val) => v.set_var(var, val, VarFlags::READONLY),
@@ -443,7 +444,7 @@ impl super::Builtin for Export {
     }
 
     for (arg, span) in arg_vec {
-      let (var, val) = split_assignment(&arg, span.as_bytes());
+      let (var, val) = split_assignment(&arg, span.slice().as_bytes());
       let var = &var.to_str_lossy();
       if unexport {
         if let Some(val) = val {

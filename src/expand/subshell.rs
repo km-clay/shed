@@ -84,7 +84,7 @@ pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
 }
 
 pub(crate) fn is_internal(raw: &str) -> Option<ForkBehavior> {
-  let mut parser = ParsedSrc::new(raw.into()).with_name("is_internal check".into());
+  let mut parser = ParsedSrc::with_name("is_internal check".into(), raw.into());
 
   if parser.parse_src().is_err() {
     return None;

@@ -348,11 +348,12 @@ fn get_entry_range(
 mod tests {
   use super::*;
   use crate::eval::lex::{LexFlags, LexStream, TkRule};
+  use crate::state::SourceHandle;
   use crate::tests::testutil::TestGuard;
 
   /// Lex an `fc <args>` invocation into the Tk vec that `parse_fc_args` expects.
-  fn lex_fc(input: &str) -> Vec<Tk> {
-    LexStream::new(input.as_bytes(), LexFlags::empty())
+  fn lex_fc(input: &SourceHandle) -> Vec<Tk> {
+    LexStream::new(input, LexFlags::empty())
       .filter_map(Result::ok)
       .filter(|t| {
         !matches!(
@@ -363,7 +364,7 @@ mod tests {
       .collect()
   }
 
-  fn parse(input: &str) -> (Vec<(VarStr, Span)>, FixCmdOpts) {
+  fn parse(input: &SourceHandle) -> (Vec<(VarStr, Span)>, FixCmdOpts) {
     let tks = lex_fc(input);
     parse_fc_args(&tks).expect("parse should succeed")
   }
@@ -373,7 +374,8 @@ mod tests {
   #[test]
   fn fc_no_args_returns_defaults() {
     let _g = TestGuard::new();
-    let (non_opts, opts) = parse("fc");
+    let handle = state::register_source("fc");
+    let (non_opts, opts) = parse(&handle);
     assert!(non_opts.is_empty());
     assert_eq!(opts.mode, FixMode::Edit);
     assert!(!opts.no_numbers);
@@ -387,35 +389,40 @@ mod tests {
   #[test]
   fn fc_dash_l_sets_list_mode() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc -l");
+    let handle = state::register_source("fc -l");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::List);
   }
 
   #[test]
   fn fc_dash_n_sets_no_numbers() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc -n");
+    let handle = state::register_source("fc -n");
+    let (_, opts) = parse(&handle);
     assert!(opts.no_numbers);
   }
 
   #[test]
   fn fc_dash_r_sets_reverse() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc -r");
+    let handle = state::register_source("fc -r");
+    let (_, opts) = parse(&handle);
     assert!(opts.reverse);
   }
 
   #[test]
   fn fc_dash_s_sets_rerun_mode() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc -s");
+    let handle = state::register_source("fc -s");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::Rerun);
   }
 
   #[test]
   fn fc_multiple_flags_compose() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc -l -n -r");
+    let handle = state::register_source("fc -l -n -r");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::List);
     assert!(opts.no_numbers);
     assert!(opts.reverse);
@@ -427,9 +434,11 @@ mod tests {
     // This documents the precedence rather than enforcing one — change
     // the assertion if the policy changes.
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc -s -l");
+    let handle = state::register_source("fc -s -l");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::List);
-    let (_, opts) = parse("fc -l -s");
+    let handle = state::register_source("fc -l -s");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::Rerun);
   }
 
@@ -438,14 +447,16 @@ mod tests {
   #[test]
   fn fc_dash_e_consumes_next_arg_as_editor() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc -e vim");
+    let handle = state::register_source("fc -e vim");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.editor, Some("vim".into()));
   }
 
   #[test]
   fn fc_dash_e_without_arg_errors() {
     let _g = TestGuard::new();
-    let tks = lex_fc("fc -e");
+    let handle = state::register_source("fc -e");
+    let tks = lex_fc(&handle);
     let result = parse_fc_args(&tks);
     assert!(result.is_err());
   }
@@ -455,7 +466,8 @@ mod tests {
   #[test]
   fn fc_single_number_sets_first() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc 5");
+    let handle = state::register_source("fc 5");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Number(5)));
     assert!(opts.last.is_none());
   }
@@ -463,7 +475,8 @@ mod tests {
   #[test]
   fn fc_two_numbers_set_first_and_last() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc 5 10");
+    let handle = state::register_source("fc 5 10");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Number(5)));
     assert_eq!(opts.last, Some(RangeArg::Number(10)));
   }
@@ -471,7 +484,8 @@ mod tests {
   #[test]
   fn fc_negative_numbers_accepted() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc -3 -1");
+    let handle = state::register_source("fc -3 -1");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Number(-3)));
     assert_eq!(opts.last, Some(RangeArg::Number(-1)));
   }
@@ -481,14 +495,16 @@ mod tests {
     // `0` parses to i32 but the `num != 0` guard rejects it, so it
     // falls through to the catch-all and becomes a Prefix.
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc 0");
+    let handle = state::register_source("fc 0");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Prefix("0".into())));
   }
 
   #[test]
   fn fc_third_number_goes_to_non_opts() {
     let _g = TestGuard::new();
-    let (non_opts, opts) = parse("fc 1 2 3");
+    let handle = state::register_source("fc 1 2 3");
+    let (non_opts, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Number(1)));
     assert_eq!(opts.last, Some(RangeArg::Number(2)));
     assert_eq!(non_opts.len(), 1);
@@ -500,14 +516,16 @@ mod tests {
   #[test]
   fn fc_word_sets_first_as_prefix() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc git");
+    let handle = state::register_source("fc git");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Prefix("git".into())));
   }
 
   #[test]
   fn fc_two_words_set_first_and_last_as_prefixes() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc git cargo");
+    let handle = state::register_source("fc git cargo");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Prefix("git".into())));
     assert_eq!(opts.last, Some(RangeArg::Prefix("cargo".into())));
   }
@@ -515,7 +533,8 @@ mod tests {
   #[test]
   fn fc_mixed_number_and_prefix() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc 5 git");
+    let handle = state::register_source("fc 5 git");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Number(5)));
     assert_eq!(opts.last, Some(RangeArg::Prefix("git".into())));
   }
@@ -525,7 +544,8 @@ mod tests {
   #[test]
   fn fc_dash_s_with_replacement() {
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc -s foo=bar");
+    let handle = state::register_source("fc -s foo=bar");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.replace, Some(("foo".into(), "bar".into())));
   }
 
@@ -535,7 +555,8 @@ mod tests {
     // the whole token so the backslash survives shell-level expansion
     // and reaches parse_fc_args literally.
     let _g = TestGuard::new();
-    let (_, opts) = parse(r"fc -s 'foo\=baz=bar'");
+    let handle = state::register_source(r"fc -s 'foo\=baz=bar'");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.replace, Some((r"foo\=baz".into(), "bar".into())));
   }
 
@@ -544,7 +565,8 @@ mod tests {
     // No `=` in the word: the replacement branch falls through, and
     // the word goes to the range-arg catch-all (becoming a Prefix).
     let _g = TestGuard::new();
-    let (_, opts) = parse("fc -s plainword");
+    let handle = state::register_source("fc -s plainword");
+    let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::Rerun);
     assert!(opts.replace.is_none());
     assert_eq!(opts.first, Some(RangeArg::Prefix("plainword".into())));
@@ -553,7 +575,8 @@ mod tests {
   #[test]
   fn fc_dash_s_second_replacement_goes_to_non_opts() {
     let _g = TestGuard::new();
-    let (non_opts, opts) = parse("fc -s a=b c=d");
+    let handle = state::register_source("fc -s a=b c=d");
+    let (non_opts, opts) = parse(&handle);
     assert_eq!(opts.replace, Some(("a".into(), "b".into())));
     assert_eq!(non_opts.len(), 1);
     assert_eq!(non_opts[0].0, "c=d");
@@ -564,7 +587,8 @@ mod tests {
   #[test]
   fn fc_double_dash_collects_remaining_as_non_opts() {
     let _g = TestGuard::new();
-    let (non_opts, opts) = parse("fc -l -- -r foo 42");
+    let handle = state::register_source("fc -l -- -r foo 42");
+    let (non_opts, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::List);
     // Everything after `--`, including the literal `--`, lands in non_opts.
     let collected: Vec<&str> = non_opts

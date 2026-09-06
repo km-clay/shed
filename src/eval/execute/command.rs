@@ -19,7 +19,7 @@ use nix::{
 use crate::{
   HashSet, autocmd,
   builtin::{self, Builtin},
-  eval::{lex::Tk, parse::NdFlags},
+  eval::parse::NdFlags,
   lifecycle,
   procio::Sinks,
   sherr, signal, socket,
@@ -94,7 +94,10 @@ impl super::Dispatcher {
     }
     // argv is not empty. let's set this stuff here.
     let cmd_tk = &tree[argv.get(0)];
-    let cmd_name = &cmd_tk.to_str_lossy();
+
+    let cmd_name = &cmd_tk.slice();
+    let cmd_name = &cmd_name.to_str_lossy();
+
     let exec_path = cmd::lookup_cmd(cmd_name);
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
@@ -133,7 +136,9 @@ impl super::Dispatcher {
       for id in assignments {
         let a = &tree[*id];
         if let NdRule::Assignment { var, .. } = &a.class {
-          let raw = tree[*var].span.as_bytes();
+          let name = tree[*var].span.slice();
+          let raw = name.as_bytes();
+
           let name: VarStr =
             params::parse_arr_bracket(raw).map_or_else(|| raw.into(), |(base, _)| base);
 
@@ -309,7 +314,7 @@ impl super::Dispatcher {
       StageResult::new(Shed::get_status())
     });
 
-    let cmd_name = tree.command_for(node).map(Tk::as_bytes).map(VarStr::from);
+    let cmd_name = tree.command_for(node).map(|tk| tk.slice());
 
     StageThread::new(handle).with_name(cmd_name)
   }

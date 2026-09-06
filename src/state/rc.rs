@@ -108,7 +108,7 @@ fn live_funcs() -> Vec<VarStr> {
     l.funcs()
       .iter()
       .filter_map(|(name, f)| match f {
-        ShFunc::Defined { source, .. } => Some((name.into(), source.as_var_str())),
+        ShFunc::Defined { source, .. } => Some((name.into(), source.slice())),
         ShFunc::Autoload(_) => None,
       })
       .collect()

@@ -8,7 +8,7 @@ use crate::{
   expand::{self, alias},
   motion, shopt,
   state::{
-    Shed, paths,
+    self, Shed, paths,
     vars::{VarFlags, VarKind, VarStr},
   },
   status_msg,
@@ -318,7 +318,8 @@ impl LineBuf {
   pub(crate) fn attempt_alias_expansion(&mut self) -> bool {
     let (to_cursor, mut after_cursor) = self.lines.clone().split_lines(self.cursor.pos);
     let raw = to_cursor.join();
-    let mut tokens = LexStream::new(raw.as_bytes(), LexFlags::empty())
+    let handle = state::register_source(raw.as_bytes());
+    let mut tokens = LexStream::new(&handle, LexFlags::empty())
       .filter_map(Result::ok)
       .filter(|tk| !matches!(tk.class, TkRule::Soi | TkRule::Eoi | TkRule::Null))
       .collect::<Vec<_>>();
@@ -336,8 +337,8 @@ impl LineBuf {
       return false;
     }
     let tk_start = last.span.start();
-    let word = last.to_str_lossy();
-    let word = word.as_ref();
+    let word = last.slice();
+    let word = &word.to_string();
 
     if let Some(alias) = Shed::logic(|l| l.aliases().get(word).cloned())
       && let alias = alias.to_string()
@@ -363,25 +364,26 @@ impl LineBuf {
     for tk in &tks {
       hist_expansions.extend(tk.find_nodes(|n| *n.class() == CtxTkRule::HistExp));
     }
-    hist_expansions.sort_by_key(|n| n.span().start());
+    hist_expansions.sort_by_key(|n| n.start());
 
     let mut any_changes = false;
     let mut changes: Vec<((Pos, Pos), String)> = vec![];
     for exp in hist_expansions {
-      let span = exp.span().clone();
-      let Some(start) = self.byte_to_pos(span.range().start) else {
+      let range = exp.range();
+      let Some(start) = self.byte_to_pos(range.start) else {
         continue;
       };
-      let Some(mut end) = self.byte_to_pos(span.range().end) else {
+      let Some(mut end) = self.byte_to_pos(range.end) else {
         continue;
       };
       end = end.col_sub(1); // exclusive range
-      let change = if let Some(s) = history.resolve_hist_token(&exp.span().to_str_lossy()) {
+      let change = if let Some(s) = history.resolve_hist_token(&exp.slice().to_str_lossy()) {
         any_changes = true;
         s.clone()
       } else {
         any_changes = true;
-        let raw = exp.span().to_str_lossy();
+        let raw = exp.slice();
+        let raw = raw.to_str_lossy();
         raw
           .strip_prefix('!')
           .map_or_else(|| raw.to_string(), ToString::to_string)

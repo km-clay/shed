@@ -87,7 +87,7 @@ pub(crate) fn is_in_path(name: &Tk) -> bool {
 pub(crate) fn is_func_node(cmd: NodeId, tree: &Ast) -> bool {
   tree
     .command_for(cmd)
-    .is_some_and(|cmd_word| is_func(&cmd_word.to_str_lossy()))
+    .is_some_and(|cmd_word| is_func(&cmd_word.slice().to_str_lossy()))
 }
 
 pub(super) fn is_func(name: &str) -> bool {
@@ -107,8 +107,8 @@ pub(crate) fn is_builtin(cmd: NodeId, tree: &Ast) -> bool {
     return false;
   };
 
-  !is_func(&cmd_word.to_str_lossy())
-    && builtin::fork_behavior_for(cmd_word.as_bytes())
+  !is_func(&cmd_word.slice().to_str_lossy())
+    && builtin::fork_behavior_for(cmd_word.slice().as_bytes())
       .is_some_and(|b| !matches!(b, ForkBehavior::Always))
     && cmd_word.flags.contains(TkFlags::BUILTIN)
 }
@@ -123,7 +123,7 @@ pub(super) fn runs_inline(cmd: &Node, tree: &Ast) -> bool {
       }
       let cmd_id = cmd.get_command().unwrap();
       let cmd_word = &tree[cmd_id];
-      is_func(&cmd_word.to_str_lossy()) || cmd_word.flags.contains(TkFlags::BUILTIN)
+      is_func(&cmd_word.slice().to_str_lossy()) || cmd_word.flags.contains(TkFlags::BUILTIN)
     }
     NdRule::List { .. }
     | NdRule::Conjunction { .. }
@@ -149,7 +149,7 @@ pub(super) fn will_fork(cmd: &Node, tree: &Ast) -> bool {
     NdRule::Command { argv, .. } if !argv.is_empty() => {
       let cmd_id = cmd.get_command().unwrap();
       let cmd_word = &tree[cmd_id];
-      !(is_func(&cmd_word.to_str_lossy()) || cmd_word.flags.contains(TkFlags::BUILTIN))
+      !(is_func(&cmd_word.slice().to_str_lossy()) || cmd_word.flags.contains(TkFlags::BUILTIN))
     }
     _ => false,
   }

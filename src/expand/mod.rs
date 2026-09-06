@@ -34,7 +34,7 @@ impl Tk {
       return Ok(self.clone());
     }
     if self.is_literal() {
-      let raw = self.span.as_bytes().into();
+      let raw = self.slice();
       let class = TkRule::Expanded { exp: [raw].into() };
       return Ok(Self {
         class,
@@ -53,7 +53,7 @@ impl Tk {
       return Ok(exp.clone());
     }
     if self.is_literal() {
-      return Ok([self.span.as_bytes().into()].into());
+      return Ok([self.slice()].into());
     }
     let span = self.span.clone();
     Expander::new(self)
@@ -66,7 +66,7 @@ impl Tk {
       return Ok(self.clone());
     }
     if self.is_literal() {
-      let raw = self.span.as_bytes().into();
+      let raw = self.slice();
       let class = TkRule::Expanded { exp: [raw].into() };
       return Ok(Self {
         class,
@@ -88,7 +88,7 @@ impl Tk {
       return Ok(exp.join_with(" "));
     }
     if self.is_literal() {
-      return Ok(self.span.as_bytes().into());
+      return Ok(self.slice());
     }
 
     let span = self.span.clone();
@@ -103,7 +103,7 @@ impl Tk {
   pub(crate) fn get_words(&self) -> Arc<[VarStr]> {
     match &self.class {
       TkRule::Expanded { exp } => exp.clone(),
-      _ => [self.as_bytes().into()].into(),
+      _ => [self.slice()].into(),
     }
   }
 
@@ -122,8 +122,8 @@ pub(crate) struct Expander {
 
 impl Expander {
   pub(crate) fn new(raw: &Tk) -> Self {
-    let tk_raw = raw.span.as_bytes();
-    Self::from_raw(tk_raw, raw.flags)
+    let tk_raw = raw.slice();
+    Self::from_raw(&tk_raw, raw.flags)
   }
   pub(crate) fn from_raw(raw: &[u8], flags: TkFlags) -> Self {
     let raw = if raw.contains(&b'{') {

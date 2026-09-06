@@ -19,7 +19,7 @@ use nix::{
 use crate::{
   builtin::ForkBehavior,
   eval::{
-    lex::{Span, Tk},
+    lex::Span,
     parse::{NdFlags, Node, node},
   },
   procio::{RedirSet, Sink, Sinks},
@@ -97,7 +97,10 @@ impl super::Dispatcher {
     while let Some((i, cmd)) = cmd_iter.next() {
       let mut guard = Sinks::redir_scope();
 
-      let cmd_name = tree.command_for(*cmd).map(Tk::as_bytes).unwrap_or_default();
+      let cmd_name = tree
+        .command_for(*cmd)
+        .map(|s| s.slice())
+        .unwrap_or_default();
 
       // now we decide if we are threading this pipeline stage or not
       // builtins get a thread instead of a fork
@@ -134,7 +137,7 @@ impl super::Dispatcher {
         if is_bg {
           let name = tree
             .command_for(cmds[i])
-            .map(Tk::to_str_lossy)
+            .map(|tk| tk.slice())
             .unwrap_or_default();
           result = self.run_fork(name.as_bytes(), move |s| {
             super::catch_exit(
@@ -191,7 +194,7 @@ impl super::Dispatcher {
           .push_member(jobs::JobMember::Thread(handle));
         Ok(())
       } else if should_fork_segment(cmd_node) {
-        self.run_fork(cmd_name, |s| {
+        self.run_fork(&cmd_name, |s| {
           super::catch_exit(|| s.dispatch_node(tree, *cmd), super::exit_with);
         })
       } else {
@@ -311,7 +314,7 @@ impl super::Dispatcher {
     let res = if should_fork(cmd) {
       let name = cmd
         .get_command()
-        .map(|tk| tree[tk].to_str_lossy())
+        .map(|tk| tree[tk].slice())
         .unwrap_or_default();
 
       self.run_fork(name.as_bytes(), |s| {

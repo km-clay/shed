@@ -41,7 +41,7 @@ use crate::{
   match_loop, procio,
   readline::Candidate,
   sherr,
-  state::{Shed, params, paths},
+  state::{self, Shed, params, paths},
   util::{
     self,
     error::{LabelBuilder, ShResult},
@@ -802,8 +802,8 @@ impl VarKind {
 
 impl VarKind {
   pub(crate) fn arr_from_tk(tk: &Tk) -> ShResult<Self> {
-    let raw = tk.as_bytes();
-    Self::arr_from_raw(raw)
+    let raw = tk.slice();
+    Self::arr_from_raw(&raw)
   }
 
   pub(crate) fn arr_from_raw(raw: &[u8]) -> ShResult<Self> {
@@ -816,7 +816,8 @@ impl VarKind {
     }
     let raw = &raw[1..raw.len() - 1];
 
-    let tokens = LexStream::new(raw, LexFlags::empty())
+    let handle = state::register_source(raw);
+    let tokens = LexStream::new(&handle, LexFlags::empty())
       .filter(|tk| {
         !tk.as_ref().is_ok_and(|tk| {
           matches!(

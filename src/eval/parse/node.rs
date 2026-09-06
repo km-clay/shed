@@ -317,7 +317,7 @@ pub(crate) fn node_fork_behavior(tree: &Ast, node_id: NodeId) -> Option<ForkBeha
           if classify::is_builtin(id, tree) {
             let behavior = node
               .get_command()
-              .and_then(|name| fork_behavior_for(tree[name].as_bytes()))
+              .and_then(|name| fork_behavior_for(tree[name].slice().as_bytes()))
               .unwrap_or(ForkBehavior::Never);
             acc = acc.map(|cur| cur.max(behavior));
           } else {
@@ -326,12 +326,13 @@ pub(crate) fn node_fork_behavior(tree: &Ast, node_id: NodeId) -> Option<ForkBeha
           return;
         }
         let name = node.get_command().unwrap();
+        let func_name = tree[name].slice();
 
         // Caller is about to execute this anyway (cmd sub, pipeline, etc),
         // so source the autoload now while we have the chance.
         let autoload_src = Shed::logic_mut(|l| {
-          if let Some(ShFunc::Autoload(_)) = l.get_func_ref(&tree[name].to_str_lossy()) {
-            let func = l.remove_func(&tree[name].to_str_lossy())?;
+          if let Some(ShFunc::Autoload(_)) = l.get_func_ref(&func_name.to_str_lossy()) {
+            let func = l.remove_func(&func_name.to_str_lossy())?;
             if let ShFunc::Autoload(src) = func {
               return Some(src);
             }
@@ -349,7 +350,7 @@ pub(crate) fn node_fork_behavior(tree: &Ast, node_id: NodeId) -> Option<ForkBeha
         // Cached verdict: outer None means cache miss (compute below); outer
         // Some(inner) short-circuits, with inner None = not internal.
         let cached = Shed::logic(|l| {
-          let Some(func) = l.get_func_ref(&tree[name].to_str_lossy()) else {
+          let Some(func) = l.get_func_ref(&func_name.to_str_lossy()) else {
             return Some(None);
           };
 
@@ -374,7 +375,7 @@ pub(crate) fn node_fork_behavior(tree: &Ast, node_id: NodeId) -> Option<ForkBeha
 
         // Cache miss: function exists, is Defined, is_internal is None.
         // Mark Checking and clone the body in a single borrow.
-        let Some(logic) = Shed::logic_mut(|l| match l.get_func_mut(&tree[name].to_str_lossy()) {
+        let Some(logic) = Shed::logic_mut(|l| match l.get_func_mut(&func_name.to_str_lossy()) {
           Some(ShFunc::Defined {
             logic, is_internal, ..
           }) => {
@@ -390,14 +391,14 @@ pub(crate) fn node_fork_behavior(tree: &Ast, node_id: NodeId) -> Option<ForkBeha
           return;
         };
 
-        let body_src = logic.span_for(root);
+        let body_src = logic.span_for(root).slice();
         let behavior = subshell::is_internal(&body_src.to_str_lossy());
         let verdict = match behavior {
           Some(b) => IsInternal::Yes(b),
           None => IsInternal::No,
         };
         Shed::logic_mut(|l| {
-          if let Some(func) = l.get_func_mut(&tree[name].to_str_lossy()) {
+          if let Some(func) = l.get_func_mut(&func_name.to_str_lossy()) {
             func.set_is_internal(verdict).ok();
           }
         });

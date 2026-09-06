@@ -416,9 +416,8 @@ impl Drop for TestGuard {
 pub(crate) fn get_ast(input: &str) -> ShResult<Ast> {
   let input = alias::expand_aliases(input);
 
-  let mut parser = ParsedSrc::new(input.into())
-    .with_lex_flags(LexFlags::empty())
-    .with_name("test_input".into());
+  let mut parser =
+    ParsedSrc::with_name("test_input".into(), input.into()).with_lex_flags(LexFlags::empty());
 
   parser
     .parse_src()

@@ -32,7 +32,7 @@ use crate::{
     node::LabelCtx,
   },
   match_loop, procio, sherr,
-  state::vars::VarStr,
+  state::{self, SourceHandle, vars::VarStr},
   two_way_display,
   util::error::{ShErr, ShResult},
 };
@@ -40,10 +40,9 @@ use crate::{
 use super::lex::{self, LexFlags, LexStream, Span, Tk, TkFlags, TkRule};
 
 /// The parsed AST along with the source input it parsed
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct ParsedSrc {
-  pub src: VarStr,
-  pub name: VarStr,
+  pub src: SourceHandle,
   pub ast: Ast,
   pub lex_flags: LexFlags,
   pub parse_flags: ParseFlags,
@@ -52,23 +51,28 @@ pub(crate) struct ParsedSrc {
 
 impl ParsedSrc {
   pub(crate) fn new(src: VarStr) -> Self {
+    Self::new_inner(None, src)
+  }
+  pub(crate) fn with_name(name: VarStr, src: VarStr) -> Self {
+    Self::new_inner(Some(name), src)
+  }
+  fn new_inner(name: Option<VarStr>, src: VarStr) -> Self {
     let src = if src.contains_slice(b"\\\n") || src.contains(&b'\r') {
       lex::clean_input(&src)
     } else {
       src
     };
+    let handle = match name {
+      Some(n) => state::register_named_source(n, src),
+      None => state::register_source(src),
+    };
     Self {
-      src,
-      name: "<stdin>".into(),
+      src: handle,
       ast: Ast::new(),
       lex_flags: LexFlags::empty(),
       parse_flags: ParseFlags::empty(),
       context: VecDeque::new().into(),
     }
-  }
-  pub(crate) fn with_name(mut self, name: VarStr) -> Self {
-    self.name = name;
-    self
   }
   pub(crate) fn with_lex_flags(mut self, flags: LexFlags) -> Self {
     self.lex_flags = flags;
@@ -81,7 +85,7 @@ impl ParsedSrc {
   pub(crate) fn parse_src(&mut self) -> Result<(), Vec<ShErr>> {
     let mut tokens = vec![];
     let mut errors = vec![];
-    let mut stream = LexStream::new(&self.src, self.lex_flags).with_name(self.name.clone());
+    let mut stream = LexStream::new(&self.src, self.lex_flags);
 
     while let Some(lex_result) = stream.next() {
       if lex_result
@@ -118,7 +122,7 @@ impl ParsedSrc {
       return Err(errors);
     }
 
-    self.ast = parser.tree;
+    self.ast = parser.tree.with_source(self.src.share_handle());
     Ok(())
   }
   pub(crate) fn into_ast(self) -> Ast {

@@ -81,7 +81,8 @@ impl super::Dispatcher {
     };
 
     if Shed::shopts(|o| o.set.verbose) {
-      let command = span.to_str_lossy();
+      let command = span.slice();
+      let command = command.to_str_lossy();
       errln!("{command}");
     }
 
@@ -282,7 +283,8 @@ impl super::Dispatcher {
       Err(e) => return Err(e),
     };
 
-    let body_raw = span.to_str_lossy();
+    let body_raw = span.slice();
+    let body_raw = body_raw.to_str_lossy();
     let body_display = body_raw.graphemes(true).take(70).collect::<String>();
     let name = format!("( {body_display} )");
 
@@ -315,7 +317,7 @@ impl super::Dispatcher {
         let CaseNode { patterns, body } = &tree[block];
 
         for pattern in patterns {
-          let pattern_exp = case::expand_case_pattern(pattern.span.as_bytes())?;
+          let pattern_exp = case::expand_case_pattern(pattern.span.slice().as_bytes())?;
           if pattern_exp.is_empty() {
             if pattern_raw.is_empty() {
               let _guard = guards::shared_scope_guard();

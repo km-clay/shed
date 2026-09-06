@@ -41,9 +41,15 @@ pub(super) mod paths;
 pub(super) mod rc;
 pub(super) mod scopes;
 pub(crate) mod shopt;
+pub(super) mod source;
 pub(super) mod terminal;
-pub(super) mod timeline;
+pub(super) mod thread;
 pub(super) mod vars;
+
+pub(crate) use source::{
+  SourceHandle, SourceId, get_source, get_source_name, handle_for, register_named_source,
+  register_source, slice_source,
+};
 
 thread_local! {
   static SHED: Shed = Shed::new();

@@ -5,7 +5,7 @@ use crate::{
   eval::lex::{LexFlags, LexStream, Tk, TkFlags},
   keys::{KeyCode, KeyEvent, ModKeys},
   shopt,
-  state::Shed,
+  state::{self, Shed, SourceHandle},
 };
 
 struct AliasExpander {
@@ -25,13 +25,14 @@ impl AliasExpander {
     let mut cursor = 0;
     let mut active: HashSet<String> = HashSet::default();
 
-    let mut tokens = self.lex_tokens();
+    let mut input_handle = state::register_source(self.input.as_str());
+    let mut tokens = Self::lex_tokens(&input_handle);
     let mut ti = 0;
 
     loop {
       while ti < tokens.len() {
         let tk = &tokens[ti];
-        if tk.span.range().start >= cursor
+        if tk.start() >= cursor
           && tk.flags.contains(TkFlags::IS_CMD)
           && !tk.flags.contains(TkFlags::KEYWORD)
         {
@@ -40,9 +41,8 @@ impl AliasExpander {
         ti += 1;
       }
       let Some(tk) = tokens.get(ti) else { break };
-      let span = tk.span.range();
-      let (start, end) = (span.start, span.end);
-      let word = tk.to_str_lossy().to_string();
+      let (start, end) = (tk.start(), tk.end());
+      let word = tk.slice().to_str_lossy().to_string();
 
       let alias = if active.contains(&word) {
         None // guarded: re-expanding would recurse
@@ -57,7 +57,8 @@ impl AliasExpander {
         // `input` changed; token spans past `start` are now stale. Re-lex and
         // re-scan from `cursor` (unchanged) so the replacement is itself
         // examined for chained/recursive expansion.
-        tokens = self.lex_tokens();
+        input_handle = state::register_source(self.input.as_str());
+        tokens = Self::lex_tokens(&input_handle);
         ti = 0;
       } else {
         cursor = end;
@@ -71,8 +72,8 @@ impl AliasExpander {
   /// Lex the current input into a token vector. Each token carries its own
   /// snapshot of the source, so the returned tokens stay valid across a later
   /// `input` mutation (they simply become stale and are dropped on re-lex).
-  fn lex_tokens(&self) -> Vec<Tk> {
-    LexStream::new(self.input.as_bytes(), LexFlags::empty())
+  fn lex_tokens(handle: &SourceHandle) -> Vec<Tk> {
+    LexStream::new(handle, LexFlags::empty())
       .filter_map(Result::ok)
       .collect()
   }

@@ -20,8 +20,8 @@ impl super::Builtin for Flog {
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
-    let source = span.span_source().name();
-    let (line, col) = span.line_and_col();
+    let source = span.name();
+    let (line, col) = span.line_and_col().unwrap_or((0, 0));
 
     let (arg_vec, opts) = args.take_argv();
 

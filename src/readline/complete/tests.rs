@@ -796,7 +796,7 @@ fn tab_does_not_escape_user_text() {
 fn dispatch(input: &str, cursor: usize) -> (CompStrat, (usize, usize)) {
   let tks = context::get_context_tokens(input);
   let (strat, span, _cursor_pos) = CompStrat::resolve(&tks, cursor);
-  (strat, (span.range().start, span.range().end))
+  (strat, (span.start, span.end))
 }
 
 /// Helper: extract the prefix from a Var/Tilde/Command/Argument/Files/Dirs strat.

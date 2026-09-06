@@ -6,7 +6,7 @@ use unicode_width::UnicodeWidthChar;
 use crate::{
   eval::lex,
   procio, sherr, shopt,
-  state::{terminal, vars::VarStr},
+  state::{SourceId, terminal, vars::VarStr},
   status_msg, util,
 };
 
@@ -218,7 +218,7 @@ impl super::LineBuf {
     }
 
     // "master span", other spans are rebased into this one
-    let outer_span = Span::new(0..new_joined.len(), new_joined.into());
+    let outer_span = Span::new(0, new_joined.len(), SourceId::NONE);
 
     // lex the chunk; rebase its tokens into the full-buffer coord
     // space (offset by `left`) AND onto the outer source.

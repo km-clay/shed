@@ -82,8 +82,8 @@ impl Type {
   }
   fn display_alias(arg: &VarStr, short: bool) {
     let alias = Shed::logic(|v| v.get_alias(&arg.to_str_lossy())).unwrap();
-    let (line, col) = alias.source().line_and_col();
-    let name = alias.source().source().name();
+    let (line, col) = alias.source().line_and_col().unwrap_or((0, 0));
+    let name = alias.source().name();
     if short {
       outln!("alias");
     } else {
@@ -110,8 +110,8 @@ impl Type {
         }
       }
       ShFunc::Defined { source, .. } => {
-        let (line, col) = source.line_and_col();
-        let name = source.source().name();
+        let (line, col) = source.line_and_col().unwrap_or((0, 0));
+        let name = source.name();
         if short {
           outln!("function");
         } else {

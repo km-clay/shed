@@ -214,8 +214,8 @@ pub(crate) fn prefix_assign_guard(tree: &Ast, assignments: &[NodeId]) -> impl Dr
       NdRule::Assignment { var, .. } => {
         // An indexed assignment (`arr[i]=v`) touches the whole array variable,
         // so snapshot/restore under the base name.
-        let name = params::parse_arr_bracket(tree[*var].span.as_bytes())
-          .map_or_else(|| tree[*var].span.as_var_str(), |(base, _)| base);
+        let name = params::parse_arr_bracket(tree[*var].slice().as_bytes())
+          .map_or_else(|| tree[*var].slice(), |(base, _)| base);
         Some(name)
       }
       _ => None,

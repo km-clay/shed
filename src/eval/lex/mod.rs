@@ -5,11 +5,10 @@
 //! `LexStream` implements `Iterator`, so lexing is a lazy operation.
 
 use std::{
-  borrow::Cow,
   cmp::Ordering,
   collections::VecDeque,
   fmt::Display,
-  ops::{Bound, Index, Range, RangeBounds, RangeFrom, RangeTo, RangeToInclusive},
+  ops::{Bound, Deref, Index, Range, RangeBounds, RangeFrom, RangeTo, RangeToInclusive},
   sync::Arc,
 };
 
@@ -21,7 +20,7 @@ use crate::{
   builtin::BUILTIN_NAMES,
   match_loop, sherr,
   state::{
-    Shed,
+    self, Shed, SourceHandle, SourceId,
     vars::{VarStr, VarStrSliceExt},
   },
   util::{
@@ -69,12 +68,9 @@ pub(crate) trait TkVecUtils<Tk> {
 impl TkVecUtils<Tk> for &[Tk] {
   fn get_span(&self) -> Option<Span> {
     if let Some(first_tk) = self.first() {
-      self.last().map(|last_tk| {
-        Span::new(
-          first_tk.span.range().start..last_tk.span.range().end,
-          first_tk.source(),
-        )
-      })
+      self
+        .last()
+        .map(|last_tk| Span::new(first_tk.span.start, last_tk.span.end, first_tk.source()))
     } else {
       None
     }
@@ -179,145 +175,158 @@ impl Display for SpanSource {
   }
 }
 
+pub(crate) struct WeakSpan {
+  start: usize,
+  end: usize,
+}
+
 /// A slice of some source text. Ultimately wraps a [`crate::state::vars::VarStr`], which means these are cheap to clone.
 ///
 /// Load-bearing struct. Used extensively throughout the codebase for slicing shell input for various reasons (error reporting, tab completion, etc)
-#[derive(Clone, PartialEq, Default, Debug)]
+#[derive(Clone, PartialEq, Copy, Debug)]
 pub(crate) struct Span {
-  range: Range<usize>,
-  pos: Pos,
-  source: SpanSource,
+  start: usize,
+  end: usize,
+  pos: Option<Pos>,
+  source: SourceId,
+}
+
+impl Default for Span {
+  fn default() -> Self {
+    Self {
+      start: 0,
+      end: 0,
+      pos: None,
+      source: SourceId::NONE,
+    }
+  }
 }
 
 impl Span {
   /// New `Span`. Wraps a range and a string that it refers to.
-  pub(crate) fn new(range: Range<usize>, content: VarStr) -> Self {
+  pub(crate) fn new(start: usize, end: usize, source: SourceId) -> Self {
     Span {
-      range,
-      pos: Pos::MIN,
-      source: SpanSource {
-        name: stdin_name(),
-        content,
-      },
-    }
-  }
-  /// Like `new`, but reuses an already-built, shared `Rc<SpanSource>` — no
-  /// allocation and no per-token rename.
-  pub(crate) fn with_source(range: Range<usize>, source: SpanSource) -> Self {
-    Span {
-      range,
-      pos: Pos::MIN,
+      start,
+      end,
+      pos: None,
       source,
     }
   }
+  pub(crate) fn from_range(range: Range<usize>, source: SourceId) -> Self {
+    Span::new(range.start, range.end, source)
+  }
+  pub(crate) fn start(&self) -> usize {
+    ariadne::Span::start(self)
+  }
+  pub(crate) fn end(&self) -> usize {
+    ariadne::Span::end(self)
+  }
+  pub(crate) fn source(&self) -> SourceId {
+    *ariadne::Span::source(self)
+  }
+  pub(crate) fn range(&self) -> Range<usize> {
+    self.start..self.end
+  }
   pub(crate) fn merge_inplace(&mut self, other: &Span) {
-    if !VarStr::ptr_eq(&self.source.content, &other.source.content) {
+    if self.source != other.source {
       return;
     }
 
-    if other.range.start < self.range.start {
+    if other.start < self.start {
       self.pos = other.pos;
     }
-    self.range.start = self.range.start.min(other.range.start);
-    self.range.end = self.range.end.max(other.range.end);
+    self.start = self.start.min(other.start);
+    self.end = self.end.max(other.end);
   }
   pub(crate) fn merge_with(mut self, other: &Span) -> Option<Self> {
     // make sure these two spans originate from the same input. See
     // `merge_inplace` for why the `ptr_eq` fast path needs a value fallback.
-    if !VarStr::ptr_eq(&self.source.content, &other.source.content)
-      && self.source.content != other.source.content
-    {
+    if self.source != other.source {
       return None;
     }
 
-    if other.range.start < self.range.start {
+    if other.start < self.start {
       self.pos = other.pos;
     }
-    self.range.start = self.range.start.min(other.range.start);
-    self.range.end = self.range.end.max(other.range.end);
+    self.start = self.start.min(other.start);
+    self.end = self.end.max(other.end);
     Some(self)
   }
   pub(crate) fn at(mut self, pos: Pos) -> Self {
-    self.pos = pos;
+    self.pos = Some(pos);
     self
   }
-  pub(crate) fn rename(&mut self, name: VarStr) {
-    // Fork this span's shared source (copy-on-write) so renaming it — e.g. to
-    // attribute a function body to its name for error blame — doesn't rename
-    // every other span sharing the source.
-    self.source.name = name;
+  pub(crate) fn line_and_col(&self) -> Option<(usize, usize)> {
+    self.pos.map(|p| (p.row, p.col))
   }
-  pub(crate) fn line_and_col(&self) -> (usize, usize) {
-    (self.pos.row, self.pos.col)
+  pub(crate) fn name(&self) -> VarStr {
+    state::get_source_name(self.source()).unwrap_or_else(|| VarStr::from(b"<unknown>".as_slice()))
   }
-  /// Slice the source string at the wrapped range
-  pub(crate) fn to_str_lossy(&self) -> Cow<'_, str> {
-    self.as_bytes().to_str_lossy()
+  pub(crate) fn try_text(&self) -> Option<VarStr> {
+    state::get_source(self.source)
   }
-  pub(crate) fn as_var_str(&self) -> VarStr {
-    self.as_bytes().into()
+  #[track_caller]
+  pub(crate) fn text(&self) -> VarStr {
+    let Some(text) = self.try_text() else {
+      panic!("Span::text called in invalid span: {self:?}");
+    };
+    text
   }
-  pub(crate) fn as_bytes(&self) -> &[u8] {
-    &self.source.content[self.range().start..self.range().end]
+  pub(crate) fn try_slice(&self) -> Option<VarStr> {
+    state::slice_source(*self)
   }
-  pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
-    self.source.content[self.range().start..self.range().end]
-      .iter()
-      .copied()
+  #[track_caller]
+  pub(crate) fn slice(&self) -> VarStr {
+    let Some(slice) = self.try_slice() else {
+      panic!("Span::slice called in invalid span: {self:?}");
+    };
+    slice
   }
-  pub(crate) fn get_source(&self) -> VarStr {
-    self.source.content.clone()
-  }
-  pub(crate) fn span_source(&self) -> &SpanSource {
-    &self.source
-  }
-  pub(crate) fn range(&self) -> Range<usize> {
-    self.range.clone()
-  }
+
   /// With great power comes great responsibility
   /// Only use this in the most dire of circumstances
-  pub(crate) fn set_range(&mut self, range: Range<usize>) {
-    self.range = range;
+  pub(crate) fn set_range(&mut self, start: usize, end: usize) {
+    self.start = start;
+    self.end = end;
   }
 
   pub(crate) fn shift_by(&mut self, delta: isize) {
-    let new_start = self.range.start as isize + delta;
-    let new_end = self.range.end as isize + delta;
+    let new_start = self.start as isize + delta;
+    let new_end = self.end as isize + delta;
     debug_assert!(new_start >= 0 && new_end >= 0, "shift_by underflow");
-    self.range = (new_start as usize)..(new_end as usize);
+    self.start = new_start as usize;
+    self.end = new_end as usize;
   }
 
   pub(crate) fn rebase_into(&mut self, outer_span: &Span, offset: usize) {
-    self.range = (self.range.start + offset)..(self.range.end + offset);
+    self.start = self.start + offset;
+    self.end = self.end + offset;
     self.source = outer_span.source.clone();
   }
 }
 
 impl PartialOrd for Span {
   fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-    use ariadne::Span as ASpan;
-    if self.get_source() != other.get_source() {
+    if self.source != other.source {
       return None;
     }
-    Some((self.start(), self.end()).cmp(&(other.start(), other.end())))
+    Some((self.start, self.end).cmp(&(other.start, other.end)))
   }
 }
 
 impl ariadne::Span for Span {
-  type SourceId = SpanSource;
+  type SourceId = state::SourceId;
 
   fn source(&self) -> &Self::SourceId {
     &self.source
   }
 
   fn start(&self) -> usize {
-    let max = self.source.content.len();
-    self.range.start.min(max).min(self.range.end)
+    self.start
   }
 
   fn end(&self) -> usize {
-    let max = self.source.content.len();
-    self.range.end.min(max)
+    self.end
   }
 }
 
@@ -391,8 +400,10 @@ impl Tk {
   }
   /// Returns a new string with the token's span replaced by the given string.
   pub(crate) fn replaced(&self, other: &str) -> String {
-    let mut content = self.span.source.content().to_string();
-    content.replace_range(self.span.range(), other);
+    let mut content = self.span.slice().to_string();
+    let start = self.span.start();
+    let end = self.span.end();
+    content.replace_range(start..end, other);
     content
   }
   /// Returns true if the token is a literal string, i.e. it does not contain any special characters that would require quoting or escaping.
@@ -400,14 +411,9 @@ impl Tk {
     self.filter_meta()
       && self
         .span
+        .slice()
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || b"-_./".contains(&b))
-  }
-  pub(crate) fn as_bytes(&self) -> &[u8] {
-    self.span.as_bytes()
-  }
-  pub(crate) fn to_str_lossy(&self) -> Cow<'_, str> {
-    self.span.to_str_lossy()
   }
   /// The token's effective text as a `VarStr`: the joined expansion for an
   /// expanded token, or the raw span otherwise. Mirrors `Display` without
@@ -417,11 +423,8 @@ impl Tk {
   pub(crate) fn word(&self) -> VarStr {
     match &self.class {
       TkRule::Expanded { exp } => exp.join_with(" "),
-      _ => self.span.as_bytes().into(),
+      _ => self.span.slice().as_bytes().into(),
     }
-  }
-  pub(crate) fn source(&self) -> VarStr {
-    self.span.source.content.clone()
   }
   pub(crate) fn mark(&mut self, flag: TkFlags) {
     self.flags |= flag;
@@ -431,7 +434,7 @@ impl Tk {
     let TkRule::Sep = self.class else {
       return false;
     };
-    self.span.as_bytes().trim() == b";;"
+    self.span.slice().as_bytes().trim() == b";;"
   }
 
   /// Returns false for tokens that are not part of the actual input, like `TkRule::Soi`, `TkRule::Eoi`, and `TkRule::Null`.
@@ -450,21 +453,29 @@ impl Tk {
   /// returns a new `Tk` instead of mutating in-place. Altering spans directly
   /// feels like a potential footgun.
   pub(crate) fn strip_arith_header(&self) -> ShResult<Self> {
-    let s = self.as_bytes();
+    let slice = self.slice();
+    let s = slice.as_bytes();
     let trimmed = s.trim();
 
     if trimmed.len() < 4 || !trimmed.starts_with(b"((") || !trimmed.ends_with(b"))") {
       return Err(sherr!(ParseErr @ self.span.clone(), "malformed arithmetic for-loop header"));
     }
 
-    let base = self.span.range.start;
+    let base = self.span.start;
     let start = base + (s.len() - s.trim_start().len()) + 2;
     let end = base + (s.trim_end().len()) - 2;
 
     Ok(Self::new(
       self.class.clone(),
-      Span::new(start..end, self.source()),
+      Span::new(start, end, self.source()),
     ))
+  }
+}
+
+impl Deref for Tk {
+  type Target = Span;
+  fn deref(&self) -> &Self::Target {
+    &self.span
   }
 }
 
@@ -677,7 +688,7 @@ impl LexState {
   }
 }
 
-impl From<&LexStream> for LexState {
+impl From<&LexStream<'_>> for LexState {
   fn from(lexer: &LexStream) -> Self {
     Self {
       cursor: lexer.cursor,
@@ -702,9 +713,10 @@ impl From<&LexStream> for LexState {
 ///
 /// Notes:
 /// The first and last lexed token will be an empty token with class `TkRule::Soi` and `TkRule::Eoi` respectively. These tokens must be handled specially if you are using the lexer for internal stuff like the cases mentioned above.
-pub(crate) struct LexStream {
-  source: SpanSource,
+pub(crate) struct LexStream<'a> {
+  source: &'a SourceHandle,
   pub cursor: usize,
+  end: usize,
   pos_offset: usize,
   pos: Pos,
   quote_state: QuoteState,
@@ -717,14 +729,19 @@ pub(crate) struct LexStream {
   flags: LexFlags,
 }
 
-impl LexStream {
-  pub(crate) fn new(source: &[u8], flags: LexFlags) -> Self {
+impl<'a> LexStream<'a> {
+  pub(crate) fn new(source: &'a SourceHandle, flags: LexFlags) -> Self {
+    Self::sub_lex(source, 0..source.len(), flags)
+  }
+  pub(crate) fn sub_lex(source: &'a SourceHandle, range: Range<usize>, flags: LexFlags) -> Self {
     let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
-    let source = SpanSource::new(stdin_name(), source.into());
+    let start = range.start.min(source.len());
+    let end = range.end.min(source.len());
     Self {
       flags,
       source,
-      cursor: 0,
+      end,
+      cursor: start,
       pos_offset: 0,
       pos: Pos::new(0, 0),
       quote_state: QuoteState::default(),
@@ -754,9 +771,9 @@ impl LexStream {
     let end = match range.end_bound() {
       Bound::Included(&end) => end + 1,
       Bound::Excluded(&end) => end,
-      Bound::Unbounded => self.source.content.len(),
+      Bound::Unbounded => self.source.len(),
     };
-    self.source.content.get(start..end)
+    self.source.get(start..end)
   }
   fn save_state(&self) -> LexState {
     LexState::from(self)
@@ -777,13 +794,9 @@ impl LexStream {
       None
     }
   }
-  pub(crate) fn with_name(mut self, name: VarStr) -> Self {
-    self.source.name = name;
-    self
-  }
   /// The source byte at an absolute index, if in bounds.
   fn byte_at(&self, idx: usize) -> Option<u8> {
-    self.source.content.as_bytes().get(idx).copied()
+    self.source.get(idx).copied()
   }
   pub(crate) fn in_brc_grp(&self) -> bool {
     self.brc_grp_depth > 0
@@ -1359,7 +1372,8 @@ impl LexStream {
       ));
     }
 
-    let text = new_tk.span.as_bytes();
+    let slice = new_tk.slice();
+    let text = slice.as_bytes();
     let is_cmd = self.flags.contains(LexFlags::NEXT_IS_CMD)
       && !self.flags.contains(LexFlags::NEXT_IS_REDIR)
       && !self.flags.contains(LexFlags::CASE_PAT_EXPECTED);
@@ -1529,7 +1543,7 @@ impl LexStream {
   }
   pub(crate) fn get_span(&mut self, range: Range<usize>) -> Span {
     self.update_pos();
-    Span::with_source(range, self.source.clone()).at(self.pos)
+    Span::new(range.start, range.end, self.source.get_id()).at(self.pos)
   }
   /// Slice a token out of the original source input, based on the given range.
   pub(crate) fn get_token(&mut self, range: Range<usize>, class: TkRule) -> Tk {
@@ -1538,12 +1552,12 @@ impl LexStream {
   }
 }
 
-impl ByteCursor for LexStream {
+impl ByteCursor for LexStream<'_> {
   fn peek_byte(&self) -> Option<u8> {
-    self.source.content.get(self.cursor).copied()
+    self.source.get(self.cursor).copied()
   }
   fn peek_nth(&self, n: usize) -> Option<u8> {
-    self.source.content.get(self.cursor + n).copied()
+    self.source.get(self.cursor + n).copied()
   }
   fn next_byte(&mut self) -> Option<u8> {
     let b = self.peek_byte()?;
@@ -1554,7 +1568,7 @@ impl ByteCursor for LexStream {
 
 // LexStream implements Iterator, so lexing as an operation is actually lazy.
 // The lexer essentially acts as a streaming cursor over the original input.
-impl Iterator for LexStream {
+impl Iterator for LexStream<'_> {
   type Item = ShResult<Tk>;
   fn next(&mut self) -> Option<Self::Item> {
     assert!(self.cursor <= self.source.len());
@@ -1750,8 +1764,8 @@ impl Iterator for LexStream {
           };
           // we gotta check to see if this wants a file target or not
           // if already points at a number or has '-', it doesn't.
-          let dup_style = tk
-            .span
+          let slice = tk.slice();
+          let dup_style = slice
             .as_bytes()
             .last()
             .is_some_and(|b| b.is_ascii_digit() || *b == b'-');
@@ -1816,7 +1830,8 @@ pub(crate) fn scan_cmd_sub_body(body: &[u8]) -> Option<usize> {
   let mut prefixed = Vec::with_capacity(body.len() + 1);
   prefixed.push(b'(');
   prefixed.extend_from_slice(body);
-  let mut lex = LexStream::new(&prefixed, LexFlags::LEX_UNFINISHED);
+  let handle = state::register_source(prefixed);
+  let mut lex = LexStream::new(&handle, LexFlags::LEX_UNFINISHED);
   let mut entered = false;
   while let Some(tk) = lex.next() {
     let tk = tk.ok()?;
@@ -1825,7 +1840,7 @@ pub(crate) fn scan_cmd_sub_body(body: &[u8]) -> Option<usize> {
     } else if entered {
       // `tk` is the `)` that closed the subshell. Its span end is the byte just
       // past `)` in `(`+body; strip the prepended `(` and the `)` itself.
-      return tk.span.range.end.checked_sub(2);
+      return tk.span.end.checked_sub(2);
     }
   }
   None
@@ -1840,7 +1855,8 @@ mod tests {
   use super::*;
 
   fn lex_classes(src: &str) -> Vec<TkRule> {
-    LexStream::new(src.as_bytes(), LexFlags::LEX_UNFINISHED)
+    let handle = state::register_source(src);
+    LexStream::new(&handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .filter(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi))
       .map(|t| t.class)
@@ -1848,15 +1864,17 @@ mod tests {
   }
 
   fn lex_first_nontrivial_text(src: &str) -> String {
-    LexStream::new(src.as_bytes(), LexFlags::LEX_UNFINISHED)
+    let handle = state::register_source(src);
+    LexStream::new(&handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .find(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi | TkRule::Sep))
-      .map(|t| t.span.to_str_lossy().into_owned())
+      .map(|t| t.slice().to_str_lossy().into_owned())
       .unwrap_or_default()
   }
 
   fn lex_toks(src: &str) -> Vec<Tk> {
-    LexStream::new(src.as_bytes(), LexFlags::LEX_UNFINISHED)
+    let handle = state::register_source(src);
+    LexStream::new(&handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .filter(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi))
       .collect()
@@ -1874,7 +1892,7 @@ mod tests {
     let toks = lex_toks("for x in a b");
     let in_tok = toks
       .iter()
-      .find(|t| t.span.to_str_lossy() == "in")
+      .find(|t| t.slice().to_str_lossy() == "in")
       .expect("expected an `in` token");
     assert!(
       in_tok.flags.contains(TkFlags::KEYWORD),
@@ -1900,7 +1918,7 @@ mod tests {
     let texts: Vec<String> = lex_toks(src)
       .into_iter()
       .filter(|t| t.class == TkRule::Str)
-      .map(|t| t.span.to_str_lossy().into_owned())
+      .map(|t| t.slice().to_str_lossy().into_owned())
       .collect();
     assert!(
       texts.iter().any(|t| t == "echo") && texts.iter().any(|t| t == "after"),
@@ -1920,7 +1938,9 @@ mod tests {
     // second check only looked at brace groups and let the parser report a
     // different error later. Lexed with empty (non-tolerant) flags so the
     // unclosed structure is an error rather than tolerated.
-    let err = LexStream::new(b"(echo hi ", LexFlags::empty())
+    let input = b"(echo hi ";
+    let handle = state::register_source(input.as_slice());
+    let err = LexStream::new(&handle, LexFlags::empty())
       .find_map(Result::err)
       .expect("expected a lex error for the unclosed subshell");
     let msg = err.to_string();
@@ -1934,7 +1954,9 @@ mod tests {
   fn unclosed_subshell_no_trailing_ws_errors_at_lexer() {
     // Control: the no-trailing-whitespace case was already caught by the first
     // EOF check and must keep the same error after the unify.
-    let err = LexStream::new(b"(echo hi", LexFlags::empty())
+    let input = b"(echo hi ";
+    let handle = state::register_source(input.as_slice());
+    let err = LexStream::new(&handle, LexFlags::empty())
       .find_map(Result::err)
       .expect("expected a lex error for the unclosed subshell");
     assert!(

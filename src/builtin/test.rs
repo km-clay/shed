@@ -407,10 +407,10 @@ impl super::Builtin for Test {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     let cmd_span = args.cmd_span();
-    let cmd = cmd_span.as_bytes();
-    let extended = cmd == b"[[";
+    let cmd = cmd_span.slice();
+    let extended = *cmd == *b"[[";
     let (mut arg_vec, _) = args.take_argv();
-    if (cmd == b"[" || cmd == b"[[") && !arg_vec.is_empty() {
+    if (*cmd == *b"[" || *cmd == *b"[[") && !arg_vec.is_empty() {
       arg_vec.pop();
     }
 

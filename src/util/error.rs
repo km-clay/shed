@@ -10,10 +10,10 @@ use std::sync::Arc;
 
 use crate::{
   HashMap,
-  eval::lex::{Span, SpanSource},
+  eval::lex::Span,
   procio::{self, RedirGuard},
   sherr, shopt,
-  state::vars::VarStr,
+  state::{SourceId, get_source, get_source_name, vars::VarStr},
   util::random,
   varstr,
 };
@@ -149,7 +149,7 @@ fn group_labels(labels: Vec<LabelBuilder>) -> Vec<(Span, Label<Span>)> {
 
 /// Returns true if the two spans are related by containment, i.e. one is fully contained within the other.
 fn related_by_containment(a: &Span, b: &Span) -> bool {
-  if a.span_source() != b.span_source() {
+  if a.source() != b.source() {
     return false;
   }
   let ra = a.range();
@@ -277,6 +277,30 @@ impl From<LabelBuilder> for ariadne::Label<Span> {
       label = label.with_color(color);
     }
     label
+  }
+}
+
+/// Ariadne source cache keyed on [`SourceId`], built lazily at print time.
+///
+/// Holds the resolved text and display name for each source an error touches.
+/// A source that has already been dropped is absent, so `fetch` fails for it
+/// and the report degrades to a snippet-less message.
+#[derive(Default)]
+struct SpanCache {
+  entries: HashMap<SourceId, (ariadne::Source<String>, String)>,
+}
+
+impl ariadne::Cache<SourceId> for SpanCache {
+  type Storage = String;
+  fn fetch(&mut self, id: &SourceId) -> Result<&ariadne::Source<String>, impl Debug> {
+    self
+      .entries
+      .get(id)
+      .map(|(src, _)| src)
+      .ok_or_else(|| format!("Failed to fetch source '{id}'"))
+  }
+  fn display<'a>(&self, id: &'a SourceId) -> Option<impl Display + 'a> {
+    self.entries.get(id).map(|(_, name)| name.clone())
   }
 }
 
@@ -487,21 +511,36 @@ impl ShErr {
 
     Some(report.finish())
   }
-  fn collect_sources(&self) -> HashMap<SpanSource, VarStr> {
-    let mut source_map = HashMap::default();
+  /// Resolve the source text + display name for every span this error
+  /// references, at print time. A span whose source has already been dropped
+  /// is simply omitted — `SpanCache::fetch` then fails for it and the report
+  /// falls back to a snippet-less message.
+  fn build_cache(&self) -> SpanCache {
+    let mut cache = SpanCache::default();
+    let mut add = |id: SourceId| {
+      if cache.entries.contains_key(&id) {
+        return;
+      }
+      if let Some(text) = get_source(id) {
+        let name = get_source_name(id)
+          .map(|n| n.to_str_lossy().into_owned())
+          .unwrap_or_default();
+        cache.entries.insert(
+          id,
+          (
+            ariadne::Source::from(text.to_str_lossy().into_owned()),
+            name,
+          ),
+        );
+      }
+    };
     if let Some(span) = &self.src_span {
-      let src = span.span_source().clone();
-      source_map
-        .entry(src.clone())
-        .or_insert_with(|| (*src.content()).into());
+      add(span.source());
     }
     for span in self.labels.iter().map(LabelBuilder::span) {
-      let src = span.span_source().clone();
-      source_map
-        .entry(src.clone())
-        .or_insert_with(|| (*src.content()).into());
+      add(span.source());
     }
-    source_map
+    cache
   }
   fn default_write(&self, fd: &mut impl Write) {
     writeln!(fd, "\n{}", self.kind).ok();
@@ -519,13 +558,7 @@ impl ShErr {
       return self.default_write(fd);
     };
 
-    let sources = self.collect_sources();
-    let cache = ariadne::FnCache::new(move |src: &SpanSource| {
-      sources
-        .get(src)
-        .map(|s| s.to_str_lossy().into_owned())
-        .ok_or_else(|| format!("Failed to fetch source '{}'", src.name()))
-    });
+    let cache = self.build_cache();
     writeln!(fd).ok();
     if report.write(cache, &mut *fd).is_err() {
       self.default_write(fd);

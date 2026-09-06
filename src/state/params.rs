@@ -22,7 +22,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::{
   ShResult,
   eval::lex::{LexFlags, LexStream},
-  match_loop, sherr,
+  match_loop, register_source, sherr,
   vars::{ArrIndex, Var, VarFlags, VarKind},
 };
 
@@ -71,7 +71,8 @@ pub(crate) fn parse_arr_bracket(var_name: &[u8]) -> Option<(VarStr, VarStr)> {
 
 /// Expand the raw index expression and parse it into an `ArrIndex`.
 pub(crate) fn expand_arr_index(idx_raw: &[u8], allow_side_effects: bool) -> ShResult<ArrIndex> {
-  let expanded = LexStream::new(idx_raw, LexFlags::empty())
+  let handle = register_source(idx_raw);
+  let expanded = LexStream::new(&handle, LexFlags::empty())
     .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
     .try_fold(vec![], |mut acc, wrds| {
       match wrds {

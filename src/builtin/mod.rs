@@ -330,7 +330,7 @@ pub(super) trait Builtin: Sync {
   ) -> ShResult<()> {
     let node = &tree[node_id];
     let cmd = node.get_command().unwrap();
-    let cmd_raw = tree[cmd].as_bytes();
+    let cmd_raw = tree[cmd].slice();
 
     let context = node.context;
     let NdRule::Command { assignments, argv } = &node.class else {
@@ -349,11 +349,11 @@ pub(super) trait Builtin: Sync {
     Dispatcher::set_assignments(tree, &tree[*assignments], assign_behavior)?;
     let fork_builtins = node.flags.contains(NdFlags::FORK_BUILTINS);
 
-    if !self.no_help() && argv.len() == 2 && tree[argv.get(1)].as_bytes() == b"--help" {
+    if !self.no_help() && argv.len() == 2 && *tree[argv.get(1)].slice() == *b"--help" {
       // we have been asked for help
       // is this a hack? only the nose knows.
       return execute::exec_nonint(
-        [b"help builtin-", cmd_raw].concat().into(),
+        [b"help builtin-", cmd_raw.as_bytes()].concat().into(),
         Some("<builtin-help>".into()),
       );
     }
@@ -380,7 +380,7 @@ pub(super) trait Builtin: Sync {
       };
       let child = ChildProc::new(
         Pid::this(),
-        Some(cmd_raw),
+        Some(&cmd_raw),
         fork_builtins.then_some(child_pgid),
         timer,
       );
@@ -388,7 +388,7 @@ pub(super) trait Builtin: Sync {
     }
 
     // Handle exec specially - persist redirections before dispatch
-    if cmd_raw == b"exec" {
+    if *cmd_raw == *b"exec" {
       guard.persist();
     }
 

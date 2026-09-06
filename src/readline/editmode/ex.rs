@@ -22,7 +22,7 @@ use super::{
 };
 use crate::{
   eval::lex::TkFlags,
-  state::{Shed, vars::VarStr},
+  state::{Shed, SourceId, register_source, vars::VarStr},
   varstr, verb,
 };
 use bitflags::bitflags;
@@ -198,14 +198,15 @@ fn expand_ex_aliases(input: &str) -> String {
   let mut active: crate::HashSet<String> = crate::HashSet::default();
 
   for _ in 0..MAX_EX_ALIAS_DEPTH {
-    let tokens = ExLexer::new(&input).lex();
+    let handle = register_source(input.as_str());
+    let tokens = ExLexer::new(&input, handle.get_id()).lex();
     let Some(cmd_tk) = tokens
       .iter()
       .find(|t| matches!(t.class, ExTkRule::Command(_)))
     else {
       break;
     };
-    let name = cmd_tk.span.to_str_lossy().to_string();
+    let name = cmd_tk.span.slice().to_str_lossy().to_string();
     if active.contains(&name) {
       break; // already expanding this name — treat it as a literal command
     }
@@ -222,7 +223,8 @@ fn expand_ex_aliases(input: &str) -> String {
 
 fn parse_ex_input(input: &str) -> ExP<ExNode> {
   let input = expand_ex_aliases(input);
-  let lexer = ExLexer::new(&input);
+  let handle = register_source(input.as_str());
+  let lexer = ExLexer::new(&input, handle.get_id());
   let tokens = lexer.lex();
   let parser = ExParser::new(tokens);
   parser.parse()
@@ -372,6 +374,7 @@ impl From<PatternEnd> for usize {
 
 pub(crate) struct ExLexer<'a> {
   input: VarStr,
+  source: SourceId,
   chars: Peekable<CharIndices<'a>>,
   tokens: Vec<ExTk>,
 
@@ -379,9 +382,10 @@ pub(crate) struct ExLexer<'a> {
 }
 
 impl<'a> ExLexer<'a> {
-  pub(crate) fn new(input: &'a str) -> Self {
+  pub(crate) fn new(input: &'a str, source: SourceId) -> Self {
     Self {
       input: input.into(),
+      source,
       chars: input.char_indices().peekable(),
       tokens: vec![],
       flags: ExLexFlags::empty(),
@@ -453,7 +457,7 @@ impl<'a> ExLexer<'a> {
   fn get_span(&self, range: Range<usize>) -> Option<Span> {
     self.input.get(range.clone())?;
 
-    Some(Span::new(range, self.input.clone()))
+    Some(Span::from_range(range, self.source))
   }
   fn is_addr_opener(ch: &(usize, char)) -> bool {
     let ch = ch.1;
@@ -610,8 +614,9 @@ impl<'a> ExLexer<'a> {
 
         let is_write = matches!(cmd, ExCommand::Write);
         let rest = self.chars.by_ref().map(|(_, ch)| ch).collect::<String>();
-        let outer = Span::new(0..self.input.len(), self.input.clone());
-        let stream = LexStream::new(rest.as_bytes(), LexFlags::LEX_UNFINISHED)
+        let outer = Span::from_range(0..self.input.len(), self.source);
+        let rest_handle = register_source(rest.as_str());
+        let stream = LexStream::new(&rest_handle, LexFlags::LEX_UNFINISHED)
           .filter_map(Result::ok)
           .filter_map(|tk| tk.filter_meta().then_some(tk))
           .map(|tk| tk.rebase_into(&outer, start_pos));
@@ -634,7 +639,7 @@ impl<'a> ExLexer<'a> {
             class: ExTkRule::ShellTk(shell_tk),
             span: outer_span,
           };
-          if !pushed && is_write && tk.span.to_str_lossy() == ">>" {
+          if !pushed && is_write && tk.span.slice().to_str_lossy() == ">>" {
             tk.class = ExTkRule::Append;
           }
           self.tokens.push(tk);
@@ -711,8 +716,9 @@ impl<'a> ExLexer<'a> {
       rest.push(ch);
     }
 
-    let outer = Span::new(0..self.input.len(), self.input.clone());
-    let stream = LexStream::new(rest.as_bytes(), LexFlags::LEX_UNFINISHED)
+    let outer = Span::from_range(0..self.input.len(), self.source);
+    let rest_handle = register_source(rest.as_str());
+    let stream = LexStream::new(&rest_handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .filter_map(|tk| tk.filter_meta().then_some(tk))
       .map(|tk| tk.rebase_into(&outer, start_pos));
@@ -974,30 +980,30 @@ impl ExParser {
 
     match addr {
       ExLineAddr::Number => {
-        let addr = tk.span.to_str_lossy().parse::<usize>().unwrap_or(1);
+        let addr = tk.span.slice().to_str_lossy().parse::<usize>().unwrap_or(1);
         ExPR::Partial(LineAddr::Number(addr))
       }
       ExLineAddr::Dot => ExPR::Partial(LineAddr::Current),
       ExLineAddr::Dollar => ExPR::Partial(LineAddr::Last),
       ExLineAddr::Percent => ExPR::Full(AddressRange::all_lines()),
       ExLineAddr::Offset => {
-        let raw = tk.span.to_str_lossy();
+        let raw = tk.span.slice().to_str_lossy().into_owned();
         let s = raw.strip_prefix('+').unwrap_or(&raw);
 
         let offset = s.parse::<isize>().unwrap_or(1);
         ExPR::Partial(LineAddr::Offset(offset))
       }
       ExLineAddr::Mark => {
-        let mark_name = tk.span.to_str_lossy().chars().nth(1).unwrap();
+        let mark_name = tk.span.slice().to_str_lossy().chars().nth(1).unwrap();
 
         ExPR::Partial(LineAddr::Mark(mark_name))
       }
       ExLineAddr::Pattern => {
-        let pat = VarStr::from(tk.span.as_bytes());
+        let pat = tk.span.slice();
         ExPR::Partial(LineAddr::Pattern(pat))
       }
       ExLineAddr::PatternRev => {
-        let pat = VarStr::from(tk.span.as_bytes());
+        let pat = tk.span.slice();
         ExPR::Partial(LineAddr::PatternRev(pat))
       }
       ExLineAddr::Comma => unreachable!(),
@@ -1043,9 +1049,10 @@ impl ExParser {
       ExCommand::Quit => ExR::success(ExNdRule::Quit),
       ExCommand::WriteQuit => ExR::success(ExNdRule::WriteQuit),
       ExCommand::Expand => ExR::success(ExNdRule::Expand),
-      ExCommand::Unknown => {
-        ExR::error(format!("not an editor command: {}", tk.span.to_str_lossy()))
-      }
+      ExCommand::Unknown => ExR::error(format!(
+        "not an editor command: {}",
+        tk.span.slice().to_str_lossy()
+      )),
     }
   }
   fn parse_addr_rule(
@@ -1085,7 +1092,7 @@ impl ExParser {
     }
     let args_raw = args
       .get_span() // extract total span of arg tokens
-      .map(|s| s.to_str_lossy().to_string())
+      .map(|s| s.slice().to_str_lossy().to_string())
       .unwrap_or_default();
 
     ExR::success(ExNdRule::Shell(args_raw))
@@ -1097,7 +1104,7 @@ impl ExParser {
     }
     let args_raw = args
       .get_span() // extract total span of arg tokens
-      .map(|s| s.to_str_lossy().to_string());
+      .map(|s| s.slice().to_str_lossy().to_string());
 
     let cmd = if bang {
       "help -".to_string() // resume the last help topic
@@ -1117,15 +1124,12 @@ impl ExParser {
       return ExR::error("expected normal command sequence after 'normal'".into());
     };
 
-    let seq = tk.span.to_str_lossy().to_string();
+    let seq = tk.span.slice().to_str_lossy().to_string();
     ExR::success(ExNdRule::Normal { seq, bang })
   }
   fn parse_stash(&mut self) -> ExR<ExNdRule> {
     let arg_names = ["pop", "drop", "apply", "insert", "swap", "list"];
-    let arg = self
-      .tokens
-      .next()
-      .map(|tk| VarStr::from(tk.span.as_bytes()));
+    let arg = self.tokens.next().map(|tk| tk.span.slice());
     if arg.is_none() {
       return ExR::success(ExNdRule::Stash(StashArgs::Push(None)));
     } else if !arg_names
@@ -1135,10 +1139,7 @@ impl ExParser {
       return ExR::success(ExNdRule::Stash(StashArgs::Push(arg)));
     }
 
-    let name = self
-      .tokens
-      .next()
-      .map(|tk| VarStr::from(tk.span.as_bytes()));
+    let name = self.tokens.next().map(|tk| tk.span.slice());
     let arg = arg.unwrap();
     // Inner matches use the same prefix direction as the outer gate:
     // `<name>.starts_with(arg)` — so abbreviations like `:stash p` or
@@ -1195,12 +1196,12 @@ impl ExParser {
     let flags_tk = self
       .tokens
       .peeking_next(|tk| matches!(tk.class, ExTkRule::Argument));
-    let pat = pat.span.to_str_lossy().to_string();
-    let repl = repl.span.to_str_lossy().to_string();
+    let pat = pat.span.slice().to_str_lossy().to_string();
+    let repl = repl.span.slice().to_str_lossy().to_string();
 
     let mut flags = SubFlags::empty();
     if let Some(flags_tk) = flags_tk {
-      let flags_str = flags_tk.span.to_str_lossy();
+      let flags_str = flags_tk.span.slice().to_str_lossy().into_owned();
       for ch in flags_str.chars() {
         match ch {
           'g' => flags |= SubFlags::GLOBAL,
@@ -1240,14 +1241,14 @@ impl ExParser {
     };
 
     ExR::success(ExNdRule::Global {
-      pat: pat.span.to_str_lossy().to_string(),
+      pat: pat.span.slice().to_str_lossy().to_string(),
       nested: Box::new(sub_node),
     })
   }
   fn parse_edit(&mut self) -> ExR<ExNdRule> {
     let mut args = vec![];
     while let Some(arg) = self.tokens.next() {
-      args.push(expand_path_arg(&arg.span.to_str_lossy()));
+      args.push(expand_path_arg(&arg.span.slice().to_str_lossy()));
     }
     let args = args.into_boxed_slice();
 
@@ -1264,7 +1265,7 @@ impl ExParser {
       }
       let args_raw = args
         .get_span() // extract total span of arg tokens
-        .map(|s| s.to_str_lossy().into())
+        .map(|s| s.slice().to_str_lossy().into())
         .unwrap_or_default();
 
       if is_read {
@@ -1287,7 +1288,7 @@ impl ExParser {
         arg = Some(next);
       }
 
-      let path = arg.map(|a| expand_path_arg(&a.span.to_str_lossy()));
+      let path = arg.map(|a| expand_path_arg(&a.span.slice().to_str_lossy()));
 
       if is_read {
         let Some(path) = path else {
@@ -1593,7 +1594,10 @@ mod parse_one_addr_tests {
 
   /// Run only the lexer over `input` and return the resulting tokens.
   fn lex(input: &str) -> Vec<ExTk> {
-    ExLexer::new(input).lex()
+    let handle = register_source(input);
+    let tokens = ExLexer::new(input, handle.get_id()).lex();
+    std::mem::forget(handle);
+    tokens
   }
 
   /// Extract the (single) address token and return its rule and lexeme.
@@ -1605,7 +1609,7 @@ mod parse_one_addr_tests {
       .into_iter()
       .next()
       .unwrap_or_else(|| panic!("no tokens produced for {input:?}"));
-    let text = tk.span.to_str_lossy().to_string();
+    let text = tk.span.slice().to_str_lossy().to_string();
     (tk.class, text)
   }
 

@@ -17,6 +17,7 @@ use super::{
 };
 use crate::{
   procio::RedirSpec,
+  state::SourceHandle,
   util::error::{LabelBuilder, ShResult},
 };
 
@@ -41,7 +42,7 @@ static AST_GENERATION: AtomicU32 = AtomicU32::new(0);
 /// If you know how many tokens this thing is going to parse, construct it using
 /// [`Ast::with_capacity()`], this saves us from having to contsantly resize 10 vectors
 /// during the parse.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct Ast {
   nodes: Vec<Node>,             // all ast nodes
   roots: Vec<NodeId>,           // top-level statements (entry points)
@@ -56,6 +57,7 @@ pub(crate) struct Ast {
   labels: Vec<LabelBuilder>,
 
   id: u32,
+  source: Option<SourceHandle>,
 }
 
 impl Ast {
@@ -64,6 +66,10 @@ impl Ast {
       id: AST_GENERATION.fetch_add(1, Ordering::SeqCst),
       ..Default::default()
     }
+  }
+  pub(crate) fn with_source(mut self, source: SourceHandle) -> Self {
+    self.source = Some(source);
+    self
   }
   fn reserve(&mut self, n: usize) {
     // based on testing, these ratios seem to be
@@ -99,9 +105,9 @@ impl Ast {
   pub(crate) fn span_for_range(&self, range: NodeRange) -> Span {
     let first = self[range.first().unwrap()].get_span();
     let last = self[range.last().unwrap()].get_span();
-    let start = self[first].range().start;
-    let end = self[last].range().end;
-    Span::new(start..end, self[first].source().content())
+    let start = self[first].start();
+    let end = self[last].end();
+    Span::new(start, end, self[first].source())
   }
   pub(crate) fn span_for(&self, node: NodeId) -> Span {
     self[self[node].get_span()].clone()
@@ -122,7 +128,11 @@ impl Ast {
     let mut new = Self::new();
     let root = self.copy_into(id, &mut new);
     new.mark_root(root);
-    new
+
+    match self.source.as_ref() {
+      Some(src) => new.with_source(src.share_handle()),
+      None => new,
+    }
   }
   fn copy_into(&self, id: NodeId, dst: &mut Self) -> NodeId {
     let Node {
@@ -366,6 +376,26 @@ impl Ast {
       self[tk] = expanded;
     }
     Ok(())
+  }
+}
+
+impl Clone for Ast {
+  fn clone(&self) -> Self {
+    let new_src = self.source.as_ref().map(SourceHandle::share_handle);
+    Self {
+      nodes: self.nodes.clone(),
+      roots: self.roots.clone(),
+      tokens: self.tokens.clone(),
+      redirs: self.redirs.clone(),
+      child_nodes: self.child_nodes.clone(),
+      case_nodes: self.case_nodes.clone(),
+      cond_nodes: self.cond_nodes.clone(),
+      conjuncts: self.conjuncts.clone(),
+      spans: self.spans.clone(),
+      labels: self.labels.clone(),
+      id: self.id,
+      source: new_src,
+    }
   }
 }
 

@@ -277,7 +277,7 @@ fn build_source(args: &BuiltinArgs) -> VarStr {
   let mut parts: Vec<VarStr> = vec!["complete".into()];
   for opt in args.options() {
     // the flag as written (e.g. `-W`), followed by its argument words
-    parts.push(opt.span().as_bytes().into());
+    parts.push(opt.span().slice().into());
     for (arg, _) in opt.args() {
       parts.push(arg.clone());
     }

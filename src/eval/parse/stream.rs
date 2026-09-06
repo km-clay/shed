@@ -71,7 +71,7 @@ impl ParseStream {
   pub(super) fn catch_linebreak(&mut self, span: &mut Option<Span>) {
     while self
       .peek_tk()
-      .is_some_and(|tk| tk.class == TkRule::Sep && !tk.as_bytes().contains(&b';'))
+      .is_some_and(|tk| tk.class == TkRule::Sep && !tk.slice().as_bytes().contains(&b';'))
     {
       let next = self.next_tk().unwrap();
       extend_span!(*span, next.span);
@@ -108,9 +108,9 @@ impl ParseStream {
   pub(super) fn check_keyword(&self, kw: &[u8]) -> bool {
     self.peek_tk().is_some_and(|tk| {
       if kw == b"in" {
-        tk.span.as_bytes() == b"in"
+        *tk.slice() == *b"in"
       } else {
-        tk.flags.contains(TkFlags::KEYWORD) && tk.as_bytes() == kw
+        tk.flags.contains(TkFlags::KEYWORD) && tk.slice().as_bytes() == kw
       }
     })
   }

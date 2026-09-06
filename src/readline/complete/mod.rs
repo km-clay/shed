@@ -7,6 +7,7 @@ use crate::{
 use std::{
   borrow::Cow,
   fmt::{Debug, Display},
+  ops::Range,
   os::unix::fs::PermissionsExt,
   path::{Path, PathBuf},
   rc::Rc,
@@ -112,7 +113,7 @@ enum CompStrat {
 }
 
 impl CompStrat {
-  pub(crate) fn resolve(tks: &[CtxTk], cursor_pos: usize) -> (Self, Span, usize) {
+  pub(crate) fn resolve(tks: &[CtxTk], cursor_pos: usize) -> (Self, Range<usize>, usize) {
     // first check to see if it is a redirect target
     // if it is, we complete files.
     if let Some((idx, tok)) = tks
@@ -129,12 +130,12 @@ impl CompStrat {
       if after_redirect {
         return (
           Self::Files {
-            path: tok.span().to_str_lossy().to_string(),
+            path: tok.slice().to_string(),
           },
-          tok.span().clone(),
+          tok.range(),
           tok
             .relative_cursor_pos(cursor_pos)
-            .unwrap_or(tok.span().to_str_lossy().len()),
+            .unwrap_or_else(|| tok.slice().to_str_lossy().len()),
         );
       }
     }
@@ -157,19 +158,17 @@ impl CompStrat {
     }
 
     let Some(prev) = tks.iter().rfind(|t| t.range().end <= cursor_pos) else {
+      let mut span = Span::default();
+      span.set_range(cursor_pos, cursor_pos);
       return (
         Self::Command {
           prefix: String::new(),
         },
-        Span::new(cursor_pos..cursor_pos, "".into()),
+        cursor_pos..cursor_pos,
         0,
       );
     };
-    (
-      Self::from_predecessor(prev),
-      Span::new(cursor_pos..cursor_pos, prev.span().get_source()),
-      0,
-    )
+    (Self::from_predecessor(prev), cursor_pos..cursor_pos, 0)
   }
 
   /// Cursor is *inside* `leaf`. Returns the dispatch strategy *and* the span
@@ -183,10 +182,11 @@ impl CompStrat {
   /// `complete_path` decides per-candidate whether to graft (preserving
   /// `$VAR`/`~` in the user's literal text) or wholesale-replace (for glob
   /// patterns where the literal text doesn't appear in the match).
-  fn from_leaf(leaf: &CtxTk, cursor_pos: usize) -> (Self, Span, usize) {
+  fn from_leaf(leaf: &CtxTk, cursor_pos: usize) -> (Self, Range<usize>, usize) {
     let prefix =
       String::from_utf8_lossy(leaf.prefix_from(cursor_pos).unwrap_or_default()).into_owned();
-    let whole = leaf.span().to_str_lossy();
+    let raw = leaf.slice();
+    let whole = raw.to_str_lossy();
     let cursor_pos = leaf.relative_cursor_pos(cursor_pos);
     let strat = match leaf.class() {
       CtxTkRule::ValidCommand(kind) => match kind {
@@ -243,11 +243,7 @@ impl CompStrat {
     };
     // VarSub/ParamName get a narrowed span (`${name`) so trailing param
     // expansion bits (`:-default`, `}`, etc.) are preserved on replace.
-    (
-      strat,
-      leaf.span().clone(),
-      cursor_pos.unwrap_or(whole.len()),
-    )
+    (strat, leaf.range(), cursor_pos.unwrap_or(whole.len()))
   }
 
   /// Cursor is *past* `prev` (in whitespace or at end of input). The prefix
@@ -1537,7 +1533,7 @@ impl SimpleCompleter {
 
     let mut words = relevant
       .iter()
-      .map(|s| s.span().to_str_lossy().to_string())
+      .map(|s| s.slice().to_string())
       .collect::<Vec<_>>();
 
     let cword = if let Some(pos) = relevant
@@ -1605,7 +1601,7 @@ impl SimpleCompleter {
     };
     let (strat, replace_span, _leaf_cursor_pos) = CompStrat::resolve(&tks, cursor_pos);
 
-    self.token_span = (replace_span.range().start, replace_span.range().end);
+    self.token_span = (replace_span.start, replace_span.end);
 
     // reset this inbetween completions
     self.add_space = false;

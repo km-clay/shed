@@ -56,13 +56,18 @@ impl super::Dispatcher {
       let assign = &tree[*assign_id];
       let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
       let span = tree[assign.span].clone();
+
       let NdRule::Assignment { kind, var, val } = &assign.class else {
         unreachable!()
       };
       let old_status = Shed::get_status();
-      let var_name = &tree[*var].span.to_str_lossy();
+
+      let var_name = &tree[*var].span.slice();
+      let var_name = &var_name.to_str_lossy();
+
       let is_integer = !is_arr
         && Shed::vars(|v| v.get_var_flags(var_name)).is_some_and(|f| f.contains(VarFlags::INTEGER));
+
       let val = if is_arr {
         VarKind::arr_from_tk(&tree[*val])?
       } else if is_integer {

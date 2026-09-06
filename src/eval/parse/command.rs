@@ -235,7 +235,10 @@ impl ParseStream {
           break;
         }
       }
-      let in_dbracket = argv.first().map(|t: &Tk| t.as_bytes()) == Some(b"[[");
+      let in_dbracket = argv
+        .first()
+        .map(|t: &Tk| t.slice().as_bytes() == b"[[")
+        .unwrap_or(false);
       if in_dbracket {
         // add this flag so we don't split words on test members
         flags |= NdFlags::NO_SPLIT;
@@ -302,7 +305,7 @@ impl ParseStream {
             break;
           }
           TkRule::Str => {
-            let is_dbracket_close = in_dbracket && tk.as_bytes() == b"]]";
+            let is_dbracket_close = in_dbracket && tk.slice().as_bytes() == b"]]";
             extend_span!(span, tk.span);
             tk_counter += 1;
             argv.push(tk.clone());
@@ -374,12 +377,18 @@ impl ParseStream {
     }
   }
   fn parse_assignment(&mut self, token: &Tk) -> Option<Node> {
-    let base = token.span.range().start;
-    let mut cur = SliceCursor::new(token.span.as_bytes());
+    let base = token.span.start();
+    let slice = token.slice();
+    let mut cur = SliceCursor::new(slice.as_bytes());
+
     let mut var_name = util::scratch_buf();
-    let mut name_range = base..base;
+    let name_start = base;
+    let mut name_end = base;
+
     let mut var_val = util::scratch_buf();
-    let mut val_range = token.span.range().end..token.span.range().end;
+    let mut val_start = token.end();
+    let val_end = token.end();
+
     let mut assign_kind = None;
     let mut bracket_depth = 0usize;
 
@@ -404,40 +413,40 @@ impl ParseStream {
             var_name.push(ch);
           }
           b'=' if bracket_depth == 0 => {
-            name_range.end = base + cur.pos() - 1;
-            val_range.start = base + cur.pos();
+            name_end = base + cur.pos() - 1;
+            val_start = base + cur.pos();
             assign_kind = Some(AssignKind::Eq);
           }
           b'-' if bracket_depth == 0 => {
-            name_range.end = base + cur.pos() - 1;
+            name_end = base + cur.pos() - 1;
             if !cur.bump_if_eq(b'=') {
               return None;
             }
-            val_range.start = base + cur.pos();
+            val_start = base + cur.pos();
             assign_kind = Some(AssignKind::MinusEq);
           }
           b'+' if bracket_depth == 0 => {
-            name_range.end = base + cur.pos() - 1;
+            name_end = base + cur.pos() - 1;
             if !cur.bump_if_eq(b'=') {
               return None;
             }
-            val_range.start = base + cur.pos();
+            val_start = base + cur.pos();
             assign_kind = Some(AssignKind::PlusEq);
           }
           b'/' if bracket_depth == 0 => {
-            name_range.end = base + cur.pos() - 1;
+            name_end = base + cur.pos() - 1;
             if !cur.bump_if_eq(b'=') {
               return None;
             }
-            val_range.start = base + cur.pos();
+            val_start = base + cur.pos();
             assign_kind = Some(AssignKind::DivEq);
           }
           b'*' if bracket_depth == 0 => {
-            name_range.end = base + cur.pos() - 1;
+            name_end = base + cur.pos() - 1;
             if !cur.bump_if_eq(b'=') {
               return None;
             }
-            val_range.start = base + cur.pos();
+            val_start = base + cur.pos();
             assign_kind = Some(AssignKind::MultEq);
           }
           b'\\' => {
@@ -457,8 +466,8 @@ impl ParseStream {
     }
     let assign_kind = assign_kind.unwrap();
 
-    let var = Tk::new(TkRule::Str, Span::new(name_range, token.source()));
-    let val = Tk::new(TkRule::Str, Span::new(val_range, token.source()));
+    let var = Tk::new(TkRule::Str, Span::new(name_start, name_end, token.source()));
+    let val = Tk::new(TkRule::Str, Span::new(val_start, val_end, token.source()));
     let flags = if var_val.first() == Some(&b'(') && var_val.last() == Some(&b')') {
       NdFlags::ARR_ASSIGN
     } else {

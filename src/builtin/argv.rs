@@ -108,7 +108,7 @@ pub(crate) fn join_raw_arg_iter(args: impl Iterator<Item = (VarStr, Span)>) -> (
     } else {
       let new_end = arg.1.end();
       let start = acc.1.start();
-      acc.1.set_range(start..new_end);
+      acc.1.set_range(start, new_end);
     }
 
     if acc.0.is_empty() {

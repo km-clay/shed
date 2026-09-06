@@ -362,7 +362,7 @@ impl TryFrom<Tk> for RedirBldr {
         dup_from_word: false,
       })
     } else {
-      match Self::parse(tk.as_bytes()) {
+      match Self::parse(&tk.slice()) {
         Ok(bldr) => Ok(bldr.with_span(span)),
         Err(e) => Err(e.promote(span)),
       }

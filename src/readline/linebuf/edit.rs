@@ -345,12 +345,12 @@ fn keyword_closes(kw: &str) -> Option<&'static [Opener]> {
 
 fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut Vec<(usize, i32)>) {
   for tk in tokens {
-    let start = tk.span().range().start;
+    let start = tk.range().start;
     match tk.class() {
       CtxTkRule::Keyword => {
-        let kw = tk.span().to_str_lossy();
-        let kw = kw.as_ref();
-        if let Some(opener) = keyword_opener(kw) {
+        let kw = tk.slice();
+        let kw = kw.to_str_lossy();
+        if let Some(opener) = keyword_opener(&kw) {
           stack.push(opener);
           events.push((start, 1));
         } else if kw == "esac" {
@@ -363,7 +363,7 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
             stack.pop();
             events.push((start, -1));
           }
-        } else if let Some(targets) = keyword_closes(kw)
+        } else if let Some(targets) = keyword_closes(&kw)
           && stack.last().is_some_and(|top| targets.contains(top))
         {
           stack.pop();
@@ -373,28 +373,28 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
       }
       // command-level braces/subshells arrive as flat operators carrying the
       // delimiter text; pair them by text against the stack.
-      CtxTkRule::Operator => match tk.span().to_str_lossy().as_ref() {
-        "{" => {
+      CtxTkRule::Operator => match tk.as_bytes() {
+        b"{" => {
           stack.push(Opener::Brace);
           events.push((start, 1));
         }
         // a ( directly inside a case is a pattern's leading paren (a|b), not a
         // subshell, so it opens nothing; the ) opens the arm
-        "(" if stack.last() == Some(&Opener::Case) => {}
-        "(" => {
+        b"(" if stack.last() == Some(&Opener::Case) => {}
+        b"(" => {
           stack.push(Opener::Paren);
           events.push((start, 1));
         }
-        "}" if stack.last() == Some(&Opener::Brace) => {
+        b"}" if stack.last() == Some(&Opener::Brace) => {
           stack.pop();
           events.push((start, -1));
         }
-        ")" if stack.last() == Some(&Opener::Paren) => {
+        b")" if stack.last() == Some(&Opener::Paren) => {
           stack.pop();
           events.push((start, -1));
         }
         // a ) with the case itself on top closes a pattern, opening its arm
-        ")" if stack.last() == Some(&Opener::Case) => {
+        b")" if stack.last() == Some(&Opener::Case) => {
           stack.push(Opener::CaseArm);
           events.push((start, 1));
         }
@@ -405,7 +405,7 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
       // (which sits at the end of the previous row).
       CtxTkRule::Separator
         if stack.last() == Some(&Opener::CaseArm)
-          && let Some(off) = tk.span().as_bytes().find(b";;") =>
+          && let Some(off) = tk.as_bytes().find(b";;") =>
       {
         stack.pop();
         events.push((start + off, -1));
@@ -419,7 +419,7 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
       | CtxTkRule::ProcSubIn
       | CtxTkRule::ProcSubOut
       | CtxTkRule::Arithmetic => {
-        let end = tk.span().range().end;
+        let end = tk.range().end;
         let mut inner = Vec::new();
         collect_depth_events(tk.sub_tokens(), &mut inner, events);
         for _ in 0..inner.len() {
@@ -430,13 +430,13 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
       // count: open at the `(`, close at the `)` once it's there.
       CtxTkRule::ArrayLiteral => {
         events.push((start, 1));
-        let end = tk.span().range().end;
+        let end = tk.range().end;
         let mut inner = Vec::new();
         collect_depth_events(tk.sub_tokens(), &mut inner, events);
         for _ in 0..inner.len() {
           events.push((end, -1));
         }
-        if tk.span().as_bytes().ends_with(b")") {
+        if tk.as_bytes().ends_with(b")") {
           events.push((end - 1, -1));
         }
       }

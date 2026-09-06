@@ -73,16 +73,15 @@ impl QuoteState {
  */
 
 pub(crate) fn split_tk(tk: &Tk, pat: &[u8]) -> Vec<Tk> {
-  let slice = tk.as_bytes();
+  let slice = tk.slice(); // scary! make sure the tk's source input is still alive
   let base = tk.span.range().start;
   split_all_with(
-    slice,
+    slice.as_bytes(),
     |s| split_at_unescaped(s, pat),
     |start, end| {
-      Tk::new(
-        tk.class.clone(),
-        Span::new(base + start..base + end, tk.source()),
-      )
+      let start = base + start;
+      let end = base + end;
+      Tk::new(tk.class.clone(), Span::new(start, end, tk.source()))
     },
   )
 }

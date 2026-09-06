@@ -35,7 +35,7 @@ use crate::{
   expand::{escape, var},
   match_loop, shopt,
   state::{
-    Shed, cmd,
+    Shed, SourceId, cmd,
     meta::UtilKind,
     params, paths,
     vars::{ShellParam, VarStr},
@@ -47,7 +47,8 @@ use super::editmode::{ExCommand, ExLineAddr, ExTk, ExTkRule};
 
 /// Turn raw shell input into `CtxTks`
 pub(super) fn get_context_tokens(input: &str) -> Vec<CtxTk> {
-  let out: Vec<CtxTk> = LexStream::new(input.as_bytes(), LexFlags::LEX_UNFINISHED)
+  let handle = crate::state::register_source(input);
+  let out: Vec<CtxTk> = LexStream::new(&handle, LexFlags::LEX_UNFINISHED)
     .filter_map(Result::ok)
     .filter(Tk::filter_meta)
     .flat_map(|value: Tk| CtxTk::from_tk(&value))
@@ -57,7 +58,8 @@ pub(super) fn get_context_tokens(input: &str) -> Vec<CtxTk> {
 }
 
 pub(super) fn get_ex_context_tokens(input: &str) -> Vec<CtxTk> {
-  let out: Vec<CtxTk> = super::editmode::ExLexer::new(input)
+  let handle = crate::state::register_source(input);
+  let out: Vec<CtxTk> = super::editmode::ExLexer::new(input, handle.get_id())
     .lex()
     .into_iter()
     .flat_map(CtxTk::from_ex_tk)
@@ -82,7 +84,7 @@ pub(crate) fn nested_subs(input: &str) -> Vec<NestedSub> {
         return;
       }
       CtxTkRule::CmdSub => {
-        let s = tk.span().as_bytes();
+        let s = tk.as_bytes();
         let body = s
           .strip_prefix(b"$(".as_slice())
           .and_then(|s| s.strip_suffix(b")".as_slice()))
@@ -91,7 +93,7 @@ pub(crate) fn nested_subs(input: &str) -> Vec<NestedSub> {
         return;
       }
       CtxTkRule::BacktickSub => {
-        let s = tk.span().as_bytes();
+        let s = tk.as_bytes();
         let body = s
           .strip_prefix(b"`".as_slice())
           .and_then(|s| s.strip_suffix(b"`".as_slice()))
@@ -128,7 +130,7 @@ fn process_ctx_tokens(mut out: Vec<CtxTk>) -> Vec<CtxTk> {
 fn is_exec_wrapper(tk: &CtxTk) -> bool {
   params::get_exec_wrappers()
     .into_iter()
-    .any(|wr| wr.as_bytes() == tk.span().as_bytes())
+    .any(|wr| wr.as_bytes() == tk.as_bytes())
     && is_valid_cmd(&tk.as_tk()).is_some()
 }
 
@@ -156,14 +158,12 @@ fn promote_exec_wrappers(tokens: &mut [CtxTk]) {
     while let Some(target) = tokens.peek() {
       match target.class {
         CtxTkRule::Argument | CtxTkRule::ArgumentFile => {
-          if target.span.as_bytes().starts_with(b"-")
-            || strops::has_unescaped(target.span.as_bytes(), b"=")
-          {
+          if target.as_bytes().starts_with(b"-") || strops::has_unescaped(target.as_bytes(), b"=") {
             // looks like an option or an assignment
             tokens.next();
             continue;
           }
-          if params::get_exec_wrappers().contains(&target.span.as_bytes().into()) {
+          if params::get_exec_wrappers().contains(&target.as_bytes().into()) {
             // chaining exec wrappers is a thing people do, e.g. `sudo strace cmd`
             // continue the outer loop and let it get picked up by the next iteration
             // we don't use is_exec_wrapper() for this since it doesnt have the ValidCommand rule
@@ -400,13 +400,29 @@ impl CtxTkRule {
 #[derive(Debug, Clone)]
 pub(super) struct CtxTk {
   span: Span,
+  bytes: VarStr,
   class: CtxTkRule,
   sub_tokens: Vec<CtxTk>,
 }
 
 impl CtxTk {
-  pub(super) fn span(&self) -> &Span {
-    &self.span
+  /// Construct a `CtxTk`, resolving and owning the byte slice its span refers to.
+  ///
+  /// The bytes are captured now, while the source is still live, so the token
+  /// stays self-contained no matter where it travels afterwards.
+  fn new(span: Span, class: CtxTkRule, sub_tokens: Vec<CtxTk>) -> Self {
+    Self {
+      bytes: span.try_slice().unwrap_or_default(),
+      span,
+      class,
+      sub_tokens,
+    }
+  }
+  pub(super) fn as_bytes(&self) -> &[u8] {
+    self.bytes.as_bytes()
+  }
+  pub(super) fn slice(&self) -> &VarStr {
+    &self.bytes
   }
   pub(super) fn class(&self) -> &CtxTkRule {
     &self.class
@@ -414,12 +430,20 @@ impl CtxTk {
   pub(super) fn sub_tokens(&self) -> &[CtxTk] {
     &self.sub_tokens
   }
+  pub(super) fn source(&self) -> SourceId {
+    self.span.source()
+  }
+  pub(super) fn start(&self) -> usize {
+    self.span.start()
+  }
+  pub(super) fn end(&self) -> usize {
+    self.span.end()
+  }
   pub(super) fn range(&self) -> std::ops::Range<usize> {
-    self.span.range()
+    self.span.start()..self.span.end()
   }
   pub(super) fn range_inclusive(&self) -> std::ops::RangeInclusive<usize> {
-    let r = self.span.range();
-    r.start..=r.end
+    self.span.start()..=self.span.end()
   }
 
   pub(super) fn shift_by(&mut self, delta: isize) {
@@ -490,7 +514,7 @@ impl CtxTk {
       _ => unreachable!(),
     };
 
-    let token_start = start_pos + span.range().start;
+    let token_start = start_pos + span.start();
     let body_start = token_start + opener_size; // skip the opening backtick
     let token_end = body_start + inner_consumed;
     let body_end = if closed {
@@ -499,18 +523,20 @@ impl CtxTk {
       token_end
     };
 
-    let sub_src = &span.get_source()[body_start..body_end];
-    let inner_tokens = LexStream::new(sub_src, LexFlags::LEX_UNFINISHED)
-      .filter_map(Result::ok)
-      .map(|tk| tk.rebase_into(span, body_start)) // map to outer span
-      .flat_map(|value: Tk| CtxTk::from_tk(&value))
-      .collect();
+    let inner_tokens = crate::state::handle_for(span.source())
+      .map(|handle| {
+        LexStream::sub_lex(&handle, body_start..body_end, LexFlags::LEX_UNFINISHED)
+          .filter_map(Result::ok)
+          .flat_map(|value: Tk| CtxTk::from_tk(&value))
+          .collect()
+      })
+      .unwrap_or_default();
 
-    Self {
-      span: Span::new(token_start..token_end, span.get_source()),
-      class: new_class,
-      sub_tokens: inner_tokens,
-    }
+    Self::new(
+      Span::new(token_start, token_end, span.source()),
+      new_class,
+      inner_tokens,
+    )
   }
 
   /// Check if a position is a valid split point
@@ -520,12 +546,12 @@ impl CtxTk {
   ///
   /// This is used to determine if we can split a token at a given position without breaking any nested structures.
   pub(super) fn can_split_at(&self, at: usize) -> bool {
-    let r = self.span.range();
+    let r = self.range();
     if !(r.start..r.end).contains(&at) {
       return false;
     }
     !self.sub_tokens.iter().any(|c| {
-      let cr = c.span.range();
+      let cr = c.range();
       cr.start < at && at < cr.end
     })
   }
@@ -534,22 +560,23 @@ impl CtxTk {
   ///
   /// The split point must be a valid split point as defined by `can_split_at`.
   /// Panics if the split point is invalid.
-  pub(super) fn split_at(self, at: usize) -> (CtxTk, CtxTk) {
+  pub(super) fn split_at(self, at: usize) -> (Self, Self) {
     assert!(
       self.can_split_at(at),
       "split point falls inside of child token span"
     );
+    let r = self.range();
     let CtxTk {
       span,
       class,
       sub_tokens,
+      ..
     } = self;
-    let r = span.range();
 
     let mut left = vec![];
     let mut right = vec![];
     for child in sub_tokens {
-      let cr = child.span.range();
+      let cr = child.range();
       if cr.end <= at {
         left.push(child);
       } else if cr.start >= at {
@@ -558,18 +585,10 @@ impl CtxTk {
         unreachable!(); // guaranteed by can_split_at
       }
     }
-    let src = span.get_source();
+    let src = span.source();
     (
-      CtxTk {
-        span: Span::new(r.start..at, src.clone()),
-        class,
-        sub_tokens: left,
-      },
-      CtxTk {
-        span: Span::new(at..r.end, src),
-        class,
-        sub_tokens: right,
-      },
+      CtxTk::new(Span::new(r.start, at, src), class.clone(), left),
+      CtxTk::new(Span::new(at, r.end, src), class, right),
     )
   }
 
@@ -580,13 +599,13 @@ impl CtxTk {
     if !self.range_inclusive().contains(&at) {
       return None;
     }
-    Some(at - self.span.range().start)
+    Some(at - self.range().start)
   }
 
   pub(super) fn split_str_at(&self, at: usize) -> Option<(&[u8], &[u8])> {
     let cursor_pos = self.relative_cursor_pos(at)?;
 
-    self.span().as_bytes().split_at_checked(cursor_pos)
+    self.as_bytes().split_at_checked(cursor_pos)
   }
 
   pub(super) fn prefix_from(&self, at: usize) -> Option<&[u8]> {
@@ -637,11 +656,7 @@ impl CtxTk {
   }
 
   pub(super) fn leaf(span: Span, class: CtxTkRule) -> Self {
-    Self {
-      span,
-      class,
-      sub_tokens: vec![],
-    }
+    Self::new(span, class, vec![])
   }
 
   pub(super) fn from_ex_tk(tk: ExTk) -> Vec<Self> {
@@ -666,7 +681,7 @@ impl CtxTk {
       },
       ExTkRule::Command(cmd) => {
         if let ExCommand::Unknown = cmd {
-          if Shed::logic(|l| l.get_ex_alias(&span.to_str_lossy())).is_some() {
+          if Shed::logic(|l| l.get_ex_alias(&span.slice().to_str_lossy())).is_some() {
             vec![Self::leaf(span, CtxTkRule::ValidExCommand)]
           } else {
             vec![Self::leaf(span, CtxTkRule::InvalidExCommand)]
@@ -685,14 +700,10 @@ impl CtxTk {
   pub(super) fn from_tk(value: &Tk) -> Vec<CtxTk> {
     let Tk { class, span, flags } = value;
     if let Some(class) = Self::rule_for(class) {
-      return vec![Self {
-        span: span.clone(),
-        class,
-        sub_tokens: vec![],
-      }];
+      return vec![Self::new(span.clone(), class, vec![])];
     }
 
-    let raw = span.to_str_lossy();
+    let raw = span.slice().to_str_lossy().into_owned();
     let mut chars = raw.char_indices().peekable();
 
     let new_class = if flags.contains(TkFlags::IS_ARITH) {
@@ -717,14 +728,10 @@ impl CtxTk {
     } else if flags.intersects(TkFlags::KEYWORD | TkFlags::FUNCNAME) {
       // Keywords are atomic literal text, we know exactly what they look like
       // So we aren't going to scan the token's sub spans, we're just gonna return it.
-      return vec![Self {
-        span: span.clone(),
-        class: CtxTkRule::Keyword,
-        sub_tokens: vec![],
-      }];
-    } else if flags.contains(TkFlags::ASSIGN) && !value.as_bytes().starts_with(b"=") {
+      return vec![Self::new(span.clone(), CtxTkRule::Keyword, vec![])];
+    } else if flags.contains(TkFlags::ASSIGN) && !raw.as_bytes().starts_with(b"=") {
       return parse_assignment(span, *flags);
-    } else if check_path_exists(&value.to_str_lossy()) {
+    } else if check_path_exists(&raw) {
       CtxTkRule::ArgumentFile
     } else {
       // regular argument. lets subdivide it further on COMP_WORDBREAKS members
@@ -735,11 +742,7 @@ impl CtxTk {
         &ScanCtx::TOP_LEVEL,
         TerminatorCtx::Eof,
       );
-      return vec![Self {
-        span: span.clone(),
-        class: CtxTkRule::Argument,
-        sub_tokens,
-      }];
+      return vec![Self::new(span.clone(), CtxTkRule::Argument, sub_tokens)];
     };
     let scan_ctx = if flags.contains(TkFlags::IS_ARITH) {
       ScanCtx::ARITH
@@ -762,42 +765,18 @@ impl CtxTk {
       };
       if let Some(end_delim) = end_delim {
         return vec![
-          Self {
-            span: (**start_delim).clone(),
-            class: CtxTkRule::HereDocStart,
-            sub_tokens: vec![],
-          },
-          Self {
-            span: span.clone(),
-            class: CtxTkRule::HereDocBody,
-            sub_tokens: body_tokens,
-          },
-          Self {
-            span: (**end_delim).clone(),
-            class: CtxTkRule::HereDocEnd,
-            sub_tokens: vec![],
-          },
+          Self::new((**start_delim).clone(), CtxTkRule::HereDocStart, vec![]),
+          Self::new(span.clone(), CtxTkRule::HereDocBody, body_tokens),
+          Self::new((**end_delim).clone(), CtxTkRule::HereDocEnd, vec![]),
         ];
       }
       return vec![
-        Self {
-          span: (**start_delim).clone(),
-          class: CtxTkRule::HereDocStart,
-          sub_tokens: vec![],
-        },
-        Self {
-          span: span.clone(),
-          class: CtxTkRule::HereDocBody,
-          sub_tokens: body_tokens,
-        },
+        Self::new((**start_delim).clone(), CtxTkRule::HereDocStart, vec![]),
+        Self::new(span.clone(), CtxTkRule::HereDocBody, body_tokens),
       ];
     }
 
-    vec![Self {
-      span: span.clone(),
-      class: new_class,
-      sub_tokens,
-    }]
+    vec![Self::new(span.clone(), new_class, sub_tokens)]
   }
 }
 
@@ -842,16 +821,16 @@ fn subdivide_argument(mut tk: CtxTk) -> Vec<CtxTk> {
   let mut tokens = vec![];
 
   let push_token = |tks: &mut Vec<CtxTk>, mut tk: CtxTk| {
-    if check_path_exists(&tk.span.to_str_lossy()) {
+    if check_path_exists(&tk.span.slice().to_str_lossy()) {
       tk.class = CtxTkRule::ArgumentFile;
     }
     tks.push(tk);
   };
 
   loop {
-    let raw = tk.span().to_str_lossy();
-    let span_start = tk.span().range().start;
-    let span_end = tk.span().range().end;
+    let raw = tk.span.slice().to_str_lossy().into_owned();
+    let span_start = tk.span.range().start;
+    let span_end = tk.span.range().end;
 
     let split_at = raw.char_indices().find_map(|(byte, ch)| {
       if !wordbreaks.to_str_lossy().contains(ch) {
@@ -884,16 +863,12 @@ fn subdivide_argument(mut tk: CtxTk) -> Vec<CtxTk> {
 /// `subdivide_argument` and gets shredded on `=` / `[` / `(` from
 /// `COMP_WORDBREAKS` with no awareness of the underlying structure.
 fn parse_assignment(span: &Span, flags: TkFlags) -> Vec<CtxTk> {
-  let raw = span.to_str_lossy();
+  let raw = span.slice().to_str_lossy().into_owned();
   let span_start = span.range().start;
 
   // Find the `=` operator. ASSIGN was set, so this should always succeed.
   let Some((eq_off, eq_len)) = strops::split_at_unescaped(raw.as_bytes(), b"=") else {
-    return vec![CtxTk {
-      span: span.clone(),
-      class: CtxTkRule::Argument,
-      sub_tokens: vec![],
-    }];
+    return vec![CtxTk::new(span.clone(), CtxTkRule::Argument, vec![])];
   };
   let lhs_text = &raw[..eq_off];
   let lhs_end = span_start + eq_off;
@@ -904,11 +879,11 @@ fn parse_assignment(span: &Span, flags: TkFlags) -> Vec<CtxTk> {
   let bracket_off = lhs_text.find('[');
   let name_end = bracket_off.map_or(lhs_end, |b| span_start + b);
 
-  lhs_sub.push(CtxTk {
-    span: Span::new(span_start..name_end, span.get_source()),
-    class: CtxTkRule::ParamName,
-    sub_tokens: vec![],
-  });
+  lhs_sub.push(CtxTk::new(
+    Span::from_range(span_start..name_end, span.source()),
+    CtxTkRule::ParamName,
+    vec![],
+  ));
 
   if let Some(b) = bracket_off {
     // Find matching `]` tracking depth (so `arr[a[0]]` parses correctly).
@@ -933,7 +908,7 @@ fn parse_assignment(span: &Span, flags: TkFlags) -> Vec<CtxTk> {
     // Recursively scan the index contents (excluding the brackets).
     // ARITH context matches what `${arr[idx]}` already uses.
     let inner_text = &lhs_text[b + 1..close_off - 1];
-    let inner_span = Span::new((index_start + 1)..(index_end - 1), span.get_source());
+    let inner_span = Span::from_range((index_start + 1)..(index_end - 1), span.source());
     let mut inner_chars = inner_text.char_indices().peekable();
     let (_, inner) = scan_subspans(
       &mut inner_chars,
@@ -943,36 +918,36 @@ fn parse_assignment(span: &Span, flags: TkFlags) -> Vec<CtxTk> {
       TerminatorCtx::Eof,
     );
 
-    lhs_sub.push(CtxTk {
-      span: Span::new(index_start..index_end, span.get_source()),
-      class: CtxTkRule::ParamIndex,
-      sub_tokens: inner,
-    });
+    lhs_sub.push(CtxTk::new(
+      Span::from_range(index_start..index_end, span.source()),
+      CtxTkRule::ParamIndex,
+      inner,
+    ));
   }
 
-  let lhs_tk = CtxTk {
-    span: Span::new(span_start..lhs_end, span.get_source()),
-    class: CtxTkRule::AssignmentLeft,
-    sub_tokens: lhs_sub,
-  };
+  let lhs_tk = CtxTk::new(
+    Span::from_range(span_start..lhs_end, span.source()),
+    CtxTkRule::AssignmentLeft,
+    lhs_sub,
+  );
 
-  let op_tk = CtxTk {
-    span: Span::new(lhs_end..op_end, span.get_source()),
-    class: CtxTkRule::AssignmentOp,
-    sub_tokens: vec![],
-  };
+  let op_tk = CtxTk::new(
+    Span::from_range(lhs_end..op_end, span.source()),
+    CtxTkRule::AssignmentOp,
+    vec![],
+  );
 
   // RHS: scan as full top-level expansion context.
   let rhs_text = &raw[eq_off + eq_len..];
   let rhs_start = op_end;
   let rhs_end = span_start + raw.len();
-  let rhs_span = Span::new(rhs_start..rhs_end, span.get_source());
+  let rhs_span = Span::from_range(rhs_start..rhs_end, span.source());
 
   let rhs_tk = if rhs_text.starts_with('(') {
     let close_off = rhs_text.rfind(')').filter(|&c| c > 0);
     let inner_end = close_off.unwrap_or(rhs_text.len());
     let inner_text = &rhs_text[1..inner_end];
-    let inner_span = Span::new((rhs_start + 1)..(rhs_start + inner_end), span.get_source());
+    let inner_span = Span::from_range((rhs_start + 1)..(rhs_start + inner_end), span.source());
     let mut inner_chars = inner_text.char_indices().peekable();
     let (_, inner) = scan_subspans(
       &mut inner_chars,
@@ -981,11 +956,7 @@ fn parse_assignment(span: &Span, flags: TkFlags) -> Vec<CtxTk> {
       &ScanCtx::TOP_LEVEL,
       TerminatorCtx::Eof,
     );
-    CtxTk {
-      span: rhs_span,
-      class: CtxTkRule::ArrayLiteral,
-      sub_tokens: inner,
-    }
+    CtxTk::new(rhs_span, CtxTkRule::ArrayLiteral, inner)
   } else {
     let mut rhs_chars = rhs_text.char_indices().peekable();
     let (_, rhs_sub) = scan_subspans(
@@ -995,11 +966,7 @@ fn parse_assignment(span: &Span, flags: TkFlags) -> Vec<CtxTk> {
       &ScanCtx::TOP_LEVEL,
       TerminatorCtx::Eof,
     );
-    CtxTk {
-      span: rhs_span,
-      class: CtxTkRule::AssignmentRight,
-      sub_tokens: rhs_sub,
-    }
+    CtxTk::new(rhs_span, CtxTkRule::AssignmentRight, rhs_sub)
   };
 
   vec![lhs_tk, op_tk, rhs_tk]
@@ -1025,11 +992,11 @@ fn parse_op_body(
   var_sub_tokens: &mut Vec<CtxTk>,
 ) -> usize {
   let op_end = op_start + op_size;
-  var_sub_tokens.push(CtxTk {
-    span: Span::new(op_start..op_end, span.get_source()),
-    class: CtxTkRule::ParamOp,
-    sub_tokens: vec![],
-  });
+  var_sub_tokens.push(CtxTk::new(
+    Span::from_range(op_start..op_end, span.source()),
+    CtxTkRule::ParamOp,
+    vec![],
+  ));
 
   let (inner_consumed, inner) = scan_subspans(
     chars,
@@ -1041,17 +1008,17 @@ fn parse_op_body(
   *consumed += inner_consumed;
 
   let arg_end = op_end + inner_consumed;
-  let arg_text_end =
-    if inner_consumed > 0 && span.get_source().as_bytes().get(arg_end - 1) == Some(&b'}') {
-      arg_end - 1
-    } else {
-      arg_end
-    };
-  var_sub_tokens.push(CtxTk {
-    span: Span::new(op_end..arg_text_end, span.get_source()),
-    class: CtxTkRule::ParamArg,
-    sub_tokens: inner,
-  });
+  let arg_text_end = if inner_consumed > 0 && span.text().as_bytes().get(arg_end - 1) == Some(&b'}')
+  {
+    arg_end - 1
+  } else {
+    arg_end
+  };
+  var_sub_tokens.push(CtxTk::new(
+    Span::from_range(op_end..arg_text_end, span.source()),
+    CtxTkRule::ParamArg,
+    inner,
+  ));
 
   arg_end
 }
@@ -1072,12 +1039,8 @@ fn get_subtoken(
   *consumed += inner_consumed;
 
   let token_end = token_start + opener_len + inner_consumed; // include the opening
-  let span = Span::new(token_start..token_end, span.get_source());
-  CtxTk {
-    span,
-    class: rule,
-    sub_tokens: inner,
-  }
+  let span = Span::from_range(token_start..token_end, span.source());
+  CtxTk::new(span, rule, inner)
 }
 
 fn scan_subspans(
@@ -1117,11 +1080,11 @@ fn scan_subspans(
         let esc_start = i + span.range().start;
         if let Some((_, esc_ch)) = consume(chars, consumed) {
           let esc_end = esc_start + 1 + esc_ch.len_utf8();
-          sub_tokens.push(CtxTk {
-            span: Span::new(esc_start..esc_end, span.get_source()),
-            class: CtxTkRule::Escape,
-            sub_tokens: vec![],
-          });
+          sub_tokens.push(CtxTk::new(
+            Span::from_range(esc_start..esc_end, span.source()),
+            CtxTkRule::Escape,
+            vec![],
+          ));
         }
       }
       '('
@@ -1179,15 +1142,11 @@ fn scan_subspans(
       glob @ ('*' | '?' | '[') if scan_ctx.contains(S::GLOB) => {
         match glob {
           '*' | '?' => {
-            let span = Span::new(
+            let span = Span::from_range(
               i + span.range().start..i + span.range().start + 1,
-              span.get_source(),
+              span.source(),
             );
-            sub_tokens.push(CtxTk {
-              span,
-              class: CtxTkRule::Glob,
-              sub_tokens: vec![],
-            });
+            sub_tokens.push(CtxTk::new(span, CtxTkRule::Glob, vec![]));
           }
           '[' => {
             let span_start = i + span.range().start;
@@ -1205,29 +1164,21 @@ fn scan_subspans(
             if *consumed == orig_consumed {
               continue; // no valid glob chars, skip
             }
-            let span = Span::new(
+            let span = Span::from_range(
               span_start..(span_start + 1 + (*consumed - orig_consumed)),
-              span.get_source(),
+              span.source(),
             );
-            sub_tokens.push(CtxTk {
-              span,
-              class: CtxTkRule::Glob,
-              sub_tokens: vec![],
-            });
+            sub_tokens.push(CtxTk::new(span, CtxTkRule::Glob, vec![]));
           }
           _ => unreachable!(),
         }
       }
       '~' if scan_ctx.contains(S::TILDE) => {
-        let span = Span::new(
+        let span = Span::from_range(
           i + span.range().start..i + span.range().start + 1,
-          span.get_source(),
+          span.source(),
         );
-        sub_tokens.push(CtxTk {
-          span,
-          class: CtxTkRule::Tilde,
-          sub_tokens: vec![],
-        });
+        sub_tokens.push(CtxTk::new(span, CtxTkRule::Tilde, vec![]));
       }
       '!' if scan_ctx.contains(S::HIST_EXP) => {
         let Some(&(_, ch)) = chars.peek() else {
@@ -1237,15 +1188,9 @@ fn scan_subspans(
           '!' | '$' => {
             consume(chars, consumed);
             let span_start = i + span.range().start;
-            let span = Span::new(
-              span_start..(span_start + 1 + ch.len_utf8()),
-              span.get_source(),
-            );
-            sub_tokens.push(CtxTk {
-              span,
-              class: CtxTkRule::HistExp,
-              sub_tokens: vec![],
-            });
+            let span =
+              Span::from_range(span_start..(span_start + 1 + ch.len_utf8()), span.source());
+            sub_tokens.push(CtxTk::new(span, CtxTkRule::HistExp, vec![]));
           }
           c if c.is_ascii_alphanumeric() || c == '-' || c == '_' => {
             let span_start = i + span.range().start;
@@ -1260,13 +1205,12 @@ fn scan_subspans(
               continue; // no valid history expansion token chars, skip
             }
             let delta = *consumed - orig_consumed;
-            let span = Span::new(span_start..(span_start + 1 + delta), span.get_source());
-            log::debug!("Found history expansion token: '{}'", span.to_str_lossy());
-            sub_tokens.push(CtxTk {
-              span,
-              class: CtxTkRule::HistExp,
-              sub_tokens: vec![],
-            });
+            let span = Span::from_range(span_start..(span_start + 1 + delta), span.source());
+            log::debug!(
+              "Found history expansion token: '{}'",
+              span.slice().to_str_lossy()
+            );
+            sub_tokens.push(CtxTk::new(span, CtxTkRule::HistExp, vec![]));
           }
           _ => { /* '!' by itself i guess */ }
         }
@@ -1335,12 +1279,8 @@ fn scan_subspans(
 
           let token_start = i + span.range().start;
           let token_end = token_start + 2 + inner_consumed; // include the $'
-          let span = Span::new(token_start..token_end, span.get_source());
-          sub_tokens.push(CtxTk {
-            span,
-            class: CtxTkRule::DollarString,
-            sub_tokens: inner,
-          });
+          let span = Span::from_range(token_start..token_end, span.source());
+          sub_tokens.push(CtxTk::new(span, CtxTkRule::DollarString, inner));
         } else if next_is(chars, '{') && scan_ctx.contains(S::VAR_SUB) {
           // parameter expansion
           // welcome to the posix house of horrors
@@ -1356,12 +1296,8 @@ fn scan_subspans(
             && (ch == '#' || ch == '!')
           {
             consume(chars, consumed);
-            let prefix_span = Span::new(pos..(pos + 1), span.get_source());
-            var_sub_tokens.push(CtxTk {
-              span: prefix_span,
-              class: CtxTkRule::ParamPrefix,
-              sub_tokens: vec![],
-            });
+            let prefix_span = Span::from_range(pos..(pos + 1), span.source());
+            var_sub_tokens.push(CtxTk::new(prefix_span, CtxTkRule::ParamPrefix, vec![]));
             pos += 1;
           }
 
@@ -1383,18 +1319,18 @@ fn scan_subspans(
               consume(chars, consumed);
               pos += 1;
             }
-            sub_tokens.push(CtxTk {
-              span: Span::new(var_start..pos, span.get_source()),
-              class: CtxTkRule::VarSub,
-              sub_tokens: var_sub_tokens,
-            });
+            sub_tokens.push(CtxTk::new(
+              Span::from_range(var_start..pos, span.source()),
+              CtxTkRule::VarSub,
+              var_sub_tokens,
+            ));
             continue;
           }
-          var_sub_tokens.push(CtxTk {
-            span: Span::new(name_start..pos, span.get_source()),
-            class: CtxTkRule::ParamName,
-            sub_tokens: vec![],
-          });
+          var_sub_tokens.push(CtxTk::new(
+            Span::from_range(name_start..pos, span.source()),
+            CtxTkRule::ParamName,
+            vec![],
+          ));
 
           // Optional array index
           if let Some(&(_, '[')) = chars.peek() {
@@ -1405,22 +1341,22 @@ fn scan_subspans(
               scan_subspans(chars, span, flags, &ScanCtx::ARITH, TerminatorCtx::VarIndex);
             *consumed += inner_consumed;
             pos += inner_consumed; // includes the closing ']'
-            var_sub_tokens.push(CtxTk {
-              span: Span::new(index_start..pos, span.get_source()),
-              class: CtxTkRule::ParamIndex,
-              sub_tokens: inner,
-            });
+            var_sub_tokens.push(CtxTk::new(
+              Span::from_range(index_start..pos, span.source()),
+              CtxTkRule::ParamIndex,
+              inner,
+            ));
           }
 
           // Operator (or close)
           let Some(&(_, ch)) = chars.peek() else {
             // End of input right after the name. Push the partial wrapper
             // (covers `${prefix?name?index?`) so completion can dispatch.
-            sub_tokens.push(CtxTk {
-              span: Span::new(var_start..pos, span.get_source()),
-              class: CtxTkRule::VarSub,
-              sub_tokens: var_sub_tokens,
-            });
+            sub_tokens.push(CtxTk::new(
+              Span::from_range(var_start..pos, span.source()),
+              CtxTkRule::VarSub,
+              var_sub_tokens,
+            ));
             continue;
           };
           match ch {
@@ -1450,11 +1386,11 @@ fn scan_subspans(
                   // Substring: ${var:N} or ${var:N:M}
                   // Flat scan for offset, optionally followed by `:` and length.
                   // The leading `:` already consumed; record it as ParamOp.
-                  var_sub_tokens.push(CtxTk {
-                    span: Span::new(pos - 1..pos, span.get_source()),
-                    class: CtxTkRule::ParamOp,
-                    sub_tokens: vec![],
-                  });
+                  var_sub_tokens.push(CtxTk::new(
+                    Span::from_range(pos - 1..pos, span.source()),
+                    CtxTkRule::ParamOp,
+                    vec![],
+                  ));
 
                   // Offset arg, scan until ':' or '}' at brace depth 0
                   let offset_start = pos;
@@ -1476,21 +1412,21 @@ fn scan_subspans(
                     consume(chars, consumed);
                     pos += c.len_utf8();
                   }
-                  var_sub_tokens.push(CtxTk {
-                    span: Span::new(offset_start..pos, span.get_source()),
-                    class: CtxTkRule::ParamArg,
-                    sub_tokens: vec![],
-                  });
+                  var_sub_tokens.push(CtxTk::new(
+                    Span::from_range(offset_start..pos, span.source()),
+                    CtxTkRule::ParamArg,
+                    vec![],
+                  ));
 
                   if hit_colon {
                     // Consume `:` separator and record as another ParamOp
                     consume(chars, consumed);
                     pos += 1;
-                    var_sub_tokens.push(CtxTk {
-                      span: Span::new(pos - 1..pos, span.get_source()),
-                      class: CtxTkRule::ParamOp,
-                      sub_tokens: vec![],
-                    });
+                    var_sub_tokens.push(CtxTk::new(
+                      Span::from_range(pos - 1..pos, span.source()),
+                      CtxTkRule::ParamOp,
+                      vec![],
+                    ));
 
                     // Length arg, scan until '}' at brace depth 0
                     let length_start = pos;
@@ -1508,11 +1444,11 @@ fn scan_subspans(
                       consume(chars, consumed);
                       pos += c.len_utf8();
                     }
-                    var_sub_tokens.push(CtxTk {
-                      span: Span::new(length_start..pos, span.get_source()),
-                      class: CtxTkRule::ParamArg,
-                      sub_tokens: vec![],
-                    });
+                    var_sub_tokens.push(CtxTk::new(
+                      Span::from_range(length_start..pos, span.source()),
+                      CtxTkRule::ParamArg,
+                      vec![],
+                    ));
                   }
 
                   // Consume the closing `}` if present
@@ -1595,11 +1531,11 @@ fn scan_subspans(
                 }
                 _ => 1,
               };
-              var_sub_tokens.push(CtxTk {
-                span: Span::new(pos - op_size..pos, span.get_source()),
-                class: CtxTkRule::ParamOp,
-                sub_tokens: vec![],
-              });
+              var_sub_tokens.push(CtxTk::new(
+                Span::from_range(pos - op_size..pos, span.source()),
+                CtxTkRule::ParamOp,
+                vec![],
+              ));
 
               // Pattern arg, scan until '/' or '}' at brace depth 0
               let pat_start = pos;
@@ -1621,21 +1557,21 @@ fn scan_subspans(
                 consume(chars, consumed);
                 pos += c.len_utf8();
               }
-              var_sub_tokens.push(CtxTk {
-                span: Span::new(pat_start..pos, span.get_source()),
-                class: CtxTkRule::ParamArg,
-                sub_tokens: vec![],
-              });
+              var_sub_tokens.push(CtxTk::new(
+                Span::from_range(pat_start..pos, span.source()),
+                CtxTkRule::ParamArg,
+                vec![],
+              ));
 
               if hit_slash {
                 // Consume the separating '/' as a ParamOp
                 consume(chars, consumed);
                 pos += 1;
-                var_sub_tokens.push(CtxTk {
-                  span: Span::new(pos - 1..pos, span.get_source()),
-                  class: CtxTkRule::ParamOp,
-                  sub_tokens: vec![],
-                });
+                var_sub_tokens.push(CtxTk::new(
+                  Span::from_range(pos - 1..pos, span.source()),
+                  CtxTkRule::ParamOp,
+                  vec![],
+                ));
 
                 // Replacement arg, scan until '}' at brace depth 0
                 let rep_start = pos;
@@ -1653,11 +1589,11 @@ fn scan_subspans(
                   consume(chars, consumed);
                   pos += c.len_utf8();
                 }
-                var_sub_tokens.push(CtxTk {
-                  span: Span::new(rep_start..pos, span.get_source()),
-                  class: CtxTkRule::ParamArg,
-                  sub_tokens: vec![],
-                });
+                var_sub_tokens.push(CtxTk::new(
+                  Span::from_range(rep_start..pos, span.source()),
+                  CtxTkRule::ParamArg,
+                  vec![],
+                ));
               }
 
               if next_is(chars, '}') {
@@ -1670,11 +1606,11 @@ fn scan_subspans(
 
           // Wrap and push (whether or not the op was fully recognized - a
           // partial wrapper is better than none for completion dispatch).
-          sub_tokens.push(CtxTk {
-            span: Span::new(var_start..pos, span.get_source()),
-            class: CtxTkRule::VarSub,
-            sub_tokens: var_sub_tokens,
-          });
+          sub_tokens.push(CtxTk::new(
+            Span::from_range(var_start..pos, span.source()),
+            CtxTkRule::VarSub,
+            var_sub_tokens,
+          ));
         } else if scan_ctx.contains(S::VAR_SUB) {
           let sub_start = i + span.range().start;
           let orig_consumed = *consumed;
@@ -1698,18 +1634,10 @@ fn scan_subspans(
           let var_size = *consumed - orig_consumed;
           let sub_end = sub_start + 1 + var_size; // include the '$' in the span
 
-          let outer_span = Span::new(sub_start..sub_end, span.get_source());
-          let inner_span = Span::new(sub_start + 1..sub_end, span.get_source());
-          let sub_token = CtxTk {
-            span: inner_span,
-            class: CtxTkRule::ParamName,
-            sub_tokens: vec![],
-          };
-          sub_tokens.push(CtxTk {
-            span: outer_span,
-            class: CtxTkRule::VarSub,
-            sub_tokens: vec![sub_token],
-          });
+          let outer_span = Span::from_range(sub_start..sub_end, span.source());
+          let inner_span = Span::from_range(sub_start + 1..sub_end, span.source());
+          let sub_token = CtxTk::new(inner_span, CtxTkRule::ParamName, vec![]);
+          sub_tokens.push(CtxTk::new(outer_span, CtxTkRule::VarSub, vec![sub_token]));
         }
       }
       'a'..='z' | 'A'..='Z' | '_' if in_arith => {
@@ -1722,12 +1650,8 @@ fn scan_subspans(
           consume(chars, consumed);
           var_consumed += ch.len_utf8();
         }
-        let var_span = Span::new(var_start..(var_start + var_consumed), span.get_source());
-        sub_tokens.push(CtxTk {
-          span: var_span,
-          class: CtxTkRule::ArithVar,
-          sub_tokens: vec![],
-        });
+        let var_span = Span::from_range(var_start..(var_start + var_consumed), span.source());
+        sub_tokens.push(CtxTk::new(var_span, CtxTkRule::ArithVar, vec![]));
       }
       '0'..='9' if in_arith => {
         let num_start = i + span.range().start;
@@ -1739,12 +1663,8 @@ fn scan_subspans(
           consume(chars, consumed);
           num_consumed += ch.len_utf8();
         }
-        let num_span = Span::new(num_start..(num_start + num_consumed), span.get_source());
-        sub_tokens.push(CtxTk {
-          span: num_span,
-          class: CtxTkRule::ArithNumber,
-          sub_tokens: vec![],
-        });
+        let num_span = Span::from_range(num_start..(num_start + num_consumed), span.source());
+        sub_tokens.push(CtxTk::new(num_span, CtxTkRule::ArithNumber, vec![]));
       }
       '+' | '/' | '%' | '-' | '*' | '=' | '&' | '^' | '|' | '~' | '!' | '<' | '>' | '?' | ':'
       | ','
@@ -1752,12 +1672,8 @@ fn scan_subspans(
       {
         let op_start = i + span.range().start;
         let op_end = op_start + 1;
-        let op_span = Span::new(op_start..op_end, span.get_source());
-        sub_tokens.push(CtxTk {
-          span: op_span,
-          class: CtxTkRule::ArithOp,
-          sub_tokens: vec![],
-        });
+        let op_span = Span::from_range(op_start..op_end, span.source());
+        sub_tokens.push(CtxTk::new(op_span, CtxTkRule::ArithOp, vec![]));
       }
       _ => {}
     }
@@ -1848,7 +1764,8 @@ mod tests {
 
   /// Lex `src` and convert the first non-trivial token to a `CtxTk`.
   fn parse_first(src: &str) -> CtxTk {
-    let tk = LexStream::new(src.as_bytes(), LexFlags::LEX_UNFINISHED)
+    let handle = state::register_source(src);
+    let tk = LexStream::new(&handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .find(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi | TkRule::Sep))
       .expect("expected at least one token");
@@ -1878,7 +1795,8 @@ mod tests {
     // expand_no_side_effects must strip in-band expansion markers, otherwise
     // is_valid_cmd sees a path with PUA chars in it and Path::is_absolute
     // returns false, misclassifying valid commands as InvalidCommand.
-    let tk = LexStream::new(b"~/bin/foo", LexFlags::LEX_UNFINISHED)
+    let handle = state::register_source("~/bin/foo");
+    let tk = LexStream::new(&handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .find(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi | TkRule::Sep))
       .expect("token");
@@ -1903,7 +1821,7 @@ mod tests {
     let find_class = |s: &str| {
       toks
         .iter()
-        .find(|t| t.span.to_str_lossy() == s)
+        .find(|t| t.span.slice().to_str_lossy() == s)
         .map(|t| t.class)
     };
     assert_eq!(
@@ -1936,9 +1854,9 @@ mod tests {
     let toks = get_context_tokens("echo $");
     let last = toks.last().expect("trailing token");
     let v = find(last, CtxTkRule::VarSub).expect("VarSub for bare $");
-    assert_eq!(v.span().to_str_lossy(), "$");
+    assert_eq!(v.span.slice().to_str_lossy(), "$");
     let n = find(v, CtxTkRule::ParamName).expect("zero-width ParamName under VarSub");
-    assert_eq!(n.span().to_str_lossy(), "");
+    assert_eq!(n.span.slice().to_str_lossy(), "");
     // range_inclusive on the inner ParamName must catch the cursor at
     // the position immediately after the `$`, so resolve() can dispatch
     // to CompStrat::Var { prefix: "" }.
@@ -1951,9 +1869,9 @@ mod tests {
       .iter()
       .find_map(|t| find(t, CtxTkRule::VarSub))
       .expect("VarSub for `$` before `.`");
-    assert_eq!(v.span().to_str_lossy(), "$");
+    assert_eq!(v.span.slice().to_str_lossy(), "$");
     let n = find(v, CtxTkRule::ParamName).expect("ParamName for `$` before `.`");
-    assert_eq!(n.span().to_str_lossy(), "");
+    assert_eq!(n.span.slice().to_str_lossy(), "");
   }
 
   #[test]
@@ -2484,7 +2402,10 @@ mod tests {
 
   // ===================== promote_exec_wrappers =====================
 
-  use crate::tests::testutil::{TestGuard, has_cmd};
+  use crate::{
+    state,
+    tests::testutil::{TestGuard, has_cmd},
+  };
 
   /// Find the first token in `tokens` whose span text equals `text`.
   fn find_by_text<'a>(tokens: &'a [CtxTk], text: &str, src: &str) -> Option<&'a CtxTk> {
