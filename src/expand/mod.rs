@@ -43,8 +43,8 @@ impl Tk {
     }
 
     let flags = self.flags;
-    let span = self.span.clone();
-    let exp = Expander::new(self).expand().promote_err(span.clone())?;
+    let span = self.span;
+    let exp = Expander::new(self).expand().promote_err(span)?;
     let class = TkRule::Expanded { exp: exp.into() };
     Ok(Self { class, span, flags })
   }
@@ -55,7 +55,7 @@ impl Tk {
     if self.is_literal() {
       return Ok([self.slice()].into());
     }
-    let span = self.span.clone();
+    let span = self.span;
     Expander::new(self)
       .expand()
       .map(Into::into)
@@ -75,10 +75,10 @@ impl Tk {
     }
 
     let flags = self.flags;
-    let span = self.span.clone();
+    let span = self.span;
     let exp: VarStr = Expander::new(self)
       .expand_no_side_effects()
-      .promote_err(span.clone())?;
+      .promote_err(span)?;
 
     let class = TkRule::Expanded { exp: [exp].into() };
     Ok(Self { class, span, flags })
@@ -91,12 +91,12 @@ impl Tk {
       return Ok(self.slice());
     }
 
-    let span = self.span.clone();
+    let span = self.span;
     let exp = Expander::new(self)
       .no_glob()
       .no_split()
       .expand_no_split()
-      .promote_err(span.clone())?;
+      .promote_err(span)?;
     Ok(exp)
   }
   /// Perform word splitting

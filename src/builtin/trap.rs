@@ -55,7 +55,7 @@ impl super::Builtin for Trap {
     if print || arg_vec.is_empty() {
       let filter = arg_vec
         .iter()
-        .map(|(arg, span)| TrapTarget::parse(arg).promote_err(span.clone()))
+        .map(|(arg, span)| TrapTarget::parse(arg).promote_err(*span))
         .collect::<ShResult<Vec<_>>>()?;
 
       Shed::logic(|l| -> ShResult<()> {

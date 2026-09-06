@@ -40,7 +40,7 @@ impl ParseStream {
       // LCOV_EXCL_START
       return Err(
         sherr!(
-          ParseErr @ redir_tk.span.clone(),
+          ParseErr @ redir_tk.span,
           "Invalid redirection operator"
         )
         .with_context(context.iter()),
@@ -51,7 +51,7 @@ impl ParseStream {
       // LCOV_EXCL_START
       return Err(
         sherr!(
-          ParseErr @ redir_tk.span.clone(),
+          ParseErr @ redir_tk.span,
           "Expected a filename after this redirection",
         )
         .with_context(context.iter()),
@@ -145,7 +145,7 @@ impl ParseStream {
       } else if (!matches!(next_class, TkRule::Pipe | TkRule::ErrPipe)) || is_punctuated {
         break;
       } else if let Some(pipe) = self.next_tk() {
-        dangling_pipe = Some(pipe.span.clone());
+        dangling_pipe = Some(pipe.span);
         extend_span!(span, pipe.span);
         self.catch_linebreak(&mut span);
       } else {
@@ -237,8 +237,7 @@ impl ParseStream {
       }
       let in_dbracket = argv
         .first()
-        .map(|t: &Tk| t.slice().as_bytes() == b"[[")
-        .unwrap_or(false);
+        .is_some_and(|t: &Tk| t.slice().as_bytes() == b"[[");
       if in_dbracket {
         // add this flag so we don't split words on test members
         flags |= NdFlags::NO_SPLIT;
@@ -269,7 +268,7 @@ impl ParseStream {
         );
         if had_assignments {
           let assignments_span = self.tree.span_for_range(node_range);
-          let label = error::get_context("in variable assignment defined here", &assignments_span);
+          let label = error::get_context("in variable assignment defined here", assignments_span);
           let mut labels: Vec<_> = nd
             .context
             .map(|r| self.tree[r].to_vec())
@@ -341,7 +340,7 @@ impl ParseStream {
           _ => {
             break 'out Err(parse_err!(
               self,
-              span.clone(),
+              span,
               "Unexpected token in command: {:?}",
               tk.class
             ));
@@ -474,7 +473,7 @@ impl ParseStream {
       NdFlags::empty()
     };
 
-    let span = self.tree.alloc(token.span.clone());
+    let span = self.tree.alloc(token.span);
     let var = self.tree.alloc(var);
     let val = self.tree.alloc(val);
 

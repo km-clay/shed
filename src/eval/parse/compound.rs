@@ -57,7 +57,7 @@ impl ParseStream {
         "in function '{}' defined here",
         name.slice()
       )),
-      &span.clone().unwrap_or_default(),
+      span.unwrap_or_default(),
     );
 
     let mut redirs = vec![];
@@ -102,13 +102,13 @@ impl ParseStream {
         let err = match next {
           Some(tk) => Err(parse_err!(
             self,
-            span.clone(),
+            span,
             "Unexpected token '{}' in subshell body",
             tk.slice()
           )),
           None => Err(parse_err!(
             self,
-            span.clone(),
+            span,
             "Unexpected end of input while parsing subshell body"
           )),
         };
@@ -170,13 +170,13 @@ impl ParseStream {
         let err = match next {
           Some(tk) => Err(parse_err!(
             self,
-            span.clone(),
+            span,
             "Unexpected token '{}' in brace group body",
             tk.slice()
           )),
           None => Err(parse_err!(
             self,
-            span.clone(),
+            span,
             "Unexpected end of input while parsing brace group body"
           )),
         };
@@ -218,12 +218,9 @@ impl ParseStream {
 
     extend_span!(span, self.next_tk().unwrap().span);
 
-    let pat_err = parse_err!(
-      self,
-      span.clone(),
-      "Expected a pattern after 'case' keyword"
-    )
-    .with_note("Patterns can be raw text, or anything that gets substituted with raw text".into());
+    let pat_err = parse_err!(self, span, "Expected a pattern after 'case' keyword").with_note(
+      "Patterns can be raw text, or anything that gets substituted with raw text".into(),
+    );
 
     let Some(pat_tk) = self.next_tk() else {
       self.panic_mode(&mut span);
@@ -551,7 +548,7 @@ impl ParseStream {
     if !self.check_keyword(b"do") {
       bail!(
         self,
-        span.clone(),
+        *span,
         "Expected 'do' after for loop arithmetic expression"
       );
     }
@@ -559,21 +556,17 @@ impl ParseStream {
     self.catch_separator(span);
 
     let Some(body) = self.parse_cmd_list()? else {
-      bail!(
-        self,
-        span.clone(),
-        "Expected a command after 'do' in this loop"
-      );
+      bail!(self, *span, "Expected a command after 'do' in this loop");
     };
 
     self.catch_separator(span);
     if !self.check_keyword(b"done") {
-      bail!(self, span.clone(), "Expected 'done' after for loop body");
+      bail!(self, *span, "Expected 'done' after for loop body");
     }
     extend_span!(*span, self.next_tk().unwrap().span);
 
     self.parse_redir(&mut redirs, span)?;
-    let span = self.tree.alloc(span.clone().unwrap_or_default());
+    let span = self.tree.alloc(span.unwrap_or_default());
     let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
     let node = node!(
@@ -638,16 +631,12 @@ impl ParseStream {
     self.catch_separator(span);
 
     if vars.is_empty() {
-      bail!(
-        self,
-        span.clone(),
-        "Expected a variable name for this for loop"
-      );
+      bail!(self, *span, "Expected a variable name for this for loop");
     }
     if self.peek_tk().is_none_or(|tk| *tk.slice() != *b"do") {
       bail!(
         self,
-        span.clone(),
+        *span,
         "Expected 'do' after for loop variable and array"
       );
     }
@@ -655,23 +644,19 @@ impl ParseStream {
     self.catch_separator(span);
 
     let Some(body) = self.parse_cmd_list()? else {
-      bail!(
-        self,
-        span.clone(),
-        "Expected a command after 'do' in this loop"
-      );
+      bail!(self, *span, "Expected a command after 'do' in this loop");
     };
 
     self.catch_separator(span);
     if !self.check_keyword(b"done") {
-      bail!(self, span.clone(), "Expected 'done' after for loop body");
+      bail!(self, *span, "Expected 'done' after for loop body");
     }
     extend_span!(*span, self.next_tk().unwrap().span);
 
     self.parse_redir(&mut redirs, span)?;
 
     self.assert_separator(span)?;
-    let span = self.tree.alloc(span.clone().unwrap_or_default());
+    let span = self.tree.alloc(span.unwrap_or_default());
     let vars = self.tree.alloc_tokens(vars);
     let arr = self.tree.alloc_tokens(arr);
     let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
@@ -772,7 +757,7 @@ impl ParseStream {
     let mut redirs = vec![];
 
     let try_tk = self.next_tk().unwrap();
-    let try_tk_span = try_tk.span.clone();
+    let try_tk_span = try_tk.span;
 
     extend_span!(span, try_tk.span);
     self.catch_separator(&mut span);
@@ -828,7 +813,7 @@ impl ParseStream {
       .tree
       .walk_tree_mut(body, &mut |id, tree| tree[id].is_err());
 
-    let try_span = self.tree.span_for(body).merge_with(&try_tk_span).unwrap();
+    let try_span = self.tree.span_for(body).merge_with(try_tk_span).unwrap();
     let try_span = if try_span.slice().contains(&b'\n') {
       try_span
     } else {
@@ -836,7 +821,7 @@ impl ParseStream {
     };
     let ctx = error::get_context(
       VarStr::from(styled_format!("in '{}' block defined here", "try")),
-      &try_span,
+      try_span,
     );
 
     extend_span!(span, self.next_tk().unwrap().span); // consume 'catch'
@@ -940,7 +925,7 @@ impl ParseStream {
     let mut span: Option<Span> = None;
 
     let defer_tk = self.next_tk().unwrap();
-    let defer_tk_span = defer_tk.span.clone();
+    let defer_tk_span = defer_tk.span;
 
     extend_span!(span, defer_tk.span);
 
@@ -952,7 +937,7 @@ impl ParseStream {
 
     let body_span = self.tree.span_for(body);
     let defer_span = if body_span.slice().contains(&b'\n') {
-      body_span.merge_with(&defer_tk_span).unwrap()
+      body_span.merge_with(defer_tk_span).unwrap()
     } else {
       defer_tk_span
     };
@@ -961,7 +946,7 @@ impl ParseStream {
 
     let ctx = error::get_context(
       VarStr::from(styled_format!("in '{}' block defined here", "defer")),
-      &defer_span,
+      defer_span,
     );
 
     self.catch_separator(&mut span);

@@ -35,7 +35,7 @@ impl super::Builtin for Exec {
     // execvpe only returns on error
     let cmd_str = cmd.to_str().unwrap().to_string();
     match e {
-      Errno::ENOENT => Err(sherr!(NotFound @ span.clone(), "exec: command not found: {}", cmd_str)),
+      Errno::ENOENT => Err(sherr!(NotFound @ span, "exec: command not found: {}", cmd_str)),
       _ => Err(sherr!(Errno(e) @ span, "{e}")),
     }
   }

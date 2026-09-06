@@ -35,7 +35,7 @@ trait FlowCtl: super::Builtin {
       .map(|(st, sp)| {
         st.to_str_lossy().parse::<i32>().map_err(|_| {
           sherr!(
-            SyntaxErr @ sp.clone(),
+            SyntaxErr @ sp,
             "{}: Expected a number",
             self.cmd(),
           )
@@ -241,7 +241,7 @@ impl super::Builtin for Raise {
 
               let Some(color_id) = util::parse_bytes(&color_id) else {
                 return Err(sherr!(
-                  SyntaxErr @ span.clone(),
+                  SyntaxErr @ span,
                   "Invalid color code: expected a number, got '{}'",
                   color_id.to_str_lossy()
                 ))
@@ -250,7 +250,7 @@ impl super::Builtin for Raise {
 
               let Some((arg,_)) = arg_iter.next() else {
                 return Err(sherr!(
-                  SyntaxErr @ span.clone(),
+                  SyntaxErr @ span,
                   "missing format arg for '%{color_id}'",
                 ));
               };
@@ -263,7 +263,7 @@ impl super::Builtin for Raise {
             }
             _ => {
               return Err(sherr!(
-                SyntaxErr @ span.clone(),
+                SyntaxErr @ span,
                 "Invalid format specifier: '%{}'",
                 n_b as char
               ).with_note("'raise' only takes digits or '%' after '%'".into()).with_note("to include a literal '%', use '%%'".into()));

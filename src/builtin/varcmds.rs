@@ -43,8 +43,8 @@ trait VarCmd: super::Builtin {
       .iter()
       .map(|w| match w {
         Word::Arg(value, _) => value.clone(),
-        Word::Opt(opt) => opt.span().slice().into(),
-        Word::Sep(span) => span.slice().into(),
+        Word::Opt(opt) => opt.span().slice(),
+        Word::Sep(span) => span.slice(),
       })
       .collect();
 
@@ -71,11 +71,11 @@ pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span
     let eq_pos = strops::split_at_unescaped(raw, b"=").map(|(pos, _)| pos);
 
     if is_array_literal_assignment(raw) {
-      out.push((raw.into(), tk.span.clone()));
+      out.push((raw.into(), tk.span));
       continue;
     }
 
-    let span = tk.span.clone();
+    let span = tk.span;
 
     if let Some(eq) = eq_pos {
       let name = &raw[..eq];
@@ -93,7 +93,7 @@ pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span
 
     let expanded = tk.expand_to_words()?;
     for exp in expanded.iter() {
-      out.push((exp.clone(), span.clone()));
+      out.push((exp.clone(), span));
     }
   }
   Ok(out)
@@ -162,16 +162,15 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
     let val = match (kind, raw_val) {
       (DeclareKind::Str, Some(v)) => assignment_value(v, span.slice().as_bytes()),
       (DeclareKind::Int, Some(v)) => {
-        let evaluated = arithmetic::expand_arithmetic(v).promote_err(span.clone())?;
-        let n = evaluated
-          .to_str_lossy()
-          .parse::<i32>()
-          .map_err(|_| sherr!(ExecFail @ span.clone(), "declare -i: invalid arithmetic '{}'", v.to_str_lossy()))?;
+        let evaluated = arithmetic::expand_arithmetic(v).promote_err(span)?;
+        let n = evaluated.to_str_lossy().parse::<i32>().map_err(
+          |_| sherr!(ExecFail @ span, "declare -i: invalid arithmetic '{}'", v.to_str_lossy()),
+        )?;
         VarKind::Int(n)
       }
-      (DeclareKind::Arr, Some(v)) => VarKind::arr_from_raw(v).promote_err(span.clone())?,
+      (DeclareKind::Arr, Some(v)) => VarKind::arr_from_raw(v).promote_err(span)?,
       (DeclareKind::Arr, None) => VarKind::Arr(VecDeque::new()),
-      (DeclareKind::Assoc, Some(v)) => VarKind::assoc_arr_from_raw(v).promote_err(span.clone())?,
+      (DeclareKind::Assoc, Some(v)) => VarKind::assoc_arr_from_raw(v).promote_err(span)?,
       (DeclareKind::Assoc, None) => VarKind::AssocArr(Vec::new()),
 
       (DeclareKind::Str | DeclareKind::Int, None) => unreachable!("handled above"),
@@ -246,7 +245,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
             }
             None => {
               return Err(sherr!(
-                NotFound @ span.clone(),
+                NotFound @ *span,
                 "declare: '{name}' not found",
               ));
             }

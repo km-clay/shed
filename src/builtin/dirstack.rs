@@ -164,7 +164,7 @@ impl super::Builtin for PopDir {
             let idx = n - 1;
             if idx >= dirs.len() {
               return Err(sherr!(
-                ExecFail @ blame.clone(),
+                ExecFail @ blame,
                 "popd: directory index out of range: +{n}",
               ));
             }
@@ -177,7 +177,7 @@ impl super::Builtin for PopDir {
             let dirs = m.dirs_mut();
             let actual = dirs.len().checked_sub(n + 1).ok_or_else(|| {
               sherr!(
-                ExecFail @ blame.clone(),
+                ExecFail @ blame,
                 "popd: directory index out of range: -{n}",
               )
             })?;
@@ -240,7 +240,7 @@ impl super::Builtin for Dirs {
     for (arg, _) in args.arguments() {
       match arg.to_str_lossy().as_ref() {
         _ if is_index_arg(&arg.to_str_lossy()) => {
-          target_idx = Some(parse_stack_idx(&arg.to_str_lossy(), blame.clone(), "dirs")?);
+          target_idx = Some(parse_stack_idx(&arg.to_str_lossy(), blame, "dirs")?);
         }
         _ if arg.to_str_lossy().starts_with('-') => {
           return Err(sherr!(

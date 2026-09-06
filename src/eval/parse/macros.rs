@@ -31,7 +31,7 @@ macro_rules! parse_err {
 	($parser:expr, $span:expr, $($arg:tt)*) => {
 		$crate::eval::parse::stream::parse_err_full(
 			&format!($($arg)*),
-			&$span.unwrap_or_default(),
+			$span.unwrap_or_default(),
 			&$parser.context,
 		)
 	};
@@ -40,7 +40,7 @@ macro_rules! parse_err {
 macro_rules! extend_span {
   ($span:expr, $other:expr) => {
     if let Some(span) = &mut $span {
-      span.merge_inplace(&$other);
+      span.merge_inplace($other);
     } else {
       $span = Some($other.clone());
     }

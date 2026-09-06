@@ -546,26 +546,12 @@ impl VarStr {
     self.0.windows(needle.len()).any(|window| window == needle)
   }
 
-  /// Check to see if two instances of [`VarStr`] point to the same data.
-  ///
-  /// For small `VarStr` instances (under 24 bytes), just checks content equality since `HipByt` remains
-  /// stack allocated for small buffers.
-  pub(crate) fn ptr_eq(&self, other: &VarStr) -> bool {
-    if self.0.len() >= 24 {
-      std::ptr::eq(self.0.as_ptr(), other.0.as_ptr())
-    } else {
-      self.0 == other.0
-    }
-  }
-
-  /// Borrowed UTF-8 view, or `None` if the bytes aren't valid UTF-8. Cheap
-  /// (validation only, no allocation) — use for value paths that must be text.
+  /// Borrowed UTF-8 view, or `None` if the bytes aren't valid UTF-8.
   pub(crate) fn to_str(&self) -> Option<&str> {
     std::str::from_utf8(&self.0).ok()
   }
 
-  /// Lossy UTF-8 view (invalid bytes → `U+FFFD`). For display and text-only
-  /// contexts like identifier lookups, where invalid bytes can't occur anyway.
+  /// Lossy UTF-8 view (invalid bytes → `U+FFFD`).
   pub(crate) fn to_str_lossy(&self) -> Cow<'_, str> {
     String::from_utf8_lossy(&self.0)
   }

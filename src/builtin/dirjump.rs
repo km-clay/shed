@@ -60,9 +60,8 @@ trait DirJump {
 
     let count = match args.arguments().next() {
       None => 1,
-      Some((arg, span)) => util::parse_bytes::<usize>(arg.as_bytes()).ok_or_else(
-        || sherr!(ParseErr @ span.clone(), "argument must be a non-negative integer"),
-      )?,
+      Some((arg, span)) => util::parse_bytes::<usize>(arg.as_bytes())
+        .ok_or_else(|| sherr!(ParseErr @ span, "argument must be a non-negative integer"))?,
     };
 
     if count == 0 {

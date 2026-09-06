@@ -1,4 +1,3 @@
-use ariadne::Span as ASpan;
 use itertools::Itertools;
 
 use crate::{eval::lex::Span, state::vars::VarStr, varstr};
@@ -27,11 +26,10 @@ impl BuiltinArgs {
     }
   }
   pub(crate) fn span(&self) -> Span {
-    // cloning spans is cheap
-    self.span.clone()
+    self.span
   }
   pub(crate) fn cmd_span(&self) -> Span {
-    self.cmd_span.clone()
+    self.cmd_span
   }
 
   /// The arg vector of the builtin, including *BOTH* options and arguments.
@@ -42,9 +40,9 @@ impl BuiltinArgs {
   }
 
   /// Get an iterator over the arguments (non-option words) of the builtin.
-  pub(crate) fn arguments(&self) -> impl Iterator<Item = (&VarStr, &Span)> {
+  pub(crate) fn arguments(&self) -> impl Iterator<Item = (&VarStr, Span)> {
     self.argv.iter().filter_map(|word| match word {
-      Word::Arg(value, span) => Some((value, span)),
+      Word::Arg(value, span) => Some((value, *span)),
       _ => None,
     })
   }
@@ -104,7 +102,7 @@ pub(crate) fn join_raw_args(args: Vec<(VarStr, Span)>) -> (VarStr, Span) {
 pub(crate) fn join_raw_arg_iter(args: impl Iterator<Item = (VarStr, Span)>) -> (VarStr, Span) {
   args.fold((VarStr::default(), Span::default()), |mut acc, arg| {
     if acc.1 == Span::default() {
-      acc.1 = arg.1.clone();
+      acc.1 = arg.1;
     } else {
       let new_end = arg.1.end();
       let start = acc.1.start();

@@ -55,7 +55,7 @@ impl super::Dispatcher {
     for assign_id in assigns {
       let assign = &tree[*assign_id];
       let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
-      let span = tree[assign.span].clone();
+      let span = tree[assign.span];
 
       let NdRule::Assignment { kind, var, val } = &assign.class else {
         unreachable!()
@@ -153,13 +153,13 @@ impl super::Dispatcher {
                 }
                 VarKind::AssocArr(_) => {
                   return Err(sherr!(
-                      InvalidAssignment @ span.clone(),
+                      InvalidAssignment @ span,
                       "cannot append associative array to indexed array"
                   ));
                 }
                 VarKind::Unset => {
                   return Err(sherr!(
-                      InvalidAssignment @ span.clone(),
+                      InvalidAssignment @ span,
                       "cannot append unset value to indexed array"
                   ));
                 }
@@ -201,15 +201,16 @@ impl super::Dispatcher {
             AssignKind::Eq => unreachable!(),
           };
 
-          let parse_rhs = |span: &Span| -> ShResult<i32> {
-            val.to_string().parse::<i32>().map_err(
-              |_| sherr!(InvalidAssignment @ span.clone(), "cannot {op_name} non-integer value"),
-            )
+          let parse_rhs = |span: Span| -> ShResult<i32> {
+            val
+              .to_string()
+              .parse::<i32>()
+              .map_err(|_| sherr!(InvalidAssignment @ span, "cannot {op_name} non-integer value"))
           };
 
-          let check_div_zero = |other: i32, span: &Span| -> ShResult<()> {
+          let check_div_zero = |other: i32, span: Span| -> ShResult<()> {
             if matches!(op, AssignKind::DivEq) && other == 0 {
-              return Err(sherr!(InvalidAssignment @ span.clone(), "division by zero"));
+              return Err(sherr!(InvalidAssignment @ span, "division by zero"));
             }
             Ok(())
           };
@@ -235,10 +236,10 @@ impl super::Dispatcher {
                 *s = format!("{}{other}", s.to_str_lossy()).into();
               } else {
                 let n = s.to_str_lossy().parse::<i32>().map_err(
-                  |_| sherr!(InvalidAssignment @ span.clone(), "cannot {op_name} string variable"),
+                  |_| sherr!(InvalidAssignment @ span, "cannot {op_name} string variable"),
                 )?;
-                let other = parse_rhs(&span)?;
-                check_div_zero(other, &span)?;
+                let other = parse_rhs(span)?;
+                check_div_zero(other, span)?;
                 *s = match op {
                   AssignKind::MinusEq => (n - other).to_string().into(),
                   AssignKind::MultEq => (n * other).to_string().into(),
@@ -248,8 +249,8 @@ impl super::Dispatcher {
               }
             }
             VarKind::Int(n) => {
-              let other = parse_rhs(&span)?;
-              check_div_zero(other, &span)?;
+              let other = parse_rhs(span)?;
+              check_div_zero(other, span)?;
               match op {
                 AssignKind::PlusEq => *n += other,
                 AssignKind::MinusEq => *n -= other,

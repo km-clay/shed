@@ -225,7 +225,7 @@ impl super::LineBuf {
     let chunk = new_joined.get(left..right_new)?;
     let mut chunk_tokens = get_context_tokens(chunk);
     for t in &mut chunk_tokens {
-      t.rebase_into(&outer_span, left);
+      t.rebase_into(outer_span, left);
     } // now we have the new tokens, time to replace the old ones
 
     let mut cache = self.highlight_cache.take()?;
@@ -246,7 +246,7 @@ impl super::LineBuf {
     // and then rebase them into the new buffer
     for t in &mut cache.tokens[last..] {
       t.shift_by(delta);
-      t.rebase_into(&outer_span, 0);
+      t.rebase_into(outer_span, 0);
     }
 
     // replace the old tokens with the new chunk

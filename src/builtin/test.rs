@@ -192,12 +192,18 @@ fn eval_binary(
     | BinaryOp::IntLt
     | BinaryOp::IntGe
     | BinaryOp::IntLe => {
-      let lhs_i = lhs.0.to_str_lossy().trim().parse::<i64>().map_err(
-        |_| sherr!(SyntaxErr @ lhs.1.clone(), "test: integer expected, got '{}'", &lhs.0),
-      )?;
-      let rhs_i = rhs.0.to_str_lossy().trim().parse::<i64>().map_err(
-        |_| sherr!(SyntaxErr @ rhs.1.clone(), "test: integer expected, got '{}'", &rhs.0),
-      )?;
+      let lhs_i = lhs
+        .0
+        .to_str_lossy()
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| sherr!(SyntaxErr @ lhs.1, "test: integer expected, got '{}'", &lhs.0))?;
+      let rhs_i = rhs
+        .0
+        .to_str_lossy()
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| sherr!(SyntaxErr @ rhs.1, "test: integer expected, got '{}'", &rhs.0))?;
       Ok(match op {
         BinaryOp::IntEq => lhs_i == rhs_i,
         BinaryOp::IntNeq => lhs_i != rhs_i,
@@ -211,7 +217,7 @@ fn eval_binary(
     BinaryOp::RegexMatch => {
       let cleaned = glob::replace_posix_classes(&rhs.0.to_str_lossy());
       let re = Shed::meta_mut(|m| m.get_regex(&cleaned))
-        .map_err(|e| sherr!(SyntaxErr @ rhs.1.clone(), "Invalid regex: {e}"))?;
+        .map_err(|e| sherr!(SyntaxErr @ rhs.1, "Invalid regex: {e}"))?;
       if let Some(caps) = re.captures(&lhs.0.to_str_lossy()) {
         let groups: VecDeque<VarStr> = caps
           .iter()
@@ -337,9 +343,9 @@ fn eval_leaf(leaf: &[(VarStr, Span)], extended: bool) -> ShResult<bool> {
   if leaf.is_empty() {
     return Ok(false);
   }
-  let start_span = leaf.first().unwrap().1.clone();
-  let end_span = leaf.last().unwrap().1.clone();
-  let major_span = start_span.merge_with(&end_span).unwrap_or(end_span);
+  let start_span = leaf.first().unwrap().1;
+  let end_span = leaf.last().unwrap().1;
+  let major_span = start_span.merge_with(end_span).unwrap_or(end_span);
 
   match leaf.len() {
     1 => {

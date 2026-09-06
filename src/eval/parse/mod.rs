@@ -230,7 +230,7 @@ impl ParseStream {
 
       if conjunct_op != ConjunctOp::Null {
         let Some(tk) = self.next_tk() else { break };
-        dangling_op = Some(tk.span.clone());
+        dangling_op = Some(tk.span);
         extend_span!(span, tk.span);
         // Only a newline (not `;`) may follow the operator.
         self.catch_linebreak(&mut span);
@@ -340,7 +340,7 @@ impl Iterator for ParseStream {
         Some(tk) if tk.class == TkRule::Eoi => None,
         Some(tk) => {
           let class = tk.class.clone();
-          let mut span = Some(tk.span.clone());
+          let mut span = Some(tk.span);
           self.panic_mode(&mut span);
           Some(Err(parse_err!(self, span, "Unexpected token: {class:?}")))
         }

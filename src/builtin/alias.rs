@@ -35,19 +35,19 @@ impl super::Builtin for Alias {
       // reject these two
       if name == b"command" || name == b"builtin" {
         return Err(sherr!(
-          ExecFail @ span.clone(),
+          ExecFail @ span,
           "Cannot assign alias to reserved name '{}'",
           name.to_str_lossy()
         ));
       }
 
       if let Some(value) = value {
-        Shed::logic_mut(|l| l.insert_alias(&name.to_str_lossy(), &value.into(), span.clone()));
+        Shed::logic_mut(|l| l.insert_alias(&name.to_str_lossy(), &value.into(), span));
       } else if let Some(alias) = Shed::logic(|l| l.get_alias(&name.to_str_lossy())) {
         outln_bytes(&vars::display_as_var(name, alias.body()));
       } else {
         return Err(sherr!(
-          SyntaxErr @ span.clone(),
+          SyntaxErr @ span,
           "Unknown alias '{}'",
           name.to_str_lossy()
         ));
@@ -72,7 +72,7 @@ impl super::Builtin for Unalias {
     for (arg, span) in args.arguments() {
       if Shed::logic(|l| l.get_alias(&arg.to_str_lossy())).is_none() {
         return Err(sherr!(
-          SyntaxErr @ span.clone(),
+          SyntaxErr @ span,
           "unalias: alias '{arg}' not found",
         ));
       }
@@ -115,12 +115,12 @@ impl super::Builtin for ExCmd {
       let name = &name.to_str_lossy();
 
       if !remove && let Some(value) = value {
-        Shed::logic_mut(|l| l.insert_ex_alias(name, &value.into(), span.clone()));
+        Shed::logic_mut(|l| l.insert_ex_alias(name, &value.into(), span));
       } else {
         match Shed::logic(|l| l.get_ex_alias(name)) {
           Some(_) if remove => Shed::logic_mut(|l| l.remove_ex_alias(name)),
           Some(alias) => outln_bytes(&vars::display_as_var(name.as_bytes(), alias.body())),
-          None => return Err(sherr!(SyntaxErr @ span.clone(),"Unknown ex command alias '{name}'")),
+          None => return Err(sherr!(SyntaxErr @ span,"Unknown ex command alias '{name}'")),
         }
       }
     }

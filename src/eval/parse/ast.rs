@@ -8,7 +8,6 @@ use std::{
   sync::atomic::{AtomicU32, Ordering},
 };
 
-use ariadne::Span as _;
 use smallvec::SmallVec;
 
 use super::{
@@ -110,7 +109,7 @@ impl Ast {
     Span::new(start, end, self[first].source())
   }
   pub(crate) fn span_for(&self, node: NodeId) -> Span {
-    self[self[node].get_span()].clone()
+    self[self[node].get_span()]
   }
   pub(crate) fn command_for(&self, node: NodeId) -> Option<&Tk> {
     self[node].get_command().map(|tk| &self[tk])
@@ -144,7 +143,7 @@ impl Ast {
     } = self[id];
 
     let class = self.copy_class(class, dst);
-    let span = dst.alloc(self[span].clone());
+    let span = dst.alloc(self[span]);
     let redirs = redirs.map(|r| dst.alloc_redirs(self[r].to_vec()));
     let context = context.map(|r| dst.alloc_labels(self[r].to_vec()));
 

@@ -69,7 +69,7 @@ pub(crate) fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(Va
   let mut out = Vec::with_capacity(argv.len());
 
   for arg in argv {
-    let span = arg.span.clone();
+    let span = arg.span;
     if no_split {
       // this is the bash regex thing, not a tilde expansion
       if arg.span.slice().as_bytes() == b"=~" {
@@ -80,7 +80,7 @@ pub(crate) fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(Va
       out.push((word, span));
     } else {
       for exp in arg.expand_to_words()?.iter() {
-        out.push((exp.clone(), span.clone()));
+        out.push((exp.clone(), span));
       }
     }
   }
@@ -155,7 +155,7 @@ impl ExecArgs {
   }
   pub(crate) fn get_cmd(argv: &[(VarStr, Span)]) -> (CString, Span) {
     let cmd = argv[0].0.as_bytes();
-    let span = argv[0].1.clone();
+    let span = argv[0].1;
     (CString::new(cmd).unwrap(), span)
   }
   pub(crate) fn get_argv(argv: Vec<(VarStr, Span)>) -> Rc<[CString]> {
@@ -538,7 +538,7 @@ pub(crate) fn pipefail_span(spans: &[Span]) -> Option<Span> {
   for (i, status) in pipestatus.into_iter().enumerate().rev() {
     let status = status.to_str_lossy().parse::<usize>().ok()?;
     if status != 0 {
-      return spans.get(i).cloned();
+      return spans.get(i).copied();
     }
   }
   None

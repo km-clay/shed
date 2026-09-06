@@ -50,7 +50,7 @@ impl Opt {
     &self.args
   }
   pub(crate) fn span(&self) -> Span {
-    self.span.clone()
+    self.span
   }
   pub(crate) fn key(&self) -> &str {
     self.key.to_str().unwrap_or_default()
@@ -79,12 +79,12 @@ impl Opt {
 
 impl Display for Opt {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let mut span = self.span.clone();
+    let mut span = self.span;
     if let Some(arg_span) = self.args.last().map(|(_, s)| s) {
-      span.merge_inplace(arg_span);
+      span.merge_inplace(*arg_span);
     }
 
-    write!(f, "{}", span.slice().to_str_lossy())
+    write!(f, "{}", span.try_slice().unwrap_or_default().to_str_lossy())
   }
 }
 
@@ -197,10 +197,10 @@ fn parse_opts_inner(
   let mut expanded_words = vec![];
   for tk in tokens {
     let tk = tk.clone();
-    let span = tk.span.clone();
+    let span = tk.span;
     let expanded = tk.expand()?;
     for word in expanded.get_words().iter() {
-      expanded_words.push((word.clone(), span.clone()));
+      expanded_words.push((word.clone(), span));
     }
   }
 
@@ -240,12 +240,7 @@ fn parse_opts_inner(
       // long option
       match specs.iter().find(|s| s.is_long_match(&word.to_str_lossy())) {
         Some(spec) => {
-          let args = take_args(
-            &mut words_iter,
-            spec.argc,
-            span.clone(),
-            &word.to_str_lossy(),
-          )?;
+          let args = take_args(&mut words_iter, spec.argc, span, &word.to_str_lossy())?;
           words.push(Word::Opt(Opt {
             key: spec.key.clone(),
             span,
@@ -265,12 +260,12 @@ fn parse_opts_inner(
           let args = take_args(
             &mut words_iter,
             spec.argc,
-            span.clone(),
+            span,
             &varstr!("-{}", byte as char).to_str_lossy(),
           )?;
           words.push(Word::Opt(Opt {
             key: spec.key.clone(),
-            span: span.clone(),
+            span,
             args,
           }));
         }
@@ -320,7 +315,7 @@ pub(super) fn parse_opts_raw(tokens: &[Tk], specs: &[OptSpec]) -> (Vec<Opt>, Vec
           let spec = specs.iter().find(|s| s.is_short_match(byte)).unwrap();
           opts.push(Opt {
             key: spec.key.clone(),
-            span: tk.span.clone(),
+            span: tk.span,
             args: vec![],
           });
         }

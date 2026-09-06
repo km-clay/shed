@@ -60,11 +60,7 @@ impl Builtin for Echo {
         if use_escape {
           Ok(escape::expand_ansi_c(st.as_bytes()).into())
         } else if use_prompt {
-          Ok(
-            prompt::expand_prompt(st.as_bytes())
-              .promote_err(sp.clone())?
-              .into(),
-          )
+          Ok(prompt::expand_prompt(st.as_bytes()).promote_err(sp)?.into())
         } else {
           Ok(st.clone())
         }

@@ -13,7 +13,7 @@ impl super::Builtin for Shift {
     let count = args.arguments().next().map_or(Ok(1), |(st, sp)| {
       st.to_str_lossy().parse::<usize>().map_err(|_| {
         sherr!(
-          ExecFail @ sp.clone(),
+          ExecFail @ sp,
           "Expected a number in shift args",
         )
       })

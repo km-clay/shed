@@ -30,7 +30,7 @@ impl super::Builtin for Flog {
     };
     let level = first.to_ascii_uppercase();
     let Some(level) = log::Level::from_str(&String::from_utf8_lossy(&level)).ok() else {
-      return Err(sherr!(ExecFail @ span.clone(), "Invalid log level"));
+      return Err(sherr!(ExecFail @ *span, "Invalid log level"));
     };
 
     let cur_level = Self::get_log_level().unwrap_or(log::Level::Error);

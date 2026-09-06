@@ -44,7 +44,7 @@ impl super::Builtin for Shopt {
         .iter()
         .find(|(old, _)| *old == key.to_str_lossy())
       {
-        sherr!(DeprecationWarning @ span.clone(),
+        sherr!(DeprecationWarning @ span,
           "shopt: '{key}' has been renamed to '{new_key}'"
         )
         .print_error();

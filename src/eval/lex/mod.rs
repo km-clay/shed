@@ -7,8 +7,7 @@
 use std::{
   cmp::Ordering,
   collections::VecDeque,
-  fmt::Display,
-  ops::{Bound, Deref, Index, Range, RangeBounds, RangeFrom, RangeTo, RangeToInclusive},
+  ops::{Bound, Deref, Range, RangeBounds},
   sync::Arc,
 };
 
@@ -97,87 +96,10 @@ macro_rules! lex_err {
 	}}
 }
 
-#[derive(Clone, PartialEq, Default, Debug, Eq, Hash)]
-pub(crate) struct SpanSource {
-  name: VarStr,
-  content: VarStr,
-}
-
 thread_local! {
   /// Cached default source name, so `Span::new`
   /// doesn't re-allocate `"<stdin>"` on every call.
   static STDIN_NAME: VarStr = VarStr::from("<stdin>");
-}
-
-fn stdin_name() -> VarStr {
-  STDIN_NAME.with(VarStr::clone)
-}
-
-impl SpanSource {
-  pub(crate) fn new(name: VarStr, content: VarStr) -> Self {
-    Self { name, content }
-  }
-  pub(crate) fn name(&self) -> VarStr {
-    self.name.clone()
-  }
-  pub(crate) fn content(&self) -> VarStr {
-    self.content.clone()
-  }
-  pub(crate) fn len(&self) -> usize {
-    self.content.len()
-  }
-}
-
-impl Index<usize> for SpanSource {
-  type Output = u8;
-
-  fn index(&self, index: usize) -> &Self::Output {
-    &self.content[index]
-  }
-}
-
-impl Index<RangeTo<usize>> for SpanSource {
-  type Output = [u8];
-
-  fn index(&self, index: RangeTo<usize>) -> &Self::Output {
-    &self.content[index]
-  }
-}
-
-impl Index<RangeToInclusive<usize>> for SpanSource {
-  type Output = [u8];
-
-  fn index(&self, index: RangeToInclusive<usize>) -> &Self::Output {
-    &self.content[index]
-  }
-}
-
-impl Index<RangeFrom<usize>> for SpanSource {
-  type Output = [u8];
-
-  fn index(&self, index: RangeFrom<usize>) -> &Self::Output {
-    &self.content[index]
-  }
-}
-
-impl Index<Range<usize>> for SpanSource {
-  type Output = [u8];
-
-  fn index(&self, index: Range<usize>) -> &Self::Output {
-    &self.content[index]
-  }
-}
-
-impl Display for SpanSource {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    use yansi::Paint;
-    write!(f, "{}", self.name.cyan().bold().underline())
-  }
-}
-
-pub(crate) struct WeakSpan {
-  start: usize,
-  end: usize,
 }
 
 /// A slice of some source text. Ultimately wraps a [`crate::state::vars::VarStr`], which means these are cheap to clone.
@@ -227,7 +149,7 @@ impl Span {
   pub(crate) fn range(&self) -> Range<usize> {
     self.start..self.end
   }
-  pub(crate) fn merge_inplace(&mut self, other: &Span) {
+  pub(crate) fn merge_inplace(&mut self, other: Span) {
     if self.source != other.source {
       return;
     }
@@ -238,7 +160,7 @@ impl Span {
     self.start = self.start.min(other.start);
     self.end = self.end.max(other.end);
   }
-  pub(crate) fn merge_with(mut self, other: &Span) -> Option<Self> {
+  pub(crate) fn merge_with(mut self, other: Span) -> Option<Self> {
     // make sure these two spans originate from the same input. See
     // `merge_inplace` for why the `ptr_eq` fast path needs a value fallback.
     if self.source != other.source {
@@ -298,10 +220,10 @@ impl Span {
     self.end = new_end as usize;
   }
 
-  pub(crate) fn rebase_into(&mut self, outer_span: &Span, offset: usize) {
-    self.start = self.start + offset;
-    self.end = self.end + offset;
-    self.source = outer_span.source.clone();
+  pub(crate) fn rebase_into(&mut self, outer_span: Span, offset: usize) {
+    self.start += offset;
+    self.end += offset;
+    self.source = outer_span.source;
   }
 }
 
@@ -400,7 +322,7 @@ impl Tk {
   }
   /// Returns a new string with the token's span replaced by the given string.
   pub(crate) fn replaced(&self, other: &str) -> String {
-    let mut content = self.span.slice().to_string();
+    let mut content = self.span.text().to_string();
     let start = self.span.start();
     let end = self.span.end();
     content.replace_range(start..end, other);
@@ -443,7 +365,7 @@ impl Tk {
   }
 
   /// used when lexing recursively, to replace the token's span with the original source
-  pub(crate) fn rebase_into(mut self, outer_span: &Span, offset: usize) -> Self {
+  pub(crate) fn rebase_into(mut self, outer_span: Span, offset: usize) -> Self {
     self.span.rebase_into(outer_span, offset);
     self
   }
@@ -458,7 +380,7 @@ impl Tk {
     let trimmed = s.trim();
 
     if trimmed.len() < 4 || !trimmed.starts_with(b"((") || !trimmed.ends_with(b"))") {
-      return Err(sherr!(ParseErr @ self.span.clone(), "malformed arithmetic for-loop header"));
+      return Err(sherr!(ParseErr @ self.span, "malformed arithmetic for-loop header"));
     }
 
     let base = self.span.start;
@@ -771,7 +693,7 @@ impl<'a> LexStream<'a> {
     let end = match range.end_bound() {
       Bound::Included(&end) => end + 1,
       Bound::Excluded(&end) => end,
-      Bound::Unbounded => self.source.len(),
+      Bound::Unbounded => self.end,
     };
     self.source.get(start..end)
   }
@@ -796,6 +718,9 @@ impl<'a> LexStream<'a> {
   }
   /// The source byte at an absolute index, if in bounds.
   fn byte_at(&self, idx: usize) -> Option<u8> {
+    if idx >= self.end {
+      return None;
+    }
     self.source.get(idx).copied()
   }
   pub(crate) fn in_brc_grp(&self) -> bool {
@@ -824,7 +749,7 @@ impl<'a> LexStream<'a> {
     self.pos_offset = self.cursor;
   }
   pub(crate) fn update_cursor(&mut self, new_cursor: usize) {
-    assert!(new_cursor <= self.source.len());
+    assert!(new_cursor <= self.end);
     self.cursor = new_cursor;
     self.update_pos();
   }
@@ -1554,10 +1479,10 @@ impl<'a> LexStream<'a> {
 
 impl ByteCursor for LexStream<'_> {
   fn peek_byte(&self) -> Option<u8> {
-    self.source.get(self.cursor).copied()
+    self.byte_at(self.cursor)
   }
   fn peek_nth(&self, n: usize) -> Option<u8> {
-    self.source.get(self.cursor + n).copied()
+    self.byte_at(self.cursor + n)
   }
   fn next_byte(&mut self) -> Option<u8> {
     let b = self.peek_byte()?;
@@ -1571,13 +1496,13 @@ impl ByteCursor for LexStream<'_> {
 impl Iterator for LexStream<'_> {
   type Item = ShResult<Tk>;
   fn next(&mut self) -> Option<Self::Item> {
-    assert!(self.cursor <= self.source.len());
+    assert!(self.cursor <= self.end);
     // We are at the end of the input
     if self.flags.contains(LexFlags::STALE) {
       return None;
     }
 
-    if self.cursor == self.source.len() {
+    if self.cursor == self.end {
       // we have hit the end of the source input; check for unclosed structures
       if let Some(err) = self.unclosed_structure_error() {
         return Some(err);
@@ -1602,14 +1527,14 @@ impl Iterator for LexStream<'_> {
         || self.slice(pos..pos + 3) == Some(b"\\\r\n".as_slice())
       {
         self.inc_cursor(2);
-      } else if pos < self.source.len() && is_field_sep(self.byte_at(pos).unwrap()) {
+      } else if pos < self.end && is_field_sep(self.byte_at(pos).unwrap()) {
         self.inc_cursor(1);
       } else {
         break;
       }
     }
 
-    if self.cursor == self.source.len() {
+    if self.cursor == self.end {
       if let Some(err) = self.unclosed_structure_error() {
         return Some(err);
       }
@@ -1631,7 +1556,7 @@ impl Iterator for LexStream<'_> {
 
         match_loop!(self.byte_at(self.cursor) => ch, {
           b'\\' if self.byte_at(self.cursor + 1) == Some(b'\n') => {
-            self.update_cursor((self.cursor + 2).min(self.source.len()));
+            self.update_cursor((self.cursor + 2).min(self.end));
           }
           _ if is_hard_sep(ch) => {
             self.inc_cursor(1);
@@ -1872,9 +1797,8 @@ mod tests {
       .unwrap_or_default()
   }
 
-  fn lex_toks(src: &str) -> Vec<Tk> {
-    let handle = state::register_source(src);
-    LexStream::new(&handle, LexFlags::LEX_UNFINISHED)
+  fn lex_toks(handle: &SourceHandle) -> Vec<Tk> {
+    LexStream::new(handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .filter(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi))
       .collect()
@@ -1889,7 +1813,8 @@ mod tests {
 
   #[test]
   fn for_in_marks_in_keyword() {
-    let toks = lex_toks("for x in a b");
+    let handle = state::register_source("for x in a b");
+    let toks = lex_toks(&handle);
     let in_tok = toks
       .iter()
       .find(|t| t.slice().to_str_lossy() == "in")
@@ -1914,8 +1839,9 @@ mod tests {
 
   #[test]
   fn heredoc_body_skipped_before_trailing_command() {
-    let src = "cat <<EOF\nbody\nEOF\necho after";
-    let texts: Vec<String> = lex_toks(src)
+    let handle = state::register_source("cat <<EOF\nbody\nEOF\necho after");
+    let toks = lex_toks(&handle);
+    let texts: Vec<String> = toks
       .into_iter()
       .filter(|t| t.class == TkRule::Str)
       .map(|t| t.slice().to_str_lossy().into_owned())

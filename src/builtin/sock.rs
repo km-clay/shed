@@ -403,7 +403,7 @@ impl super::Builtin for Accept {
     };
 
     let Ok(listen) = fd.to_str_lossy().parse::<u32>() else {
-      return Err(sherr!(ExecFail @ span.clone(), "Invalid file descriptor '{fd}'"));
+      return Err(sherr!(ExecFail @ span, "Invalid file descriptor '{fd}'"));
     };
 
     match argv_iter.next() {
@@ -504,13 +504,14 @@ impl super::Builtin for Listen {
     }
 
     let target_fd = if let Some((arg, span)) = arg_vec.first() {
+      let span = *span;
       let Ok(arg) = arg.to_str_lossy().parse::<u32>() else {
-        return Err(sherr!(ExecFail @ span.clone(), "Invalid file descriptor '{arg}'"));
+        return Err(sherr!(ExecFail @ span, "Invalid file descriptor '{arg}'"));
       };
 
       if arg >= 10 {
         return Err(sherr!(
-          ExecFail @ span.clone(),
+          ExecFail @ span,
           "File descriptor '{arg}' is too high, must be less than 10",
         ));
       }
@@ -596,13 +597,15 @@ impl super::Builtin for Sock {
     }
 
     let target_fd = if let Some((arg, span)) = arg_vec.first() {
+      let span = *span;
+
       let Ok(arg) = arg.to_str_lossy().parse::<u32>() else {
-        return Err(sherr!(ExecFail @ span.clone(), "Invalid file descriptor '{arg}'"));
+        return Err(sherr!(ExecFail @ span, "Invalid file descriptor '{arg}'"));
       };
 
       if arg >= 10 {
         return Err(sherr!(
-          ExecFail @ span.clone(),
+          ExecFail @ span,
           "File descriptor '{arg}' is too high, must be less than 10",
         ));
       }

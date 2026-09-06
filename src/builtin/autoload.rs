@@ -80,7 +80,7 @@ impl super::Builtin for Autoload {
       for (arg, span) in args.arguments() {
         let name = arg.to_str_lossy();
         let Some(src) = set.remove(name.as_ref()) else {
-          return Err(sherr!(ParseErr @ span.clone(), "no such autoload: {arg}"));
+          return Err(sherr!(ParseErr @ span, "no such autoload: {arg}"));
         };
         register(&name, src, now, comp)?;
       }

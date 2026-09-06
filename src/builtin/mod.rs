@@ -441,7 +441,7 @@ pub(super) trait Builtin: Sync {
   /// Parse arguments and options, pack `BuiltinArgs`, run `self.execute()`
   fn run_builtin(&self, tree: &Ast, node_id: NodeId, _dispatcher: &mut Dispatcher) -> ShResult<()> {
     let node = &tree[node_id];
-    let span = tree[node.get_span()].clone();
+    let span = tree[node.get_span()];
     let no_split = node.flags.contains(NdFlags::NO_SPLIT);
     let NdRule::Command {
       assignments: _,
@@ -451,11 +451,9 @@ pub(super) trait Builtin: Sync {
       unreachable!()
     };
 
-    let cmd_span = argv
-      .first()
-      .map_or_else(|| span.clone(), |tk| tree[tk].span.clone());
+    let cmd_span = argv.first().map_or_else(|| span, |tk| tree[tk].span);
 
-    let parsed = self.get_argv_and_opts(cmd_span.clone(), &tree[*argv], no_split)?;
+    let parsed = self.get_argv_and_opts(cmd_span, &tree[*argv], no_split)?;
 
     if !node.flags.contains(NdFlags::NO_TRACE) {
       // Trace the flat, in-order expansion (options + their args intact),
@@ -688,7 +686,7 @@ impl Builtin for BuiltinBuiltin {
     dispatcher: &mut Dispatcher,
   ) -> ShResult<()> {
     let node = &tree[node_id];
-    let span = tree[node.get_span()].clone();
+    let span = tree[node.get_span()];
     let NdRule::Command { argv, .. } = &node.class else {
       unreachable!()
     };
@@ -794,15 +792,15 @@ impl Builtin for CommandBuiltin {
         "-V" if !print_path => print_type = true,
 
         "-v" if print_type => {
-          return Err(sherr!(InvalidOpt @ tk.span.clone(), "cannot specify both -v and -V"));
+          return Err(sherr!(InvalidOpt @ tk.span, "cannot specify both -v and -V"));
         }
         "-V" if print_path => {
-          return Err(sherr!(InvalidOpt @ tk.span.clone(), "cannot specify both -v and -V"));
+          return Err(sherr!(InvalidOpt @ tk.span, "cannot specify both -v and -V"));
         }
 
         "--" => seen_dd = true,
         s if s.starts_with('-') => {
-          return Err(sherr!(InvalidOpt @ tk.span.clone(), "invalid option: {s}"));
+          return Err(sherr!(InvalidOpt @ tk.span, "invalid option: {s}"));
         }
         _ => rest.push(tk),
       }
@@ -837,7 +835,7 @@ impl Builtin for CommandBuiltin {
         );
 
         #[cfg(not(target_os = "android"))]
-        let span = sub_ast[sub_ast[root].get_span()].clone();
+        let span = sub_ast[sub_ast[root].get_span()];
         return Err(sherr!(ExecFail @ span, "unable to get default path"));
       };
       // TODO: Find a way to do this that doesn't involve forcing a full PATH rehash twice

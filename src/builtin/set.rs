@@ -267,15 +267,15 @@ fn reset_set_opts() {
 
 /// Apply a resolved [`SetFlags`] set to the shell's shopt table with the given
 /// polarity (`on` = enable). `emacs` is special-cased to invert `vi`.
-fn apply_set_flags(on: bool, flags: SetFlags, span: &Span) -> ShResult<()> {
+fn apply_set_flags(on: bool, flags: SetFlags, span: Span) -> ShResult<()> {
   for opt in flags.get_shopt_fields() {
     if opt == "emacs" {
       let val = if on { "false" } else { "true" };
-      Shed::shopts_mut(|o| o.query(&format!("set.vi={val}"))).promote_err(span.clone())?;
+      Shed::shopts_mut(|o| o.query(&format!("set.vi={val}"))).promote_err(span)?;
       continue;
     }
     let val = if on { "true" } else { "false" };
-    Shed::shopts_mut(|o| o.query(&format!("set.{opt}={val}"))).promote_err(span.clone())?;
+    Shed::shopts_mut(|o| o.query(&format!("set.{opt}={val}"))).promote_err(span)?;
   }
   Ok(())
 }
@@ -288,14 +288,14 @@ fn apply_long_o<I>(
   on: bool,
   cluster: &mut Peekable<impl Iterator<Item = char>>,
   words: &mut Peekable<I>,
-  span: &Span,
+  span: Span,
 ) -> ShResult<()>
 where
   I: Iterator<Item = (VarStr, Span)>,
 {
   let attached: String = cluster.by_ref().collect();
   if !attached.is_empty() {
-    let flag = SetFlags::from_str(&attached).promote_err(span.clone())?;
+    let flag = SetFlags::from_str(&attached).promote_err(span)?;
     return apply_set_flags(on, flag, span);
   }
 
@@ -362,7 +362,7 @@ where
 
     while let Some(ch) = cluster.next() {
       if ch == 'o' {
-        apply_long_o(on, &mut cluster, words, &span)?;
+        apply_long_o(on, &mut cluster, words, span)?;
         continue;
       }
       match classify(ch) {
@@ -371,7 +371,7 @@ where
           // getopt rule: leftover cluster chars are this option's argument.
           let attached: String = cluster.by_ref().collect();
           let attached = (!attached.is_empty()).then(|| VarStr::from(attached));
-          on_invocation(ch, attached, words, span.clone())?;
+          on_invocation(ch, attached, words, span)?;
           break; // an arg-taking option ends the cluster
         }
         Role::Unknown if strict => {
@@ -381,7 +381,7 @@ where
       }
     }
 
-    apply_set_flags(on, flags, &span)?;
+    apply_set_flags(on, flags, span)?;
   }
 
   Ok(SetOpts { terminated: false })

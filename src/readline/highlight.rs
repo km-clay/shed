@@ -1,6 +1,4 @@
-use std::ops::Range;
-
-use yansi::Paint;
+use std::{fmt, ops::Range};
 
 use crate::{
   state::shopt::ShOptHighlight,
@@ -145,88 +143,183 @@ impl Default for Palette {
   }
 }
 
-pub(super) fn highlight_ex<W: std::fmt::Write>(
+pub(super) fn highlight_ex<W: fmt::Write>(
   out: &mut W,
   input: &str,
   palette: &Palette,
   editor_cursor_pos: usize,
-) -> std::fmt::Result {
+) -> fmt::Result {
   let tks: Vec<CtxTk> = get_ex_context_tokens(input);
   highlight(out, input, &tks, palette, editor_cursor_pos, &[])
 }
 
-pub(super) fn highlight<W: std::fmt::Write>(
+pub(super) fn highlight<W: fmt::Write>(
   out: &mut W,
   input: &str,
   tks: &[CtxTk],
   palette: &Palette,
   editor_cursor_pos: usize,
   selections: &[Range<usize>],
-) -> std::fmt::Result {
-  let mut cursor = 0;
+) -> fmt::Result {
+  let mut painter = Painter::new(out, input, editor_cursor_pos, palette, selections);
   for tk in tks {
-    paint(
+    painter.paint(tk, PaletteEntry::new());
+  }
+  painter.finish()
+}
+
+struct Painter<'a, W: fmt::Write> {
+  out: &'a mut W,
+  src: &'a str,
+  cursor: usize,
+  editor_cursor_pos: usize,
+  palette: &'a Palette,
+  selections: &'a [Range<usize>],
+}
+
+impl<'a, W: fmt::Write> Painter<'a, W> {
+  fn new(
+    out: &'a mut W,
+    src: &'a str,
+    editor_cursor_pos: usize,
+    palette: &'a Palette,
+    selections: &'a [Range<usize>],
+  ) -> Painter<'a, W> {
+    Painter {
       out,
-      input,
-      tk,
-      PaletteEntry::new(),
-      &mut cursor,
+      src,
+      cursor: 0,
       editor_cursor_pos,
       palette,
       selections,
-    );
-  }
-  out.write_str("\x1b[0m")?; // ensure we reset at the end
-  out.write_str(&input[cursor..])?; // append any remaining text after the last token
-  Ok(())
-}
-
-/// given a `CtxTk`, write highlighted output to `out`
-///
-/// `CtxTk` already did the heavy lifting for figuring out where and what everything is.
-/// now we can just paint the spans that it put together.
-fn paint<W: std::fmt::Write>(
-  out: &mut W,
-  src: &str,
-  node: &CtxTk,
-  parent: PaletteEntry,
-  cursor: &mut usize,       // our position in the input
-  editor_cursor_pos: usize, // editor cursor position
-  palette: &Palette,
-  selections: &[Range<usize>],
-) {
-  let span = node.range();
-
-  // leading bytes inherit the parent style
-  if *cursor < span.start {
-    emit_with_selection(out, src, *cursor..span.start, parent, selections);
-    *cursor = span.start;
-  }
-
-  let mut style = palette.style_for(node, editor_cursor_pos);
-  let decor = style.decor().union(parent.decor()); // decorations accumulate as we descend
-  style.set_decor(decor);
-
-  if node.sub_tokens().is_empty() {
-    emit_with_selection(out, src, span.clone(), style, selections);
-    *cursor = span.end;
-  } else {
-    for child in node.sub_tokens() {
-      paint(
-        out,
-        src,
-        child,
-        style,
-        cursor,
-        editor_cursor_pos,
-        palette,
-        selections,
-      );
     }
-    // trailing bytes maintain the current style
-    if *cursor < span.end {
-      emit_with_selection(out, src, *cursor..span.end, style, selections);
-      *cursor = span.end;
+  }
+  fn finish(self) -> fmt::Result {
+    self.out.write_str("\x1b[0m")?; // ensure we reset at the end
+    self.out.write_str(&self.src[self.cursor..])?; // append any remaining text after the last token
+    Ok(())
+  }
+  fn paint(&mut self, node: &CtxTk, parent: PaletteEntry) {
+    let span = node.range();
+
+    // leading bytes inherit the parent style
+    if self.cursor < span.start {
+      self.emit_with_selection(self.cursor..span.start, parent);
+      self.cursor = span.start;
+    }
+
+    let mut style = self.palette.style_for(node, self.editor_cursor_pos);
+    let decor = style.decor().union(parent.decor()); // decorations accumulate as we descend
+    style.set_decor(decor);
+
+    if node.sub_tokens().is_empty() {
+      self.emit_with_selection(span.clone(), style);
+      self.cursor = span.end;
+    } else {
+      for child in node.sub_tokens() {
+        self.paint(child, style);
+      }
+      // trailing bytes maintain the current style
+      if self.cursor < span.end {
+        self.emit_with_selection(self.cursor..span.end, style);
+        self.cursor = span.end;
+      }
+    }
+  }
+  /// Emit `src[range]` under `style`, painting any portion that overlaps a
+  /// `selections` range with the inverted style. Overlapping/adjacent
+  /// selections are merged first so no byte is emitted twice.
+  fn emit_with_selection(&mut self, range: Range<usize>, style: PaletteEntry) {
+    // find every selection that starts before our end, and ends after our start
+    // if both of these are true, there is overlap
+    let mut overlapping: Vec<Range<usize>> = self
+      .selections
+      .iter()
+      .filter(|s| s.start < range.end && s.end > range.start)
+      .cloned()
+      .collect();
+
+    if overlapping.is_empty() {
+      self.paint_with(range, style);
+      return;
+    }
+
+    // Sort by start, then merge overlapping/adjacent ranges into disjoint
+    // segments so the sweep doesn't emit any byte twice.
+    overlapping.sort_by_key(|s| s.start);
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(overlapping.len());
+    for sel in overlapping {
+      if let Some(last) = merged.last_mut()
+        && sel.start <= last.end
+      {
+        last.end = last.end.max(sel.end);
+        continue;
+      }
+      merged.push(sel);
+    }
+
+    // Sweep through `range`, alternating between un-selected (normal style)
+    // and selected (inverted style) segments.
+    let sel_style = style.inverted();
+    let mut pos = range.start;
+    for sel in &merged {
+      let sel_start = sel.start.max(range.start);
+      let sel_end = sel.end.min(range.end);
+
+      if pos < sel_start {
+        self.paint_with(pos..sel_start, style);
+      }
+
+      if sel_start < sel_end {
+        self.paint_with(sel_start..sel_end, sel_style);
+      }
+
+      pos = sel_end;
+    }
+
+    if pos < range.end {
+      self.paint_with(pos..range.end, style);
+    }
+  }
+  /// Emit `src[range]` under `style`, rewriting ASCII control bytes as
+  /// dim+italic caret notation (`\x1b` -> `^[`, `\x7f` -> `^?`, …); `\n` and
+  /// `\t` pass through as structural whitespace. Without this, raw control
+  /// bytes in the buffer (e.g. from `:r!cat file_with_escapes`) would reach the
+  /// terminal and could drive OSC 52 / title-change injection.
+  fn paint_with(&mut self, range: Range<usize>, style: PaletteEntry) {
+    // Hot path: nothing to visualize, single styled write.
+    let text = &self.src[range];
+
+    macro_rules! paint {
+      ($text:expr, $style:expr) => {
+        if let Err(e) = write!(self.out, "{}", yansi::Paint::paint($text, $style)) {
+          panic!("highlighting output failed: {e}");
+        }
+      };
+    }
+
+    if !text.bytes().any(is_visualized_control) {
+      paint!(text, style.style());
+      return;
+    }
+    let ctrl_style = style.dim().italic();
+    let mut run_start = 0;
+    for (i, ch) in text.char_indices() {
+      let b = ch as u32;
+      if b < 0x80 && is_visualized_control(b as u8) {
+        if run_start < i {
+          paint!(&text[run_start..i], style.style());
+        }
+        let viz = match b as u8 {
+          0x7f => "^?".to_string(),
+          b => format!("^{}", (b ^ 0x40) as char),
+        };
+        paint!(&viz, ctrl_style.style());
+        run_start = i + ch.len_utf8();
+      }
+    }
+    if run_start < text.len() {
+      paint!(&text[run_start..], style.style());
     }
   }
 }
@@ -256,107 +349,9 @@ pub(crate) fn visualize_controls_str(text: &str) -> String {
   out
 }
 
-/// Emit `src[range]` styled with `style`, slicing at selection boundaries so
-/// any portion overlapping any range in `selections` paints with an inverted
-/// variant of the same style. Multiple overlapping/adjacent selections are
-/// merged so each byte is emitted at most once.
-/// Render `text` under `style`, replacing ASCII control bytes with caret
-/// notation (`\x1b` -> `^[`, `\r` -> `^M`, `\x7f` -> `^?`, etc.) styled as
-/// dim+italic so they're visually distinct from real text. `\n` and `\t` are
-/// preserved as-is because they're structural to multi-line buffers.
-///
-/// Without this pass, a buffer containing raw control bytes (e.g. from
-/// `:r!cat file_with_escapes`) would emit those bytes straight to the
-/// terminal, letting any clipboard-injection-style sequence change the
-/// title, write to OSC 52, etc.
-fn paint_with<W: std::fmt::Write>(out: &mut W, text: &str, style: PaletteEntry) {
-  // Hot path: nothing to visualize, single styled write.
-  if !text.bytes().any(is_visualized_control) {
-    write!(out, "{}", text.paint(style.style())).unwrap();
-    return;
-  }
-  let ctrl_style = style.dim().italic();
-  let mut run_start = 0;
-  for (i, ch) in text.char_indices() {
-    let b = ch as u32;
-    if b < 0x80 && is_visualized_control(b as u8) {
-      if run_start < i {
-        write!(out, "{}", text[run_start..i].paint(style.style())).unwrap();
-      }
-      let viz = match b as u8 {
-        0x7f => "^?".to_string(),
-        b => format!("^{}", (b ^ 0x40) as char),
-      };
-      write!(out, "{}", viz.paint(ctrl_style.style())).unwrap();
-      run_start = i + ch.len_utf8();
-    }
-  }
-  if run_start < text.len() {
-    write!(out, "{}", text[run_start..].paint(style.style())).unwrap();
-  }
-}
-
 fn is_visualized_control(b: u8) -> bool {
   // Caret-notation everything below 0x20 except `\n` and `\t`, plus DEL (0x7f).
   matches!(b, 0x00..=0x08 | 0x0b..=0x1f | 0x7f)
-}
-
-fn emit_with_selection<W: std::fmt::Write>(
-  out: &mut W,
-  src: &str,
-  range: Range<usize>,
-  style: PaletteEntry,
-  selections: &[Range<usize>],
-) {
-  // find every selection that starts before our end, and ends after our start
-  // if both of these are true, there is overlap
-  let mut overlapping: Vec<Range<usize>> = selections
-    .iter()
-    .filter(|s| s.start < range.end && s.end > range.start)
-    .cloned()
-    .collect();
-
-  if overlapping.is_empty() {
-    paint_with(out, &src[range], style);
-    return;
-  }
-
-  // Sort by start, then merge overlapping/adjacent ranges into disjoint
-  // segments so the sweep doesn't emit any byte twice.
-  overlapping.sort_by_key(|s| s.start);
-  let mut merged: Vec<Range<usize>> = Vec::with_capacity(overlapping.len());
-  for sel in overlapping {
-    if let Some(last) = merged.last_mut()
-      && sel.start <= last.end
-    {
-      last.end = last.end.max(sel.end);
-      continue;
-    }
-    merged.push(sel);
-  }
-
-  // Sweep through `range`, alternating between un-selected (normal style)
-  // and selected (inverted style) segments.
-  let sel_style = style.inverted();
-  let mut pos = range.start;
-  for sel in &merged {
-    let sel_start = sel.start.max(range.start);
-    let sel_end = sel.end.min(range.end);
-
-    if pos < sel_start {
-      paint_with(out, &src[pos..sel_start], style);
-    }
-
-    if sel_start < sel_end {
-      paint_with(out, &src[sel_start..sel_end], sel_style);
-    }
-
-    pos = sel_end;
-  }
-
-  if pos < range.end {
-    paint_with(out, &src[pos..range.end], style);
-  }
 }
 
 #[cfg(test)]

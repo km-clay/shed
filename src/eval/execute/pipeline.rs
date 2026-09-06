@@ -260,9 +260,9 @@ impl super::Dispatcher {
     dispatch_result?;
 
     let blame_span = if shopt!(set.pipefail) {
-      super::pipefail_span(&spans).or(Some(tree[pipeline_span].clone()))
+      super::pipefail_span(&spans).or(Some(tree[pipeline_span]))
     } else {
-      Some(tree[pipeline_span].clone())
+      Some(tree[pipeline_span])
     };
 
     super::check_err(pipeline_flags, None, blame_span, &tree[pipeline_context])?;
@@ -332,7 +332,7 @@ impl super::Dispatcher {
       // but you never know
       jobs::dispatch_job(job, false, Shed::term(Terminal::interactive))?;
     }
-    super::check_err(flags, None, Some(tree[span].clone()), &tree[context])?;
+    super::check_err(flags, None, Some(tree[span]), &tree[context])?;
     res
   }
 }

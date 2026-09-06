@@ -214,11 +214,11 @@ impl Vice {
 
   /// Run the program against the current buffer and render one output record:
   /// the cut fields joined by the delimiter, or the whole buffer if no `-c`.
-  fn render(core: &mut EditorCore, prog: &ViceProg, span: &Span) -> ShResult<String> {
+  fn render(core: &mut EditorCore, prog: &ViceProg, span: Span) -> ShResult<String> {
     let mut fields = vec![];
     let mut spent_cmds = vec![];
     Self::exec_cmds(core, prog, prog.cmds.clone(), &mut fields, &mut spent_cmds)
-      .promote_err(span.clone())?;
+      .promote_err(span)?;
 
     Ok(if !fields.is_empty() {
       fields.join(&prog.delim.to_str_lossy()) // captured fields, kept even on abort
@@ -229,7 +229,7 @@ impl Vice {
     })
   }
 
-  fn run_inplace(file: &str, input: &str, prog: &ViceProg, span: &Span) -> ShResult<bool> {
+  fn run_inplace(file: &str, input: &str, prog: &ViceProg, span: Span) -> ShResult<bool> {
     let mut collected = String::new();
     let ok = Self::run(input, prog, span, |record| {
       collected.push_str(record);
@@ -248,7 +248,7 @@ impl Vice {
     Ok(true)
   }
 
-  fn run_stream(input: &str, prog: &ViceProg, span: &Span) -> ShResult<bool> {
+  fn run_stream(input: &str, prog: &ViceProg, span: Span) -> ShResult<bool> {
     Self::run(input, prog, span, |record| {
       outln!("{record}");
       Ok(())
@@ -263,7 +263,7 @@ impl Vice {
   fn run(
     input: &str,
     prog: &ViceProg,
-    span: &Span,
+    span: Span,
     mut sink: impl FnMut(&str) -> ShResult<()>,
   ) -> ShResult<bool> {
     if prog.lines() {
@@ -299,7 +299,7 @@ impl Vice {
     file: &str,
     output: &str,
     backup_ext: Option<&VarStr>,
-    span: &Span,
+    span: Span,
   ) -> ShResult<()> {
     if let Some(ext) = backup_ext {
       let ext = ext.to_str_lossy();
@@ -318,7 +318,7 @@ impl Vice {
     temp.as_file().set_permissions(perms)?;
     temp
       .persist(file)
-      .map_err(|e| sherr!(ExecFail @ span.clone(), "Failed to write output to file: '{e}'"))?;
+      .map_err(|e| sherr!(ExecFail @ span, "Failed to write output to file: '{e}'"))?;
     Ok(())
   }
 }
@@ -341,12 +341,12 @@ impl super::Builtin for Vice {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     let (arg_vec, opts) = args.take_argv();
-    let prog = Self::parse_cmds(&opts).promote_err(span.clone())?;
+    let prog = Self::parse_cmds(&opts).promote_err(span)?;
 
     if arg_vec.is_empty()
       && let Some(input) = self.get_input_str(&mut args)
     {
-      let ok = Self::run_stream(&input, &prog, &span)?;
+      let ok = Self::run_stream(&input, &prog, span)?;
       return util::with_status(i32::from(!ok));
     }
 
@@ -357,9 +357,9 @@ impl super::Builtin for Vice {
       };
 
       let file_ok = if prog.inplace() {
-        Self::run_inplace(&file.to_str_lossy(), &content, &prog, &span)?
+        Self::run_inplace(&file.to_str_lossy(), &content, &prog, span)?
       } else {
-        Self::run_stream(&content, &prog, &span)?
+        Self::run_stream(&content, &prog, span)?
       };
       ok = ok && file_ok;
     }

@@ -62,7 +62,7 @@ impl super::Builtin for Hash {
       Shed::meta(|m| -> ShResult<()> {
         for (arg, span) in args.arguments() {
           if m.lookup_cached_cmd(&arg.to_str_lossy()).is_none() {
-            return Err(sherr!(NotFound, "Command not found: {arg}").promote(span.clone()));
+            return Err(sherr!(NotFound, "Command not found: {arg}").promote(span));
           }
         }
         Ok(())

@@ -111,15 +111,14 @@ impl super::Builtin for GetOpts {
       ));
     };
 
-    let opts_spec =
-      GetOptsSpec::from_str(&arg_string.to_str_lossy()).promote_err(arg_span.clone())?;
+    let opts_spec = GetOptsSpec::from_str(&arg_string.to_str_lossy()).promote_err(arg_span)?;
 
     let explicit_args: Vec<VarStr> = arg_vec.map(|(word, _)| word.clone()).collect();
     if explicit_args.is_empty() {
       let pos_params: Vec<VarStr> = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect());
-      Self::getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &pos_params, &span)
+      Self::getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &pos_params, span)
     } else {
-      Self::getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &explicit_args, &span)
+      Self::getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &explicit_args, span)
     }
   }
 }
@@ -155,7 +154,7 @@ impl GetOpts {
     opts_spec: &GetOptsSpec,
     opt_var: &str,
     argv: &[VarStr],
-    blame: &Span,
+    blame: Span,
   ) -> ShResult<()> {
     let Some(cur) = Self::resolve(argv)? else {
       return Ok(());
@@ -180,7 +179,7 @@ impl GetOpts {
         } else {
           Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::empty()))?;
           sherr!(
-            ExecFail @ blame.clone(),
+            ExecFail @ blame,
             "illegal option '-{ch}'",
           )
           .print_error();
@@ -274,7 +273,7 @@ impl GetOpts {
     argv: &[VarStr],
     opt_var: &str,
     opts_spec: &GetOptsSpec,
-    blame: &Span,
+    blame: Span,
   ) -> ShResult<()> {
     let ch = cur.ch;
     Shed::meta_mut(MetaTab::reset_getopts_char_offset);
@@ -312,7 +311,7 @@ impl GetOpts {
       } else {
         Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::empty()))?;
         sherr!(
-          ExecFail @ blame.clone(),
+          ExecFail @ blame,
           "option '-{ch}' requires an argument",
         )
         .print_error();

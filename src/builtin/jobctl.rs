@@ -110,7 +110,7 @@ pub(super) fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResu
   };
 
   let tabid = match arg_vec.next() {
-    Some((arg, blame)) => parse_job_id(&arg.to_str_lossy(), blame.clone())?,
+    Some((arg, blame)) => parse_job_id(&arg.to_str_lossy(), blame)?,
     None => curr_job_id,
   };
 
@@ -194,20 +194,17 @@ impl super::Builtin for Wait {
             arg.0.to_str_lossy().parse::<i32>().unwrap(),
           )))
         } else {
-          Ok(JobID::TableID(parse_job_id(
-            &arg.0.to_str_lossy(),
-            arg.1.clone(),
-          )?))
+          Ok(JobID::TableID(parse_job_id(&arg.0.to_str_lossy(), arg.1)?))
         }
       })
       .collect::<ShResult<Vec<JobID>>>()
-      .promote_err(span.clone())?;
+      .promote_err(span)?;
 
     if arg_vec.is_empty() {
       Shed::jobs_mut(JobTab::wait_all_bg).promote_err(span)?;
     } else {
       for arg in arg_vec {
-        jobs::wait_bg(&arg).promote_err(span.clone())?;
+        jobs::wait_bg(&arg).promote_err(span)?;
       }
     }
 
@@ -252,7 +249,7 @@ impl super::Builtin for Disown {
 
     let mut ids = vec![];
     for (arg, span) in args.arguments() {
-      let id = parse_job_id(&arg.to_str_lossy(), span.clone())?;
+      let id = parse_job_id(&arg.to_str_lossy(), span)?;
       ids.push(id);
     }
 
@@ -342,7 +339,7 @@ fn raw_killpg(pgid: Pid, sig: i32) -> nix::Result<()> {
 
 fn parse_kill_target(arg: &str, blame: Span) -> ShResult<KillTarget> {
   let Ok(n) = arg.parse::<i32>() else {
-    let Ok(id) = parse_job_id(arg, blame.clone()) else {
+    let Ok(id) = parse_job_id(arg, blame) else {
       return Err(sherr!(ParseErr @ blame, "Invalid kill target: {arg}"));
     };
     return Ok(KillTarget::Job(JobID::TableID(id)));
@@ -367,7 +364,7 @@ pub(super) fn list_all_signals() {
   outln!("{signals}");
 }
 
-fn send_signal(target: &KillTarget, sig: KillSig, verbose: bool, blame: &Span) -> ShResult<()> {
+fn send_signal(target: &KillTarget, sig: KillSig, verbose: bool, blame: Span) -> ShResult<()> {
   let desc = match target {
     KillTarget::Pid(pid) => {
       raw_kill(*pid, sig.as_i32())?;
@@ -397,7 +394,7 @@ fn send_signal(target: &KillTarget, sig: KillSig, verbose: bool, blame: &Span) -
             KillSig::Zero => Ok(raw_killpg(job.pgid(), 0)?),
           }
         } else {
-          Err(sherr!(ExecFail @ blame.clone(), "Job not found"))
+          Err(sherr!(ExecFail @ blame, "Job not found"))
         }
       })?;
       format!("killing job {job_id:?} with {sig}")
@@ -430,7 +427,7 @@ impl super::Builtin for Kill {
         "list" => list_sig = true,
         "signal" => {
           let sig_name = opt.value()?;
-          signal = Some(parse_kill_sig(sig_name).promote_err(args.span().clone())?);
+          signal = Some(parse_kill_sig(sig_name).promote_err(args.cmd_span())?);
         }
         _ => {}
       }
@@ -446,7 +443,7 @@ impl super::Builtin for Kill {
       // kill -l <arg> converts between names and numbers. A numeric argument
       // prints the signal name; a name prints its number. Signal 0 isn't named,
       // so we only accept real signals here.
-      let sig = signal::parse_signal(&arg.to_str_lossy()).promote_err(span.clone())?;
+      let sig = signal::parse_signal(&arg.to_str_lossy()).promote_err(span)?;
       if arg.to_str_lossy().trim().parse::<i32>().is_ok() {
         let name = sig.to_string();
         outln!("{}", name.strip_prefix("SIG").unwrap_or(&name));
@@ -468,13 +465,13 @@ impl super::Builtin for Kill {
       if arg.to_str_lossy().starts_with('-') && !arg.to_str_lossy().starts_with("--") {
         let stripped = arg.to_str_lossy();
         let stripped = stripped.trim_start_matches('-');
-        if let Ok(sig_override) = parse_kill_sig(stripped).promote_err(span.clone()) {
+        if let Ok(sig_override) = parse_kill_sig(stripped).promote_err(span) {
           signal.replace(sig_override);
           continue;
         }
       }
 
-      let target = parse_kill_target(&arg.to_str_lossy(), span.clone())?;
+      let target = parse_kill_target(&arg.to_str_lossy(), span)?;
       send_signal(&target, signal.unwrap_or(sig), verbose, span)?;
     }
 

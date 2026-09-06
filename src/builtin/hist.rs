@@ -464,14 +464,14 @@ impl super::Builtin for Hist {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     let (arg_vec, opts) = args.take_argv();
-    let mut query = HistQuery::from_opts(&opts).promote_err(span.clone())?;
+    let mut query = HistQuery::from_opts(&opts).promote_err(span)?;
     let table = if query.ex_hist {
       "ex_history"
     } else {
       "shed_history"
     };
     let hist = if let Some(conn) = db::get_db_conn() {
-      History::new(conn, table).promote_err(span.clone())?
+      History::new(conn, table).promote_err(span)?
     } else {
       if query.delete || query.pull || query.restore || query.import.is_some() {
         return Err(
@@ -482,14 +482,14 @@ impl super::Builtin for Hist {
           .promote(span),
         );
       }
-      let conn = db::open_db_conn_readonly().promote_err(span.clone())?;
+      let conn = db::open_db_conn_readonly().promote_err(span)?;
       History::attach(Arc::new(Mutex::new(conn)), table)
     };
 
     for (arg, span) in arg_vec {
       let Ok(id) = arg.to_str_lossy().parse::<i64>() else {
         Shed::set_status(2);
-        return Err(sherr!(ParseErr @ span.clone(), "Invalid command ID: {arg}"));
+        return Err(sherr!(ParseErr @ span, "Invalid command ID: {arg}"));
       };
       query.specific_ids.push(id);
     }
@@ -510,7 +510,7 @@ impl super::Builtin for Hist {
 
     if let Some(ref path) = query.import {
       let entries: Vec<(i64, HistEntry)> = readline::import_history(path)
-        .promote_err(span.clone())?
+        .promote_err(span)?
         .into_iter()
         .enumerate()
         .map(|(i, e)| ((i as u64).cast_signed(), e))
@@ -522,7 +522,7 @@ impl super::Builtin for Hist {
 
       hist.transaction(|conn| {
         for (_, entry) in entries {
-          let pushed = hist.push_with(conn, entry).promote_err(span.clone())?;
+          let pushed = hist.push_with(conn, entry).promote_err(span)?;
           count += i32::from(pushed);
         }
         Ok(())
@@ -534,7 +534,7 @@ impl super::Builtin for Hist {
       return util::with_status(0);
     }
 
-    let entries = query.execute(&hist).promote_err(span.clone())?;
+    let entries = query.execute(&hist).promote_err(span)?;
     let mut out = SinkIo(procio::stdout_sink()?);
     query.format_entries(&entries, &mut out).ok();
 

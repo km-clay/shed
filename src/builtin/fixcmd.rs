@@ -68,10 +68,10 @@ pub(super) fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCm
   let mut words: Vec<(VarStr, Span)> = vec![];
   let mut opts = FixCmdOpts::default();
   for tk in args {
-    let span = tk.span.clone();
+    let span = tk.span;
     let expanded = tk.clone().expand()?;
     for word in expanded.get_words().iter() {
-      words.push((word.clone(), span.clone()));
+      words.push((word.clone(), span));
     }
   }
 
@@ -159,7 +159,7 @@ impl super::Builtin for FixCmd {
   }
   fn run_builtin(&self, tree: &Ast, node_id: NodeId, _dispatcher: &mut Dispatcher) -> ShResult<()> {
     let node = &tree[node_id];
-    let span = tree[node.get_span()].clone();
+    let span = tree[node.get_span()];
     let NdRule::Command {
       assignments: _,
       argv,
@@ -168,12 +168,12 @@ impl super::Builtin for FixCmd {
       unreachable!()
     };
 
-    let (_argv, opts) = parse_fc_args(&tree[*argv]).promote_err(span.clone())?;
+    let (_argv, opts) = parse_fc_args(&tree[*argv]).promote_err(span)?;
 
     let conn = db::get_db_conn()
       .ok_or_else(|| sherr!(InternalErr, "database not available"))
-      .promote_err(span.clone())?;
-    let hist = History::new(conn, "shed_history").promote_err(span.clone())?;
+      .promote_err(span)?;
+    let hist = History::new(conn, "shed_history").promote_err(span)?;
     match opts.mode {
       FixMode::List => {
         fc_list(&hist, opts).promote_err(span)?;

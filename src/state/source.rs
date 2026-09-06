@@ -62,14 +62,6 @@ impl SourceHandle {
       id: self.id,
     }
   }
-
-  pub(crate) fn name(&self) -> Option<&[u8]> {
-    self.ptr.name.as_deref()
-  }
-
-  pub(crate) fn as_bytes(&self) -> &[u8] {
-    &self.ptr.content
-  }
 }
 
 /// Build a temporary co-owning handle for an already-registered source.
@@ -111,10 +103,7 @@ impl SourceRegistry {
 
   fn register(&mut self, name: Option<Box<[u8]>>, src: Box<[u8]>) -> SourceHandle {
     let id = SourceId(SRC_GENERATION.fetch_add(1, Ordering::AcqRel));
-    let source = Arc::new(Source {
-      name: name.map(|n| n.into()),
-      content: src.into(),
-    });
+    let source = Arc::new(Source { name, content: src });
     let weak = Arc::downgrade(&source);
     self.sources.insert(id, weak);
     SourceHandle { ptr: source, id }
@@ -135,7 +124,7 @@ pub(crate) fn register_named_source<T: InputSource>(name: T, src: T) -> SourceHa
     .register(Some(name.into_source_bytes()), src.into_source_bytes())
 }
 
-trait InputSource {
+pub(crate) trait InputSource {
   fn into_source_bytes(self) -> Box<[u8]>;
 }
 impl InputSource for VarStr {

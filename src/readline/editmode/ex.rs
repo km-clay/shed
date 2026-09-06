@@ -350,7 +350,7 @@ impl ExTk {
 
 impl From<Tk> for ExTk {
   fn from(value: Tk) -> Self {
-    let span = value.span.clone();
+    let span = value.span;
     ExTk {
       class: ExTkRule::ShellTk(value),
       span,
@@ -619,7 +619,7 @@ impl<'a> ExLexer<'a> {
         let stream = LexStream::new(&rest_handle, LexFlags::LEX_UNFINISHED)
           .filter_map(Result::ok)
           .filter_map(|tk| tk.filter_meta().then_some(tk))
-          .map(|tk| tk.rebase_into(&outer, start_pos));
+          .map(|tk| tk.rebase_into(outer, start_pos));
 
         let mut pushed = false;
 
@@ -634,7 +634,7 @@ impl<'a> ExLexer<'a> {
           } else {
             shell_tk.flags.remove(FILE_ARG_STRIP);
           }
-          let outer_span = shell_tk.span.clone();
+          let outer_span = shell_tk.span;
           let mut tk = ExTk {
             class: ExTkRule::ShellTk(shell_tk),
             span: outer_span,
@@ -721,10 +721,10 @@ impl<'a> ExLexer<'a> {
     let stream = LexStream::new(&rest_handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
       .filter_map(|tk| tk.filter_meta().then_some(tk))
-      .map(|tk| tk.rebase_into(&outer, start_pos));
+      .map(|tk| tk.rebase_into(outer, start_pos));
 
     for shell_tk in stream {
-      let outer_span = shell_tk.span.clone();
+      let outer_span = shell_tk.span;
       self.tokens.push(ExTk {
         class: ExTkRule::ShellTk(shell_tk),
         span: outer_span,
@@ -1261,7 +1261,7 @@ impl ExParser {
     if is_shell_arg {
       let mut args = vec![];
       for tk in &mut self.tokens {
-        args.push(Tk::new(lex::TkRule::Str, tk.span.clone()));
+        args.push(Tk::new(lex::TkRule::Str, tk.span));
       }
       let args_raw = args
         .get_span() // extract total span of arg tokens

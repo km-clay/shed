@@ -168,7 +168,7 @@ impl super::Dispatcher {
           return Err(e);
         }
 
-        let blame = e.src_span().cloned().unwrap_or(try_blame);
+        let blame = e.src_span().copied().unwrap_or(try_blame);
 
         if !err.is_empty() {
           let mut msg_parts = Vec::with_capacity(err.len());

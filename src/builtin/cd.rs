@@ -49,11 +49,11 @@ impl super::Builtin for Cd {
       if arg == "-" {
         let old_pwd = get_old_pwd();
         print_dir = true;
-        (old_pwd, Some(span.clone()))
+        (old_pwd, Some(span))
       } else {
         // we only use cd path if the argument is not absolute or relative (starts with / or .)
         try_cd_path = !arg.to_str_lossy().starts_with(['/', '.']);
-        (PathBuf::from(arg), Some(span.clone()))
+        (PathBuf::from(arg), Some(span))
       }
     } else {
       let home_dir = paths::get_home_str().unwrap_or("/".into());
@@ -97,13 +97,13 @@ impl super::Builtin for Cd {
 
     // handle weird cases
     if !target.exists() {
-      return Err(sherr!(ExecFail @ span.clone(), "Directory not found: {}", target.display()));
+      return Err(sherr!(ExecFail @ span, "Directory not found: {}", target.display()));
     }
     if !target.is_dir() {
-      return Err(sherr!(ExecFail @ span.clone(), "Not a directory"));
+      return Err(sherr!(ExecFail @ span, "Not a directory"));
     }
     if let Err(e) = cwd::change_dir_with_pwd(&target, logical_pwd, true, true) {
-      return Err(sherr!(ExecFail @ span.clone(), "Failed to change directory: {e}"));
+      return Err(sherr!(ExecFail @ span, "Failed to change directory: {e}"));
     }
 
     if print_dir {
@@ -179,7 +179,7 @@ impl Zd {
     }) {
       Some(n) => match n.parse::<usize>() {
         Ok(n) => Some(n),
-        Err(_) => return Err(sherr!(ParseErr @ args.span().clone(), "zd: invalid depth: {n}")),
+        Err(_) => return Err(sherr!(ParseErr @ args.span(), "zd: invalid depth: {n}")),
       },
       None => None,
     };

@@ -56,7 +56,7 @@ impl ParseStream {
     while *self.next_tk_class() == TkRule::Sep {
       let next = self.next_tk().unwrap();
       if let Some(span) = span {
-        span.merge_inplace(&next.span);
+        span.merge_inplace(next.span);
       } else {
         *span = Some(next.span);
       }
@@ -125,13 +125,13 @@ pub(super) fn split_for_arith_tk(
   tree: &mut Ast,
   tk: &Tk,
 ) -> ShResult<Option<(NodeId, NodeId, NodeId)>> {
-  let span = tk.span.clone();
+  let span = tk.span;
   let mut tks = strops::split_tk(&tk.strip_arith_header()?, b";").into_iter();
 
   let Some(init_tk) = tks.next() else {
     return Err(sherr!(ParseErr @ span, "Missing init statement"));
   };
-  let span = tree.alloc(init_tk.span.clone());
+  let span = tree.alloc(init_tk.span);
   let init_tk = tree.alloc(init_tk);
   let init = Node {
     class: NdRule::Arithmetic { body: init_tk },
@@ -142,10 +142,10 @@ pub(super) fn split_for_arith_tk(
   };
 
   let Some(cond_tk) = tks.next() else {
-    return Err(sherr!(ParseErr @ tree[span].clone(), "Missing condition statement"));
+    return Err(sherr!(ParseErr @ tree[span], "Missing condition statement"));
   };
 
-  let cond_tk_span = tree.alloc(cond_tk.span.clone());
+  let cond_tk_span = tree.alloc(cond_tk.span);
   let cond_tk = tree.alloc(cond_tk);
   let cond = Node {
     class: NdRule::Arithmetic { body: cond_tk },
@@ -156,10 +156,10 @@ pub(super) fn split_for_arith_tk(
   };
 
   let Some(step_tk) = tks.next() else {
-    return Err(sherr!(ParseErr @ tree[span].clone(), "Missing step statement"));
+    return Err(sherr!(ParseErr @ tree[span], "Missing step statement"));
   };
 
-  let step_tk_span = tree.alloc(step_tk.span.clone());
+  let step_tk_span = tree.alloc(step_tk.span);
   let step_tk = tree.alloc(step_tk);
 
   let step = Node {
@@ -175,6 +175,6 @@ pub(super) fn split_for_arith_tk(
   Ok(Some(nodes))
 }
 
-pub(super) fn parse_err_full(reason: &str, blame: &Span, context: &LabelCtx) -> ShErr {
-  sherr!(ParseErr @ blame.clone(), "{reason}").with_context(context.iter())
+pub(super) fn parse_err_full(reason: &str, blame: Span, context: &LabelCtx) -> ShErr {
+  sherr!(ParseErr @ blame, "{reason}").with_context(context.iter())
 }

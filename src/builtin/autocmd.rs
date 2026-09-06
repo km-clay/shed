@@ -30,7 +30,7 @@ impl super::Builtin for AutoCmdBuiltin {
 
     let Ok(autocmd_kind) = kind.to_str_lossy().parse::<AutoCmdKind>() else {
       return Err(sherr!(
-          ExecFail @ kind_span.clone(),
+          ExecFail @ kind_span,
           "invalid autocmd kind: {kind}",
       ));
     };

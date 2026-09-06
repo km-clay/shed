@@ -347,7 +347,7 @@ impl RedirBldr {
 impl TryFrom<Tk> for RedirBldr {
   type Error = ShErr;
   fn try_from(tk: Tk) -> Result<Self, Self::Error> {
-    let span = tk.span.clone();
+    let span = tk.span;
     if tk.flags.contains(TkFlags::IS_HEREDOC) {
       let flags = tk.flags;
 
@@ -517,7 +517,7 @@ impl RedirSpec {
         }
       },
       RedirSpec::File { path, mode, .. } => {
-        let span = path.span.clone();
+        let span = path.span;
         let path = path
           .clone()
           .expand()
@@ -1751,7 +1751,7 @@ pub(super) fn capture_command(
   }
 }
 fn expand_fd(word: &Tk) -> ShResult<Option<RawFd>> {
-  let span = word.span.clone();
+  let span = word.span;
   let words = word
     .clone()
     .expand()
@@ -1775,7 +1775,7 @@ fn expand_fd(word: &Tk) -> ShResult<Option<RawFd>> {
 
   let from = src.parse::<RawFd>().map_err(|_| {
     sherr!(
-      ExecFail @ span.clone(),
+      ExecFail @ span,
       "ambiguous redirect: `{src}` is not a valid file descriptor"
     )
   })?;

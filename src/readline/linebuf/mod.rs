@@ -1,6 +1,5 @@
 use std::{collections::VecDeque, ops::Range};
 
-use ariadne::Span as AriadneSpan;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{

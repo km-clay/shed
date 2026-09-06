@@ -49,7 +49,7 @@ impl super::Dispatcher {
 
     if KEYWORDS.contains(&func_name) || matches!(func_name, b"builtin" | b"command") {
       return Err(sherr!(
-          SyntaxErr @ tree[*name].span.clone(),
+          SyntaxErr @ tree[*name].span,
           "function: Forbidden function name `{}`",
           func_name.to_str_lossy()
       ));
@@ -114,7 +114,7 @@ impl super::Dispatcher {
         .get_first_word()
         .unwrap_or_default();
 
-      (name, tree[func_name].span.clone())
+      (name, tree[func_name].span)
     };
 
     let Some(sh_func) = Shed::logic(|l| l.get_func(&func_name.to_str_lossy())) else {
@@ -146,7 +146,7 @@ impl super::Dispatcher {
     let label_name = func_name.clone();
     let call_ctx = error::get_context(
       LabelMsg::lazy(move || styled_format!("in call to function '{}'", &label_name).into()),
-      &blame,
+      blame,
     );
 
     let max_depth = Shed::shopts(|s| s.core.max_recurse_depth);
@@ -178,7 +178,7 @@ impl super::Dispatcher {
 
     let _ctx_frame = Shed::push_call_frame(frame);
 
-    let argv = super::prepare_argv(&tree[*argv]).try_blame(blame.clone())?;
+    let argv = super::prepare_argv(&tree[*argv]).try_blame(blame)?;
 
     if !func.flags.contains(NdFlags::NO_TRACE) {
       shopt::xtrace_print(&argv);

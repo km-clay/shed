@@ -73,7 +73,7 @@ trait ArrOp {
               VarKind::arr([val.clone()]),
               VarFlags::empty(),
             )
-            .promote_err(span.clone())?;
+            .promote_err(span)?;
           }
         }
       }
@@ -99,7 +99,7 @@ trait ArrOp {
         "variable" => var = opt.value().ok(),
         "reverse" => { /* no-op */ }
         _ => {
-          return Err(sherr!(ParseErr @ opt.span().clone(), "invalid option: '{opt}'"));
+          return Err(sherr!(ParseErr @ opt.span(), "invalid option: '{opt}'"));
         }
       }
     }

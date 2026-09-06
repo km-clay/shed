@@ -1,5 +1,3 @@
-use ariadne::Span;
-
 use crate::{
   autoload::AutoloadSrc,
   eval::lex::KEYWORDS,
@@ -48,7 +46,7 @@ impl super::Builtin for Type {
         Self::display_variable(arg, &var, short);
       } else {
         sherr!(
-          NotFound @ span.clone(),
+          NotFound @ span,
           "'{arg}' is not a command, function, or alias",
         )
         .print_error();

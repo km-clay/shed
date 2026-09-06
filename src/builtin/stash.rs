@@ -73,17 +73,15 @@ impl super::Builtin for StashBuiltin {
     let is_empty = args.no_options();
     let (_, opts) = args.take_argv();
 
-    let stash_opts = StashOpts::from_opts(&opts).promote_err(span.clone())?;
-    let stash = Stash::new().promote_err(span.clone())?;
+    let stash_opts = StashOpts::from_opts(&opts).promote_err(span)?;
+    let stash = Stash::new().promote_err(span)?;
 
     for cmd in stash_opts.to_save {
-      stash.stash_cmd(&cmd).promote_err(span.clone())?;
+      stash.stash_cmd(&cmd).promote_err(span)?;
     }
 
     for cmd in stash_opts.to_delete {
-      stash
-        .delete_cmd(&cmd.to_str_lossy())
-        .promote_err(span.clone())?;
+      stash.delete_cmd(&cmd.to_str_lossy()).promote_err(span)?;
     }
 
     if stash_opts.list || is_empty {

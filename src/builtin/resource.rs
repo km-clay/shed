@@ -118,35 +118,35 @@ impl super::Builtin for ULimit {
       stack,
       core,
       vmem,
-    } = RLimits::from_opts(&opts).promote_err(span.clone())?;
+    } = RLimits::from_opts(&opts).promote_err(span)?;
 
     if let Some(fds) = fds {
       let (_, hard) = getrlimit(Resource::RLIMIT_NOFILE).map_err(|e| {
         sherr!(
-          ExecFail @ span.clone(),
+          ExecFail @ span,
           "failed to get file descriptor limit: {}", e,
         )
       })?;
       setrlimit(Resource::RLIMIT_NOFILE, fds, hard).map_err(|e| {
         sherr!(
-          ExecFail @ span.clone(),
+          ExecFail @ span,
           "failed to set file descriptor limit: {}", e,
         )
       })?;
     }
     if let Some(procs) = procs {
-      ulimit_nproc(&span, procs)?;
+      ulimit_nproc(span, procs)?;
     }
     if let Some(stack) = stack {
       let (_, hard) = getrlimit(Resource::RLIMIT_STACK).map_err(|e| {
         sherr!(
-          ExecFail @ span.clone(),
+          ExecFail @ span,
           "failed to get stack size limit: {}", e,
         )
       })?;
       setrlimit(Resource::RLIMIT_STACK, stack, hard).map_err(|e| {
         sherr!(
-          ExecFail @ span.clone(),
+          ExecFail @ span,
           "failed to set stack size limit: {}", e,
         )
       })?;
@@ -154,13 +154,13 @@ impl super::Builtin for ULimit {
     if let Some(core) = core {
       let (_, hard) = getrlimit(Resource::RLIMIT_CORE).map_err(|e| {
         sherr!(
-          ExecFail @ span.clone(),
+          ExecFail @ span,
           "failed to get core dump size limit: {}", e,
         )
       })?;
       setrlimit(Resource::RLIMIT_CORE, core, hard).map_err(|e| {
         sherr!(
-          ExecFail @ span.clone(),
+          ExecFail @ span,
           "failed to set core dump size limit: {}", e,
         )
       })?;
@@ -168,13 +168,13 @@ impl super::Builtin for ULimit {
     if let Some(vmem) = vmem {
       let (_, hard) = getrlimit(Resource::RLIMIT_AS).map_err(|e| {
         sherr!(
-          ExecFail @ span.clone(),
+          ExecFail @ span,
           "failed to get virtual memory limit: {}", e,
         )
       })?;
       setrlimit(Resource::RLIMIT_AS, vmem, hard).map_err(|e| {
         sherr!(
-          ExecFail @ span.clone(),
+          ExecFail @ span,
           "failed to set virtual memory limit: {}", e,
         )
       })?;
@@ -199,16 +199,16 @@ fn parse_rwx(bits: &str) -> stat::mode_t {
 }
 
 #[cfg(linux_like)]
-fn ulimit_nproc(span: &Span, procs: rlim_t) -> ShResult<()> {
+fn ulimit_nproc(span: Span, procs: rlim_t) -> ShResult<()> {
   let (_, hard) = getrlimit(Resource::RLIMIT_NPROC).map_err(|e| {
     sherr!(
-      ExecFail @ span.clone(),
+      ExecFail @ span,
       "failed to get process limit: {}", e,
     )
   })?;
   setrlimit(Resource::RLIMIT_NPROC, procs, hard).map_err(|e| {
     sherr!(
-      ExecFail @ span.clone(),
+      ExecFail @ span,
       "failed to set process limit: {}", e,
     )
   })?;
@@ -250,7 +250,7 @@ fn apply_symbolic(
   who: &str,
   op: char,
   new_bits: stat::mode_t,
-  span: &Span,
+  span: Span,
 ) -> ShResult<()> {
   for ch in who.chars() {
     match ch {
@@ -264,7 +264,7 @@ fn apply_symbolic(
       }
       _ => {
         return Err(sherr!(
-          ParseErr @ span.clone(),
+          ParseErr @ span,
           "invalid umask 'who' character: {ch}",
         ));
       }
@@ -313,6 +313,7 @@ impl super::Builtin for UMask {
     let mut old_bits = old.bits();
 
     if let Some((raw, span)) = arg_vec.first() {
+      let span = *span;
       if arg_vec.len() > 1 {
         return Err(sherr!(
           ParseErr @ args.span(),
@@ -323,11 +324,11 @@ impl super::Builtin for UMask {
       if raw.to_str_lossy().chars().any(|c| c.is_ascii_digit()) {
         // Numeric mode: umask 022
         let mode_raw = stat::mode_t::from_str_radix(&raw.to_str_lossy(), 8)
-          .map_err(|_| sherr!(ParseErr @ span.clone(), "invalid numeric umask: {raw}"))?;
+          .map_err(|_| sherr!(ParseErr @ span, "invalid numeric umask: {raw}"))?;
         // need to use the mode_t type alias
         // since the int size varies between Linux/MacOS
         let mode = Mode::from_bits(mode_raw as stat::mode_t)
-          .ok_or_else(|| sherr!(ParseErr @ span.clone(), "invalid umask value: {raw}"))?;
+          .ok_or_else(|| sherr!(ParseErr @ span, "invalid umask value: {raw}"))?;
         change_umask(mode.bits());
       } else {
         // Symbolic mode: umask u=rwx,g=rx,o=
@@ -340,7 +341,7 @@ impl super::Builtin for UMask {
             (w, '-', b)
           } else {
             return Err(sherr!(
-              ParseErr @ span.clone(),
+              ParseErr @ span,
               "invalid symbolic umask: {part}",
             ));
           };

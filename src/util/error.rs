@@ -1,5 +1,4 @@
 //! The shell's error type (`ShErr` / `ShResult`) and its `ariadne`-rendered diagnostics.
-#![expect(clippy::needless_pass_by_value)]
 use ariadne::{Color, Label};
 use ariadne::{Report, ReportKind};
 use nix::errno::Errno;
@@ -86,11 +85,9 @@ pub(crate) fn last_color() -> Color {
   COLOR_RNG.with(|rng| rng.borrow_mut().last_color())
 }
 
-pub(crate) fn get_context(msg: impl Into<LabelMsg>, span: &Span) -> LabelBuilder {
+pub(crate) fn get_context(msg: impl Into<LabelMsg>, span: Span) -> LabelBuilder {
   let color = last_color();
-  LabelBuilder::new(span.clone())
-    .with_color(color)
-    .with_message(msg)
+  LabelBuilder::new(span).with_color(color).with_message(msg)
 }
 
 fn group_labels(labels: Vec<LabelBuilder>) -> Vec<(Span, Label<Span>)> {
@@ -263,7 +260,7 @@ impl LabelBuilder {
     self
   }
   pub(crate) fn span(&self) -> Span {
-    self.span.clone()
+    self.span
   }
 }
 
@@ -418,7 +415,7 @@ impl ShErr {
       self.notes = vec![];
     }
 
-    blame_func(self, span.clone()).labeled(span, first)
+    blame_func(self, span).labeled(span, first)
   }
   /// Persist all io guards, closing saved fds without restoring them.
   /// Use this when an error is being converted to a control flow signal
@@ -438,16 +435,12 @@ impl ShErr {
   }
   pub(crate) fn at(kind: ShErrKind, span: Span, msg: VarStr) -> Self {
     let color = last_color();
-    let label = LabelBuilder::new(span.clone())
-      .with_message(msg)
-      .with_color(color);
-    Self::new(kind, span.clone()).with_label(label)
+    let label = LabelBuilder::new(span).with_message(msg).with_color(color);
+    Self::new(kind, span).with_label(label)
   }
   pub(crate) fn labeled(self, span: Span, msg: VarStr) -> Self {
     let color = last_color();
-    let label = LabelBuilder::new(span.clone())
-      .with_message(msg)
-      .with_color(color);
+    let label = LabelBuilder::new(span).with_message(msg).with_color(color);
     self.with_label(label)
   }
   pub(crate) fn blame(mut self, span: Span) -> Self {
@@ -494,7 +487,7 @@ impl ShErr {
     } else {
       ReportKind::Error
     };
-    let mut report = Report::build(kind, span.clone()).with_config(
+    let mut report = Report::build(kind, *span).with_config(
       ariadne::Config::default()
         .with_index_type(ariadne::IndexType::Byte)
         .with_tab_width(shopt!(line.tab_width))

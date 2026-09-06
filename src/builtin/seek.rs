@@ -62,10 +62,10 @@ impl super::Builtin for Seek {
     };
 
     let sink = Shed::sinks(|s| s.get(fd.cast_signed()))
-      .ok_or_else(|| sherr!(ExecFail @ span.clone(), "lseek failed: EBADF: Bad file number"))?;
+      .ok_or_else(|| sherr!(ExecFail @ span, "lseek failed: EBADF: Bad file number"))?;
     let new_off = sink
       .seek(seek_from)
-      .map_err(|e| sherr!(ExecFail @ span.clone(), "lseek failed: {e}"))?;
+      .map_err(|e| sherr!(ExecFail @ span, "lseek failed: {e}"))?;
 
     outln!("{new_off}");
 

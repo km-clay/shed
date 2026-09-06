@@ -277,7 +277,7 @@ fn build_source(args: &BuiltinArgs) -> VarStr {
   let mut parts: Vec<VarStr> = vec!["complete".into()];
   for opt in args.options() {
     // the flag as written (e.g. `-W`), followed by its argument words
-    parts.push(opt.span().slice().into());
+    parts.push(opt.span().slice());
     for (arg, _) in opt.args() {
       parts.push(arg.clone());
     }
@@ -307,7 +307,7 @@ pub(super) fn get_comp_opts<'a>(opts: impl Iterator<Item = &'a Opt>) -> ShResult
         "nospace" => comp_opts.opt_flags &= !CompOptFlags::SPACE,
         opt_flag => {
           return Err(sherr!(
-            InvalidOpt @ opt.span().clone(),
+            InvalidOpt @ opt.span(),
             "complete: invalid option: {opt_flag}"
           ));
         }
