@@ -32,7 +32,9 @@
     rustToolchain = pkgs.rust-bin.stable.latest.default.override {
       targets = [
         "x86_64-unknown-linux-musl"
+        "aarch64-unknown-linux-gnu"
         "x86_64-apple-darwin"
+        "aarch64-apple-darwin"
       ];
     };
 
@@ -43,6 +45,37 @@
       cargo = rustToolchain;
       rustc = rustToolchain;
     };
+
+    inherit (pkgs) lib;
+    checkTargets = [
+      "x86_64-unknown-linux-gnu"
+      "aarch64-unknown-linux-gnu"
+      "x86_64-unknown-linux-musl"
+      "x86_64-apple-darwin"
+      "aarch64-apple-darwin"
+    ];
+
+    mkCheck = triple:
+      pkgs.stdenv.mkDerivation {
+        name = "check-${triple}";
+        src = self;
+        cargoDeps = rustPlatform.importCargoLock { lockFile = ./Cargo.lock; };
+        nativeBuildInputs = [
+          rustToolchain
+          rustPlatform.cargoSetupHook
+          pkgs.zig
+          pkgs.cargo-zigbuild
+        ];
+        buildPhase = ''
+          runHook preBuild
+          export HOME=$(mktemp -d)
+          export ZIG_GLOBAL_CACHE_DIR=$(mktemp -d)
+          cargo-zigbuild check --target ${triple} --offline
+          runHook postBuild
+        '';
+        installPhase = "touch $out";
+        dontFixup = true;
+      };
   in
   {
     devShells.default = pkgs.mkShell {
@@ -95,6 +128,11 @@
         mainProgram = "shed";
       };
     };
+
+    checks = builtins.listToAttrs (map (t: {
+      name = "check-${t}";
+      value = mkCheck t;
+    }) checkTargets);
   }) // {
     nixosModules.shed = import ./nix/module.nix;
     homeModules.shed = import ./nix/hm-module.nix;
