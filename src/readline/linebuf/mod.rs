@@ -320,7 +320,7 @@ impl LineBuf {
     let handle = state::register_source(raw.as_bytes());
     let mut tokens = LexStream::new(&handle, LexFlags::empty())
       .filter_map(Result::ok)
-      .filter(|tk| !matches!(tk.class, TkRule::Soi | TkRule::Eoi | TkRule::Null))
+      .filter(|tk| !matches!(tk.class, TkRule::Null))
       .collect::<Vec<_>>();
     while tokens
       .last()

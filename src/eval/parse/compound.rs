@@ -261,7 +261,7 @@ impl ParseStream {
         let Some(word) = self.next_tk() else {
           bail!(self, span, "Expected a case pattern here");
         };
-        if matches!(word.class, TkRule::SubshEnd | TkRule::Sep | TkRule::Eoi)
+        if matches!(word.class, TkRule::SubshEnd | TkRule::Sep)
           || word.flags.contains(TkFlags::KEYWORD)
         {
           self.panic_mode(&mut span);
@@ -831,7 +831,7 @@ impl ParseStream {
     while let Some(tk) = self.peek_tk() {
       let is_sep = tk.class == TkRule::Sep;
       let is_done = tk.flags.contains(TkFlags::KEYWORD) && tk.slice().as_bytes() == b"done";
-      let is_terminator = matches!(tk.class, TkRule::Eoi | TkRule::Comment);
+      let is_terminator = matches!(tk.class, TkRule::Comment);
       if is_sep || is_done || is_terminator {
         break;
       }

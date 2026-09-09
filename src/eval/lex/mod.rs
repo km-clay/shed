@@ -259,11 +259,6 @@ pub(crate) enum TkRule {
   /// String tokens are further disambiguated using the `TkFlags` on the token itself, which can mark a string token as a keyword, a command name, a subshell, etc.
   Str,
 
-  /// The start of a given input.
-  Soi,
-  /// The end of a given input.
-  Eoi,
-
   Null,
   Pipe,
   ErrPipe,
@@ -361,7 +356,7 @@ impl Tk {
 
   /// Returns false for tokens that are not part of the actual input, like `TkRule::Soi`, `TkRule::Eoi`, and `TkRule::Null`.
   pub(crate) fn filter_meta(&self) -> bool {
-    !matches!(self.class, TkRule::Soi | TkRule::Eoi | TkRule::Null)
+    !matches!(self.class, TkRule::Null)
   }
 
   /// used when lexing recursively, to replace the token's span with the original source
@@ -1507,17 +1502,12 @@ impl Iterator for LexStream<'_> {
       if let Some(err) = self.unclosed_structure_error() {
         return Some(err);
       }
-      // Return the Eoi token
-      let token = self.get_token(self.cursor..self.cursor, TkRule::Eoi);
-      self.flags |= LexFlags::STALE;
-      return Some(Ok(token));
+      return None;
     }
 
     // Return the Soi token
     if self.flags.contains(LexFlags::FRESH) {
       self.flags &= !LexFlags::FRESH;
-      let token = self.get_token(self.cursor..self.cursor, TkRule::Soi);
-      return Some(Ok(token));
     }
 
     // more line continuation handling
@@ -1783,7 +1773,6 @@ mod tests {
     let handle = state::register_source(src);
     LexStream::new(&handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
-      .filter(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi))
       .map(|t| t.class)
       .collect()
   }
@@ -1792,7 +1781,7 @@ mod tests {
     let handle = state::register_source(src);
     LexStream::new(&handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
-      .find(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi | TkRule::Sep))
+      .find(|t| !matches!(t.class, TkRule::Sep))
       .map(|t| t.slice().to_str_lossy().into_owned())
       .unwrap_or_default()
   }
@@ -1800,7 +1789,6 @@ mod tests {
   fn lex_toks(handle: &SourceHandle) -> Vec<Tk> {
     LexStream::new(handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
-      .filter(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi))
       .collect()
   }
 

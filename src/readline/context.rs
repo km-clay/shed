@@ -470,12 +470,7 @@ impl CtxTk {
       TkRule::Redir => Some(CtxTkRule::Redirect),
       TkRule::Comment => Some(CtxTkRule::Comment),
 
-      TkRule::Expanded { exp: _ }
-      | TkRule::HereDoc { .. }
-      | TkRule::Eoi
-      | TkRule::Soi
-      | TkRule::Null
-      | TkRule::Str => None,
+      TkRule::Expanded { exp: _ } | TkRule::HereDoc { .. } | TkRule::Null | TkRule::Str => None,
     }
   }
 
@@ -1763,7 +1758,7 @@ mod tests {
     let handle = state::register_source(src);
     let tk = LexStream::new(&handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
-      .find(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi | TkRule::Sep))
+      .find(|t| !matches!(t.class, TkRule::Sep))
       .expect("expected at least one token");
     CtxTk::from_tk(&tk).pop().unwrap()
   }
@@ -1794,7 +1789,7 @@ mod tests {
     let handle = state::register_source("~/bin/foo");
     let tk = LexStream::new(&handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
-      .find(|t| !matches!(t.class, TkRule::Soi | TkRule::Eoi | TkRule::Sep))
+      .find(|t| !matches!(t.class, TkRule::Sep))
       .expect("token");
     let expanded = tk.expand_no_side_effects().expect("expand");
     let word = expanded.get_first_word().expect("word");

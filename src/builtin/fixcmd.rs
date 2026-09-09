@@ -355,12 +355,7 @@ mod tests {
   fn lex_fc(input: &SourceHandle) -> Vec<Tk> {
     LexStream::new(input, LexFlags::empty())
       .filter_map(Result::ok)
-      .filter(|t| {
-        !matches!(
-          t.class,
-          TkRule::Soi | TkRule::Eoi | TkRule::Sep | TkRule::Null
-        )
-      })
+      .filter(|t| !matches!(t.class, TkRule::Sep | TkRule::Null))
       .collect()
   }
 

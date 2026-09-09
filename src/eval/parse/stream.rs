@@ -26,11 +26,7 @@ impl ParseStream {
     self.tokens.get(self.cursor)
   }
   pub(super) fn next_tk(&mut self) -> Option<Tk> {
-    let tk = self
-      .tokens
-      .get(self.cursor)
-      .and_then(|tk| (tk.class != TkRule::Eoi).then_some(tk))
-      .cloned()?;
+    let tk = self.tokens.get(self.cursor).cloned()?;
     self.cursor += 1;
     Some(tk)
   }
@@ -78,10 +74,12 @@ impl ParseStream {
     }
   }
   pub(super) fn assert_separator(&mut self, node_tks: &mut Option<Span>) -> ShResult<()> {
+    if self.peek_tk().is_none() {
+      return Ok(());
+    }
     let next_class = self.next_tk_class();
     match next_class {
-      TkRule::Eoi
-      | TkRule::Or
+      TkRule::Or
       | TkRule::Bg
       | TkRule::And
       | TkRule::BraceGrpEnd
@@ -100,7 +98,7 @@ impl ParseStream {
   pub(super) fn next_tk_is_some(&self) -> bool {
     self
       .peek_tk()
-      .is_some_and(|tk| !matches!(tk.class, TkRule::Comment | TkRule::Eoi))
+      .is_some_and(|tk| !matches!(tk.class, TkRule::Comment))
   }
   pub(super) fn check_flags(&self, flags: TkFlags) -> bool {
     self.peek_tk().is_some_and(|tk| tk.flags.contains(flags))

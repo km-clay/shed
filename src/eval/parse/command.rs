@@ -47,7 +47,7 @@ impl ParseStream {
       );
       // LCOV_EXCL_STOP
     };
-    let Some(next_tk) = next().filter(|tk| tk.class != TkRule::Eoi) else {
+    let Some(next_tk) = next() else {
       // LCOV_EXCL_START
       return Err(
         sherr!(
@@ -289,8 +289,7 @@ impl ParseStream {
             tk_counter += 1;
             argv.push(tk.clone());
           }
-          TkRule::Eoi
-          | TkRule::Comment
+          TkRule::Comment
           | TkRule::Pipe
           | TkRule::ErrPipe
           | TkRule::And

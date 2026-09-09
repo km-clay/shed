@@ -805,12 +805,9 @@ impl VarKind {
     let handle = state::register_source(raw);
     let tokens = LexStream::new(&handle, LexFlags::empty())
       .filter(|tk| {
-        !tk.as_ref().is_ok_and(|tk| {
-          matches!(
-            tk.class,
-            TkRule::Sep | TkRule::Soi | TkRule::Eoi | TkRule::Comment
-          )
-        })
+        !tk
+          .as_ref()
+          .is_ok_and(|tk| matches!(tk.class, TkRule::Sep | TkRule::Comment))
       })
       .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
       .try_fold(Vec::new(), |mut acc, wrds| {

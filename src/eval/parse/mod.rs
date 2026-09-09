@@ -319,14 +319,11 @@ impl Iterator for ParseStream {
   type Item = Result<NodeId, ShErr>;
   fn next(&mut self) -> Option<Self::Item> {
     // Empty token vector or only Soi/Eoi tokens, nothing to do
-    if self.is_empty() && self.len() == 1 && self.tokens().last().unwrap().class == TkRule::Eoi {
+    if self.is_empty() && self.len() == 1 {
       return None;
     }
     while let Some(tk) = self.tokens().first() {
-      if let TkRule::Eoi = tk.class {
-        return None;
-      }
-      if let TkRule::Soi | TkRule::Sep = tk.class {
+      if let TkRule::Sep = tk.class {
         self.next_tk();
       } else {
         break;
@@ -337,7 +334,6 @@ impl Iterator for ParseStream {
       Ok(Some(node)) => Some(Ok(node)),
       Ok(None) => match self.peek_tk() {
         None => None,
-        Some(tk) if tk.class == TkRule::Eoi => None,
         Some(tk) => {
           let class = tk.class.clone();
           let mut span = Some(tk.span);
