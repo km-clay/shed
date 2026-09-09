@@ -120,7 +120,7 @@ fn scratch_fd() -> io::Result<OwnedFd> {
     memfd_create("shed-scratch", MFdFlags::MFD_CLOEXEC)
   };
   #[cfg(not(linux_like))]
-  let fd = { Ok(OwnedFd::from(tempfile::tempfile()?)) };
+  let fd = tempfile::tempfile().map(OwnedFd::from);
 
   move_high(fd?).map_err(|e| io::Error::from_raw_os_error(e as i32))
 }

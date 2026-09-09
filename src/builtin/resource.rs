@@ -216,9 +216,9 @@ fn ulimit_nproc(span: Span, procs: rlim_t) -> ShResult<()> {
 }
 
 #[cfg(not(linux_like))]
-fn ulimit_nproc(span: &Span, _procs: rlim_t) -> ShResult<()> {
+fn ulimit_nproc(span: Span, _procs: rlim_t) -> ShResult<()> {
   Err(sherr!(
-    ExecFail @ span.clone(),
+    ExecFail @ span,
     "ulimit -u (max user processes) is not supported on this platform",
   ))
 }
