@@ -2625,6 +2625,12 @@ STAT                                             *builtin-stat* *stat*
     `{a} -lt {b}`   integer less than
     `{a} -ge {b}`   integer greater than or equal
     `{a} -le {b}`   integer less than or equal
+    `{a} -nt {b}`   {a} is newer than {b} (by modification time), or {a}
+                    exists and {b} does not
+    `{a} -ot {b}`   {a} is older than {b} (by modification time), or {b}
+                    exists and {a} does not
+    `{a} -ef {b}`   {a} and {b} refer to the same file (same device and
+                    inode number)
 
   Logical operators ~
 

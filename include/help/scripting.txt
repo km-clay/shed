@@ -437,6 +437,12 @@ executable with a shebang line:
           `{a} -gt {b}`   greater than
           `{a} -ge {b}`   greater than or equal
 
+      File comparisons:
+
+          `{a} -nt {b}`   {a} is newer than {b} (or {a} exists, {b} doesn't)
+          `{a} -ot {b}`   {a} is older than {b} (or {b} exists, {a} doesn't)
+          `{a} -ef {b}`   {a} and {b} are the same file
+
       Logical operators:
 
           `! {expr}`              negation

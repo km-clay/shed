@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fs, path::PathBuf, str::FromStr};
+use std::{collections::VecDeque, fs, os::unix::fs::MetadataExt, path::PathBuf, str::FromStr};
 
 use crate::{
   eval::{
@@ -84,31 +84,52 @@ impl FromStr for UnaryOp {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) enum FileOp {
+  OlderThan, // -ot
+  NewerThan, // -nt
+  FileEq,    // -ef
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum IntOp {
+  Eq,  // -eq
+  Neq, // -ne
+  Gt,  // -gt
+  Lt,  // -lt
+  Ge,  // -ge
+  Le,  // -le
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum StringOp {
+  Equal,    // =/==
+  NotEqual, // !=
+  Match,    // =~
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum BinaryOp {
-  StringEq,   // = ==
-  StringNeq,  // !=
-  IntEq,      // -eq
-  IntNeq,     // -ne
-  IntGt,      // -gt
-  IntLt,      // -lt
-  IntGe,      // -ge
-  IntLe,      // -le
-  RegexMatch, // =~
+  String(StringOp),
+  Int(IntOp),
+  File(FileOp),
 }
 
 impl FromStr for BinaryOp {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s {
-      "==" | "=" => Ok(Self::StringEq),
-      "!=" => Ok(Self::StringNeq),
-      "=~" => Ok(Self::RegexMatch),
-      "-eq" => Ok(Self::IntEq),
-      "-ne" => Ok(Self::IntNeq),
-      "-gt" => Ok(Self::IntGt),
-      "-lt" => Ok(Self::IntLt),
-      "-ge" => Ok(Self::IntGe),
-      "-le" => Ok(Self::IntLe),
+      "==" | "=" => Ok(Self::String(StringOp::Equal)),
+      "!=" => Ok(Self::String(StringOp::NotEqual)),
+      "=~" => Ok(Self::String(StringOp::Match)),
+      "-eq" => Ok(Self::Int(IntOp::Eq)),
+      "-ne" => Ok(Self::Int(IntOp::Neq)),
+      "-gt" => Ok(Self::Int(IntOp::Gt)),
+      "-lt" => Ok(Self::Int(IntOp::Lt)),
+      "-ge" => Ok(Self::Int(IntOp::Ge)),
+      "-le" => Ok(Self::Int(IntOp::Le)),
+      "-ot" => Ok(Self::File(FileOp::OlderThan)),
+      "-nt" => Ok(Self::File(FileOp::NewerThan)),
+      "-ef" => Ok(Self::File(FileOp::FileEq)),
       _ => Err(sherr!(SyntaxErr, "Invalid binary test operator '{s}'")),
     }
   }
@@ -170,28 +191,36 @@ fn eval_binary(
   extended: bool,
 ) -> ShResult<bool> {
   match op {
-    BinaryOp::StringEq => {
-      if extended {
-        let pattern = Shed::meta_mut(|m| m.get_glob(rhs.0.as_bytes()));
-        Ok(pattern.is_match(lhs.0.as_bytes()))
-      } else {
-        Ok(lhs.0 == rhs.0)
+    BinaryOp::String(str_op) => match str_op {
+      StringOp::Equal | StringOp::NotEqual => {
+        let polarity = matches!(str_op, StringOp::Equal);
+        let is_eq = if extended {
+          let pat = Shed::meta_mut(|m| m.get_glob(rhs.0.as_bytes()));
+          pat.is_match(lhs.0.as_bytes())
+        } else {
+          lhs.0 == rhs.0
+        };
+
+        Ok(is_eq == polarity)
       }
-    }
-    BinaryOp::StringNeq => {
-      if extended {
-        let pattern = Shed::meta_mut(|m| m.get_glob(rhs.0.as_bytes()));
-        Ok(!pattern.is_match(lhs.0.as_bytes()))
-      } else {
-        Ok(lhs.0 != rhs.0)
+      StringOp::Match => {
+        let cleaned = glob::replace_posix_classes(&rhs.0.to_str_lossy());
+        let re = Shed::meta_mut(|m| m.get_regex(&cleaned))
+          .map_err(|e| sherr!(SyntaxErr @ rhs.1, "Invalid regex: {e}"))?;
+        if let Some(caps) = re.captures(&lhs.0.to_str_lossy()) {
+          let groups: VecDeque<VarStr> = caps
+            .iter()
+            .map(|m| m.map(|mat| VarStr::from(mat.as_str())).unwrap_or_default())
+            .collect();
+          Shed::vars_mut(|v| v.set_var("SHED_REMATCH", VarKind::arr(groups), VarFlags::LOCAL))?;
+          Ok(true)
+        } else {
+          Shed::vars_mut(|v| v.unset_var("SHED_REMATCH")).ok();
+          Ok(false)
+        }
       }
-    }
-    BinaryOp::IntEq
-    | BinaryOp::IntNeq
-    | BinaryOp::IntGt
-    | BinaryOp::IntLt
-    | BinaryOp::IntGe
-    | BinaryOp::IntLe => {
+    },
+    BinaryOp::Int(int_op) => {
       let lhs_i = lhs
         .0
         .to_str_lossy()
@@ -204,31 +233,38 @@ fn eval_binary(
         .trim()
         .parse::<i64>()
         .map_err(|_| sherr!(SyntaxErr @ rhs.1, "test: integer expected, got '{}'", &rhs.0))?;
-      Ok(match op {
-        BinaryOp::IntEq => lhs_i == rhs_i,
-        BinaryOp::IntNeq => lhs_i != rhs_i,
-        BinaryOp::IntGt => lhs_i > rhs_i,
-        BinaryOp::IntLt => lhs_i < rhs_i,
-        BinaryOp::IntGe => lhs_i >= rhs_i,
-        BinaryOp::IntLe => lhs_i <= rhs_i,
-        _ => unreachable!(),
+      Ok(match int_op {
+        IntOp::Eq => lhs_i == rhs_i,
+        IntOp::Neq => lhs_i != rhs_i,
+        IntOp::Gt => lhs_i > rhs_i,
+        IntOp::Lt => lhs_i < rhs_i,
+        IntOp::Ge => lhs_i >= rhs_i,
+        IntOp::Le => lhs_i <= rhs_i,
       })
     }
-    BinaryOp::RegexMatch => {
-      let cleaned = glob::replace_posix_classes(&rhs.0.to_str_lossy());
-      let re = Shed::meta_mut(|m| m.get_regex(&cleaned))
-        .map_err(|e| sherr!(SyntaxErr @ rhs.1, "Invalid regex: {e}"))?;
-      if let Some(caps) = re.captures(&lhs.0.to_str_lossy()) {
-        let groups: VecDeque<VarStr> = caps
-          .iter()
-          .map(|m| m.map(|mat| VarStr::from(mat.as_str())).unwrap_or_default())
-          .collect();
-        Shed::vars_mut(|v| v.set_var("SHED_REMATCH", VarKind::arr(groups), VarFlags::LOCAL))?;
-        Ok(true)
-      } else {
-        Shed::vars_mut(|v| v.unset_var("SHED_REMATCH")).ok();
-        Ok(false)
-      }
+    BinaryOp::File(file_op) => {
+      let mtime = |v: &VarStr| {
+        PathBuf::from(v.clone())
+          .metadata()
+          .and_then(|m| m.modified())
+          .ok()
+      };
+
+      Ok(match file_op {
+        FileOp::NewerThan => mtime(&lhs.0) > mtime(&rhs.0),
+        FileOp::OlderThan => mtime(&lhs.0) < mtime(&rhs.0),
+        FileOp::FileEq => {
+          let left_file = PathBuf::from(lhs.0.clone());
+          let left_data = left_file.metadata();
+          let right_file = PathBuf::from(rhs.0.clone());
+          let right_data = right_file.metadata();
+
+          match (left_data, right_data) {
+            (Ok(l), Ok(r)) => l.ino() == r.ino() && l.dev() == r.dev(),
+            _ => false,
+          }
+        }
+      })
     }
   }
 }
@@ -728,6 +764,134 @@ mod tests {
     // Bash convention: a syntax error inside `[[ ]]` prints the diagnostic and
     // surfaces as a non-zero exit status rather than aborting the shell. We
     // match that — no propagation, just a failed status.
+    assert_ne!(state::Shed::get_status(), 0);
+  }
+
+  // ===================== Binary: file comparison =====================
+
+  fn set_mtime(f: &NamedTempFile, secs: u64) {
+    let t = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+    f.as_file().set_modified(t).unwrap();
+  }
+
+  #[test]
+  fn test_nt_newer_is_true() {
+    let _g = TestGuard::new();
+    let old = NamedTempFile::new().unwrap();
+    let new = NamedTempFile::new().unwrap();
+    set_mtime(&old, 1_000);
+    set_mtime(&new, 2_000);
+    test_input(format!(
+      "[[ {} -nt {} ]]",
+      new.path().display(),
+      old.path().display()
+    ))
+    .unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_nt_older_is_false() {
+    let _g = TestGuard::new();
+    let old = NamedTempFile::new().unwrap();
+    let new = NamedTempFile::new().unwrap();
+    set_mtime(&old, 1_000);
+    set_mtime(&new, 2_000);
+    test_input(format!(
+      "[[ {} -nt {} ]]",
+      old.path().display(),
+      new.path().display()
+    ))
+    .unwrap();
+    assert_ne!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_ot_older_is_true() {
+    let _g = TestGuard::new();
+    let old = NamedTempFile::new().unwrap();
+    let new = NamedTempFile::new().unwrap();
+    set_mtime(&old, 1_000);
+    set_mtime(&new, 2_000);
+    test_input(format!(
+      "[[ {} -ot {} ]]",
+      old.path().display(),
+      new.path().display()
+    ))
+    .unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_nt_existing_vs_missing_is_true() {
+    let _g = TestGuard::new();
+    let f = NamedTempFile::new().unwrap();
+    test_input(format!(
+      "[[ {} -nt /tmp/__nt_no_such_file__ ]]",
+      f.path().display()
+    ))
+    .unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_nt_missing_vs_existing_is_false() {
+    let _g = TestGuard::new();
+    let f = NamedTempFile::new().unwrap();
+    test_input(format!(
+      "[[ /tmp/__nt_no_such_file__ -nt {} ]]",
+      f.path().display()
+    ))
+    .unwrap();
+    assert_ne!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_ot_missing_vs_existing_is_true() {
+    let _g = TestGuard::new();
+    let f = NamedTempFile::new().unwrap();
+    test_input(format!(
+      "[[ /tmp/__ot_no_such_file__ -ot {} ]]",
+      f.path().display()
+    ))
+    .unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_nt_both_missing_is_false() {
+    let _g = TestGuard::new();
+    test_input("[[ /tmp/__nt_missing_a__ -nt /tmp/__nt_missing_b__ ]]").unwrap();
+    assert_ne!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_ef_same_file_is_true() {
+    let _g = TestGuard::new();
+    let f = NamedTempFile::new().unwrap();
+    let p = f.path().display();
+    test_input(format!("[[ {p} -ef {p} ]]")).unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_ef_different_files_is_false() {
+    let _g = TestGuard::new();
+    let a = NamedTempFile::new().unwrap();
+    let b = NamedTempFile::new().unwrap();
+    test_input(format!(
+      "[[ {} -ef {} ]]",
+      a.path().display(),
+      b.path().display()
+    ))
+    .unwrap();
+    assert_ne!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_ef_missing_is_false() {
+    let _g = TestGuard::new();
+    test_input("[[ /tmp/__ef_missing_a__ -ef /tmp/__ef_missing_b__ ]]").unwrap();
     assert_ne!(state::Shed::get_status(), 0);
   }
 
