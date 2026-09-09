@@ -115,10 +115,10 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       Two |shopt|s control how stages run. `core.pipeline_style` selects
       the execution mechanism:
 
-        `fork`    every stage runs in its own forked subshell (the
-                  default, matches `bash`)
+        `fork`    every stage runs in its own forked subshell (matches
+                  `bash`)
         `thread`  builtin stages run as in-process threads instead of
-                  forking; external stages still fork
+                  forking; external stages still fork (the default)
 
       `core.lastpipe` selects whether the *final* stage runs in the
       current shell, so its side effects, variable assignments, `read`,
