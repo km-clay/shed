@@ -4,10 +4,9 @@
 //! rendering ([`xtrace_line`]).
 #![expect(clippy::struct_excessive_bools, clippy::trivially_copy_pass_by_ref)]
 
+use ::std::{fmt::Display, str::FromStr};
 use bstr::ByteSlice;
-use std::{
-  cell::RefCell, collections::HashSet, fmt::Display, ops::Deref, str::FromStr, time::Duration,
-};
+use std::{cell::RefCell, collections::HashSet, ops::Deref, time::Duration};
 
 use itertools::Itertools;
 
@@ -109,6 +108,10 @@ fn warn_once(old: &'static str, new: &'static str) {
       warned.insert(old);
     }
   });
+}
+
+fn store_alias(alias: &'static str) {
+  WARNED_ALIASES.with(|warned| warned.borrow_mut().insert(alias));
 }
 
 fn resolve_alias(path: &str) -> &str {
@@ -471,9 +474,40 @@ pub(crate) enum PipeStyle {
   Fork,
 }
 
-two_way_display! {PipeStyle,
-  Fork <=> "fork";
-  Thread <=> "thread";
+impl Display for PipeStyle {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Self::Fork => write!(f, "fork"),
+      Self::Thread => write!(f, "thread"),
+    }
+  }
+}
+impl FromStr for PipeStyle {
+  type Err = ShErr;
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    match s {
+      "fork" => Ok(Self::Fork),
+      "all" => {
+        system_msg!(
+          "shopt: value 'all' for 'core.pipeline_style' is deprecated, use 'fork' instead"
+        );
+        Ok(Self::Fork)
+      }
+      "tail" => {
+        system_msg!(
+          "shopt: value 'tail' for 'core.pipeline_style' is deprecated, use 'thread' instead"
+        );
+        Ok(Self::Thread)
+      }
+      "thread" => Ok(Self::Thread),
+      _ => Err(sherr!(
+        ParseErr,
+        "Invalid {} kind: {}",
+        stringify!(PipeStyle),
+        s,
+      )),
+    }
+  }
 }
 
 #[derive(Clone, Debug, ShOptGroup)]
