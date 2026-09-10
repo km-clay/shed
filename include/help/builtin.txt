@@ -921,7 +921,7 @@ FLOG                       *builtin-flog* *flog* *FLOG_FMT* *flog-fmt*
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*
 
-  `genrc [-saAkfc] [--default] [--no-comments]`
+  `genrc [-vsaAkfc] [--default] [--no-comments]`
 
   Print an rc file built from the current shell state to stdout. Useful
   for regenerating `~/.shedrc`, or for inspecting the live configuration
@@ -933,16 +933,20 @@ GENRC                                            *builtin-genrc* *genrc*
   sourced, would re-establish the corresponding piece of configuration.
 
   Section order in the output is shopts, aliases, functions,
-  completions, autocmds, keymaps -- chosen so that later sections can
-  safely reference symbols defined by earlier ones (e.g. a
+  completions, autocmds, keymaps, variables -- chosen so that later
+  sections can safely reference symbols defined by earlier ones (e.g. a
   `complete -F func_name` line follows the function it names).
+
+  The variables section is opt-in: it is emitted only when `-v` is
+  passed, never as part of the default dump.
 
   Note: emitted functions will include all of the builtin completion functions.
 
   Section flags pick which categories to emit. With no section flags,
-  every section is included. Passing any section flag restricts the
-  output to just those categories. Short flags pack, so `-saAkfc` is
-  the same as `-s -a -A -k -f -c`.
+  every section except variables is included (variables are opt-in via
+  `-v`). Passing any section flag restricts the output to just those
+  categories. Short flags pack, so `-saAkfc` is the same as
+  `-s -a -A -k -f -c`.
 
   `-s`                  Include the shopts section.
   `-a`                  Include the aliases section.
@@ -950,6 +954,9 @@ GENRC                                            *builtin-genrc* *genrc*
   `-k`                  Include the keymaps section.
   `-f`                  Include the functions section.
   `-c`                  Include the completions section.
+  `-v`                  Include the variables section. Emits `declare`
+                        statements for user variables; shell-managed
+                        vars (`PWD`, `OPTIND`, ...) are excluded.
 
   `--default`           Emit factory-default shopt values and the canned
                         example autocmds, keymaps, and completion lines
@@ -969,6 +976,7 @@ GENRC                                            *builtin-genrc* *genrc*
       `genrc -Ak`                         pull just autocmds and keymaps
       `genrc -fa > ~/.shed_funcs.sh`      export functions and aliases
       `genrc -s --no-comments`            bare shopt dump, sourceable
+      `genrc -v --no-comments`            dump user variables as declares
 
 ==============================================================================
 GETOPTS                                          *builtin-getopts* *getopts*

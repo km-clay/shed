@@ -110,10 +110,6 @@ fn warn_once(old: &'static str, new: &'static str) {
   });
 }
 
-fn store_alias(alias: &'static str) {
-  WARNED_ALIASES.with(|warned| warned.borrow_mut().insert(alias));
-}
-
 fn resolve_alias(path: &str) -> &str {
   if let Some((old, new)) = SHOPT_ALIASES.iter().find(|(old, _)| *old == path) {
     warn_once(old, new);
@@ -184,9 +180,9 @@ impl Default for ShOpts {
 /// Where shopt values come from when composing rc output.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ShoptSource {
-  /// Values from `Self::default()` — the factory rc.
+  /// Values from `Self::default()`, the factory rc.
   Defaults,
-  /// Values from the live `ShOpts` instance — used to regenerate the
+  /// Values from the live `ShOpts` instance, used to regenerate the
   /// rc file from the user's current configuration.
   Current,
 }
@@ -257,6 +253,10 @@ impl ShOpts {
           .map(move |(key, line, doc)| (key, group, line, doc))
       })
       .collect()
+  }
+
+  pub(super) fn forget(&mut self) {
+    *self = Self::default();
   }
 
   pub(crate) fn query(&mut self, query: &str) -> ShResult<Option<String>> {

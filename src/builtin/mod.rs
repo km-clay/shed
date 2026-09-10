@@ -55,6 +55,7 @@ mod exec;
 mod fixcmd;
 mod flog;
 mod flowctl;
+mod forget;
 mod genrc;
 mod getopts;
 mod hash;
@@ -139,6 +140,7 @@ register_builtins! {
   b"fc"       => fixcmd::FixCmd,
   b"fg"       => jobctl::Fg,
   b"flog"     => flog::Flog,
+  b"forget"   => forget::Forget,
   b"fpop"     => arrops::FrontPop,
   b"fpush"    => arrops::FrontPush,
   b"genrc"    => genrc::GenRc,

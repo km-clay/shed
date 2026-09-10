@@ -11,7 +11,7 @@ use std::{
   collections::VecDeque,
   ffi::OsStr,
   fmt::{self, Display},
-  ops::Deref,
+  ops::{Deref, RangeBounds},
   os::unix::ffi::{OsStrExt, OsStringExt},
   path::{Path, PathBuf},
   rc::Rc,
@@ -636,9 +636,30 @@ impl VarStr {
     std::str::from_utf8(&self.0).ok()
   }
 
-  /// Lossy UTF-8 view (invalid bytes → `U+FFFD`).
+  /// Lossy UTF-8 view (invalid bytes -> `U+FFFD`).
   pub(crate) fn to_str_lossy(&self) -> Cow<'_, str> {
     String::from_utf8_lossy(&self.0)
+  }
+
+  pub(crate) fn try_slice(&self, range: impl RangeBounds<usize>) -> Option<Self> {
+    self.0.try_slice(range).ok().map(Self)
+  }
+
+  pub(crate) fn push_slice(&mut self, other: impl AsRef<[u8]>) {
+    self.0.push_slice(other.as_ref());
+  }
+
+  pub(crate) fn push(&mut self, byte: u8) {
+    self.0.push(byte);
+  }
+
+  pub(crate) fn from_slice(other: impl AsRef<[u8]>) -> Self {
+    Self(HipByt::from(other.as_ref()))
+  }
+
+  pub(crate) fn chain(mut self, other: impl AsRef<[u8]>) -> Self {
+    self.push_slice(other);
+    self
   }
 }
 
@@ -756,6 +777,12 @@ impl AsRef<std::ffi::OsStr> for VarStr {
 impl AsRef<Path> for VarStr {
   fn as_ref(&self) -> &Path {
     Path::new(OsStr::from_bytes(self.as_bytes()))
+  }
+}
+
+impl AsRef<[u8]> for VarStr {
+  fn as_ref(&self) -> &[u8] {
+    self.as_bytes()
   }
 }
 
@@ -1399,6 +1426,12 @@ impl VarTab {
     for arg in std::env::args_os() {
       self.bpush_arg(VarStr::from(arg.into_vec()));
     }
+  }
+  /// Clear all userspace shell variables
+  ///
+  /// Retains variables that are managed by the shell, such as `PWD` and `UMASK`
+  pub(crate) fn clear_userspace_vars(&mut self) {
+    self.vars.retain(|_, v| v.flags.contains(VarFlags::SHELL));
   }
   pub(crate) fn defer_cmd(&mut self, ast: Ast, ctx: LabelBuilder) {
     self.deferred_cmds.push(DeferredAst { ast, ctx });

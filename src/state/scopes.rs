@@ -68,6 +68,14 @@ impl ScopeStack {
       scope.set_kind(vars::ScopeKind::Function);
     }
   }
+  pub(super) fn clear_userspace_globals(&mut self) {
+    if let Some(scope) = self.scopes.first_mut() {
+      scope.clear_userspace_vars();
+    }
+  }
+  pub(super) fn clear_deferred_cmds(&mut self) {
+    self.cur_scope_mut().take_deferred_cmds();
+  }
   pub(crate) fn ascend(&mut self) {
     if self.depth >= 1 {
       let popped = self.scopes.pop();

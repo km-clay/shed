@@ -620,6 +620,8 @@ pub(crate) struct MetaTab {
   // envp cache - environment variables for execve
   envp_cache: Option<Rc<[CString]>>,
   // programmable completion specs
+  // NOTE: these arent on `LogTab` because we'd have to make
+  // `CompSpec` send+sync otherwise
   comp_specs: HashMap<VarStr, Box<dyn CompSpec>>,
 
   // stack of currently open procsubs
@@ -1010,6 +1012,9 @@ impl MetaTab {
   pub(crate) fn remove_comp_spec(&mut self, cmd: &str) -> bool {
     let var_str = VarStr::from(cmd);
     self.comp_specs.remove(&var_str).is_some()
+  }
+  pub(super) fn clear_comp_specs(&mut self) {
+    self.comp_specs.clear();
   }
   pub(crate) fn set_last_was_func_def(&mut self, was_func_def: bool) {
     self.last_was_func_def = was_func_def;

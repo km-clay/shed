@@ -1,6 +1,6 @@
 use itertools::Itertools;
 
-use crate::{eval::lex::Span, state::vars::VarStr, varstr};
+use crate::{eval::lex::Span, state::vars::VarStr};
 
 use super::opt::{Opt, Word};
 
@@ -99,20 +99,25 @@ pub(crate) fn join_raw_args(args: Vec<(VarStr, Span)>) -> (VarStr, Span) {
 
 /// Join all of the word-split arguments into a single string
 /// Preserve the span too
-pub(crate) fn join_raw_arg_iter(args: impl Iterator<Item = (VarStr, Span)>) -> (VarStr, Span) {
+pub(crate) fn join_raw_arg_iter<'a>(
+  args: impl Iterator<Item = (impl AsRef<[u8]>, Span)>,
+) -> (VarStr, Span) {
   args.fold((VarStr::default(), Span::default()), |mut acc, arg| {
+    let arg_span = arg.1;
+
     if acc.1 == Span::default() {
-      acc.1 = arg.1;
+      acc.1 = arg_span;
     } else {
-      let new_end = arg.1.end();
-      let start = acc.1.start();
-      acc.1.set_range(start, new_end);
+      acc.1.merge_inplace(arg_span);
     }
 
+    let bytes = arg.0.as_ref();
+
     if acc.0.is_empty() {
-      acc.0 = arg.0;
+      acc.0 = bytes.into();
     } else {
-      acc.0 = varstr!("{} {}", acc.0, arg.0);
+      acc.0.push(b' ');
+      acc.0.push_slice(bytes);
     }
     acc
   })

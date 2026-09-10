@@ -3,6 +3,7 @@
 //! This module contains the [`Shed`] struct, which is the central repository for all of the shell's state.
 //! Fun fact: the [`size_of`] the [`Shed`] struct is 2584 bytes, which is a bit over 2.5 KB. This is a lot of state to manage, but it is necessary for the shell to function properly.
 
+use bitflags::bitflags;
 use chrono::{DateTime, Local};
 use std::{
   cell::RefCell,
@@ -53,6 +54,21 @@ pub(crate) use source::{
 
 thread_local! {
   static SHED: Shed = Shed::new();
+}
+
+bitflags! {
+  #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+  pub(crate) struct ForgetFlags: u32 {
+    const SHOPTS = 1<<0;
+    const VARS = 1<<1;
+    const ALIASES = 1<<2;
+    const FUNCS = 1<<3;
+    const KEYMAPS = 1<<4;
+    const COMPS = 1<<5;
+    const AUTOCMDS = 1<<6;
+    const DEFERRED = 1<<7;
+    const TRAPS = 1<<8;
+  }
 }
 
 /// Pops a call frame's traceback labels on drop, restoring the context stack
@@ -619,6 +635,25 @@ impl Shed {
         .cloned()
         .collect::<Vec<Message>>()
     })
+  }
+
+  pub(crate) fn forget(flags: ForgetFlags) {
+    SHED.with(|shed| {
+      if flags.contains(ForgetFlags::VARS) {
+        shed.var_scopes.borrow_mut().clear_userspace_globals();
+        shed.meta.borrow_mut().clear_envp();
+      }
+      if flags.contains(ForgetFlags::DEFERRED) {
+        shed.var_scopes.borrow_mut().clear_deferred_cmds();
+      }
+      if flags.contains(ForgetFlags::SHOPTS) {
+        shed.shopts.borrow_mut().forget();
+      }
+      if flags.contains(ForgetFlags::COMPS) {
+        shed.meta.borrow_mut().clear_comp_specs();
+      }
+      shed.logic.borrow_mut().forget(flags);
+    });
   }
 
   /// Get the last exit status code, used by `$?`.

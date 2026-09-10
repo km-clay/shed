@@ -18,6 +18,7 @@ use crate::{
   state::vars::VarStr,
 };
 
+use super::ForgetFlags;
 use super::{
   eval::lex::Span,
   expand::escape,
@@ -292,6 +293,28 @@ impl LogTab {
     let mut new = Self::default();
     new.register_autoload_funcs();
     new
+  }
+  pub(super) fn forget(&mut self, flags: ForgetFlags) {
+    if flags.contains(ForgetFlags::FUNCS) {
+      self.functions.clear();
+      self.register_autoload_funcs();
+    }
+    if flags.contains(ForgetFlags::COMPS) {
+      self.register_autoload_comps();
+    }
+    if flags.contains(ForgetFlags::ALIASES) {
+      self.aliases.clear();
+      self.ex_aliases.clear();
+    }
+    if flags.contains(ForgetFlags::KEYMAPS) {
+      self.keymaps.clear();
+    }
+    if flags.contains(ForgetFlags::AUTOCMDS) {
+      self.autocmds.clear();
+    }
+    if flags.contains(ForgetFlags::TRAPS) {
+      self.traps.clear();
+    }
   }
   fn register_autoload_funcs(&mut self) {
     for (name, src) in autoload::FuncLoader.bundled() {
