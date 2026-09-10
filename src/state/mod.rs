@@ -640,7 +640,7 @@ impl Shed {
   pub(crate) fn forget(flags: ForgetFlags) {
     SHED.with(|shed| {
       if flags.contains(ForgetFlags::VARS) {
-        shed.var_scopes.borrow_mut().clear_userspace_globals();
+        shed.var_scopes.borrow_mut().forget_userspace_globals();
         shed.meta.borrow_mut().clear_envp();
       }
       if flags.contains(ForgetFlags::DEFERRED) {

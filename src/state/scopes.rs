@@ -3,6 +3,7 @@
 //! [`ScopeStack`] — the nested variable environments (globals, function locals, and
 //! `local` declarations) that variable lookups walk.
 
+use std::cell::OnceCell;
 use std::collections::{VecDeque, hash_map::Entry};
 use std::os::unix::ffi::OsStringExt;
 
@@ -22,20 +23,24 @@ use crate::{
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ScopeStack {
-  // ALWAYS keep one scope.
-  // The bottom scope is the global variable space.
-  // Scopes that come after that are pushed in functions,
-  // and only contain variables that are defined using `local`.
+  /// ALWAYS keep one scope.
+  /// The bottom scope is the global variable space.
+  /// Scopes that come after that are pushed in functions,
+  /// and only contain variables that are defined using `local`.
   scopes: Vec<VarTab>,
   depth: u32,
 
-  // Global parameters such as $!, $$, etc
+  /// Global parameters such as $!, $$, etc
   global_params: HashMap<ShellParam, VarStr>,
+
+  launch_env: OnceCell<HashMap<String, Var>>,
 }
 
 impl ScopeStack {
   pub(crate) fn new() -> Self {
-    Self::from_frame(VarTab::new())
+    let new = Self::from_frame(VarTab::new());
+    new.launch_env.set(new.cur_scope().vars().clone()).ok();
+    new
   }
   pub(crate) fn from_frame(frame: VarTab) -> Self {
     let mut new = Self::default();
@@ -68,9 +73,26 @@ impl ScopeStack {
       scope.set_kind(vars::ScopeKind::Function);
     }
   }
-  pub(super) fn clear_userspace_globals(&mut self) {
-    if let Some(scope) = self.scopes.first_mut() {
-      scope.clear_userspace_vars();
+  /// Forget user-defined shell variables
+  ///
+  /// Unsets all global variables that are not managed by the shell, and then restores
+  /// the env vars inherited by the shell so that critical vars like `PATH` and `HOME` are not unset
+  pub(super) fn forget_userspace_globals(&mut self) {
+    let Some(scope) = self.scopes.first_mut() else {
+      return;
+    };
+    scope
+      .vars_mut()
+      .retain(|_, v| v.flags().contains(VarFlags::SHELL));
+
+    let Some(launch_vars) = self.launch_env.get() else {
+      return;
+    };
+
+    for (name, var) in launch_vars {
+      if !var.flags().contains(VarFlags::SHELL) {
+        scope.put_var(name, var.clone());
+      }
     }
   }
   pub(super) fn clear_deferred_cmds(&mut self) {

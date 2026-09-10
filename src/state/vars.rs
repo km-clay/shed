@@ -1443,12 +1443,6 @@ impl VarTab {
       self.bpush_arg(VarStr::from(arg.into_vec()));
     }
   }
-  /// Clear all userspace shell variables
-  ///
-  /// Retains variables that are managed by the shell, such as `PWD` and `UMASK`
-  pub(crate) fn clear_userspace_vars(&mut self) {
-    self.vars.retain(|_, v| v.flags.contains(VarFlags::SHELL));
-  }
   pub(crate) fn defer_cmd(&mut self, ast: Ast, ctx: LabelBuilder) {
     self.deferred_cmds.push(DeferredAst { ast, ctx });
   }
