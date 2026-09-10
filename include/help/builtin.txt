@@ -30,6 +30,7 @@ The following builtins are available:
   `fc`          edit and re-exec commands from history      |builtin-fc|
   `flog`        write a formatted log message               |builtin-flog|
   `fg`          bring a job to the foreground               |builtin-fg|
+  `forget`      reset shell state to its launch baseline    |builtin-forget|
   `genrc`       (re)generate the rc file from live state    |builtin-genrc|
   `getopts`     parse option flags in scripts               |builtin-getopts|
   `hash`        manage the command location cache           |builtin-hash|
@@ -917,6 +918,44 @@ FLOG                       *builtin-flog* *flog* *FLOG_FMT* *flog-fmt*
       `FLOG_LEVEL=debug flog debug "entering loop"`
       `FLOG_FMT='[%H:%M:%S {level}]' flog info "started"`
       `export FLOG_FMT='[{level} {source}:{line}]'  # in .shedrc`
+
+==============================================================================
+FORGET                                           *builtin-forget* *forget*
+
+  `forget [-vsafkcAdt]`
+
+  Reset shell state to the state it was in at launch. Each flag forgets
+  one category; with no flags, `forget` forgets everything.
+
+  Variables are *restored to their launch values* (the inherited
+  environment), not merely unset -- so `PATH`, `HOME`, etc. keep
+  working. User-defined variables are dropped, and any launch variable
+  the session modified is reset to its original value. Shell-managed
+  variables (`PWD`, `OPTIND`, `SHLVL`, ...) keep their live value rather
+  than reverting, so the working directory stays correct.
+
+  Functions, aliases, completions, keymaps, and autocmds reset to their
+  launch baseline: user definitions are dropped, while shed's bundled
+  autoload functions and completions are preserved.
+
+  `forget` does not re-source your rc; it leaves you at a clean launch
+  baseline. Pair it with `source` to rebuild your configuration.
+
+  `-v`, `--vars`        Variables (see above).
+  `-s`, `--shopts`      Shell options (reset to defaults).
+  `-a`, `--aliases`     Aliases (command and `excmd`).
+  `-f`, `--functions`   Functions (bundled autoloads are kept).
+  `-k`, `--keymaps`     Key bindings.
+  `-c`, `--comps`       Completion specs (bundled autoloads are kept).
+  `-A`, `--autocmds`    Autocommand hooks.
+  `-t`, `--traps`       Trap handlers.
+  `-d`, `--deferred`    Pending |defer|red commands in the current scope
+
+  Examples:
+
+      `forget`                       reset the whole shell to launch state
+      `forget -af`                   drop aliases and functions
+      `forget; source ~/.shedrc`     reload configuration from scratch
 
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*
