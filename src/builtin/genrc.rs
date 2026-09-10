@@ -20,6 +20,7 @@ impl super::Builtin for GenRc {
       OptSpec::new_short("autocmds", b'A'),
       OptSpec::new_short("functions", b'f'),
       OptSpec::new_short("completions", b'c'),
+      OptSpec::new_short("vars", b'v').long("vars"),
       OptSpec::new_long("default"),
       OptSpec::new_long("no-comments"),
     ]
@@ -40,6 +41,7 @@ impl super::Builtin for GenRc {
     let mut want_autocmds = false;
     let mut want_functions = false;
     let mut want_completions = false;
+    let mut want_vars = false;
     let mut any_section_flag = false;
 
     for opt in args.options() {
@@ -68,6 +70,10 @@ impl super::Builtin for GenRc {
           want_completions = true;
           any_section_flag = true;
         }
+        "vars" => {
+          want_vars = true;
+          any_section_flag = true;
+        }
         "default" => use_defaults = true,
         "no-comments" => no_comments = true,
         _ => {}
@@ -83,6 +89,7 @@ impl super::Builtin for GenRc {
       config.include_autocmds = want_autocmds;
       config.include_functions = want_functions;
       config.include_completions = want_completions;
+      config.include_vars = want_vars;
     }
 
     if use_defaults {

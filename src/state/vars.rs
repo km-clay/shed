@@ -127,6 +127,86 @@ fn join_lines(mut lines: Vec<Vec<u8>>) -> Vec<u8> {
   out
 }
 
+pub(crate) fn serialize_var(name: &str, var: &Var) -> Option<VarStr> {
+  let Var { flags, kind } = var;
+
+  if let VarKind::Magic(_) = kind {
+    return None;
+  }
+
+  let mut letters: Vec<u8> = Vec::new();
+  match kind {
+    VarKind::Arr(_) => letters.push(b'a'),
+    VarKind::AssocArr(_) => letters.push(b'A'),
+    _ => {}
+  }
+  if flags.contains(VarFlags::INTEGER) {
+    letters.push(b'i');
+  }
+  if flags.contains(VarFlags::READONLY) {
+    letters.push(b'r');
+  }
+  if flags.contains(VarFlags::EXPORT) {
+    letters.push(b'x');
+  }
+
+  let mut out: Vec<u8> = b"declare ".to_vec();
+  if letters.is_empty() {
+    out.extend_from_slice(b"--");
+  } else {
+    out.push(b'-');
+    out.extend_from_slice(&letters);
+  }
+  out.push(b' ');
+  out.extend_from_slice(name.as_bytes());
+
+  match kind {
+    VarKind::Unset => {}
+    VarKind::Arr(items) => {
+      out.extend_from_slice(b"=(");
+      let mut it = items.iter().peekable();
+      while let Some(item) = it.next() {
+        out.extend_from_slice(&escape::shell_quote_bytes(item.as_bytes()));
+        if it.peek().is_some() {
+          out.push(b' ');
+        }
+      }
+      out.push(b')');
+    }
+    VarKind::AssocArr(items) => {
+      out.extend_from_slice(b"=(");
+      let mut it = items.iter().peekable();
+      while let Some((k, v)) = it.next() {
+        out.push(b'[');
+        out.extend_from_slice(&escape::shell_quote_bytes(k.as_bytes()));
+        out.extend_from_slice(b"]=");
+        out.extend_from_slice(&escape::shell_quote_bytes(v.as_bytes()));
+        if it.peek().is_some() {
+          out.push(b' ');
+        }
+      }
+      out.push(b')');
+    }
+    VarKind::Str(_) | VarKind::Int(_) => {
+      out.push(b'=');
+      out.extend_from_slice(&escape::shell_quote_bytes(&kind.value_bytes()));
+    }
+    VarKind::Magic(_) => unreachable!(),
+  }
+
+  Some(out.into())
+}
+
+pub(crate) fn serialize_vars(vars: &ScopeStack) -> Vec<u8> {
+  let lines = vars
+    .flatten_vars()
+    .into_iter()
+    .filter_map(|(k, v)| serialize_var(&k, &v))
+    .map(|line| line.as_bytes().to_vec())
+    .collect();
+  join_lines(lines)
+}
+
 /// Display key/value pairs as '{key}={value}', one per line, sorted.
 ///
 /// The 'value' is escaped in such a way that the whole line can be reused as a shell assignment
@@ -263,8 +343,13 @@ bitflags! {
     const LOCAL = 1 << 1;
     const READONLY = 1 << 2;
     const INTEGER = 1 << 3;
+    const SHELL = 1 << 4;
   }
 }
+
+pub(crate) const SHELL_MANAGED_VARS: &[&str] = &[
+  "PWD", "OLDPWD", "SHLVL", "PPID", "LINENO", "OPTIND", "UMASK", "_",
+];
 
 #[derive(Clone, Debug)]
 pub(crate) enum ArrIndex {
@@ -1171,6 +1256,11 @@ impl VarTab {
     vars.insert("OPTIND".into(), "1".into());
     let env_vars = Self::init_env();
     vars.extend(env_vars);
+    for (name, var) in &mut vars {
+      if SHELL_MANAGED_VARS.contains(&name.as_str()) {
+        var.flags |= VarFlags::SHELL;
+      }
+    }
     vars
   }
   fn init_env() -> Vec<(String, Var)> {
@@ -1524,6 +1614,11 @@ impl VarTab {
     &self.params
   }
   pub(crate) fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
+    let flags = if SHELL_MANAGED_VARS.contains(&var_name) {
+      flags | VarFlags::SHELL
+    } else {
+      flags
+    };
     if let Some(var) = self.vars.get_mut(var_name) {
       if var.flags.contains(VarFlags::READONLY) && !flags.contains(VarFlags::READONLY) {
         return Err(sherr!(ExecFail, "Variable '{}' is readonly", var_name,));

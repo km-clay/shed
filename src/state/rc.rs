@@ -48,6 +48,7 @@ pub(crate) struct GenRcConfig {
   pub include_completions: bool,
   pub include_autocmds: bool,
   pub include_keymaps: bool,
+  pub include_vars: bool,
 }
 
 impl Default for GenRcConfig {
@@ -61,6 +62,7 @@ impl Default for GenRcConfig {
       include_completions: true,
       include_autocmds: true,
       include_keymaps: true,
+      include_vars: false,
     }
   }
 }
@@ -100,6 +102,20 @@ fn live_aliases() -> Vec<VarStr> {
       VarStr::from(line)
     })
     .collect()
+}
+
+/// Live variable definitions as re-sourceable `declare` statements, sorted by
+/// name. Shell-managed vars (`PWD`, `LINENO`, …) and magic vars are excluded.
+fn live_vars() -> Vec<VarStr> {
+  let mut vars: Vec<(String, VarStr)> = Shed::vars(|v| {
+    v.flatten_vars()
+      .into_iter()
+      .filter(|(_, var)| !var.flags().contains(super::vars::VarFlags::SHELL))
+      .filter_map(|(name, var)| super::vars::serialize_var(&name, &var).map(|line| (name, line)))
+      .collect()
+  });
+  vars.sort_by(|a, b| a.0.cmp(&b.0));
+  vars.into_iter().map(|(_, line)| line).collect()
 }
 
 /// Live user function definitions (verbatim source), sorted by name.
@@ -288,6 +304,16 @@ pub(crate) fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
       )],
       live_keymaps,
     ),
+  );
+
+  section(
+    &mut lines,
+    config.include_vars,
+    &[
+      "# -- Variables --",
+      "# Shell variables and attributes, as re-sourceable declare statements.",
+    ],
+    user_section(live_vars),
   );
 
   // Trim trailing blank lines so the file doesn't end with extra padding.

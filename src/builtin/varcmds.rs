@@ -12,7 +12,6 @@ use crate::{
     meta::MetaTab,
     vars::{self, VarFlags, VarKind, VarName, VarStr},
   },
-  try_var,
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -231,24 +230,18 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
   match mode {
     IntrospectMode::Vars => {
       if argv.is_empty() {
-        let output = Shed::vars(vars::display_local);
+        let output = Shed::vars(vars::serialize_vars);
         procio::outln_bytes(&output);
       } else {
         for (name, span) in argv {
-          let val = try_var!(&name.to_str_lossy());
-          match val {
-            Some(v) => procio::outln_bytes(&vars::display_as_var(name.as_bytes(), v)),
-            None if Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy())).is_some() => {
-              // Declared but unset: it exists, so show it value-less rather than
-              // erroring (cf. bash's `declare -- name`).
-              outln!("{name}=");
-            }
-            None => {
-              return Err(sherr!(
-                NotFound @ *span,
-                "declare: '{name}' not found",
-              ));
-            }
+          let Some(var) = Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy())) else {
+            return Err(sherr!(
+              NotFound @ *span,
+              "declare: '{name}' not found",
+            ));
+          };
+          if let Some(line) = vars::serialize_var(&name.to_str_lossy(), &var) {
+            procio::outln_bytes(line.as_bytes());
           }
         }
       }
@@ -1465,8 +1458,85 @@ mod tests {
     // than erroring "not found".
     let g = TestGuard::new();
     test_input("f(){ local x; declare -p x; }; f").unwrap();
-    assert_eq!(g.read_output().trim(), "x=");
+    assert_eq!(g.read_output().trim(), "declare -- x");
     assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  // ===================== declare -p round-trip per VarKind =====================
+
+  #[test]
+  fn roundtrip_str_with_spaces() {
+    let g = TestGuard::new();
+    test_input(r#"d=$(rt_v='a b  c'; declare -p rt_v); eval "$d"; printf '%s' "$rt_v""#).unwrap();
+    assert_eq!(g.read_output(), "a b  c");
+  }
+
+  #[test]
+  fn roundtrip_str_with_single_quote() {
+    let g = TestGuard::new();
+    test_input(r#"d=$(rt_q="it's here"; declare -p rt_q); eval "$d"; printf '%s' "$rt_q""#)
+      .unwrap();
+    assert_eq!(g.read_output(), "it's here");
+  }
+
+  #[test]
+  fn roundtrip_str_with_control_chars() {
+    let g = TestGuard::new();
+    test_input("d=$(rt_c=$'a\\tb\\nc'; declare -p rt_c); eval \"$d\"; printf '%s' \"$rt_c\"")
+      .unwrap();
+    assert_eq!(g.read_output(), "a\tb\nc");
+  }
+
+  #[test]
+  fn roundtrip_int() {
+    let g = TestGuard::new();
+    test_input(r#"d=$(declare -i rt_n=42; declare -p rt_n); eval "$d"; printf '%s' "$rt_n""#)
+      .unwrap();
+    assert_eq!(g.read_output(), "42");
+  }
+
+  #[test]
+  fn roundtrip_array() {
+    let g = TestGuard::new();
+    test_input(
+      r#"d=$(declare -a rt_a=(x "y z" q); declare -p rt_a); eval "$d"; printf '%s|%s|%s|%s' "${#rt_a[@]}" "${rt_a[0]}" "${rt_a[1]}" "${rt_a[2]}""#,
+    )
+    .unwrap();
+    assert_eq!(g.read_output(), "3|x|y z|q");
+  }
+
+  #[test]
+  fn roundtrip_assoc() {
+    let g = TestGuard::new();
+    test_input(
+      r#"d=$(declare -A rt_m=([host]=h [port]=9000); declare -p rt_m); eval "$d"; printf '%s|%s' "${rt_m[host]}" "${rt_m[port]}""#,
+    )
+    .unwrap();
+    assert_eq!(g.read_output(), "h|9000");
+  }
+
+  #[test]
+  fn roundtrip_empty_stays_set() {
+    let g = TestGuard::new();
+    test_input(
+      r#"d=$(rt_e=''; declare -p rt_e); eval "$d"; printf '[%s][%s]' "$rt_e" "${rt_e+set}""#,
+    )
+    .unwrap();
+    assert_eq!(g.read_output(), "[][set]");
+  }
+
+  #[test]
+  fn roundtrip_readonly_export_attrs() {
+    let g = TestGuard::new();
+    test_input(r#"d=$(declare -rx rt_w=hi; declare -p rt_w); eval "$d"; declare -p rt_w"#).unwrap();
+    assert_eq!(g.read_output().trim(), "declare -rx rt_w=hi");
+  }
+
+  #[test]
+  fn roundtrip_typed_unset() {
+    let g = TestGuard::new();
+    test_input(r#"d=$(declare -i rt_tn; declare -p rt_tn); eval "$d"; declare -p rt_tn"#).unwrap();
+    assert_eq!(g.read_output().trim(), "declare -i rt_tn");
   }
 
   // ===================== local with declare-style flags =====================
