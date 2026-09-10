@@ -657,9 +657,25 @@ impl VarStr {
     Self(HipByt::from(other.as_ref()))
   }
 
+  pub(crate) fn from_slices(others: impl Iterator<Item = impl AsRef<[u8]>>) -> Self {
+    let mut out = Self::default();
+    for other in others {
+      out.push_slice(other);
+    }
+    out
+  }
+
   pub(crate) fn chain(mut self, other: impl AsRef<[u8]>) -> Self {
     self.push_slice(other);
     self
+  }
+
+  pub(crate) fn to_ascii_uppercase(&self) -> Self {
+    Self(self.0.to_ascii_uppercase())
+  }
+
+  pub(crate) fn to_ascii_lowercase(&self) -> Self {
+    Self(self.0.to_ascii_lowercase())
   }
 }
 

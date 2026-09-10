@@ -1,6 +1,5 @@
 use crate::{HashMap, eval::lex::Span, state::vars::VarStr};
 use std::{
-  borrow::Cow,
   fmt::Display,
   ops::Deref,
   sync::{
@@ -84,8 +83,8 @@ impl Deref for SourceHandle {
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub(crate) struct Source {
-  name: Option<Box<[u8]>>,
-  content: Box<[u8]>,
+  name: Option<VarStr>,
+  content: VarStr,
 }
 
 #[derive(Default)]
@@ -101,8 +100,9 @@ impl SourceRegistry {
     self.sources.get(&id).and_then(Weak::upgrade)
   }
 
-  fn register(&mut self, name: Option<Box<[u8]>>, src: Box<[u8]>) -> SourceHandle {
+  fn register(&mut self, name: Option<VarStr>, src: VarStr) -> SourceHandle {
     let id = SourceId(SRC_GENERATION.fetch_add(1, Ordering::AcqRel));
+
     let source = Arc::new(Source { name, content: src });
     let weak = Arc::downgrade(&source);
     self.sources.insert(id, weak);
@@ -110,52 +110,15 @@ impl SourceRegistry {
   }
 }
 
-pub(crate) fn register_source<T: InputSource>(src: T) -> SourceHandle {
+pub(crate) fn register_source<T: Into<VarStr>>(src: T) -> SourceHandle {
+  SOURCES.write().unwrap().register(None, src.into())
+}
+
+pub(crate) fn register_named_source<T: Into<VarStr>>(name: T, src: T) -> SourceHandle {
   SOURCES
     .write()
     .unwrap()
-    .register(None, src.into_source_bytes())
-}
-
-pub(crate) fn register_named_source<T: InputSource>(name: T, src: T) -> SourceHandle {
-  SOURCES
-    .write()
-    .unwrap()
-    .register(Some(name.into_source_bytes()), src.into_source_bytes())
-}
-
-pub(crate) trait InputSource {
-  fn into_source_bytes(self) -> Box<[u8]>;
-}
-impl InputSource for VarStr {
-  fn into_source_bytes(self) -> Box<[u8]> {
-    self.as_bytes().into()
-  }
-}
-impl InputSource for Vec<u8> {
-  fn into_source_bytes(self) -> Box<[u8]> {
-    self.into()
-  }
-}
-impl InputSource for &[u8] {
-  fn into_source_bytes(self) -> Box<[u8]> {
-    self.into()
-  }
-}
-impl InputSource for &str {
-  fn into_source_bytes(self) -> Box<[u8]> {
-    self.as_bytes().into()
-  }
-}
-impl InputSource for String {
-  fn into_source_bytes(self) -> Box<[u8]> {
-    self.into_bytes().into()
-  }
-}
-impl InputSource for Cow<'_, str> {
-  fn into_source_bytes(self) -> Box<[u8]> {
-    self.into_owned().into_bytes().into()
-  }
+    .register(Some(name.into()), src.into())
 }
 
 pub(crate) fn get_source(id: SourceId) -> Option<VarStr> {
@@ -163,7 +126,7 @@ pub(crate) fn get_source(id: SourceId) -> Option<VarStr> {
     .read()
     .unwrap()
     .get_source(id)
-    .map(|s| VarStr::from(&*s.content))
+    .map(|s| s.content.clone())
 }
 
 pub(crate) fn get_source_name(id: SourceId) -> Option<VarStr> {
@@ -171,7 +134,7 @@ pub(crate) fn get_source_name(id: SourceId) -> Option<VarStr> {
     .read()
     .unwrap()
     .get_source(id)
-    .and_then(|s| s.name.as_deref().map(VarStr::from))
+    .and_then(|s| s.name.clone())
 }
 
 pub(crate) fn slice_source(span: Span) -> Option<VarStr> {
@@ -180,8 +143,8 @@ pub(crate) fn slice_source(span: Span) -> Option<VarStr> {
   let id = span.source();
   let source = {
     let lock = SOURCES.read().unwrap();
-    lock.get_source(id)
+    lock.get_source(id)?
   };
 
-  source.map(|s| VarStr::from(&(*s.content)[start..end]))
+  source.content.try_slice(start..end)
 }
