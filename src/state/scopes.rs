@@ -77,20 +77,20 @@ impl ScopeStack {
   ///
   /// Unsets all global variables that are not managed by the shell, and then restores
   /// the env vars inherited by the shell so that critical vars like `PATH` and `HOME` are not unset
-  pub(super) fn forget_userspace_globals(&mut self) {
+  pub(super) fn forget_userspace_globals(&mut self, exclude: &[String]) {
     let Some(scope) = self.scopes.first_mut() else {
       return;
     };
     scope
       .vars_mut()
-      .retain(|_, v| v.flags().contains(VarFlags::SHELL));
+      .retain(|k, v| v.flags().contains(VarFlags::SHELL) || exclude.contains(k));
 
     let Some(launch_vars) = self.launch_env.get() else {
       return;
     };
 
     for (name, var) in launch_vars {
-      if !var.flags().contains(VarFlags::SHELL) {
+      if !var.flags().contains(VarFlags::SHELL) && !exclude.contains(name) {
         scope.put_var(name, var.clone());
       }
     }

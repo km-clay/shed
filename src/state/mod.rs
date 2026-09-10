@@ -9,6 +9,7 @@ use std::{
   cell::RefCell,
   collections::VecDeque,
   fmt::Display,
+  ops::BitOrAssign,
   os::{fd::AsFd, unix::net::UnixStream},
   sync::{
     Arc,
@@ -54,6 +55,41 @@ pub(crate) use source::{
 
 thread_local! {
   static SHED: Shed = Shed::new();
+}
+
+pub(crate) struct ForgetSpec {
+  flags: ForgetFlags,
+  exclude_vars: Vec<String>,
+}
+
+impl ForgetSpec {
+  pub(crate) fn new() -> Self {
+    Self {
+      flags: ForgetFlags::empty(),
+      exclude_vars: vec![],
+    }
+  }
+  pub(crate) fn all() -> Self {
+    Self {
+      flags: ForgetFlags::all(),
+      exclude_vars: vec![],
+    }
+  }
+  pub(crate) fn flags(&self) -> ForgetFlags {
+    self.flags
+  }
+  pub(crate) fn exclude(&mut self, var: &str) {
+    self.exclude_vars.push(var.to_string());
+  }
+  pub(crate) fn except(&mut self) {
+    self.flags = self.flags.complement();
+  }
+}
+
+impl BitOrAssign<ForgetFlags> for ForgetSpec {
+  fn bitor_assign(&mut self, rhs: ForgetFlags) {
+    self.flags |= rhs;
+  }
 }
 
 bitflags! {
@@ -637,10 +673,14 @@ impl Shed {
     })
   }
 
-  pub(crate) fn forget(flags: ForgetFlags) {
+  pub(crate) fn forget(spec: &ForgetSpec) {
+    let flags = spec.flags;
     SHED.with(|shed| {
       if flags.contains(ForgetFlags::VARS) {
-        shed.var_scopes.borrow_mut().forget_userspace_globals();
+        shed
+          .var_scopes
+          .borrow_mut()
+          .forget_userspace_globals(&spec.exclude_vars);
         shed.meta.borrow_mut().clear_envp();
       }
       if flags.contains(ForgetFlags::DEFERRED) {

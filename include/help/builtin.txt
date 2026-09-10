@@ -922,7 +922,7 @@ FLOG                       *builtin-flog* *flog* *FLOG_FMT* *flog-fmt*
 ==============================================================================
 FORGET                                           *builtin-forget* *forget*
 
-  `forget [-vsafkcAdt]`
+  `forget [-vsafkcAdt] [--except] [-x <name>]`
 
   Reset shell state to the state it was in at launch. Each flag forgets
   one category; with no flags, `forget` forgets everything.
@@ -941,20 +941,33 @@ FORGET                                           *builtin-forget* *forget*
   `forget` does not re-source your rc; it leaves you at a clean launch
   baseline. Pair it with `source` to rebuild your configuration.
 
-  `-v`, `--vars`        Variables (see above).
-  `-s`, `--shopts`      Shell options (reset to defaults).
-  `-a`, `--aliases`     Aliases (command and `excmd`).
-  `-f`, `--functions`   Functions (bundled autoloads are kept).
-  `-k`, `--keymaps`     Key bindings.
-  `-c`, `--comps`       Completion specs (bundled autoloads are kept).
-  `-A`, `--autocmds`    Autocommand hooks.
-  `-t`, `--traps`       Trap handlers.
-  `-d`, `--deferred`    Pending |defer|red commands in the current scope
+  `-v`/`--vars`        Variables (see above).
+  `-s`/`--shopts`      Shell options (reset to defaults).
+  `-a`/`--aliases`     Aliases (command and `excmd`).
+  `-f`/`--functions`   Functions (bundled autoloads are kept).
+  `-k`/`--keymaps`     Key bindings.
+  `-c`/`--comps`       Completion specs (bundled autoloads are kept).
+  `-A`/`--autocmds`    Autocommand hooks.
+  `-t`/`--traps`       Trap handlers.
+  `-d`/`--deferred`    Pending |defer|red commands in the current scope
+
+  `--except`           Invert the category flags: forget everything
+                       *except* the listed categories.
+  `-x`/`--exclude` <name>
+                       Preserve variable _name_ (keeping its current
+                       value) while forgetting the rest. Repeat to
+                       exclude several: `-x A -x B`. Given without any
+                       category flag, `forget -x` forgets everything but
+                       the named variable(s).
 
   Examples:
 
       `forget`                       reset the whole shell to launch state
       `forget -af`                   drop aliases and functions
+      `forget --except -f`           forget everything but functions
+      `forget -x PS1`                reset all but the `PS1` variable
+      `dump=$(genrc --vars)`         stash variables, wipe them, restore
+      `forget -x dump; eval "$dump"`
       `forget; source ~/.shedrc`     reload configuration from scratch
 
 ==============================================================================
