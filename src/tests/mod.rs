@@ -268,7 +268,7 @@ fn printf_percent_c_of_raw_byte() {
 fn declare_p_emits_ansi_c_for_non_utf8_value() {
   let guard = TestGuard::new();
   test_input("x=$(printf 'a\\377b'); declare -p x").unwrap();
-  assert_eq!(guard.read_output_bytes(), b"x=$'a\\xffb'\n");
+  assert_eq!(guard.read_output_bytes(), b"declare -- x=$'a\\xffb'\n");
 }
 
 #[test]
