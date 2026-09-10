@@ -552,7 +552,7 @@ macro_rules! shopt_mut {
 
 /// Assert that a const array of strings is sorted alphabetically at compile time.
 ///
-/// Used mainly to ensure the `BUILTIN_TABLE` is sorted, so that builtin lookup works.
+/// Used to ensure that lists of const string slices are sorted so that binary search can be used on them.
 #[macro_export]
 macro_rules! assert_sorted {
   ($arr:expr) => {

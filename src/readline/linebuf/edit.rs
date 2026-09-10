@@ -211,8 +211,8 @@ impl Diff {
     while s < smax && ag[ag.len() - 1 - s] == bg[bg.len() - 1 - s] {
       s += 1;
     }
-    let removed: VarStr = ag[p..ag.len() - s].concat().into();
-    let inserted: VarStr = bg[p..bg.len() - s].concat().into();
+    let removed = VarStr::from_slices(ag[p..ag.len() - s].iter());
+    let inserted = VarStr::from_slices(bg[p..bg.len() - s].iter());
     let mut row = 0;
     let mut col = 0;
     for g in &ag[..p] {

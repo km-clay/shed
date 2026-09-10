@@ -99,7 +99,7 @@ pub(crate) fn join_raw_args(args: Vec<(VarStr, Span)>) -> (VarStr, Span) {
 
 /// Join all of the word-split arguments into a single string
 /// Preserve the span too
-pub(crate) fn join_raw_arg_iter<'a>(
+pub(crate) fn join_raw_arg_iter(
   args: impl Iterator<Item = (impl AsRef<[u8]>, Span)>,
 ) -> (VarStr, Span) {
   args.fold((VarStr::default(), Span::default()), |mut acc, arg| {

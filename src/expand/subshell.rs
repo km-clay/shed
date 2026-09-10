@@ -83,7 +83,7 @@ pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
   }
 }
 
-pub(crate) fn is_internal(raw: &str) -> Option<ForkBehavior> {
+pub(crate) fn is_internal(raw: &[u8]) -> Option<ForkBehavior> {
   let mut parser = ParsedSrc::with_name("is_internal check".into(), raw.into());
 
   if parser.parse_src().is_err() {
@@ -100,7 +100,7 @@ pub(crate) fn is_internal(raw: &str) -> Option<ForkBehavior> {
 
   let has_forking_sub = readline::nested_subs(raw).into_iter().any(|sub| match sub {
     NestedSub::Proc => true,
-    NestedSub::Cmd(body) => is_internal(&body.to_str_lossy()).is_none(),
+    NestedSub::Cmd(body) => is_internal(body.as_bytes()).is_none(),
   });
   if has_forking_sub {
     return None;
@@ -109,7 +109,7 @@ pub(crate) fn is_internal(raw: &str) -> Option<ForkBehavior> {
   Some(behavior)
 }
 
-pub(crate) fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
+pub(crate) fn internal_cmd_sub(raw: &[u8]) -> ShResult<VarStr> {
   // create read and write out here
   let (read, write) = Sinks::sink_pipes();
 
@@ -142,9 +142,9 @@ pub(crate) fn internal_cmd_sub(raw: &str) -> ShResult<VarStr> {
 }
 
 /// Get the command output of a given command input as a String
-pub(crate) fn expand_cmd_sub(raw: &str) -> ShResult<VarStr> {
-  if raw.starts_with('(') && raw.ends_with(')') {
-    return arithmetic::expand_arithmetic_wrapped(raw.as_bytes());
+pub(crate) fn expand_cmd_sub(raw: &[u8]) -> ShResult<VarStr> {
+  if raw.starts_with(b"(") && raw.ends_with(b")") {
+    return arithmetic::expand_arithmetic_wrapped(raw);
   }
   // command subs add an xtrace layer
   let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
@@ -219,7 +219,7 @@ mod tests {
   #[test]
   fn cmd_sub_echo() {
     let _guard = TestGuard::new();
-    let result = expand_cmd_sub("echo hello").unwrap();
+    let result = expand_cmd_sub(b"echo hello").unwrap();
     assert_eq!(result, "hello");
   }
 
@@ -233,25 +233,25 @@ mod tests {
   #[test]
   fn is_internal_plain_builtin_body() {
     let _g = TestGuard::new();
-    assert!(is_internal("echo hi").is_some());
-    assert!(is_internal("printf '%s' x").is_some());
+    assert!(is_internal(b"echo hi").is_some());
+    assert!(is_internal(b"printf '%s' x").is_some());
   }
 
   #[test]
   fn is_internal_all_builtin_nesting_stays_inprocess() {
     let _g = TestGuard::new();
-    assert!(is_internal(r#"echo "$(echo 1)""#).is_some());
-    assert!(is_internal(r#"echo "$(( 2 + 3 ))""#).is_some());
-    assert!(is_internal(r#"echo "$( { echo y; } )""#).is_some());
-    assert!(is_internal(r#"echo "$(read v < /dev/null; echo $v)""#).is_some());
+    assert!(is_internal(br#"echo "$(echo 1)""#).is_some());
+    assert!(is_internal(br#"echo "$(( 2 + 3 ))""#).is_some());
+    assert!(is_internal(br#"echo "$( { echo y; } )""#).is_some());
+    assert!(is_internal(br#"echo "$(read v < /dev/null; echo $v)""#).is_some());
   }
 
   #[test]
   fn is_internal_nested_external_forks() {
     let _g = TestGuard::new();
-    assert!(is_internal(r#"echo "$(echo 1 | cat)""#).is_none());
-    assert!(is_internal(r#"echo "$(echo "$(echo 1 | cat)")""#).is_none());
-    assert!(is_internal(r#"echo "`echo 7 | cat`""#).is_none());
+    assert!(is_internal(br#"echo "$(echo 1 | cat)""#).is_none());
+    assert!(is_internal(br#"echo "$(echo "$(echo 1 | cat)")""#).is_none());
+    assert!(is_internal(br#"echo "`echo 7 | cat`""#).is_none());
   }
 
   #[test]
@@ -260,21 +260,21 @@ mod tests {
     // command present" heuristic would miss. Redirects, by contrast, apply
     // through the fd table and stay in-process.
     let _g = TestGuard::new();
-    assert!(is_internal(r#"echo "$( (echo x) )""#).is_none());
+    assert!(is_internal(br#"echo "$( (echo x) )""#).is_none());
   }
 
   #[test]
   fn is_internal_sub_in_param_exp_and_arith() {
     let _g = TestGuard::new();
-    assert!(is_internal(r#"echo "${foo:+$(echo 1 | cat)}""#).is_none());
-    assert!(is_internal(r#"echo "$(( $(echo 3 | cat) + 1 ))""#).is_none());
+    assert!(is_internal(br#"echo "${foo:+$(echo 1 | cat)}""#).is_none());
+    assert!(is_internal(br#"echo "$(( $(echo 3 | cat) + 1 ))""#).is_none());
   }
 
   #[test]
   fn is_internal_single_quoted_sub_is_literal() {
     // A `$(…)` inside single quotes is literal text, not a substitution.
     let _g = TestGuard::new();
-    assert!(is_internal(r"echo '$(echo nope | cat)'").is_some());
+    assert!(is_internal(br"echo '$(echo nope | cat)'").is_some());
   }
 
   #[test]
@@ -283,29 +283,29 @@ mod tests {
     // caller — the AST walk alone can't see into the body's word tokens. (#145)
     let _g = TestGuard::new();
     test_input(r#"f() { echo "$(echo 1 | cat)"; }"#).unwrap();
-    assert!(is_internal("f").is_none());
+    assert!(is_internal(b"f").is_none());
 
     test_input(r#"g() { echo "$( (echo x) )"; }"#).unwrap();
-    assert!(is_internal("g").is_none());
+    assert!(is_internal(b"g").is_none());
   }
 
   #[test]
   fn is_internal_all_builtin_function_stays_inprocess() {
     let _g = TestGuard::new();
     test_input(r#"h() { echo "$(echo 1)"; }"#).unwrap();
-    assert!(is_internal("h").is_some());
+    assert!(is_internal(b"h").is_some());
   }
 
   #[test]
   fn cmd_sub_trailing_newlines_stripped() {
     let _guard = TestGuard::new();
-    let result = expand_cmd_sub("printf 'hello\\n\\n'").unwrap();
+    let result = expand_cmd_sub(b"printf 'hello\\n\\n'").unwrap();
     assert_eq!(result, "hello");
   }
 
   #[test]
   fn cmd_sub_arithmetic() {
-    let result = expand_cmd_sub("(1+2)").unwrap();
+    let result = expand_cmd_sub(b"(1+2)").unwrap();
     assert_eq!(result, "3");
   }
 
@@ -313,14 +313,14 @@ mod tests {
   fn cmd_sub_only_final_newline_is_stripped() {
     // Internal newlines must survive; just the trailing run is removed.
     let _g = TestGuard::new();
-    let result = expand_cmd_sub("printf 'a\\nb\\nc\\n'").unwrap();
+    let result = expand_cmd_sub(b"printf 'a\\nb\\nc\\n'").unwrap();
     assert_eq!(result, "a\nb\nc");
   }
 
   #[test]
   fn cmd_sub_empty_output() {
     let _g = TestGuard::new();
-    let result = expand_cmd_sub("true").unwrap();
+    let result = expand_cmd_sub(b"true").unwrap();
     assert_eq!(result, "");
   }
 
@@ -343,7 +343,7 @@ mod tests {
 
     let tmp = tempfile::TempDir::new().unwrap();
     // `cd` is builtin-only, so this takes the in-process path (internal_cmd_sub).
-    let _ = expand_cmd_sub(&format!("cd {}", canon(tmp.path()).display()));
+    let _ = expand_cmd_sub(format!("cd {}", canon(tmp.path()).display()).as_bytes());
 
     let after = std::env::current_dir().unwrap();
     // Restore before asserting so a regression can't leak into sibling tests.
@@ -361,7 +361,7 @@ mod tests {
     // way out (via exit_shed) and the output must land in the captured sub — not
     // leak to the parent. Exercises trap-forces-fork + setup_child + exit_shed.
     let _g = TestGuard::new();
-    let result = expand_cmd_sub("trap 'echo trapped' EXIT; true").unwrap();
+    let result = expand_cmd_sub(b"trap 'echo trapped' EXIT; true").unwrap();
     assert_eq!(result, "trapped");
   }
 
@@ -370,14 +370,14 @@ mod tests {
     // `(exit N)` would hit the arithmetic fast-path; use a bare
     // command that genuinely exits with the desired status.
     let _g = TestGuard::new();
-    expand_cmd_sub("false").unwrap();
+    expand_cmd_sub(b"false").unwrap();
     assert_eq!(crate::state::Shed::get_status(), 1);
   }
 
   #[test]
   fn cmd_sub_zero_status_on_success() {
     let _g = TestGuard::new();
-    expand_cmd_sub("true").unwrap();
+    expand_cmd_sub(b"true").unwrap();
     assert_eq!(crate::state::Shed::get_status(), 0);
   }
 
@@ -386,7 +386,7 @@ mod tests {
     // The outer-parens-check fast-path routes "(N+M)" to the arithmetic
     // expander, not to fork+exec. Verify by giving an arithmetic input
     // that wouldn't be valid as a shell command.
-    let result = expand_cmd_sub("(10*5)").unwrap();
+    let result = expand_cmd_sub(b"(10*5)").unwrap();
     assert_eq!(result, "50");
   }
 
@@ -399,7 +399,7 @@ mod tests {
     let _g = TestGuard::new();
     // 2^18 = 262144 chars — comfortably above a typical 64KB pipe buf.
     let result = expand_cmd_sub(
-      "s=x; for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do s=$s$s; done; echo \"$s\"",
+      b"s=x; for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do s=$s$s; done; echo \"$s\"",
     )
     .unwrap();
     assert_eq!(result.len(), 1 << 18);

@@ -1,5 +1,6 @@
+use std::os::unix::ffi::OsStrExt;
+
 use nix::unistd::{Uid, User};
-use smol_str::format_smolstr;
 
 use crate::{
   eval::lex,
@@ -7,7 +8,7 @@ use crate::{
   state::vars::VarStr,
   try_var,
   util::{error::ShResult, strops::QuoteState},
-  var,
+  var, varstr,
 };
 
 use super::{
@@ -55,15 +56,15 @@ pub(crate) fn expand_raw_inner(
         (var!("HOME"), true)
       } else if let Ok(Some(user)) = User::from_name(&username) {
         // username expansion like '~user'
-        (user.dir.to_string_lossy().as_ref().into(), true)
+        (user.dir.as_os_str().as_bytes().into(), true)
       } else if let Ok(id) = username.parse::<u32>()
         && let Ok(Some(user)) = User::from_uid(Uid::from_raw(id))
       {
         // uid expansion like '~1000'
         // shed only feature btw B)
-        (user.dir.to_string_lossy().as_ref().into(), true)
+        (user.dir.as_os_str().as_bytes().into(), true)
       } else {
-        (format_smolstr!("~{username}").as_str().into(), false)
+        (varstr!("~{username}"), false)
       };
 
       if expanded {
@@ -149,7 +150,7 @@ pub(crate) fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> Sh
         return Ok(out);
       }
       if allow_side_effects {
-        let expanded = subshell::expand_cmd_sub(&String::from_utf8_lossy(&subsh_body))?;
+        let expanded = subshell::expand_cmd_sub(&subsh_body)?;
         return Ok(SegStream::from_bytes(expanded.as_bytes()));
       }
       return Ok(SegStream::from_bytes(&subsh_body));

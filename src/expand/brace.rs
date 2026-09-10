@@ -112,7 +112,7 @@ fn expand_one_brace(word: &[u8]) -> Vec<VarStr> {
   };
 
   // Split the inner content on top-level commas, or expand as range
-  let parts = split_brace_inner(&inner.to_str_lossy());
+  let parts = split_brace_inner(&inner);
 
   // If we got back a single part with no expansion, treat as literal
   if parts.len() == 1 && inner == parts[0] {
@@ -129,7 +129,7 @@ fn expand_one_brace(word: &[u8]) -> Vec<VarStr> {
 
   parts
     .into_iter()
-    .map(|p| concat_parts(&prefix, &p.into(), &suffix))
+    .map(|p| VarStr::from_slices([&prefix, &p, &suffix].iter()))
     .collect()
 }
 
@@ -210,43 +210,43 @@ fn get_brace_parts(word: &[u8]) -> Option<(VarStr, VarStr, VarStr)> {
 /// Split brace inner content on top-level commas.
 /// "a,b,c" -> ["a", "b", "c"]
 /// "a,{b,c},d" -> ["a", "{b,c}", "d"]
-fn split_brace_inner(inner: &str) -> Vec<String> {
+fn split_brace_inner(inner: &[u8]) -> Vec<VarStr> {
   let mut parts = Vec::new();
-  let mut current = String::new();
-  let mut chars = inner.chars().peekable();
+  let mut current = util::scratch_buf();
+  let mut bytes = inner.iter().copied().peekable();
   let mut depth = 0;
   let mut qt_state = QuoteState::default();
 
-  match_loop!(chars.next() => ch, {
-    '\\' => {
-      current.push(ch);
-      if let Some(next) = chars.next() {
+  match_loop!(bytes.next() => byte, {
+    b'\\' => {
+      current.push(byte);
+      if let Some(next) = bytes.next() {
         current.push(next);
       }
     }
-    '\'' => {
+    b'\'' => {
       qt_state.toggle_single();
-      current.push(ch);
+      current.push(byte);
     }
-    '"' => {
+    b'"' => {
       qt_state.toggle_double();
-      current.push(ch);
+      current.push(byte);
     }
-    '{' if qt_state.outside() => {
+    b'{' if qt_state.outside() => {
       depth += 1;
-      current.push(ch);
+      current.push(byte);
     }
-    '}' if qt_state.outside() => {
+    b'}' if qt_state.outside() => {
       depth -= 1;
-      current.push(ch);
+      current.push(byte);
     }
-    ',' if qt_state.outside() && depth == 0 => {
-      parts.push(std::mem::take(&mut current));
+    b',' if qt_state.outside() && depth == 0 => {
+      parts.push(std::mem::take(&mut current).into());
     }
-    _ => current.push(ch),
+    _ => current.push(byte),
   });
 
-  parts.push(current);
+  parts.push(current.into());
   parts
 }
 
@@ -402,22 +402,22 @@ mod tests {
 
   #[test]
   fn split_inner_simple() {
-    assert_eq!(split_brace_inner("a,b,c"), vec!["a", "b", "c"]);
+    assert_eq!(split_brace_inner(b"a,b,c"), vec!["a", "b", "c"]);
   }
 
   #[test]
   fn split_inner_nested_braces() {
-    assert_eq!(split_brace_inner("a,{b,c},d"), vec!["a", "{b,c}", "d"]);
+    assert_eq!(split_brace_inner(b"a,{b,c},d"), vec!["a", "{b,c}", "d"]);
   }
 
   #[test]
   fn split_inner_no_comma() {
-    assert_eq!(split_brace_inner("abc"), vec!["abc"]);
+    assert_eq!(split_brace_inner(b"abc"), vec!["abc"]);
   }
 
   #[test]
   fn split_inner_empty_parts() {
-    assert_eq!(split_brace_inner(",a,"), vec!["", "a", ""]);
+    assert_eq!(split_brace_inner(b",a,"), vec!["", "a", ""]);
   }
 
   // ===================== try_expand_range / expand_range =====================

@@ -25,6 +25,7 @@ use std::{
 };
 
 use bitflags::bitflags;
+use bstr::ByteSlice;
 
 use crate::{
   builtin::BUILTIN_NAMES,
@@ -76,7 +77,7 @@ pub(crate) enum NestedSub {
 
 /// Collect every command, backtick, or process
 /// substitution nested inside a word of `input`
-pub(crate) fn nested_subs(input: &str) -> Vec<NestedSub> {
+pub(crate) fn nested_subs(input: &[u8]) -> Vec<NestedSub> {
   fn collect(tk: &CtxTk, out: &mut Vec<NestedSub>) {
     match tk.class() {
       CtxTkRule::ProcSubIn | CtxTkRule::ProcSubOut => {
@@ -109,7 +110,7 @@ pub(crate) fn nested_subs(input: &str) -> Vec<NestedSub> {
   }
 
   let mut out = vec![];
-  for tk in get_context_tokens(input) {
+  for tk in get_context_tokens(&input.to_str_lossy()) {
     collect(&tk, &mut out);
   }
   out

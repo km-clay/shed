@@ -392,7 +392,7 @@ pub(crate) fn node_fork_behavior(tree: &Ast, node_id: NodeId) -> Option<ForkBeha
         };
 
         let body_src = logic.span_for(root).slice();
-        let behavior = subshell::is_internal(&body_src.to_str_lossy());
+        let behavior = subshell::is_internal(body_src.as_bytes());
         let verdict = match behavior {
           Some(b) => IsInternal::Yes(b),
           None => IsInternal::No,

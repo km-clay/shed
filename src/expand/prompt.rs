@@ -313,7 +313,7 @@ fn func_expand(input: &str, out: &mut String) -> ShResult<()> {
   shopt_mut!(set.errexit = false);
   shopt_mut!(set.noexec = false);
   shopt_mut!(set.xtrace = false);
-  let res = subshell::expand_cmd_sub(input);
+  let res = subshell::expand_cmd_sub(input.as_bytes());
   shopt_mut!(set.errexit = errexit);
   shopt_mut!(set.noexec = noexec);
   shopt_mut!(set.xtrace = xtrace);

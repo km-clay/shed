@@ -421,8 +421,8 @@ impl Dispatcher {
       Self::exec_arith(tree, node)
     } else if classify::can_autocd(cmd) {
       // autocd
-      let cd_call = [b"cd ", cmd.span.slice().as_bytes()].concat();
-      exec_input(cd_call.into(), Some(self.source_name.clone()))
+      let cd_call = VarStr::from_slice(b"cd ").chain(cmd.span.slice());
+      exec_input(cd_call, Some(self.source_name.clone()))
     } else {
       // normal external
       self.exec_cmd(tree, node)

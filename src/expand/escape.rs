@@ -114,7 +114,8 @@ fn unescape_with(stream: SegStream, flags: ExpandFlags) -> SegStream {
   {
     let wb = try_var!("COMP_WORDBREAKS").unwrap_or("\"'><=;|&(: ".into());
     let ifs = try_var!("IFS").unwrap_or(" \t\n".into());
-    (Some([wb.as_bytes(), ifs.as_bytes()].concat()), false, true)
+
+    (Some(wb.chain(ifs)), false, true)
   } else {
     (None, false, false)
   };

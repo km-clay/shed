@@ -137,7 +137,7 @@ impl KeyEvent {
     }
 
     if needs_angle_bracket {
-      [b"<", seq.as_slice(), b">"].concat().into()
+      VarStr::from_slice(b"<").chain(seq.as_slice()).chain(b">")
     } else {
       seq.into()
     }

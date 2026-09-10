@@ -1,3 +1,5 @@
+use bstr::ByteSlice;
+
 use crate::{
   eval::lex::TkFlags,
   expand::{
@@ -391,38 +393,39 @@ pub(crate) fn perform_param_expansion(
     match expansion {
       ParamExp::ToUpperAll => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
-        let new = value.to_uppercase();
-        Ok(new.into())
-      }
-      ParamExp::ToUpperFirst => {
-        let value = Shed::vars(get);
-        let value = value.to_str_lossy();
-        let mut chars = value.chars();
-        let first = chars
-          .next()
-          .map(|c| c.to_uppercase().to_string())
-          .unwrap_or_default();
-
-        let new = first + chars.as_str();
+        let new = value.to_ascii_uppercase();
         Ok(new.into())
       }
       ParamExp::ToLowerAll => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
-        let new = value.to_lowercase();
+        let new = value.to_ascii_lowercase();
         Ok(new.into())
+      }
+      ParamExp::ToUpperFirst => {
+        let value = Shed::vars(get);
+        if value.is_empty() {
+          Ok(value.into())
+        } else {
+          let first = value.try_slice(..1).unwrap();
+          let rest = value.try_slice(1..).unwrap();
+
+          let new = first.to_ascii_uppercase().chain(rest);
+
+          Ok(new.into())
+        }
       }
       ParamExp::ToLowerFirst => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
-        let mut chars = value.chars();
-        let first = chars
-          .next()
-          .map(|c| c.to_lowercase().to_string())
-          .unwrap_or_default();
-        let new = first + chars.as_str();
-        Ok(new.into())
+        if value.is_empty() {
+          Ok(value.into())
+        } else {
+          let first = value.try_slice(..1).unwrap();
+          let rest = value.try_slice(1..).unwrap();
+
+          let new = first.to_ascii_lowercase().chain(rest);
+
+          Ok(new.into())
+        }
       }
       ParamExp::DefaultUnsetOrNull(default) => {
         match Shed::vars(try_get).filter(|v| !v.is_empty()) {
@@ -502,19 +505,27 @@ pub(crate) fn perform_param_expansion(
       }
       ParamExp::SliceOpen(pos) => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
-        let chars: Vec<char> = value.chars().collect();
-        let n = chars.len() as i64;
+        let bytes = value.as_bytes();
+        let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();
+        let n = starts.len() as i64;
+
         let start = resolve_offset(pos, n) as usize;
-        let substr: String = chars[start..].iter().collect();
-        Ok(substr.into())
+        let start_byte = starts.get(start).copied().unwrap_or(bytes.len());
+
+        value
+          .try_slice(start_byte..bytes.len())
+          .map(SegStream::from)
+          .ok_or_else(|| sherr!(ExecFail, "substring expression < 0"))
       }
       ParamExp::SliceClosed(pos, len) => {
         let value = Shed::vars(get);
-        let value = value.to_str_lossy();
-        let chars: Vec<char> = value.chars().collect();
-        let n = chars.len() as i64;
+        let bytes = value.as_bytes();
+        let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();
+        let n = starts.len() as i64;
+
         let start = resolve_offset(pos, n);
+        let start_byte = starts.get(start as usize).copied().unwrap_or(bytes.len());
+
         // A negative length is an offset from the end of the string; a positive
         // one counts forward from `start`. bash errors if the end lands before
         // the start ("substring expression < 0").
@@ -523,11 +534,15 @@ pub(crate) fn perform_param_expansion(
         } else {
           (start + len).min(n)
         };
+        let end_byte = starts.get(end as usize).copied().unwrap_or(bytes.len());
         if end < start {
           return Err(sherr!(ExecFail, "substring expression < 0"));
         }
-        let substr: String = chars[start as usize..end as usize].iter().collect();
-        Ok(substr.into())
+
+        value
+          .try_slice(start_byte..end_byte)
+          .map(SegStream::from)
+          .ok_or_else(|| sherr!(ExecFail, "substring expression < 0"))
       }
       ParamExp::RemShortestPrefix(prefix) => {
         let value = Shed::vars(get);
