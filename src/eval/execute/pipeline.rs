@@ -48,12 +48,10 @@ impl super::Dispatcher {
       unreachable!()
     };
 
-    let cmds: Vec<NodeId> = tree[*cmds].to_vec();
+    let cmds: &[NodeId] = &tree[*cmds];
 
     let is_bg = pipeline_flags.contains(NdFlags::BACKGROUND);
-    let interactive = Shed::term(Terminal::interactive);
     let num_cmds = cmds.len();
-    let mut tty_attached = false;
 
     // closure that tells us if a pipeline segment should fork
     let should_fork_segment =
@@ -63,6 +61,9 @@ impl super::Dispatcher {
       // it's a single command. skip the I/O setup
       return self.exec_one(tree, cmds[0], should_fork_segment, pipeline_flags);
     }
+
+    let interactive = Shed::term(Terminal::interactive);
+    let mut tty_attached = false;
 
     let _underscore_guard = (num_cmds > 1).then(super::suppress_underscore_guard);
 

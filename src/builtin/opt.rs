@@ -198,9 +198,8 @@ fn parse_opts_inner(
   for tk in tokens {
     let tk = tk.clone();
     let span = tk.span;
-    let expanded = tk.expand()?;
-    for word in expanded.get_words().iter() {
-      expanded_words.push((word.clone(), span));
+    for word in tk.expand_to_words()? {
+      expanded_words.push((word, span));
     }
   }
 

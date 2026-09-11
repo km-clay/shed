@@ -13,6 +13,8 @@ pub(crate) mod var;
 
 use std::{convert::Into, sync::Arc};
 
+use smallvec::{SmallVec, smallvec};
+
 use crate::{
   eval::lex::{Tk, TkFlags, TkRule},
   match_loop, shopt,
@@ -25,6 +27,10 @@ use crate::{
 
 use stream::Quote;
 
+/// Expanded words. Inline for the common single-word case, spills to the heap
+/// only when a token splits or globs into multiple words.
+pub(crate) type Words = SmallVec<[VarStr; 1]>;
+
 pub(crate) const PARAMETERS: [char; 8] = ['-', '@', '*', '#', '$', '?', '!', '0'];
 
 impl Tk {
@@ -33,55 +39,51 @@ impl Tk {
     if let TkRule::Expanded { .. } = self.class {
       return Ok(self.clone());
     }
+
+    let class = TkRule::Expanded {
+      exp: self.expand_to_words()?.into_vec().into(),
+    };
+    Ok(Self {
+      class,
+      span: self.span,
+      flags: self.flags,
+    })
+  }
+  pub(crate) fn expand_to_words(&self) -> ShResult<Words> {
+    if let TkRule::Expanded { exp } = &self.class {
+      return Ok(exp.iter().cloned().collect());
+    }
     if self.is_literal() {
-      let raw = self.slice();
-      let class = TkRule::Expanded { exp: [raw].into() };
-      return Ok(Self {
-        class,
-        ..self.clone()
-      });
+      return Ok(smallvec![self.slice()]);
+    }
+    let span = self.span;
+    Expander::new(self).expand().promote_err(span)
+  }
+  pub(crate) fn expand_to_words_pure(&self) -> ShResult<VarStr> {
+    if let TkRule::Expanded { exp } = &self.class {
+      return Ok(exp.first().cloned().unwrap_or_default());
+    }
+    if self.is_literal() {
+      return Ok(self.slice());
     }
 
-    let flags = self.flags;
-    let span = self.span;
-    let exp = Expander::new(self).expand().promote_err(span)?;
-    let class = TkRule::Expanded { exp: exp.into() };
-    Ok(Self { class, span, flags })
-  }
-  pub(crate) fn expand_to_words(&self) -> ShResult<Arc<[VarStr]>> {
-    if let TkRule::Expanded { exp } = &self.class {
-      return Ok(exp.clone());
-    }
-    if self.is_literal() {
-      return Ok([self.slice()].into());
-    }
     let span = self.span;
     Expander::new(self)
-      .expand()
-      .map(Into::into)
+      .expand_no_side_effects()
       .promote_err(span)
   }
   pub(crate) fn expand_no_side_effects(&self) -> ShResult<Self> {
     if let TkRule::Expanded { .. } = self.class {
       return Ok(self.clone());
     }
-    if self.is_literal() {
-      let raw = self.slice();
-      let class = TkRule::Expanded { exp: [raw].into() };
-      return Ok(Self {
-        class,
-        ..self.clone()
-      });
-    }
-
-    let flags = self.flags;
-    let span = self.span;
-    let exp: VarStr = Expander::new(self)
-      .expand_no_side_effects()
-      .promote_err(span)?;
-
-    let class = TkRule::Expanded { exp: [exp].into() };
-    Ok(Self { class, span, flags })
+    let class = TkRule::Expanded {
+      exp: [self.expand_to_words_pure()?].into(),
+    };
+    Ok(Self {
+      class,
+      span: self.span,
+      flags: self.flags,
+    })
   }
   pub(crate) fn expand_no_split(&self) -> ShResult<VarStr> {
     if let TkRule::Expanded { exp } = &self.class {
@@ -170,12 +172,12 @@ impl Expander {
       ..self
     }
   }
-  pub(crate) fn expand(self) -> ShResult<Vec<VarStr>> {
+  pub(crate) fn expand(self) -> ShResult<Words> {
     let noglob = self.noglob || shopt!(set.noglob);
     if let Some(b) = self.raw.as_plain_bytes() {
       // single literal byte string, so no splitting is needed
       if noglob || !glob::might_be_glob(b) {
-        return Ok(vec![b.into()]); // no globs either, just return it
+        return Ok(smallvec![b.into()]); // no globs either, just return it
       }
       let exp = glob::expand_glob(b).into_iter().map(VarStr::from).collect();
       return Ok(exp);
@@ -194,7 +196,7 @@ impl Expander {
       return Ok(words.into_iter().map(|w| w.into_bytes().into()).collect());
     }
 
-    let mut glob_words: Vec<VarStr> = Vec::with_capacity(words.len());
+    let mut glob_words: Words = SmallVec::with_capacity(words.len());
 
     for word in words {
       if !word.has_glob_meta() {

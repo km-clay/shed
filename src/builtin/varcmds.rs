@@ -90,9 +90,8 @@ pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span
       }
     }
 
-    let expanded = tk.expand_to_words()?;
-    for exp in expanded.iter() {
-      out.push((exp.clone(), span));
+    for exp in tk.expand_to_words()? {
+      out.push((exp, span));
     }
   }
   Ok(out)

@@ -730,12 +730,9 @@ impl Builtin for BuiltinBuiltin {
 fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
   let mut out = Vec::with_capacity(argv.len());
   for tk in argv {
-    let words = tk.expand_to_words()?;
-    for word in words.iter() {
+    for word in tk.expand_to_words()? {
       out.push(Tk {
-        class: TkRule::Expanded {
-          exp: [word.clone()].into(),
-        },
+        class: TkRule::Expanded { exp: [word].into() },
         ..tk.clone()
       });
     }

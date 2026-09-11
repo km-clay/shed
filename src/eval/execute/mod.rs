@@ -79,8 +79,8 @@ pub(crate) fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(Va
       let word = arg.expand_no_split()?;
       out.push((word, span));
     } else {
-      for exp in arg.expand_to_words()?.iter() {
-        out.push((exp.clone(), span));
+      for exp in arg.expand_to_words()? {
+        out.push((exp, span));
       }
     }
   }
@@ -396,7 +396,7 @@ impl Dispatcher {
     // so that a command smuggled inside of a variable is routed correctly,
     // instead of only hitting the exec_cmd path
     let words = tree[*cmd].clone().expand_to_words()?;
-    let Some(cmd_word) = words.iter().next().cloned() else {
+    let Some(cmd_word) = words.first().cloned() else {
       if let NdRule::Command {
         assignments,
         argv: _,

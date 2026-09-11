@@ -22,10 +22,7 @@ use super::{
   },
 };
 pub(crate) fn in_cd_path(name: &Tk) -> bool {
-  let Ok(expanded) = name.expand_no_side_effects() else {
-    return false;
-  };
-  let Some(name) = expanded.get_first_word() else {
+  let Ok(name) = name.expand_to_words_pure() else {
     return false;
   };
   if Path::new(&name).is_dir() {
@@ -44,10 +41,7 @@ pub(crate) fn in_cd_path(name: &Tk) -> bool {
 }
 
 pub(crate) fn is_in_path(name: &Tk) -> bool {
-  let Ok(expanded) = name.expand_no_side_effects() else {
-    return false;
-  };
-  let Some(name) = expanded.get_first_word() else {
+  let Ok(name) = name.expand_to_words_pure() else {
     return false;
   };
   if name.starts_with_str("./") || name.starts_with_str("../") || name.starts_with_str("/") {

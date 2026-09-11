@@ -507,7 +507,7 @@ impl super::Dispatcher {
       let to_expanded_strings = |tks: &[Tk]| -> ShResult<Vec<VarStr>> {
         let mut out = vec![];
         for tk in tks {
-          out.extend(tk.expand_to_words()?.iter().cloned());
+          out.extend(tk.expand_to_words()?);
         }
 
         Ok(out)
