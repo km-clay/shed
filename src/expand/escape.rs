@@ -868,7 +868,7 @@ mod tests {
   fn unescape_str(s: &str) -> String {
     use crate::expand::stream::StreamSeg;
     let mut out = String::new();
-    for seg in super::unescape_str(s.as_bytes()).stream() {
+    for seg in &super::unescape_str(s.as_bytes()).stream() {
       match seg {
         StreamSeg::Bytes(b) => out.push_str(&String::from_utf8_lossy(b)),
         StreamSeg::Mark(m) => out.push(marker_char(*m)),

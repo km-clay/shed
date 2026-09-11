@@ -260,7 +260,7 @@ impl Expander {
   /// Resolves escapes and the special `$@`/`$*` cases, and performs IFS field
   /// splitting, but only inside `EXPAND_START`/`EXPAND_END` runs.
   pub(crate) fn split_words(raw: &stream::SegStream) -> Vec<stream::SegStream> {
-    use stream::{Marker, SegStream, StreamSeg, Unit};
+    use stream::{Marker, SegStream, Unit};
     let mut words: Vec<SegStream> = vec![];
     let mut cursor = raw.cursor();
     let mut cur_word = SegStream::new();
@@ -367,13 +367,9 @@ impl Expander {
 
     // Drop a lone NULL_EXPAND word (`"$@"`/`"$*"` with no positional args) and
     // strip the marker from any surviving fields.
-    words.retain(|w| !matches!(w.stream(), [StreamSeg::Mark(Marker::NullExpand)]));
+    words.retain(|w| w.sole_marker() != Some(Marker::NullExpand));
     for w in &mut words {
-      if w
-        .stream()
-        .iter()
-        .any(|s| matches!(s, StreamSeg::Mark(Marker::NullExpand)))
-      {
+      if w.contains_marker(Marker::NullExpand) {
         *w = w.without_marker(Marker::NullExpand);
       }
     }
@@ -430,7 +426,7 @@ mod tests {
   fn render(seg: &stream::SegStream) -> String {
     use stream::{Marker, ProcSubKind, Quote, StreamSeg};
     let mut out = String::new();
-    for s in seg.stream() {
+    for s in &seg.stream() {
       match s {
         StreamSeg::Bytes(b) => out.push_str(&String::from_utf8_lossy(b)),
         StreamSeg::Mark(m) => out.push(match m {
@@ -477,7 +473,7 @@ mod tests {
       flags: TkFlags::empty(),
     };
     let words = Expander::split_words(&exp.raw);
-    assert_eq!(words, vec!["hello", "world", "foo"]);
+    assert_eq!(words.clone(), vec!["hello", "world", "foo"]);
   }
 
   #[test]
@@ -494,7 +490,7 @@ mod tests {
       flags: TkFlags::empty(),
     };
     let words = Expander::split_words(&exp.raw);
-    assert_eq!(words, vec!["a", "b", "c"]);
+    assert_eq!(words.clone(), vec!["a", "b", "c"]);
   }
 
   #[test]
@@ -517,7 +513,7 @@ mod tests {
       flags: TkFlags::empty(),
     };
     let words = Expander::split_words(&exp.raw);
-    assert_eq!(words, vec!["hello world"]);
+    assert_eq!(words.clone(), vec!["hello world"]);
   }
 
   #[test]
@@ -533,7 +529,7 @@ mod tests {
       flags: TkFlags::empty(),
     };
     let words = Expander::split_words(&exp.raw);
-    assert_eq!(words, vec!["hello world"]);
+    assert_eq!(words.clone(), vec!["hello world"]);
   }
 
   // ===================== Escaped Word Splitting =====================
@@ -551,7 +547,7 @@ mod tests {
       flags: TkFlags::empty(),
     };
     let words = exp.expand().unwrap();
-    assert_eq!(words, vec!["hello world"]);
+    assert_eq!(words.to_vec(), vec!["hello world"]);
   }
 
   #[test]
@@ -567,7 +563,7 @@ mod tests {
       flags: TkFlags::empty(),
     };
     let words = exp.expand().unwrap();
-    assert_eq!(words, vec!["hello\tworld"]);
+    assert_eq!(words.to_vec(), vec!["hello\tworld"]);
   }
 
   #[test]
@@ -587,7 +583,7 @@ mod tests {
     // escaped `\:` nor the bare `:` splits — both are literal colons and the
     // word stays whole (matches bash: `IFS=:; echo a\:b:c` -> `a:b:c`).
     let words = exp.expand().unwrap();
-    assert_eq!(words, vec!["a:b:c"]);
+    assert_eq!(words.to_vec(), vec!["a:b:c"]);
   }
 
   // ===================== Array Indexing (TestGuard) =====================

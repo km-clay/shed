@@ -5,7 +5,7 @@ use nix::unistd::{Uid, User};
 use crate::{
   eval::lex,
   match_loop, sherr, shopt,
-  state::vars::VarStr,
+  state::{Shed, vars::VarStr},
   try_var,
   util::{error::ShResult, strops::QuoteState},
   var, varstr,
@@ -201,15 +201,15 @@ pub(crate) fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> Sh
     }
     Unit::Byte(b) if var_name.is_empty() && (PARAMETERS.contains(&(b as char)) || b.is_ascii_digit()) => {
       stream.bump();
+
+      if b == b'@' {
+        let fields = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect::<Vec<_>>());
+        return Ok(positional_fields_seg(&fields));
+      }
+
       let mut buf = [0u8; 4];
       let parameter = (b as char).encode_utf8(&mut buf);
       let val = var!(parameter);
-
-      if b == b'@' && val.is_empty() {
-        let mut out = SegStream::new();
-        out.push_marker(Marker::NullExpand);
-        return Ok(out);
-      }
 
       return Ok(val.into());
     }
@@ -229,6 +229,21 @@ pub(crate) fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> Sh
   } else {
     lookup_var(&var_name)
   }
+}
+
+pub(crate) fn positional_fields_seg(fields: &[VarStr]) -> SegStream {
+  let mut out = SegStream::new();
+  if fields.is_empty() {
+    out.push_marker(Marker::NullExpand);
+    return out;
+  }
+  for (i, field) in fields.iter().enumerate() {
+    if i > 0 {
+      out.push_marker(Marker::ArgSep);
+    }
+    out.push_bytes(field.as_bytes());
+  }
+  out
 }
 
 /// Look up a bare `$name` and return its value, honoring `set -u` (nounset).
@@ -274,7 +289,7 @@ mod tests {
     super::expand_raw(cur).map(|seg| {
       use crate::expand::stream::StreamSeg;
       let mut out = String::new();
-      for s in seg.stream() {
+      for s in &seg.stream() {
         match s {
           StreamSeg::Bytes(b) => out.push_str(&String::from_utf8_lossy(b)),
           StreamSeg::Mark(m) => out.push(marker_char(*m)),
@@ -500,7 +515,7 @@ mod tests {
     if let Some(prev) = saved {
       let _ = std::env::set_current_dir(prev);
     }
-    result
+    result.to_vec()
   }
 
   /// Build a tempdir populated with the given filenames.

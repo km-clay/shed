@@ -4,7 +4,7 @@ use crate::{
   eval::lex::TkFlags,
   expand::{
     Expander,
-    stream::{Marker, SegStream, Unit},
+    stream::{SegStream, Unit},
     var,
   },
   match_loop, sherr, shopt,
@@ -256,6 +256,15 @@ pub(crate) fn perform_param_expansion(
   body: &SegStream,
   allow_side_effects: bool,
 ) -> ShResult<SegStream> {
+  perform_param_expansion_inner(body, allow_side_effects).map(SegStream::reinterpret_sentinels)
+}
+
+fn perform_param_expansion_inner(
+  body: &SegStream,
+  allow_side_effects: bool,
+) -> ShResult<SegStream> {
+  // FIXME: this is probably the single hideous function in this entire codebase
+
   // Resolve the array subscript first (`${arr[$i]}`), then parse the name /
   // operator against a lossy string view; the operand (the suffix after the
   // operator) keeps its markers and is sliced back off `body` once we know the
@@ -715,8 +724,13 @@ pub(crate) fn perform_param_expansion(
           } else {
             &inner
           };
-          let joined = inner.contains("[*]");
-          Shed::vars(|v| v.get_array_keys(var_name, joined)).map(Into::into)
+          if inner.contains("[*]") {
+            Shed::vars(|v| v.get_array_keys(var_name, true)).map(Into::into)
+          } else if let Some(fields) = Shed::vars(|v| v.array_keys_fields(var_name)) {
+            Ok(var::positional_fields_seg(&fields))
+          } else {
+            Shed::vars(|v| v.get_array_keys(var_name, false)).map(Into::into)
+          }
         } else {
           let inner_name = VarName::parse(&inner, allow_side_effects)?;
           let value = Shed::vars(|v| v.resolve_var(&inner_name).unwrap_or_default());
@@ -725,13 +739,14 @@ pub(crate) fn perform_param_expansion(
       }
     }
   } else {
-    let var = Shed::vars(try_get);
-    // "${@}" must expand to zero fields
-    if *var_name == *b"@" && var.as_deref().unwrap_or_default().is_empty() {
-      let mut out = SegStream::new();
-      out.push_marker(Marker::NullExpand);
-      return Ok(out);
+    if *var_name == *b"@" {
+      let fields = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect::<Vec<_>>());
+      return Ok(var::positional_fields_seg(&fields));
     }
+    if let Some(fields) = Shed::vars(|v| v.split_fields(&parsed)) {
+      return Ok(var::positional_fields_seg(&fields));
+    }
+    let var = Shed::vars(try_get);
     if var.is_none() && shopt!(set.nounset) {
       return Err(sherr!(NotFound, "Variable '{}' is not set", parsed.name()));
     }

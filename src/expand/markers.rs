@@ -5,13 +5,9 @@ pub(crate) fn is_marker(c: Marker) -> bool {
   ('\u{fdd0}'..='\u{fdef}').contains(&c)
 }
 
-/// Value-layer separator joining `$@`/`${arr[@]}` elements so each becomes its
-/// own field after word splitting. Arrays and positional params store their
-/// joined value as a `VarStr`, so the separator lives as this byte sequence and
-/// is translated to `Marker::ArgSep` when the value enters a `SegStream`.
+/// Used to separate args in `$@` expansions
 pub(crate) const ARG_SEP: Marker = '\u{fdd6}';
-/// Value-layer null-field marker for empty `"$@"`/`"${arr[@]}"` (zero fields).
-/// Translated to `Marker::NullExpand` at the `SegStream` boundary.
+/// Used to represent an empty `$@` expansion
 pub(crate) const NULL_EXPAND: Marker = '\u{fdd5}';
 
 // Display markers (help/syntax highlighting and format placeholders). These

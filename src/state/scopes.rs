@@ -525,6 +525,23 @@ impl ScopeStack {
     Ok(VarStr::default())
   }
 
+  /// The index/key fields of `${!arr[@]}` for a split expansion. `None` when
+  /// `var_name` names no existing array.
+  pub(crate) fn array_keys_fields(&self, var_name: &str) -> Option<Vec<VarStr>> {
+    for scope in self.scopes_rev() {
+      if scope.var_exists(var_name)
+        && let Some(var) = scope.vars().get(var_name)
+      {
+        return Some(match var.kind() {
+          VarKind::Arr(items) => (0..items.len()).map(|i| i.to_string().into()).collect(),
+          VarKind::AssocArr(items) => items.iter().map(|(k, _)| k.clone()).collect(),
+          _ => return None,
+        });
+      }
+    }
+    None
+  }
+
   pub(crate) fn get_array_keys(&self, var_name: &str, joined: bool) -> ShResult<VarStr> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name)
@@ -652,6 +669,31 @@ impl ScopeStack {
     } else {
       self.try_get_var(var.name())
     }
+  }
+
+  /// The individual fields of an `[@]` split expansion, honoring an array
+  /// slice. `None` when `var` is not a split form or names no existing array.
+  pub(crate) fn split_fields(&self, var: &VarName) -> Option<Vec<VarStr>> {
+    if !matches!(var.index(), Some(ArrIndex::AllSplit)) {
+      return None;
+    }
+    for scope in self.scopes_rev() {
+      if scope.var_exists(var.name())
+        && let Some(v) = scope.vars().get(var.name())
+      {
+        let start = var.slice_start().unwrap_or(0);
+        return Some(match v.kind() {
+          VarKind::Arr(items) => {
+            let take = var.slice_len().unwrap_or(items.len().saturating_sub(start));
+
+            items.iter().skip(start).take(take).cloned().collect()
+          }
+          VarKind::AssocArr(items) => items.iter().map(|(_, v)| v.clone()).collect(),
+          _ => return None,
+        });
+      }
+    }
+    None
   }
   pub(crate) fn try_take_var_meta(&mut self, var_name: &str) -> Option<Var> {
     let var = self.try_get_var_meta(var_name)?;
