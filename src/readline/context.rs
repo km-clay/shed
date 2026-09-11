@@ -29,12 +29,13 @@ use bstr::ByteSlice;
 
 use crate::{
   builtin::BUILTIN_NAMES,
+  defer,
   eval::{
     execute::classify::{in_cd_path, is_in_path},
     lex::{LexFlags, LexStream, Span, Tk, TkFlags, TkRule},
   },
   expand::{escape, var},
-  match_loop, shopt,
+  match_loop, shopt, shopt_mut,
   state::{
     Shed, cmd,
     meta::UtilKind,
@@ -56,6 +57,17 @@ pub(super) fn get_context_tokens(input: &str) -> Vec<CtxTk> {
     .collect();
 
   process_ctx_tokens(out)
+}
+
+/// A variant of [`get_context_tokens`] that disables the file check for arguments.
+///
+/// This is used when we need to check for certain structures in a token stream and dont care
+/// if an argument is a file or not. saves a lot of syscalls.
+pub(super) fn pure_context_tokens(input: &str) -> Vec<CtxTk> {
+  let prev = shopt!(highlight.check_files);
+  shopt_mut!(highlight.check_files = false);
+  defer! { shopt_mut!(highlight.check_files = prev); }
+  get_context_tokens(input)
 }
 
 pub(super) fn get_ex_context_tokens(input: &str) -> Vec<CtxTk> {
@@ -110,7 +122,7 @@ pub(crate) fn nested_subs(input: &[u8]) -> Vec<NestedSub> {
   }
 
   let mut out = vec![];
-  for tk in get_context_tokens(&input.to_str_lossy()) {
+  for tk in pure_context_tokens(&input.to_str_lossy()) {
     collect(&tk, &mut out);
   }
   out
