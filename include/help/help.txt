@@ -2,22 +2,25 @@
 
 #SHED MANUAL#
 
-Shed is an experimental UNIX command interpreter (shell) usable as both an
+`shed` is an experimental UNIX command interpreter (shell) usable as both an
 interactive login shell and as a shell script command preprocessor.
-Shed combines the functionality of `bash` with the UX and customizability of `vim`.
+`shed` combines the functionality of `bash` with the UX and customizability of `vim`.
 Features include:
 * A hackable line editor similar to `zsh`'s `zle`
 * Programmable, dynamic prompts
 * Custom tab completion
 * An event hook system
-* An IPC socket for async workflows
-* Fuzzy history search/tab completion
-* Extensive, navigable documentation via `help`
+* An IPC socket for async interactive workflows
+* Unique |shell scripting features|(scripting)
+* A rich suite of |builtin utilities|(builtin)
+* Extensive, navigable documentation via |help|(builtin-help)
 
 Press `Tab` to follow cross-reference links in the help pages. Visible links
 will be given a hint with a letter, typing that letter follows the link.
 
 Cross-reference links can also be `clicked` directly with the mouse.
+
+Our *GitHub* repository can be found at `https://github.com/km-clay/shed`.
 
 ==============================================================================
 1. Available Topics                            *help-topics*
