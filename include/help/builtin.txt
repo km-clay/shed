@@ -952,13 +952,13 @@ FORGET                                           *builtin-forget* *forget*
   `-d`/`--deferred`    Pending |defer|red commands in the current scope
 
   `--except`           Invert the category flags: forget everything
-                       *except* the listed categories.
+                     *except* the listed categories.
   `-x`/`--exclude` <name>
-                       Preserve variable _name_ (keeping its current
-                       value) while forgetting the rest. Repeat to
-                       exclude several: `-x A -x B`. Given without any
-                       category flag, `forget -x` forgets everything but
-                       the named variable(s).
+                     Preserve variable _name_ (keeping its current
+                     value) while forgetting the rest. Repeat to
+                     exclude several: `-x A -x B`. Given without any
+                     category flag, `forget -x` forgets everything but
+                     the named variable(s).
 
   Examples:
 
