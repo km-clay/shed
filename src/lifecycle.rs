@@ -93,7 +93,7 @@ fn print_usage() {
 /// Print program information for `--about`: description, author, license, and
 /// the source repository. Metadata is sourced from `Cargo.toml` so it stays in
 /// sync with the package.
-fn print_about() {
+pub(crate) fn print_about() {
   let cargo_ver = env!("CARGO_PKG_VERSION");
   let cargo_authors = env!("CARGO_PKG_AUTHORS");
   let cargo_license = env!("CARGO_PKG_LICENSE");

@@ -22,7 +22,7 @@ use crate::{
     },
   },
   expand::{arithmetic, escape},
-  outln,
+  lifecycle, outln,
   procio::{self, RedirSet, SinkIo, Sinks},
   sherr, signal,
   state::{
@@ -114,6 +114,7 @@ register_builtins! {
   b":"        => Colon,
   b"["        => test::Test,
   b"[["       => test::Test,
+  b"about"    => About,
   b"accept"   => sock::Accept,
   b"alias"    => alias::Alias,
   b"autocmd"  => autocmd::AutoCmdBuiltin,
@@ -474,6 +475,17 @@ pub(super) trait Builtin: Sync {
 }
 
 // The easy ones
+
+struct About;
+impl Builtin for About {
+  fn no_help(&self) -> bool {
+    true
+  }
+  fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
+    lifecycle::print_about();
+    util::with_status(0)
+  }
+}
 
 /// The POSIX no-op command. It does nothing.
 struct Colon;
