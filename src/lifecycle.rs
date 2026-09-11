@@ -246,7 +246,7 @@ pub(super) fn setup() -> Option<ShedArgs> {
   setup_panic_handler();
   flog::init().ok();
   params::set_ver_info().ok();
-  params::set_sh_lvl().ok();
+  params::inc_sh_lvl().ok();
 
   // Parse argv with shed's own option scanner (shared with the `set` builtin),
   // so `-e`/`-x`/`-o pipefail`/`+e` etc. behave identically at invocation and

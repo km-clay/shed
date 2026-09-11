@@ -98,6 +98,13 @@ impl ScopeStack {
   pub(super) fn clear_deferred_cmds(&mut self) {
     self.cur_scope_mut().take_deferred_cmds();
   }
+  pub(crate) fn put_var(&mut self, name: &str, var: Var) {
+    let Some(scope) = self.scopes.first_mut() else {
+      return;
+    };
+
+    scope.put_var(name, var);
+  }
   pub(crate) fn ascend(&mut self) {
     if self.depth >= 1 {
       let popped = self.scopes.pop();

@@ -1,7 +1,7 @@
 use crate::{
   eval::execute::ExecArgs,
   sherr,
-  state::{Shed, terminal::Terminal},
+  state::{Shed, params, terminal::Terminal},
   util::{self, error::ShResult, posix},
 };
 use nix::errno::Errno;
@@ -22,6 +22,8 @@ impl super::Builtin for Exec {
     }
 
     let (arg_vec, _) = args.take_argv();
+
+    params::dec_sh_lvl().ok();
 
     let args = ExecArgs::from_expanded(arg_vec);
 

@@ -7,7 +7,7 @@ use crate::{
   HashMap,
   eval::lex::TkFlags,
   expand::Expander,
-  state::{Shed, vars::VarStr},
+  state::{Shed, meta::MetaTab, vars::VarStr},
   try_var,
   util::{
     self, guards,
@@ -224,24 +224,28 @@ pub(crate) fn set_ver_info() -> ShResult<()> {
   Ok(())
 }
 
-pub(crate) fn set_sh_lvl() -> ShResult<()> {
-  // Increment SHLVL, or set to 1 if not present or invalid.
-  // This var represents how many nested shell instances we're in
-  if let Some(var) = try_var!("SHLVL")
-    && let Ok(lvl) = var.to_str_lossy().parse::<u32>()
-  {
-    Shed::vars_mut(|v| {
-      v.set_var(
-        "SHLVL",
-        VarKind::string((lvl + 1).to_string().into()),
-        VarFlags::EXPORT,
-      )
-    })?;
-  } else {
-    Shed::vars_mut(|v| v.set_var("SHLVL", VarKind::Str("1".into()), VarFlags::EXPORT))?;
-  }
+fn adjust_sh_lvl(lvl: i32) -> ShResult<()> {
+  let cur = try_var!("SHLVL")
+    .map(|l| l.to_str_lossy().parse::<u32>().ok())
+    .flatten()
+    .unwrap_or_default();
+
+  let new = cur.saturating_add_signed(lvl);
+
+  let sh_lvl = Var::new(VarKind::string(varstr!("{new}")), VarFlags::EXPORT);
+
+  Shed::vars_mut(|v| v.put_var("SHLVL", sh_lvl));
+  Shed::meta_mut(MetaTab::clear_envp);
 
   Ok(())
+}
+
+pub(crate) fn dec_sh_lvl() -> ShResult<()> {
+  adjust_sh_lvl(-1)
+}
+
+pub(crate) fn inc_sh_lvl() -> ShResult<()> {
+  adjust_sh_lvl(1)
 }
 
 /// The process-wide history database connection.
