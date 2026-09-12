@@ -1,5 +1,6 @@
 use crate::{HashMap, eval::lex::Span, state::vars::VarStr};
 use std::{
+  cell::RefCell,
   fmt::Display,
   ops::Deref,
   sync::{
@@ -8,8 +9,17 @@ use std::{
   },
 };
 
+/// A map of currently active text sources
+///
+/// Holds weak references, so that when all [`SourceHandle`]s for a source are dropped, the source
+/// will be removed from this map.
 static SOURCES: LazyLock<RwLock<SourceRegistry>> = LazyLock::new(Default::default);
 static SRC_GENERATION: AtomicI32 = AtomicI32::new(0);
+
+thread_local! {
+  /// A strong reference to the last source accessed in the [`SOURCES`] map.
+  static LAST_SOURCE: RefCell<Option<(SourceId, Arc<Source>)>> = const { RefCell::new(None) };
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct SourceId(i32);
@@ -141,10 +151,17 @@ pub(crate) fn slice_source(span: Span) -> Option<VarStr> {
   let start = span.start();
   let end = span.end();
   let id = span.source();
-  let source = {
-    let lock = SOURCES.read().unwrap();
-    lock.get_source(id)?
-  };
+  let source = LAST_SOURCE.with(|slot| {
+    if let Some((s_id, src)) = &*slot.borrow()
+      && *s_id == id
+    {
+      return Some(Arc::clone(src));
+    };
+
+    let src = SOURCES.read().unwrap().get_source(id)?;
+    *slot.borrow_mut() = Some((id, Arc::clone(&src)));
+    Some(src)
+  })?;
 
   source.content.try_slice(start..end)
 }
