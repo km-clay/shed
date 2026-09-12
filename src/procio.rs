@@ -747,6 +747,14 @@ impl PipeBuf {
       truncated: false,
     }
   }
+
+  fn is_full_and_readable(&mut self) -> bool {
+    self.queue.len() >= self.limit && self.reader_open
+  }
+
+  fn is_empty_and_writable(&mut self) -> bool {
+    self.queue.is_empty() && self.writer_open
+  }
 }
 
 pub(crate) enum PipeSink {
@@ -857,6 +865,35 @@ impl ThreadSink {
     let w = Arc::clone(&r);
     (Self::Read(r), Self::Write(w))
   }
+
+  fn pipe_lock(&mut self) -> std::sync::MutexGuard<'_, PipeBuf> {
+    match self {
+      ThreadSink::Read(p) | ThreadSink::Write(p) => p.buf.lock().unwrap(),
+    }
+  }
+
+  fn notify_all(&self) {
+    match self {
+      ThreadSink::Read(p) | ThreadSink::Write(p) => p.notif.notify_all(),
+    }
+  }
+
+  fn is_writer(&self) -> bool {
+    matches!(self, ThreadSink::Write(_))
+  }
+
+  fn close(&mut self) {
+    let is_writer = self.is_writer();
+    {
+      let mut buf = self.pipe_lock();
+      if is_writer {
+        buf.writer_open = false;
+      } else {
+        buf.reader_open = false;
+      }
+    }
+    self.notify_all();
+  }
 }
 
 impl Sink for ThreadSink {
@@ -866,10 +903,11 @@ impl Sink for ThreadSink {
     };
     let mut buf = pipe.buf.lock().unwrap();
 
-    // keep calling notif.wait until we have data or the writer is closed
-    while buf.queue.is_empty() && buf.writer_open {
-      buf = pipe.notif.wait(buf).unwrap();
-    }
+    buf = pipe
+      .notif
+      .wait_while(buf, PipeBuf::is_empty_and_writable)
+      .unwrap();
+
     if buf.queue.is_empty() {
       return Ok(0); // buf.writer_open is false, so we got EOF
     }
@@ -878,7 +916,7 @@ impl Sink for ThreadSink {
     for (slot, byte) in out.iter_mut().zip(buf.queue.drain(..n)) {
       *slot = byte;
     }
-    pipe.notif.notify_all();
+    self.notify_all();
     Ok(n)
   }
   fn write(&self, data: &[u8]) -> io::Result<usize> {
@@ -891,17 +929,17 @@ impl Sink for ThreadSink {
       return Err(io::Error::from(io::ErrorKind::BrokenPipe));
     }
 
-    while buf.queue.len() >= buf.limit && buf.reader_open {
-      // backpressure, wait for the reader to drain some data
-      buf = pipe.notif.wait(buf).unwrap();
-    }
+    buf = pipe
+      .notif
+      .wait_while(buf, PipeBuf::is_full_and_readable)
+      .unwrap();
 
     if !buf.reader_open {
       return Err(io::Error::from(io::ErrorKind::BrokenPipe));
     }
 
     buf.queue.extend(data);
-    pipe.notif.notify_all();
+    self.notify_all();
     Ok(data.len())
   }
   fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
@@ -924,50 +962,35 @@ impl Sink for ThreadSink {
       return Err(ebadf());
     };
     let mut buf = pipe.buf.lock().unwrap();
+    let timeout_dur = timeout
+      .filter(PollTimeout::is_some)
+      .and_then(|t| t.duration());
 
     // a blocking poll waits for data or the writer's close instead of reporting
     // the queue as empty. A concurrent writer thread has usually not produced yet
     // when the reader first polls.
-    match timeout
-      .filter(PollTimeout::is_some)
-      .and_then(|t| t.duration())
-    {
-      None => {
-        while buf.queue.is_empty() && buf.writer_open {
-          buf = pipe.notif.wait(buf).unwrap();
-        }
-      }
+    buf = match timeout_dur {
+      None => pipe
+        .notif
+        .wait_while(buf, PipeBuf::is_empty_and_writable)
+        .unwrap(),
+
       Some(dur) => {
-        let start = std::time::Instant::now();
-        while buf.queue.is_empty() && buf.writer_open {
-          let Some(remaining) = dur.checked_sub(start.elapsed()) else {
-            break;
-          };
-          let (b, wt) = pipe.notif.wait_timeout(buf, remaining).unwrap();
-          buf = b;
-          if wt.timed_out() {
-            break;
-          }
-        }
+        pipe
+          .notif
+          .wait_timeout_while(buf, dur, PipeBuf::is_empty_and_writable)
+          .unwrap()
+          .0
       }
-    }
+    };
+
     Ok(buf.queue.len())
   }
 }
 
 impl Drop for ThreadSink {
   fn drop(&mut self) {
-    let (pipe, writer) = match self {
-      Self::Write(p) => (p, true),
-      Self::Read(p) => (p, false),
-    };
-    let mut buf = pipe.buf.lock().unwrap();
-    if writer {
-      buf.writer_open = false;
-    } else {
-      buf.reader_open = false;
-    }
-    pipe.notif.notify_all();
+    self.close();
   }
 }
 
