@@ -1349,6 +1349,10 @@ impl VarTab {
     env
       .entry("USER".into())
       .or_insert_with(|| username_fallback.clone().into());
+    if let Some(path) = params::get_default_path() {
+      env.entry("PATH".into()).or_insert_with(|| path.into());
+    }
+
     let resolved_home = env["HOME"].to_str_lossy().into_owned();
     let resolved_user = env["USER"].clone();
 
