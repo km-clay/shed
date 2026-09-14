@@ -63,7 +63,7 @@ pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
       drop(register_fd);
 
       Shed::sinks(|s| {
-        s.redirect(target_fd, Arc::new(OsSink::new(proc_fd)));
+        s.clobber(target_fd, Arc::new(OsSink::new(proc_fd)));
         s.commit_redirects()
       })?;
 
@@ -160,7 +160,7 @@ pub(crate) fn expand_cmd_sub(raw: &[u8]) -> ShResult<VarStr> {
       lifecycle::setup_child();
 
       Shed::sinks(|s| {
-        s.redirect(STDOUT_FILENO, Arc::new(OsSink::new(wpipe)));
+        s.clobber(STDOUT_FILENO, Arc::new(OsSink::new(wpipe)));
         s.commit_redirects()
       })?;
 

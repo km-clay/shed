@@ -43,14 +43,14 @@ use nix::{
 };
 
 use crate::{
-  HashMap, HashSet,
+  HashMap, HashSet, errln,
   eval::{
     execute,
     lex::{Span, Tk, TkFlags},
   },
   expand::Expander,
   lifecycle, match_loop, sherr, shopt, signal,
-  state::{self, Shed, shopt::ReadLimit, terminal::Terminal, vars::VarStr},
+  state::{Shed, shopt::ReadLimit, terminal::Terminal, vars::VarStr},
   util::{
     self,
     error::{ShErr, ShResult},
@@ -456,9 +456,6 @@ impl RedirSpec {
   pub(crate) fn file(fd: RawFd, path: Tk, mode: RedirType) -> Self {
     Self::File { fd, path, mode }
   }
-  pub(crate) fn dup(from: RawFd, to: RawFd, mode: RedirType) -> Self {
-    Self::Dup { from, to, mode }
-  }
   pub(crate) fn dup_spanned(from: RawFd, to: RawFd, mode: RedirType) -> Self {
     Self::Dup { from, to, mode }
   }
@@ -561,6 +558,11 @@ impl RedirSpec {
     };
 
     Ok(sink)
+  }
+
+  #[cfg(test)]
+  pub(crate) fn dup(from: RawFd, to: RawFd, mode: RedirType) -> Self {
+    Self::Dup { from, to, mode }
   }
 }
 
@@ -729,6 +731,61 @@ impl Sink for BufSink {
   }
 }
 
+pub(crate) enum OsPipe {
+  Read(OsSink),
+  Write(OsSink),
+}
+
+impl OsPipe {
+  pub(crate) fn pipes() -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
+    let (r, w) = pipes_high()?;
+    let w = Arc::new(Self::Write(OsSink::new(w)));
+    let r = Arc::new(Self::Read(OsSink::new(r)));
+    Ok((r, w))
+  }
+}
+
+impl Sink for OsPipe {
+  fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
+    let Self::Read(p) = self else {
+      return Err(ebadf());
+    };
+    p.read(buf)
+  }
+
+  fn write(&self, buf: &[u8]) -> io::Result<usize> {
+    let Self::Write(p) = self else {
+      return Err(ebadf());
+    };
+    p.write(buf)
+  }
+
+  fn flush(&self) -> io::Result<()> {
+    let (Self::Read(p) | Self::Write(p)) = self;
+    p.flush()
+  }
+
+  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
+    let (Self::Read(p) | Self::Write(p)) = self;
+    p.as_os_fd()
+  }
+
+  fn kind(&self) -> SinkKind {
+    match self {
+      Self::Read(_) => SinkKind::ReadPipe,
+      Self::Write(_) => SinkKind::WritePipe,
+    }
+  }
+
+  fn poll(&self, timeout: Option<PollTimeout>) -> io::Result<usize> {
+    let Self::Read(p) = self else {
+      return Err(ebadf());
+    };
+
+    p.poll(timeout)
+  }
+}
+
 pub(crate) struct PipeBuf {
   queue: VecDeque<u8>,
   writer_open: bool,
@@ -746,6 +803,14 @@ impl PipeBuf {
       limit: *shopt!(core.max_read_limit) as usize,
       truncated: false,
     }
+  }
+
+  fn is_full_and_readable(&mut self) -> bool {
+    self.queue.len() >= self.limit && self.reader_open
+  }
+
+  fn is_empty_and_writable(&mut self) -> bool {
+    self.queue.is_empty() && self.writer_open
   }
 }
 
@@ -819,7 +884,10 @@ impl Sink for PipeSink {
     ))
   }
   fn kind(&self) -> SinkKind {
-    SinkKind::Pipe
+    match self {
+      Self::Read(_) => SinkKind::ReadPipe,
+      Self::Write(_) => SinkKind::WritePipe,
+    }
   }
 }
 
@@ -832,6 +900,7 @@ impl Drop for PipeSink {
   }
 }
 
+/// A thread-safe version of [`PipeBuf`]
 pub(crate) struct ThreadPipe {
   buf: Mutex<PipeBuf>,
   notif: Condvar,
@@ -846,6 +915,9 @@ impl ThreadPipe {
   }
 }
 
+/// An internal pipe-like object that can be used instead of calling [`nix::unistd::pipe()`]
+///
+/// These are used to redirect I/O between builtins, when multithreaded pipelines are enabled.
 pub(crate) enum ThreadSink {
   Read(Arc<ThreadPipe>),
   Write(Arc<ThreadPipe>),
@@ -857,6 +929,35 @@ impl ThreadSink {
     let w = Arc::clone(&r);
     (Self::Read(r), Self::Write(w))
   }
+
+  fn pipe_lock(&mut self) -> std::sync::MutexGuard<'_, PipeBuf> {
+    match self {
+      ThreadSink::Read(p) | ThreadSink::Write(p) => p.buf.lock().unwrap(),
+    }
+  }
+
+  fn notify_all(&self) {
+    match self {
+      ThreadSink::Read(p) | ThreadSink::Write(p) => p.notif.notify_all(),
+    }
+  }
+
+  fn is_writer(&self) -> bool {
+    matches!(self, ThreadSink::Write(_))
+  }
+
+  fn close(&mut self) {
+    let is_writer = self.is_writer();
+    {
+      let mut buf = self.pipe_lock();
+      if is_writer {
+        buf.writer_open = false;
+      } else {
+        buf.reader_open = false;
+      }
+    }
+    self.notify_all();
+  }
 }
 
 impl Sink for ThreadSink {
@@ -866,10 +967,11 @@ impl Sink for ThreadSink {
     };
     let mut buf = pipe.buf.lock().unwrap();
 
-    // keep calling notif.wait until we have data or the writer is closed
-    while buf.queue.is_empty() && buf.writer_open {
-      buf = pipe.notif.wait(buf).unwrap();
-    }
+    buf = pipe
+      .notif
+      .wait_while(buf, PipeBuf::is_empty_and_writable)
+      .unwrap();
+
     if buf.queue.is_empty() {
       return Ok(0); // buf.writer_open is false, so we got EOF
     }
@@ -878,7 +980,7 @@ impl Sink for ThreadSink {
     for (slot, byte) in out.iter_mut().zip(buf.queue.drain(..n)) {
       *slot = byte;
     }
-    pipe.notif.notify_all();
+    self.notify_all();
     Ok(n)
   }
   fn write(&self, data: &[u8]) -> io::Result<usize> {
@@ -891,17 +993,17 @@ impl Sink for ThreadSink {
       return Err(io::Error::from(io::ErrorKind::BrokenPipe));
     }
 
-    while buf.queue.len() >= buf.limit && buf.reader_open {
-      // backpressure, wait for the reader to drain some data
-      buf = pipe.notif.wait(buf).unwrap();
-    }
+    buf = pipe
+      .notif
+      .wait_while(buf, PipeBuf::is_full_and_readable)
+      .unwrap();
 
     if !buf.reader_open {
       return Err(io::Error::from(io::ErrorKind::BrokenPipe));
     }
 
     buf.queue.extend(data);
-    pipe.notif.notify_all();
+    self.notify_all();
     Ok(data.len())
   }
   fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
@@ -911,7 +1013,10 @@ impl Sink for ThreadSink {
     ))
   }
   fn kind(&self) -> SinkKind {
-    SinkKind::Pipe
+    match self {
+      ThreadSink::Read(_) => SinkKind::ReadPipe,
+      ThreadSink::Write(_) => SinkKind::WritePipe,
+    }
   }
   fn flush(&self) -> io::Result<()> {
     Ok(())
@@ -924,50 +1029,35 @@ impl Sink for ThreadSink {
       return Err(ebadf());
     };
     let mut buf = pipe.buf.lock().unwrap();
+    let timeout_dur = timeout
+      .filter(PollTimeout::is_some)
+      .and_then(|t| t.duration());
 
     // a blocking poll waits for data or the writer's close instead of reporting
     // the queue as empty. A concurrent writer thread has usually not produced yet
     // when the reader first polls.
-    match timeout
-      .filter(PollTimeout::is_some)
-      .and_then(|t| t.duration())
-    {
-      None => {
-        while buf.queue.is_empty() && buf.writer_open {
-          buf = pipe.notif.wait(buf).unwrap();
-        }
-      }
+    buf = match timeout_dur {
+      None => pipe
+        .notif
+        .wait_while(buf, PipeBuf::is_empty_and_writable)
+        .unwrap(),
+
       Some(dur) => {
-        let start = std::time::Instant::now();
-        while buf.queue.is_empty() && buf.writer_open {
-          let Some(remaining) = dur.checked_sub(start.elapsed()) else {
-            break;
-          };
-          let (b, wt) = pipe.notif.wait_timeout(buf, remaining).unwrap();
-          buf = b;
-          if wt.timed_out() {
-            break;
-          }
-        }
+        pipe
+          .notif
+          .wait_timeout_while(buf, dur, PipeBuf::is_empty_and_writable)
+          .unwrap()
+          .0
       }
-    }
+    };
+
     Ok(buf.queue.len())
   }
 }
 
 impl Drop for ThreadSink {
   fn drop(&mut self) {
-    let (pipe, writer) = match self {
-      Self::Write(p) => (p, true),
-      Self::Read(p) => (p, false),
-    };
-    let mut buf = pipe.buf.lock().unwrap();
-    if writer {
-      buf.writer_open = false;
-    } else {
-      buf.reader_open = false;
-    }
-    pipe.notif.notify_all();
+    self.close();
   }
 }
 
@@ -1114,7 +1204,8 @@ pub(crate) enum SinkKind {
   Buffer,
   Os,
   Tty,
-  Pipe,
+  ReadPipe,
+  WritePipe,
   Null,
   Close,
 }
@@ -1198,10 +1289,7 @@ impl Sinks {
     (read, write)
   }
   pub(crate) fn os_pipes() -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
-    let (r, w) = pipes_high()?;
-    let r = Arc::new(OsSink::new(r));
-    let w = Arc::new(OsSink::new(w));
-    Ok((r, w))
+    OsPipe::pipes()
   }
   pub(crate) fn thread_pipes() -> (Arc<dyn Sink>, Arc<dyn Sink>) {
     let (read, write) = ThreadSink::new();
@@ -1296,15 +1384,28 @@ impl Sinks {
   pub(crate) fn apply_sink(sink: Arc<dyn Sink>, fd: RawFd) -> ShResult<RedirGuard> {
     RedirGuard::from_sink(sink, fd)
   }
-  pub(crate) fn apply_set(s: &RedirSet) -> ShResult<RedirGuard> {
-    RedirGuard::from_redirs(s)
-  }
   pub(crate) fn try_apply_set(s: &RedirSet, fatal: bool) -> ShResult<Option<RedirGuard>> {
     RedirGuard::try_from_redirs(s, fatal)
   }
-  pub(crate) fn redirect(&mut self, fd: RawFd, sink: Arc<dyn Sink>) -> Option<Arc<dyn Sink>> {
+  /// Point a [`RawFd`] at a specific instance of [`Sink`]
+  ///
+  /// Replaces any existing resource the `RawFd` already points to. The replaced `Sink` is then returned.
+  /// If the `RawFd` does not currently point at anything, it returns a `CloseSink`.
+  /// The return value of this function is intended to be saved and placed back after the redirection is no longer needed.
+  #[must_use = "This returns the Sink it is replacing. Make sure to save it unless the redirection is intended to be permanent."]
+  fn redirect(&mut self, fd: RawFd, sink: Arc<dyn Sink>) -> Arc<dyn Sink> {
     // getting 'None' here is equivalent to closing the fd, which is valid
-    self.table.insert(fd, sink)
+    self
+      .table
+      .insert(fd, sink)
+      .unwrap_or_else(|| Arc::new(CloseSink))
+  }
+  /// Overwrite the sink pointed at by `fd`. Closes the original sink.
+  ///
+  /// This is used for **permanent** redirections. If you are making a temporary redirection,
+  /// use one of [`Sinks::apply_sink()`](Sinks::apply_sink), [`Sinks::try_apply_set()`] or [`Sinks::apply_set()`](Sinks::apply_set) instead.
+  pub(crate) fn clobber(&mut self, fd: RawFd, sink: Arc<dyn Sink>) {
+    let _ = self.redirect(fd, sink);
   }
   pub(crate) fn input_available(&mut self) -> bool {
     match self.get_stdin() {
@@ -1316,6 +1417,11 @@ impl Sinks {
     let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
     let owned = dup_high(borrowed)?;
     Ok(Arc::new(OsSink::new(owned)))
+  }
+
+  #[cfg(test)]
+  pub(crate) fn apply_set(s: &RedirSet) -> ShResult<RedirGuard> {
+    RedirGuard::from_redirs(s)
   }
 }
 
@@ -1331,42 +1437,30 @@ impl RedirResult {
 }
 
 pub(crate) struct RedirGuard {
-  saved: Vec<(RawFd, Arc<dyn Sink>)>,
-  active: bool,
+  saved: Option<Vec<(RawFd, Arc<dyn Sink>)>>,
 }
 
 impl Debug for RedirGuard {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let saved = self
-      .saved
-      .iter()
-      .map(|(fd, sink)| (fd, sink.kind()))
-      .collect::<Vec<_>>();
-    f.debug_struct("RedirGuard")
-      .field("saved", &saved)
-      .field("active", &self.active)
-      .finish()
+    let saved = self.saved.as_ref().map(|s| {
+      s.iter()
+        .map(|(fd, sink)| (fd, sink.kind()))
+        .collect::<Vec<_>>()
+    });
+    f.debug_struct("RedirGuard").field("saved", &saved).finish()
   }
 }
 
 impl RedirGuard {
   fn new() -> Self {
     Self {
-      saved: Vec::new(),
-      active: true,
+      saved: Some(Vec::new()),
     }
   }
 
   fn from_sink(sink: Arc<dyn Sink>, fd: RawFd) -> ShResult<Self> {
     let mut guard = Self::new();
     guard.apply_sink(fd, sink)?;
-    Ok(guard)
-  }
-
-  fn from_redirs(redirs: &RedirSet) -> ShResult<Self> {
-    let mut guard = Self::new();
-    // on error the guard drops here and its Drop restores the partial redirs.
-    guard.apply_set(redirs)?;
     Ok(guard)
   }
 
@@ -1379,17 +1473,23 @@ impl RedirGuard {
     }
   }
 
+  pub(crate) fn try_save(&mut self, fd: RawFd, sink: Arc<dyn Sink>) {
+    let Some(saved) = self.saved.as_mut() else {
+      return;
+    };
+    if saved.iter().any(|(f, _)| *f == fd) {
+      // do not overwrite existing saved entries
+      return;
+    }
+    saved.push((fd, sink));
+  }
+
   pub(crate) fn apply_sink(&mut self, fd: RawFd, sink: Arc<dyn Sink>) -> ShResult<()> {
     validate_fd(fd)?;
 
     Shed::sinks(|sinks| {
-      if !self.saved.iter().any(|(f, _)| *f == fd) {
-        // only save once
-        self
-          .saved
-          .push((fd, sinks.get(fd).unwrap_or_else(|| Arc::new(CloseSink))));
-      }
-      sinks.redirect(fd, sink);
+      let old = sinks.redirect(fd, sink);
+      self.try_save(fd, old);
     });
 
     Ok(())
@@ -1401,9 +1501,8 @@ impl RedirGuard {
   /// Swaps it back on drop, unless [`RedirGuard::persist()`] is called.
   pub(crate) fn apply(&mut self, r: &RedirSpec) -> ShResult<()> {
     let fd = r.target_fd();
-    // resolve before taking the borrow: as_sink runs expansion, which can run
-    // command substitutions that re-enter the table.
-    let sink = r.as_sink()?;
+
+    let sink = r.as_sink()?; // runs expansion. careful!
     self.apply_sink(fd, sink)
   }
 
@@ -1428,35 +1527,37 @@ impl RedirGuard {
     Ok(())
   }
 
-  /// Unwind the applied redirs immediately and disarm, so the eventual `Drop`
-  /// is a no-op.
+  /// Unwind the applied redirs immediately and disarm
   fn restore_into(&mut self) {
+    let Some(saved) = self.saved.take() else {
+      return;
+    };
     Shed::sinks(|sinks| {
-      for (fd, old) in self.saved.drain(..).rev() {
-        sinks.redirect(fd, old);
+      for (fd, old) in saved.into_iter().rev() {
+        sinks.clobber(fd, old);
       }
     });
-    self.active = false;
   }
 
   /// Drop the guard without restoring the redirections
   ///
   /// Used by contexts like the `exec` builtin
   pub(crate) fn persist(mut self) {
-    self.active = false;
-
-    // i know it happens anyway, just making it obvious that
-    // this is the intention
+    self.saved.take();
     std::mem::drop(self);
+  }
+
+  #[cfg(test)]
+  fn from_redirs(redirs: &RedirSet) -> ShResult<Self> {
+    let mut guard = Self::new();
+    // on error the guard drops here and its Drop restores the partial redirs.
+    guard.apply_set(redirs)?;
+    Ok(guard)
   }
 }
 
 impl Drop for RedirGuard {
   fn drop(&mut self) {
-    if !self.active {
-      return;
-    }
-
     self.restore_into();
   }
 }
@@ -1464,8 +1565,6 @@ impl Drop for RedirGuard {
 pub(crate) fn stdin_is_tty() -> bool {
   Shed::sinks(Sinks::get_stdin).is_some_and(|s| s.isatty())
 }
-
-// TODO: drop impl
 
 pub(super) fn stdin_fileno() -> BorrowedFd<'static> {
   unsafe { BorrowedFd::borrow_raw(STDIN_FILENO) }
@@ -1511,26 +1610,26 @@ impl Deref for CappedRead {
 pub(crate) fn read_capped(fd: BorrowedFd) -> ShResult<CappedRead> {
   let limit = shopt!(core.max_read_limit);
 
-  let mut out = Vec::new();
-  let mut buf = [0u8; 8192];
+  let mut buf = Vec::new();
+  let mut tmp_buf = [0u8; 8192];
   let mut remaining = *limit as usize;
-  let mut truncated = false;
+  let mut was_truncated = false;
 
   loop {
-    match unistd::read(fd.as_fd(), &mut buf) {
+    match unistd::read(fd.as_fd(), &mut tmp_buf) {
       Ok(0) => break,
       Ok(n) => {
         let bytes_read = n.min(remaining);
-        out.extend_from_slice(&buf[..bytes_read]);
+        buf.extend_from_slice(&tmp_buf[..bytes_read]);
         remaining = remaining.saturating_sub(bytes_read);
         if remaining == 0 {
-          truncated = true;
+          was_truncated = true;
           break;
         }
       }
       Err(Errno::EINTR) => {
         if signal::sigint_pending() {
-          state::Shed::set_status(130);
+          Shed::set_status(130);
           break;
         }
       }
@@ -1539,9 +1638,9 @@ pub(crate) fn read_capped(fd: BorrowedFd) -> ShResult<CappedRead> {
   }
 
   Ok(CappedRead {
-    buf: out,
+    buf,
     limit,
-    was_truncated: truncated,
+    was_truncated,
   })
 }
 
@@ -1555,7 +1654,7 @@ pub(super) fn bytes_to_string(buf: Vec<u8>) -> String {
 
 /// Write raw bytes to the current output sink, byte-native counterpart to `out!`.
 pub(super) fn out_bytes(buf: &[u8]) {
-  let Some(out) = Shed::sinks(Sinks::get_stdout) else {
+  let Ok(out) = stdout_sink() else {
     return;
   };
   SinkIo(out).write_all(buf).ok();
@@ -1563,49 +1662,12 @@ pub(super) fn out_bytes(buf: &[u8]) {
 
 /// Write raw bytes followed by a newline, byte-native counterpart to `outln!`.
 pub(super) fn outln_bytes(buf: &[u8]) {
-  let Some(out) = Shed::sinks(Sinks::get_stdout) else {
+  let Ok(out) = stdout_sink() else {
     return;
   };
   let mut sink_io = SinkIo(out);
   sink_io.write_all(buf).ok();
   sink_io.write_all(b"\n").ok();
-}
-
-/// A pipe created before a fork to deliver stdin bytes to the child on fd 0.
-///
-/// Used to materialize an in-process pipeline stdin sink (or any byte buffer)
-/// onto a real fd when a stage forks a child that reads stdin, e.g. an external
-/// command inside a command substitution.
-pub(crate) struct StdinPipe {
-  read: OwnedFd,
-  write: OwnedFd,
-}
-
-impl StdinPipe {
-  /// Create the pipe. Call before forking.
-  pub(crate) fn new() -> ShResult<Self> {
-    let (read, write) = pipes_high()?;
-    Ok(Self { read, write })
-  }
-
-  /// Child side: register the fd-0 dup into `specs`, drop the write end so the
-  /// child sees EOF once the parent finishes feeding, and return the read end
-  /// to keep alive until the redirs are applied.
-  pub(crate) fn into_child(self, specs: &mut Vec<RedirSpec>) -> OwnedFd {
-    specs.push(RedirSpec::dup(
-      self.read.as_raw_fd(),
-      STDIN_FILENO,
-      RedirType::Input,
-    ));
-    drop(self.write);
-    self.read
-  }
-
-  /// Parent side: drop the read end and return the write end for feeding.
-  pub(crate) fn into_writer(self) -> OwnedFd {
-    drop(self.read);
-    self.write
-  }
 }
 
 /// Read from the given file descriptor, then write the results to stdout
@@ -1643,7 +1705,7 @@ pub(crate) fn write_all_to_fd(fd: BorrowedFd, bytes: &[u8]) {
       Ok(n) => written += n,
       Err(Errno::EINTR) => {
         if signal::sigint_pending() {
-          state::Shed::set_status(130);
+          Shed::set_status(130);
           break;
         }
       }
@@ -1677,10 +1739,10 @@ pub(super) fn capture_command(
   cmd: &[u8],
   stdin: Option<&[u8]>,
   name: Option<&VarStr>,
-) -> ShResult<String> {
-  let (rpipe, wpipe) = pipes_high()?;
+) -> ShResult<VarStr> {
+  let (rpipe, wpipe) = OsPipe::pipes()?;
   let stdin_pipe = if stdin.is_some() {
-    Some(StdinPipe::new()?)
+    Some(OsPipe::pipes()?)
   } else {
     None
   };
@@ -1689,44 +1751,59 @@ pub(super) fn capture_command(
     ForkResult::Child => {
       lifecycle::setup_child();
 
-      let mut specs = vec![RedirSpec::dup(wpipe.as_raw_fd(), 1, RedirType::Output)];
-      // Keep the read end alive until redirs.apply() dups it onto fd 0.
-      let _stdin_r_keep_alive = stdin_pipe.map(|p| p.into_child(&mut specs));
-      let redirs: RedirSet = specs.into();
-      // TODO: make sure this is the correct migration for "or_fatal()?"
-      let _guard = Sinks::apply_set(&redirs);
+      std::mem::drop(rpipe);
+      let stdin_pipe = stdin_pipe.map(|(r, w)| {
+        // drop write, keep read
+        std::mem::drop(w);
+        r
+      });
 
       execute::catch_exit(
-        || execute::exec_nonint(cmd.into(), name.cloned()),
+        || {
+          // wire output and optional input
+          let _stdout_guard = Sinks::apply_sink(wpipe.clone(), STDOUT_FILENO)?;
+          let _stdin_guard = stdin_pipe
+            .clone()
+            .map(|r| Sinks::apply_sink(r, STDIN_FILENO))
+            .transpose()?;
+
+          execute::exec_nonint(cmd.into(), name.cloned())
+        },
         |code| unsafe { nix::libc::_exit(code) },
       );
 
-      let status = state::Shed::get_status();
+      let status = Shed::get_status();
       unsafe { nix::libc::_exit(status) };
     }
     ForkResult::Parent { child } => {
-      drop(wpipe);
+      std::mem::drop(wpipe);
 
-      // Feed stdin from a thread while we read stdout here; writing it all
-      // first would deadlock once both pipes fill. We borrow `stdin` (rather
-      // than owning bytes) so a scoped thread is used instead of feed_fd_async.
-      let sink = if let Some(pipe) = stdin_pipe {
-        let writer = pipe.into_writer();
-        let bytes = stdin.unwrap().as_bytes();
-        std::thread::scope(|scope| {
-          scope.spawn(move || {
-            write_all_to_fd(writer.as_fd(), bytes);
-            // Closing the write end signals EOF to the child's stdin.
-            drop(writer);
-          });
-          read_capped(rpipe.as_fd())
-        })?
-      } else {
-        read_capped(rpipe.as_fd())?
+      let stdin_pipe = stdin_pipe.map(|(_, w)| w); // drops read
+      let capture_pipe = rpipe.as_os_fd()?;
+
+      // feed stdin from a thread while we read stdout here, doing both on one thread is dangerous
+      // since the child's out pipe can overfill while we are writing
+      let sink = match stdin_pipe {
+        None => read_capped(capture_pipe)?,
+
+        Some(pipe) => {
+          let bytes = stdin.unwrap().as_bytes();
+          std::thread::scope(|scope| {
+            scope.spawn(move || {
+              // move the pipe into this scope
+              // after the write, it drops and closes
+              if let Ok(fd) = pipe.as_os_fd() {
+                write_all_to_fd(fd, bytes);
+              }
+            });
+            read_capped(capture_pipe)
+          })?
+        }
       };
+
       let truncated = sink.was_truncated();
       let size = sink.limit();
-      let captured = bytes_to_string(sink.into_inner());
+      let captured = sink.into_inner();
 
       let status = loop {
         match waitpid(child, Some(WtFlag::WUNTRACED)) {
@@ -1738,12 +1815,12 @@ pub(super) fn capture_command(
 
       match status {
         WtStat::Exited(_, code) => {
-          state::Shed::set_status(code);
+          Shed::set_status(code);
           if truncated {
-            state::Shed::set_status(SINK_TRUNCATED_STATUS);
-            crate::errln!("shed: command output truncated (exceeded {size})");
+            Shed::set_status(SINK_TRUNCATED_STATUS);
+            errln!("shed: command output truncated (exceeded {size})");
           }
-          Ok(captured)
+          Ok(captured.into())
         }
         _ => Err(sherr!(InternalErr, "Command sub failed")),
       }
@@ -1840,7 +1917,7 @@ pub(super) fn read_input() -> ShResult<Vec<u8>> {
       Ok(n) => input.extend_from_slice(&read_buf[..n]),
       Err(e) if e.kind() == io::ErrorKind::Interrupted => {
         if signal::sigint_pending() {
-          state::Shed::set_status(130);
+          Shed::set_status(130);
           return Ok(vec![]);
         }
       }

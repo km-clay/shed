@@ -268,7 +268,9 @@ impl ClipboardProvider {
       procio::capture_command(argv.as_bytes(), None, Some(&("clipboard paste".into()))).ok()
     })?;
 
-    Some(RegisterContent::Span(Lines::to_lines(&out).into_vec()))
+    Some(RegisterContent::Span(
+      Lines::to_lines(&out.to_string()).into_vec(),
+    ))
   }
 
   pub(super) fn copy_argv(self, sel: Selection) -> Option<&'static str> {

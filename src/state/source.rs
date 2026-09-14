@@ -156,7 +156,7 @@ pub(crate) fn slice_source(span: Span) -> Option<VarStr> {
       && *s_id == id
     {
       return Some(Arc::clone(src));
-    };
+    }
 
     let src = SOURCES.read().unwrap().get_source(id)?;
     *slot.borrow_mut() = Some((id, Arc::clone(&src)));

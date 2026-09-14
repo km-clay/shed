@@ -629,7 +629,7 @@ impl super::LineBuf {
         autocmd!(PreCmd);
         defer!(autocmd!(PostCmd));
         match procio::capture_command(cmd.as_bytes(), None, Some(&get_entry_name())) {
-          Ok(out) => out,
+          Ok(out) => out.to_string(),
           Err(e) => {
             e.print_error();
             return;
@@ -714,11 +714,14 @@ impl super::LineBuf {
     let output = if let Some(stdin) = stdin {
       defer!(autocmd!(PostCmd));
       let _guard = Shed::term_mut(|t| t.yield_terminal(false));
-      Some(procio::capture_command(
-        sh_cmd.as_bytes(),
-        Some(stdin.as_bytes()),
-        Some(&get_entry_name()),
-      )?)
+      Some(
+        procio::capture_command(
+          sh_cmd.as_bytes(),
+          Some(stdin.as_bytes()),
+          Some(&get_entry_name()),
+        )?
+        .to_string(),
+      )
     } else {
       defer!(autocmd!(PostCmd));
       let _guard = Shed::term_mut(|t| t.yield_terminal(false));
