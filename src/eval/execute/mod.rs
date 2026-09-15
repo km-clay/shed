@@ -11,7 +11,10 @@ use super::{
     ast::{Ast, NodeId},
   },
 };
-use crate::builtin::{self, BUILTIN_NAMES};
+use crate::{
+  builtin::{self, BUILTIN_NAMES},
+  state,
+};
 use crate::{
   eval::parse::{NdFlags, NdRule, ParsedSrc},
   expand::{alias, arithmetic},
@@ -48,6 +51,7 @@ mod tests;
 
 // re-exports
 pub(crate) use assign::AssignBehavior;
+pub(crate) use command::reexec_as_script;
 pub(crate) use control::dispatch_deferred_cmd;
 
 thread_local! {
@@ -188,10 +192,18 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
 
   let is_tty = procio::stdin_is_tty();
   let _guard = Shed::term_mut(|t| t.interactive_guard(is_tty));
-  let name = args
+
+  // $0 value
+  let name = args.first().cloned().map_or_else(
+    || state::paths::get_exe_path().unwrap_or_else(|| "shed".into()),
+    VarStr::from,
+  );
+
+  // span source for error reporting
+  let source_name = args
     .first()
     .cloned()
-    .map_or("<shed -c>".into(), VarStr::from);
+    .map_or_else(|| "<shed -c>".into(), VarStr::from);
 
   Shed::vars_mut(|v| {
     v.set_param(ShellParam::ShellName, &name.to_str_lossy()); // $0
@@ -209,7 +221,7 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
   });
 
   let expanded = alias::expand_aliases(input);
-  let mut parser = ParsedSrc::with_name(name.clone(), expanded.into())
+  let mut parser = ParsedSrc::with_name(source_name, expanded.into())
     .with_lex_flags(super::lex::LexFlags::empty());
 
   if let Err(errors) = parser.parse_src() {

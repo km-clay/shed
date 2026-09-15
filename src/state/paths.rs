@@ -8,7 +8,7 @@ use crate::{HashMap, state::vars::VarStr, util::strops};
 use super::try_var;
 
 use std::{
-  os::unix::fs::PermissionsExt,
+  os::unix::{ffi::OsStrExt, fs::PermissionsExt},
   path::{Path, PathBuf},
   time::SystemTime,
 };
@@ -302,6 +302,12 @@ pub(crate) fn config_dir() -> Option<PathBuf> {
 }
 pub(crate) fn runtime_dir() -> Option<PathBuf> {
   xdg_dir("XDG_RUNTIME_DIR", Fallback::Var("TMPDIR"))
+}
+
+pub(crate) fn get_exe_path() -> Option<VarStr> {
+  std::env::current_exe()
+    .ok()
+    .map(|p| p.as_os_str().as_bytes().into())
 }
 
 pub(crate) fn get_home() -> Option<PathBuf> {

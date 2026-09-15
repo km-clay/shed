@@ -3,7 +3,12 @@
 //! Used to dispatch commands to the proper execution functions, and for stuff like figuring out of a given path
 //! can be autocd'd to
 
-use std::{os::unix::fs::PermissionsExt, path::Path};
+use std::{
+  ffi::{CStr, OsStr},
+  fs::File,
+  os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+  path::Path,
+};
 
 use bstr::ByteSlice;
 
@@ -38,6 +43,16 @@ pub(crate) fn in_cd_path(name: &Tk) -> bool {
     }
   }
   false
+}
+
+pub(crate) fn is_binary_file(path: &CStr) -> bool {
+  use std::io::Read;
+  let Ok(mut f) = File::open(OsStr::from_bytes(path.to_bytes())) else {
+    return false;
+  };
+  let mut buf = [0u8; 128];
+  let n = f.read(&mut buf).unwrap_or(0);
+  buf[..n].contains(&0)
 }
 
 pub(crate) fn is_in_path(name: &Tk) -> bool {
