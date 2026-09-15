@@ -1950,15 +1950,16 @@ RAISE                                            *builtin-raise* *raise*
 ==============================================================================
 SCRY                                             *builtin-scry* *scry*
 
-  `scry [options]`
+  `scry [options] [entries...]`
 
-  Read candidate lines from stdin, show them in the interactive fuzzy picker,
-  and write the chosen line to stdout. This is the same fuzzy finder used for
-  completion and history search, exposed as a command so it can be dropped
-  into a pipeline.
+  Read candidate lines from stdin and positional arguments, show them in the
+  interactive fuzzy picker, and write the chosen line to stdout. This is the
+  same fuzzy finder used for tab completion and history search, exposed as a
+  command so it can be dropped into a pipeline.
 
-  The picker is only shown when stdin has data and the shell is attached to a
-  terminal; with nothing piped in, `scry` exits 0 without doing anything.
+  The picker is only shown when stdin has data and/or positional arguments are
+  passed, and the shell is attached to a terminal; with nothing piped in and no
+  arguments, `scry` exits 0 without doing anything.
 
   Input Options ~
 
@@ -1983,8 +1984,8 @@ SCRY                                             *builtin-scry* *scry*
       `ls | scry`                          pick a file name
       `hist --quoted -n | scry -q`         pick a past command, decoded
       `find . -type d -print0 | scry -0`   pick a directory, NUL-safe
-
-  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+      `scry ./src/**/*.rs`                 pick files from a directory
+                                           using a glob pattern
 
   See also: |quoted-streams|, |builtin-hist|
 

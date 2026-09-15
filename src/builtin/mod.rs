@@ -285,7 +285,7 @@ pub(super) trait Builtin: Sync {
   ///
   /// Only reads stdin whenn no arguments are given
   fn get_input(&self, args: &mut BuiltinArgs) -> Option<Vec<u8>> {
-    self.get_input_with(args, |a| a.argv().is_empty())
+    self.get_input_with(args, BuiltinArgs::no_arguments)
   }
 
   /// Input getter. Takes a predicate that decides whether to slurp stdin or not.

@@ -24,9 +24,15 @@ impl super::Builtin for Scry {
     true
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let Some(input) = self.get_input_str(&mut args) else {
+    let input = self
+      .get_input_with(&mut args, |_| true)
+      .map(procio::bytes_to_string)
+      .unwrap_or_default();
+
+    if input.is_empty() && args.no_arguments() {
       return util::with_status(0);
-    };
+    }
+
     let mut null_in = false;
     let mut quote_in = false;
     let mut quote_out = false;
@@ -46,13 +52,17 @@ impl super::Builtin for Scry {
       }
     }
 
-    let entries = if quote_in {
+    let mut entries = if quote_in {
       Self::split_input_quoted(&input)?
     } else if null_in {
       Self::split_input_null(&input)
     } else {
       input.lines().map(|s| (s.to_string(), 0)).collect()
     };
+
+    for (arg, _) in args.arguments() {
+      entries.push((arg.to_string(), 0));
+    }
 
     if entries.is_empty() {
       errln!("scry: received no items to list");
