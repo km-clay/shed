@@ -179,7 +179,7 @@ impl Zd {
     }) {
       Some(n) => match n.parse::<usize>() {
         Ok(n) => Some(n),
-        Err(_) => return Err(sherr!(ParseErr @ args.span(), "zd: invalid depth: {n}")),
+        Err(_) => return Err(sherr!(ParseErr @ args.span(), "invalid depth: {n}")),
       },
       None => None,
     };
@@ -200,7 +200,7 @@ impl Zd {
     let mut paths = Vec::new();
     for dir in dirs {
       if !dir.is_dir() {
-        return Err(sherr!(ExecFail @ args.span(), "zd: not a directory: {}", dir.display()));
+        return Err(sherr!(ExecFail @ args.span(), "not a directory: {}", dir.display()));
       }
       if recursive {
         collect_subdirs(&dir, depth, &mut paths);
@@ -239,7 +239,7 @@ impl Zd {
       .map(|(a, _)| a.to_string())
       .collect();
     if targets.is_empty() {
-      return Err(sherr!(ExecFail @ args.span(), "zd: remove requires a directory"));
+      return Err(sherr!(ExecFail @ args.span(), "remove requires a directory"));
     }
 
     let Some(conn) = db::get_db_conn() else {
@@ -311,7 +311,7 @@ impl Zd {
     let mut rows = load_dir_stats();
 
     if rows.is_empty() {
-      return Err(sherr!(ExecFail @ args.span(), "zd: no directory history yet"));
+      return Err(sherr!(ExecFail @ args.span(), "no directory history yet"));
     }
 
     if !query.is_empty() {
@@ -475,7 +475,12 @@ impl Zd {
   fn query(args: &super::BuiltinArgs) -> ShResult<()> {
     // every positional is concatenated into one subsequence query, so
     // `zd pro fern` still finds `~/projects/fern`.
-    let query: String = args.arguments().map(|(a, _)| a.to_str_lossy()).collect();
+    let query = args
+      .arguments()
+      .map(|(a, _)| a.to_str_lossy())
+      .collect::<String>()
+      .trim_end_matches('/')
+      .to_string();
     let print_dir = args.options().any(|o| o.key() == "print");
 
     let entries = if query.is_empty() {
@@ -484,13 +489,13 @@ impl Zd {
       load_dir_entries()
     };
     if entries.is_empty() {
-      return Err(sherr!(ExecFail @ args.span(), "zd: no directory history yet"));
+      return Err(sherr!(ExecFail @ args.cmd_span(), "no directory history yet"));
     }
 
     let mut target = if query.is_empty() {
       if !Shed::term(Terminal::interactive) {
         return Err(
-          sherr!(ExecFail @ args.span(), "zd: a directory query is required when non-interactive"),
+          sherr!(ExecFail @ args.cmd_span(), "a directory query is required when non-interactive"),
         );
       }
       // no argument, let's open the fuzzy finder
@@ -517,7 +522,7 @@ impl Zd {
         if print_dir {
           outln!("{path}");
         } else if let Err(e) = cwd::change_dir(&path) {
-          return Err(sherr!(ExecFail @ args.span(), "zd: could not change directory: {e}"));
+          return Err(sherr!(ExecFail @ args.span(), "could not change directory: {e}"));
         }
         util::with_status(0)
       }
