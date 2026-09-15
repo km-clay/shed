@@ -1094,7 +1094,7 @@ impl<'a> LexStream<'a> {
             if !strops::scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
               return Err(lex_err!(
                   self,
-                  paren_pos..paren_pos + 1,
+                  paren_pos - 1..paren_pos,
                   "Unclosed subshell",
               ));
             }
@@ -1108,7 +1108,7 @@ impl<'a> LexStream<'a> {
         self.inc_cursor(2); // '$('
         let paren_pos = self.cursor;
         if !strops::scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
-          return Err(lex_err!(self, paren_pos..paren_pos + 1, "Unclosed subshell"));
+          return Err(lex_err!(self, paren_pos - 1..paren_pos, "Unclosed subshell"));
         }
       }
       b'$' if self.peek_nth(1) == Some(b'(') => {
@@ -1125,7 +1125,7 @@ impl<'a> LexStream<'a> {
           None if !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) => {
             return Err(lex_err!(
                 self,
-                paren_pos..paren_pos + 1,
+                paren_pos - 1..paren_pos,
                 "Unclosed subshell",
             ));
           }
@@ -1167,7 +1167,7 @@ impl<'a> LexStream<'a> {
         if !strops::scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
               self,
-              paren_pos..paren_pos + 1,
+              paren_pos - 1..paren_pos,
               "Unclosed subshell",
           ));
         }
@@ -1208,7 +1208,7 @@ impl<'a> LexStream<'a> {
         if !strops::scan_parens(self, paren_count) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
           return Err(lex_err!(
               self,
-              paren_pos..paren_pos + 1,
+              paren_pos - 1..paren_pos,
               "Unclosed subshell",
           ));
         }
