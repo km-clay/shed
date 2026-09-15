@@ -1601,6 +1601,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    not(linux_like),
+    ignore = "fd-table pipe wiring for forked external stages is broken on macOS"
+  )]
   fn local_export_combined() {
     let _g = TestGuard::new();
     test_input("foo() { local -x EXPORTED_LOCAL=hi; env | grep '^EXPORTED_LOCAL='; }").unwrap();
