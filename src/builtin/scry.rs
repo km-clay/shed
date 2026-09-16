@@ -29,7 +29,7 @@ impl super::Builtin for Scry {
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let input = self
-      .get_input_with(&mut args, |_| true)
+      .get_input(&mut args)
       .map(procio::bytes_to_string)
       .unwrap_or_default();
 
