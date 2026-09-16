@@ -107,7 +107,6 @@ impl super::Dispatcher {
       // builtins get a thread instead of a fork
       let cmd_node = &tree[*cmd];
       let thread_this_stage = num_cmds > 1
-        && !interactive
         && !is_bg
         && !should_fork_segment(cmd_node)
         && node::node_fork_behavior(tree, *cmd) == Some(ForkBehavior::Never)
