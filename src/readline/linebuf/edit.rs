@@ -1,7 +1,4 @@
-use std::{
-  mem,
-  sync::atomic::{AtomicU64, Ordering},
-};
+use std::mem;
 
 use bstr::ByteSlice;
 use unicode_segmentation::UnicodeSegmentation;
@@ -19,12 +16,6 @@ use super::{
   Grapheme, Line, Lines,
   context::{CtxTk, CtxTkRule},
 };
-
-static EDIT_EPOCH: AtomicU64 = AtomicU64::new(0);
-
-fn fetch_epoch() -> u64 {
-  EDIT_EPOCH.fetch_add(1, Ordering::Relaxed)
-}
 
 /// The `LineBuf`'s undo/redo stack, and some edit-related state fields
 #[derive(Clone, Debug, Default)]
@@ -113,7 +104,6 @@ pub(crate) struct Edit {
   old_cursor: Pos,
   new_cursor: Pos,
   merging: bool,
-  epoch: u64,
   body: EditBody,
 }
 
@@ -142,7 +132,6 @@ impl Edit {
       old_cursor,
       new_cursor,
       merging: false,
-      epoch: fetch_epoch(),
       body: EditBody::Delta {
         at,
         removed,
@@ -155,7 +144,6 @@ impl Edit {
       old_cursor,
       new_cursor,
       merging,
-      epoch: fetch_epoch(),
       body: EditBody::Snapshot { old, new },
     }
   }
@@ -164,12 +152,6 @@ impl Edit {
   }
   pub(crate) fn new_cursor(&self) -> Pos {
     self.new_cursor
-  }
-  pub(crate) fn merging(&self) -> bool {
-    self.merging
-  }
-  pub(crate) fn epoch(&self) -> u64 {
-    self.epoch
   }
   pub(crate) fn stop_merge(&mut self) {
     self.merging = false;
@@ -185,14 +167,6 @@ impl Edit {
   /// An empty step, used to break a merge chain without recording a change.
   pub(super) fn empty(cursor: Pos) -> Self {
     Edit::delta(cursor, VarStr::default(), VarStr::default(), cursor, cursor)
-  }
-  pub(crate) fn is_empty(&self) -> bool {
-    match &self.body {
-      EditBody::Delta {
-        removed, inserted, ..
-      } => removed.is_empty() && inserted.is_empty(),
-      EditBody::Snapshot { old, new } => old == new,
-    }
   }
   /// Extend an open merge with the current buffer state.
   fn set_new(&mut self, new_lines: Lines, new_cursor: Pos) {
@@ -218,30 +192,6 @@ impl Edit {
         removed,
         inserted,
       };
-    }
-  }
-  /// Re-expand a delta into snapshots so the entry can be merged into. `current`
-  /// is the live buffer, which equals this entry's post-edit state.
-  fn make_snapshot(&mut self, current: &Lines) {
-    let snap = match &self.body {
-      EditBody::Delta {
-        at,
-        removed,
-        inserted,
-      } => {
-        let mut old = current.clone();
-        splice_lines(
-          &mut old,
-          *at,
-          &inserted.to_str_lossy(),
-          &removed.to_str_lossy(),
-        ); // revert this delta
-        Some((old, current.clone()))
-      }
-      EditBody::Snapshot { .. } => None,
-    };
-    if let Some((old, new)) = snap {
-      self.body = EditBody::Snapshot { old, new };
     }
   }
   pub(super) fn undo(&self, lines: &mut Lines) {
@@ -738,9 +688,6 @@ impl super::LineBuf {
     self
       .edit_stack
       .record(old, self.lines.clone(), old_cursor, new_cursor, want_merge);
-  }
-  pub(crate) fn epoch(&self) -> u64 {
-    self.edit_stack.current.epoch()
   }
 }
 

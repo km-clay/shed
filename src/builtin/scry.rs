@@ -37,13 +37,13 @@ impl super::Builtin for Scry {
       return util::with_status(0);
     }
 
-    let mut null_in = false;
-    let mut quote_in = false;
-    let mut quote_out = false;
-    let mut no_newline = false;
-    let mut list = false;
-    let mut prompt = None;
-    let mut query = None;
+    let mut null_in/*----*/= false;
+    let mut quote_in/*---*/= false;
+    let mut quote_out/*--*/= false;
+    let mut no_newline/*-*/= false;
+    let mut list/*-------*/= false;
+    let mut prompt/*-----*/= None;
+    let mut query/*------*/= None;
 
     for opt in args.options() {
       match opt.key() {

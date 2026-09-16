@@ -392,7 +392,7 @@ impl super::LineBuf {
     } else {
       self.edit_stack.redo()
     };
-    let Some(mut edit) = edit else { return };
+    let Some(edit) = edit else { return };
 
     let cursor = if is_undo {
       edit.old_cursor()

@@ -5,8 +5,12 @@
 
 use std::{
   fmt,
-  os::fd::{AsFd, OwnedFd},
+  os::{
+    fd::{AsFd, BorrowedFd, OwnedFd},
+    unix::thread::JoinHandleExt,
+  },
   sync::Weak,
+  thread,
 };
 
 use crate::{
@@ -19,6 +23,7 @@ use bitflags::bitflags;
 use itertools::izip;
 use nix::{
   errno::Errno,
+  libc,
   poll::{PollFd, PollFlags, PollTimeout, poll},
   sys::{
     signal::{Signal, kill, killpg},
@@ -182,6 +187,19 @@ enum StageStatus {
   Panicked,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct WorkerId(libc::pthread_t);
+
+unsafe impl Send for WorkerId {}
+
+impl WorkerId {
+  fn interrupt(self) {
+    unsafe {
+      libc::pthread_kill(self.0, libc::SIGINT);
+    }
+  }
+}
+
 pub(crate) struct StageThread {
   status: Option<StageStatus>,
   command: Option<VarStr>,
@@ -224,6 +242,14 @@ impl StageThread {
     self.channels = channels;
     self
   }
+  pub(crate) fn pthread_id(&self) -> Option<WorkerId> {
+    match &self.status {
+      Some(StageStatus::Running(handle)) => {
+        Some(WorkerId(handle.as_pthread_t() as libc::pthread_t))
+      }
+      _ => None,
+    }
+  }
   fn cancel(&self) {
     for ch in &self.channels {
       if let Some(ch) = ch.upgrade() {
@@ -231,6 +257,10 @@ impl StageThread {
         // close both sides of the pipe
         ch.cancel();
       }
+    }
+
+    if let Some(id) = self.pthread_id() {
+      id.interrupt();
     }
   }
   fn is_finished(&self) -> bool {
@@ -454,6 +484,80 @@ pub(crate) struct JobData {
   pub cmds: Vec<VarStr>,
   pub display: String,
   pub timer: Option<CmdTimer>,
+}
+
+#[derive(Debug)]
+pub(crate) struct Watcher {
+  handle: Option<thread::JoinHandle<()>>,
+  done_wr: Option<OwnedFd>,
+}
+
+#[expect(clippy::needless_pass_by_value)]
+impl Watcher {
+  pub(crate) fn new(
+    channels: Vec<Weak<dyn Sink>>,
+    workers: Vec<WorkerId>,
+    wake: BorrowedFd<'static>,
+  ) -> ShResult<Self> {
+    let (done_rd, done_wr) = procio::pipes_high_nonblocking()?;
+    let handle = thread::spawn(move || Self::watcher_loop(channels, workers, wake, done_rd));
+    Ok(Self {
+      handle: Some(handle),
+      done_wr: Some(done_wr),
+    })
+  }
+  fn watcher_loop(
+    channels: Vec<Weak<dyn Sink>>,
+    workers: Vec<WorkerId>,
+    wake_fd: BorrowedFd,
+    done_rd: OwnedFd,
+  ) {
+    let mut fds = [
+      PollFd::new(wake_fd, PollFlags::POLLIN),
+      PollFd::new(done_rd.as_fd(), PollFlags::POLLIN | PollFlags::POLLHUP),
+    ];
+
+    loop {
+      if poll(&mut fds, PollTimeout::NONE).is_err() {
+        continue;
+      }
+
+      if fds[1]
+        .revents()
+        .is_some_and(|r| r.intersects(PollFlags::POLLIN | PollFlags::POLLHUP))
+      {
+        // done pipe has received the signal, we exit now
+        return;
+      }
+
+      if fds[0]
+        .revents()
+        .is_some_and(|r| r.intersects(PollFlags::POLLIN))
+      {
+        procio::drain_fd(wake_fd);
+        if signal::sigint_pending() {
+          for ch in &channels {
+            if let Some(ch) = ch.upgrade() {
+              ch.cancel();
+            }
+          }
+
+          for id in &workers {
+            id.interrupt();
+          }
+        }
+      }
+    }
+  }
+}
+
+impl Drop for Watcher {
+  fn drop(&mut self) {
+    drop(self.done_wr.take());
+    if let Some(handle) = self.handle.take() {
+      let _ = handle.join();
+    }
+  }
 }
 
 #[derive(Debug)]

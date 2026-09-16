@@ -168,8 +168,11 @@ pub(crate) fn pipes_high_no_cloexec() -> nix::Result<(OwnedFd, OwnedFd)> {
 }
 
 pub(crate) fn pipes_high_nonblocking() -> nix::Result<(OwnedFd, OwnedFd)> {
-  let (r, w) = nix::unistd::pipe2(OFlag::O_NONBLOCK)?;
-  Ok((move_high(r)?, move_high(w)?))
+  let (r, w) = nix::unistd::pipe()?;
+  let (r, w) = (move_high(r)?, move_high(w)?);
+  fcntl(r.as_fd(), FcntlArg::F_SETFL(OFlag::O_NONBLOCK))?;
+  fcntl(w.as_fd(), FcntlArg::F_SETFL(OFlag::O_NONBLOCK))?;
+  Ok((r, w))
 }
 
 /// Step one of our redirection building pipeline.

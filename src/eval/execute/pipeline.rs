@@ -9,7 +9,7 @@
 //! * `last`: the last command executes in-process if it is a builtin
 //! * `all`: every command forks, no matter what.
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use nix::{
   libc::STDIN_FILENO,
@@ -23,10 +23,10 @@ use crate::{
     parse::{NdFlags, Node, node},
   },
   procio::{RedirSet, Sink, Sinks},
-  shopt,
+  shopt, signal,
   state::{
     Shed,
-    jobs::{self},
+    jobs::{self, Watcher},
     shopt::PipeStyle,
     terminal::Terminal,
     vars::{VarFlags, VarKind},
@@ -88,6 +88,7 @@ impl super::Dispatcher {
 
     let lastpipe = shopt!(core.lastpipe);
     let pipe_style = shopt!(core.pipeline_style);
+    let fork_only = matches!(pipe_style, PipeStyle::Fork);
 
     // Per-stage statuses of the in-process tail, captured for the PIPESTATUS
     // splice and pipefail blame after the forked prefix is waited on.
@@ -95,6 +96,9 @@ impl super::Dispatcher {
     let mut cmd_iter = cmds.iter().enumerate().peekable();
 
     let mut prev_read: Option<Arc<dyn Sink>> = None;
+    let mut sinks: Vec<Weak<dyn Sink>> = vec![];
+    let mut workers: Vec<jobs::WorkerId> = vec![];
+
     while let Some((i, cmd)) = cmd_iter.next() {
       let mut guard = Sinks::redir_scope();
 
@@ -108,9 +112,9 @@ impl super::Dispatcher {
       let cmd_node = &tree[*cmd];
       let thread_this_stage = num_cmds > 1
         && !is_bg
+        && !fork_only
         && !should_fork_segment(cmd_node)
-        && node::node_fork_behavior(tree, *cmd) == Some(ForkBehavior::Never)
-        && !matches!(pipe_style, PipeStyle::Fork);
+        && node::node_fork_behavior(tree, *cmd) == Some(ForkBehavior::Never);
 
       // if the next stage is also threaded, we can use our threaded in-process pipes
       // instead of using a syscall to create os pipes
@@ -150,6 +154,8 @@ impl super::Dispatcher {
         if Shed::term(Terminal::interactive) {
           Shed::term_mut(|t| t.attach(unistd::getpgrp())).ok();
         }
+
+        let _watcher = (!fork_only).then(|| Watcher::new(sinks, workers, signal::wake_fd()));
         result = match self.exec_internal_segment(tree, cmds[i]) {
           Ok(status) => {
             tail_status = Some(status);
@@ -173,6 +179,8 @@ impl super::Dispatcher {
         } else {
           Sinks::os_pipes()?
         };
+        sinks.push(Arc::downgrade(&read));
+        sinks.push(Arc::downgrade(&write));
         guard.apply_sink(1, write)?;
         prev_read = Some(read);
       } else {
@@ -187,6 +195,10 @@ impl super::Dispatcher {
       result = if thread_this_stage {
         let stage_sinks = Shed::sinks(|s| s.clone());
         let handle = self.spawn_stage(tree, *cmd, stage_sinks)?;
+        if let Some(tid) = handle.pthread_id() {
+          workers.push(tid);
+        }
+
         self
           .job_stack
           .curr_job_mut()
