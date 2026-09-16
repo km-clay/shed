@@ -38,15 +38,11 @@
       ];
     };
 
-    # buildRustPackage defaults to nixpkgs's rustc, which lags behind. Build
-    # an explicit rustPlatform from the same overlay toolchain the devShell
-    # uses so `nix build` sees the same language features as `cargo build`.
     rustPlatform = pkgs.makeRustPlatform {
       cargo = rustToolchain;
       rustc = rustToolchain;
     };
 
-    inherit (pkgs) lib;
     checkTargets = [
       "x86_64-unknown-linux-gnu"
       "aarch64-unknown-linux-gnu"
@@ -88,11 +84,6 @@
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER =
         "${pkgs.pkgsCross.musl64.stdenv.cc}/bin/${pkgs.pkgsCross.musl64.stdenv.cc.targetPrefix}cc";
 
-      # Tell the `cc` crate (used by libsqlite3-sys build script and any
-      # other -sys crate compiling C code) to use the musl cross-cc when
-      # building for the musl target. Without this it falls back to host
-      # gcc, which produces glibc-flavored object files that don't link
-      # against musl ("undefined reference to open64 / __memcpy_chk").
       CC_x86_64_unknown_linux_musl =
         "${pkgs.pkgsCross.musl64.stdenv.cc}/bin/${pkgs.pkgsCross.musl64.stdenv.cc.targetPrefix}cc";
       AR_x86_64_unknown_linux_musl =
@@ -101,7 +92,7 @@
 
     packages.default = rustPlatform.buildRustPackage {
       pname = "shed";
-      version = "0.42.5";
+      version = "0.42.6";
 
       src = self;
       cargoLock = { lockFile = ./Cargo.lock; };
@@ -129,10 +120,12 @@
       };
     };
 
-    checks = builtins.listToAttrs (map (t: {
+    checks = (builtins.listToAttrs (map (t: {
       name = "check-${t}";
       value = mkCheck t;
-    }) checkTargets);
+    }) checkTargets)) // {
+      tests = self.packages.${system}.default;
+    };
   }) // {
     nixosModules.shed = import ./nix/module.nix;
     homeModules.shed = import ./nix/hm-module.nix;
