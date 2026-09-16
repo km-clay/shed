@@ -20,6 +20,7 @@ impl super::Builtin for Scry {
       opt!("quote-out" | b'Q'),
       opt!("list" | b'l'),
       opt!("prompt" | b'p', 1),
+      opt!("search" | b's', 1),
       OptSpec::new_short("no-newline", b'n'),
     ]
   }
@@ -42,6 +43,7 @@ impl super::Builtin for Scry {
     let mut no_newline = false;
     let mut list = false;
     let mut prompt = None;
+    let mut query = None;
 
     for opt in args.options() {
       match opt.key() {
@@ -51,6 +53,7 @@ impl super::Builtin for Scry {
         "no-newline"/*-*/=> no_newline = true,
         "list"/*-------*/=> list = true,
         "prompt"/*-----*/=> prompt = Some(opt.value()?.to_string()),
+        "search"/*-----*/=> query = Some(opt.value()?.to_string()),
         _ => {}
       }
     }
@@ -77,6 +80,10 @@ impl super::Builtin for Scry {
     if let Some(prompt) = prompt {
       selector = selector.with_placeholder(prompt);
     }
+    if let Some(query) = query {
+      selector = selector.with_query(query);
+    }
+
     if list {
       return Self::print_candidates(selector, no_newline, quote_out);
     }
