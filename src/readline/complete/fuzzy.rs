@@ -6,7 +6,9 @@ use nix::{
 };
 
 use crate::{
-  flush_term, sherr,
+  flush_term,
+  readline::Pos,
+  sherr,
   state::terminal::{TermCap, Terminal},
   util::{error::ShResult, ui},
 };
@@ -197,6 +199,9 @@ impl ScoredCandidate {
     let score = cb(&self.candidate, &query_chars, self.penalize_len_diff);
     self.score = Some(score);
     score
+  }
+  pub(crate) fn content(&self) -> &str {
+    self.candidate.as_str()
   }
 }
 
@@ -412,6 +417,7 @@ pub(crate) enum SelectorResponse {
 #[derive(Debug, Default)]
 pub(crate) struct FuzzyBuilder {
   entries: Vec<(String, i32)>,
+  search_query: Option<String>,
   placeholder: Option<String>,
   score_cb: Option<ScoreCallback>,
   highlight_cb: Option<HighlightCallback>,
@@ -431,6 +437,11 @@ impl FuzzyBuilder {
     self
   }
 
+  pub(crate) fn with_query(mut self, query: impl Into<String>) -> Self {
+    self.search_query = Some(query.into());
+    self
+  }
+
   pub(crate) fn with_entries(mut self, entries: Vec<(String, i32)>) -> Self {
     self.entries = entries;
     self
@@ -447,6 +458,32 @@ impl FuzzyBuilder {
     self.highlight_cb = Some(cb);
     self
   }
+  pub(crate) fn build(self) -> FuzzySelector {
+    let Self {
+      entries,
+      search_query,
+      placeholder,
+      score_cb,
+      highlight_cb,
+      inline,
+    } = self;
+
+    let candidates = entries
+      .into_iter()
+      .map(|(text, weight)| Candidate::from(text).with_weight(weight))
+      .collect();
+    let search_query = search_query.as_deref().unwrap_or_default();
+
+    let mut selector = FuzzySelector::new();
+    selector.set_placeholder(placeholder);
+    selector.set_inline(inline);
+    selector.set_score_cb(score_cb);
+    selector.set_highlight_cb(highlight_cb);
+    selector.activate(candidates);
+    selector.set_prompt_line_context(0, 0);
+    selector.set_query(search_query);
+    selector
+  }
   pub(crate) fn pick(self) -> ShResult<Option<String>> {
     if self.entries.is_empty() || Shed::term(Terminal::test_mode) {
       return Ok(None);
@@ -454,23 +491,10 @@ impl FuzzyBuilder {
     let Some(tty) = Shed::term(Terminal::tty) else {
       return Ok(None); // not attached to a terminal
     };
-
     let _raw = Shed::term_mut(Terminal::raw_mode_guard)?;
-
-    let candidates = self
-      .entries
-      .into_iter()
-      .map(|(text, weight)| Candidate::from(text).with_weight(weight))
-      .collect();
-
     let inline = self.inline;
-    let mut selector = FuzzySelector::new("");
-    selector.set_placeholder(self.placeholder);
-    selector.set_inline(inline);
-    selector.set_score_cb(self.score_cb);
-    selector.set_highlight_cb(self.highlight_cb);
-    selector.activate(candidates);
-    selector.set_prompt_line_context(0, 0);
+
+    let mut selector = self.build();
 
     // The beam is set with a raw escape that bypasses `execute_control`, so the
     // terminal's tracked style stays at the pre-picker value; restore to it on exit.
@@ -595,7 +619,7 @@ impl FuzzySelector {
   /// Every cell is prefixed with a 2-column leader (`► ` or dim `· `).
   const LEADER_W: usize = 2;
 
-  pub(crate) fn new(_title: impl Into<String>) -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       query: QueryEditor::default(),
       filtered: vec![],
@@ -662,7 +686,10 @@ impl FuzzySelector {
   }
 
   pub(crate) fn set_query(&mut self, query: &str) {
-    self.query.linebuf = LineBuf::new().with_initial(query, query.len());
+    self.query.linebuf.edit(|buf| {
+      buf.set_buffer(query);
+      buf.set_cursor(Pos::MAX);
+    });
     self.score_candidates();
   }
 
@@ -1110,7 +1137,7 @@ impl Default for FuzzyCompleter {
   fn default() -> Self {
     Self {
       completer: SimpleCompleter::default(),
-      selector: FuzzySelector::new("Complete"),
+      selector: FuzzySelector::new(),
     }
   }
 }

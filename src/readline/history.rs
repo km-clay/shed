@@ -1211,7 +1211,7 @@ impl History {
       return Some(all_entries[0].command().to_string());
     }
 
-    let mut finder = FuzzySelector::new("History").number_candidates(true);
+    let mut finder = FuzzySelector::new().number_candidates(true);
 
     let candidates: Vec<Candidate> = all_entries
       .into_iter()

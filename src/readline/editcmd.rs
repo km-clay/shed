@@ -273,16 +273,6 @@ impl EditCmd {
       .as_ref()
       .is_some_and(|v| matches!(v.1, Verb::Change))
   }
-  pub(crate) fn is_line_motion(&self) -> bool {
-    self
-      .motion
-      .as_ref()
-      .is_some_and(|m| matches!(m.1, Motion::LineUp | Motion::LineDown))
-      || self
-        .verb
-        .as_ref()
-        .is_some_and(|v| v.1 == Verb::AcceptLineOrNewline)
-  }
   pub(crate) fn is_vertical(&self) -> bool {
     matches!(
       self.motion().map(|m| &m.1),

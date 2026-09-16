@@ -1109,7 +1109,7 @@ mod fuzzy_selector_handle_key {
   use crate::{key, keys::ModKeys as M};
 
   fn sel_with(items: &[&str]) -> FuzzySelector {
-    let mut sel = FuzzySelector::new("test");
+    let mut sel = FuzzySelector::new();
     let cands: Vec<Candidate> = items
       .iter()
       .map(|s| Candidate::from(s.to_string()))
@@ -1123,7 +1123,7 @@ mod fuzzy_selector_handle_key {
   #[test]
   fn enter_with_empty_filtered_dismisses() {
     let _g = TestGuard::new();
-    let mut sel = FuzzySelector::new("test");
+    let mut sel = FuzzySelector::new();
     let resp = sel.handle_key(key!(Enter)).unwrap();
     assert!(matches!(resp, SelectorResponse::Dismiss));
   }
@@ -1352,7 +1352,7 @@ mod fuzzy_selector_handle_key {
   #[test]
   fn navigation_on_empty_selector_does_not_panic() {
     let _g = TestGuard::new();
-    let mut sel = FuzzySelector::new("test");
+    let mut sel = FuzzySelector::new();
     for key in [
       key!(Down),
       key!(Up),
@@ -1838,7 +1838,7 @@ fn flat_score(cand: &str, q: &[char], _p: bool) -> i32 {
 #[test]
 fn score_cb_applies_in_extends_branch() {
   let _g = TestGuard::new();
-  let mut sel = FuzzySelector::new("test");
+  let mut sel = FuzzySelector::new();
   sel.set_score_cb(Some(flat_score));
   sel.activate(make_cands(&["abc"]));
   sel.set_query("a");

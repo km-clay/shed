@@ -1,9 +1,11 @@
+use itertools::Itertools;
+
 use crate::{
   errln,
   expand::escape,
   opt, out, outln,
   procio::{self, SinkIo},
-  readline::FuzzyBuilder,
+  readline::{FuzzyBuilder, ScoredCandidate},
   util::{self, error::ShResult},
 };
 
@@ -16,6 +18,7 @@ impl super::Builtin for Scry {
       opt!("read0" | b'0'),
       opt!("quote-in" | b'q'),
       opt!("quote-out" | b'Q'),
+      opt!("list" | b'l'),
       opt!("prompt" | b'p', 1),
       OptSpec::new_short("no-newline", b'n'),
     ]
@@ -36,18 +39,18 @@ impl super::Builtin for Scry {
     let mut null_in = false;
     let mut quote_in = false;
     let mut quote_out = false;
-    let mut prompt = None;
     let mut no_newline = false;
+    let mut list = false;
+    let mut prompt = None;
 
     for opt in args.options() {
       match opt.key() {
-        "read0" => null_in = true,
-        "quote-in" => quote_in = true,
-        "quote-out" => quote_out = true,
-        "no-newline" => no_newline = true,
-        "prompt" => {
-          prompt = Some(opt.value()?.to_string());
-        }
+        "read0"/*------*/=> null_in = true,
+        "quote-in"/*---*/=> quote_in = true,
+        "quote-out"/*--*/=> quote_out = true,
+        "no-newline"/*-*/=> no_newline = true,
+        "list"/*-------*/=> list = true,
+        "prompt"/*-----*/=> prompt = Some(opt.value()?.to_string()),
         _ => {}
       }
     }
@@ -72,7 +75,10 @@ impl super::Builtin for Scry {
     let mut selector = FuzzyBuilder::new().with_entries(entries).with_inline(false);
 
     if let Some(prompt) = prompt {
-      selector = selector.with_placeholder(prompt.as_str());
+      selector = selector.with_placeholder(prompt);
+    }
+    if list {
+      return Self::print_candidates(selector, no_newline, quote_out);
     }
 
     match selector.pick()? {
@@ -101,6 +107,40 @@ impl Scry {
         .map(|r| (String::from_utf8_lossy(&r.join(&b' ')).into_owned(), 0))
         .collect(),
     )
+  }
+
+  fn print_candidates(builder: FuzzyBuilder, no_newline: bool, quote_out: bool) -> ShResult<()> {
+    let selector = builder.build();
+    let candidates = selector.filtered();
+
+    if quote_out {
+      let Some(out) = procio::stdout_sink().ok() else {
+        return util::with_status(1);
+      };
+      let mut first = true;
+
+      for cand in candidates {
+        if !first {
+          outln!();
+        }
+        let content = cand.content();
+        escape::shell_quote_fmt(content, &mut SinkIo(out.clone())).ok();
+        first = false;
+      }
+      if !no_newline {
+        outln!();
+      }
+    } else {
+      let output = candidates.iter().map(ScoredCandidate::content).join("\n");
+
+      if no_newline {
+        out!("{output}");
+      } else {
+        outln!("{output}");
+      }
+    }
+
+    util::with_status(0)
   }
 
   fn split_input_null(input: &str) -> Vec<(String, i32)> {

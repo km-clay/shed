@@ -1664,7 +1664,7 @@ mod handle_hist_search_key {
   /// the history's `fuzzy_finder`. Candidate ids must be present because
   /// the Accept arm does `cmd.id().unwrap()`.
   fn install_hist_finder(line: &mut ShedLine, items: &[(usize, &str)]) {
-    let mut sel = FuzzySelector::new("History");
+    let mut sel = FuzzySelector::new();
     let cands: Vec<Candidate> = items
       .iter()
       .map(|(id, s)| Candidate::from((*id, s.to_string())))
