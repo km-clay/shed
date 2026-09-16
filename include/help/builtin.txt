@@ -1967,11 +1967,16 @@ SCRY                                             *builtin-scry* *scry*
     `-q`, `--quote-in`     candidates are shell-quoted records; each is decoded
                            before being displayed (see |quoted-streams|)
     `-p`, `--prompt {t}`   placeholder hint shown while the query box is empty
+    `-s`, `--search {q}`   start with the query box pre-filled with `q`, so the
+                           candidate list is filtered and ranked by `q` up front
 
   Output Options ~
 
     `-Q`, `--quote-out`    shell-quote the selected line before printing it
     `-n`                   omit the trailing newline on the selected line
+    `-l`, `--list`         skip the interactive picker and print the ranked
+                           candidates to stdout, best match first; honors `-s`
+                           for filtering and `-Q`/`-n` for formatting
 
   Exit status:
 
@@ -1986,6 +1991,8 @@ SCRY                                             *builtin-scry* *scry*
       `find . -type d -print0 | scry -0`   pick a directory, NUL-safe
       `scry ./src/**/*.rs`                 pick files from a directory
                                            using a glob pattern
+      `scry -l -s test ./src/*.rs`         list matching files, ranked,
+                                           without the picker
 
   See also: |quoted-streams|, |builtin-hist|
 
