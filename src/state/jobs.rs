@@ -3,14 +3,23 @@
 //! Tracks foreground and background jobs and their child processes ([`ChildProc`],
 //! [`JobStack`]), and renders their wait status ([`DisplayWaitStatus`]).
 
-use std::fmt;
+use std::{
+  fmt,
+  os::fd::{AsFd, OwnedFd},
+  sync::Weak,
+};
 
-use crate::{defer, procio, state::thread::StageResult};
+use crate::{
+  defer,
+  procio::{self, Sink},
+  state::thread::StageResult,
+};
 use ariadne::Fmt;
 use bitflags::bitflags;
 use itertools::izip;
 use nix::{
   errno::Errno,
+  poll::{PollFd, PollFlags, PollTimeout, poll},
   sys::{
     signal::{Signal, kill, killpg},
     wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid},
@@ -130,8 +139,13 @@ impl JobMember {
     match self {
       JobMember::Process(child_proc) => Ok(child_proc.wait(flags)?.into()),
       JobMember::Thread(stage_thread) => {
+        let outcome = stage_thread.wait()?;
         stage_thread.join();
-        Ok(stage_thread.outcome())
+        Ok(match outcome {
+          // interrupt wins
+          Outcome::Signaled(sig) => Outcome::Signaled(sig),
+          _ => stage_thread.outcome(),
+        })
       }
     }
   }
@@ -168,11 +182,24 @@ enum StageStatus {
   Panicked,
 }
 
-#[derive(Debug)]
 pub(crate) struct StageThread {
   status: Option<StageStatus>,
   command: Option<VarStr>,
   timer: Option<CmdTimer>,
+  notif: Option<OwnedFd>,
+  channels: Vec<Weak<dyn Sink>>,
+}
+
+impl fmt::Debug for StageThread {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("StageThread")
+      .field("status", &self.status)
+      .field("command", &self.command)
+      .field("timer", &self.timer)
+      .field("notif", &self.notif)
+      .field("channels", &self.channels.len())
+      .finish()
+  }
 }
 
 impl StageThread {
@@ -181,11 +208,30 @@ impl StageThread {
       status: Some(StageStatus::Running(handle)),
       command: None,
       timer: None,
+      notif: None,
+      channels: Vec::new(),
     }
   }
   pub(crate) fn with_name(mut self, name: Option<VarStr>) -> Self {
     self.command = name;
     self
+  }
+  pub(crate) fn with_notif(mut self, notif: OwnedFd) -> Self {
+    self.notif = Some(notif);
+    self
+  }
+  pub(crate) fn with_channels(mut self, channels: Vec<Weak<dyn Sink>>) -> Self {
+    self.channels = channels;
+    self
+  }
+  fn cancel(&self) {
+    for ch in &self.channels {
+      if let Some(ch) = ch.upgrade() {
+        // call Sink::cancel, which makes ThreadSink
+        // close both sides of the pipe
+        ch.cancel();
+      }
+    }
   }
   fn is_finished(&self) -> bool {
     matches!(
@@ -198,6 +244,42 @@ impl StageThread {
       Some(StageStatus::Complete(result)) => Outcome::Exited(result.status()),
       Some(StageStatus::Panicked) => Outcome::Signaled(Signal::SIGABRT),
       _ => Outcome::Running,
+    }
+  }
+  fn wait(&self) -> Result<Outcome, Errno> {
+    let Some(notif) = self.notif.as_ref().map(|fd| fd.as_fd()) else {
+      return Err(Errno::EBADF);
+    };
+    let mut poll_fds = [
+      PollFd::new(notif, PollFlags::POLLIN | PollFlags::POLLHUP),
+      PollFd::new(signal::wake_fd(), PollFlags::POLLIN),
+    ];
+
+    loop {
+      if signal::sigint_pending() {
+        self.cancel();
+
+        return Ok(Outcome::Signaled(Signal::SIGINT));
+      }
+
+      poll(&mut poll_fds, PollTimeout::NONE)?;
+
+      // if we are here, the poll got a revent.
+      // if it was our notif_fd (poll_fds[0]), the thread is done
+      // if it was the wake_fd (poll_fds[1]), we got a signal
+
+      if poll_fds[0].revents().is_some() {
+        return Ok(Outcome::Exited(Shed::get_status()));
+      }
+
+      if poll_fds[1].revents().is_some() {
+        procio::drain_fd(poll_fds[1].as_fd());
+        if signal::sigint_pending() {
+          self.cancel();
+
+          return Ok(Outcome::Signaled(Signal::SIGINT));
+        }
+      }
     }
   }
   fn join(&mut self) {

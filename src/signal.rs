@@ -5,7 +5,11 @@
 
 use std::{
   collections::VecDeque,
-  sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering},
+  os::fd::{AsFd, BorrowedFd, IntoRawFd, OwnedFd},
+  sync::{
+    OnceLock,
+    atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering},
+  },
 };
 
 use nix::{
@@ -34,10 +38,13 @@ use super::{
 };
 
 use crate::{
-  HashMap,
+  HashMap, procio,
   state::{jobs::Outcome, vars::VarStr},
   varstr,
 };
+
+static THREAD_WAKE_WR: AtomicI32 = AtomicI32::new(-1);
+static THREAD_WAKE_RD: OnceLock<OwnedFd> = OnceLock::new();
 
 /// A bitset representing all signals that have been received but not yet handled by `check_signals`.
 /// "indexed" by bit shifting the signal number (e.g. `1 << SIGINT` for SIGINT).
@@ -270,7 +277,22 @@ pub(crate) fn enable_reaping() {
   REAPING_ENABLED.store(true, Ordering::SeqCst);
 }
 
+fn ensure_wake_pipe() -> &'static OwnedFd {
+  THREAD_WAKE_RD.get_or_init(|| {
+    let (rd, wr) = procio::pipes_high_nonblocking().expect("failed to create thread wake pipe");
+    // leak the write pipe into the global; it has a static lifetime
+    THREAD_WAKE_WR.store(wr.into_raw_fd(), Ordering::SeqCst);
+    rd
+  })
+}
+
+pub(crate) fn wake_fd() -> BorrowedFd<'static> {
+  ensure_wake_pipe().as_fd()
+}
+
 pub(crate) fn install_signal_handlers() {
+  ensure_wake_pipe();
+
   let flags = SaFlags::empty();
   let action = SigAction::new(SigHandler::Handler(handle_signal), flags, SigSet::empty());
 
@@ -327,6 +349,15 @@ pub(crate) fn request_exit(code: i32) {
 
 extern "C" fn handle_signal(sig: libc::c_int) {
   SIGNALS.fetch_or(1 << sig, Ordering::SeqCst);
+  let fd = THREAD_WAKE_WR.load(Ordering::SeqCst);
+
+  if fd >= 0 {
+    unsafe {
+      // write a single byte to the pipe to wake up the main thread if it's
+      // waiting on a child thread
+      libc::write(fd, [0u8].as_ptr().cast(), 1);
+    }
+  }
 }
 
 pub(crate) fn hang_up(_: libc::c_int) {

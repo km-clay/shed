@@ -27,7 +27,7 @@ use crate::{
   builtin::{self, Builtin},
   eval::parse::NdFlags,
   lifecycle,
-  procio::Sinks,
+  procio::{self, Sinks},
   sherr, signal, socket,
   state::{
     Shed, cmd,
@@ -326,11 +326,32 @@ impl super::Dispatcher {
     Ok(())
   }
 
-  pub(super) fn spawn_stage(&self, tree: &Ast, node: NodeId, sinks: Sinks) -> StageThread {
+  pub(super) fn spawn_stage(
+    &self,
+    tree: &Ast,
+    node: NodeId,
+    mut sinks: Sinks,
+  ) -> ShResult<StageThread> {
     let ast = Arc::new(tree.break_off(node));
+
+    // we need weak pointers to the node's pipes
+    // so that interrupts can properly close pipe fds
+    // and send POLLHUP and stuff
+    let channels: Vec<_> = [0, 1]
+      .into_iter()
+      .filter_map(|fd| sinks.get(fd).map(|arc| Arc::downgrade(&arc)))
+      .collect();
+
     let spec = Shed::fork_spec(sinks, ast);
     let source = self.source_name.clone();
+    let (notif_rd, notif_wr) = procio::pipes_high_nonblocking()?;
+
     let handle = thread::spawn(move || {
+      let _notif = notif_wr; // give this to the thread.
+      // when this drops, notif_rd will
+      // be notified. this is the thread
+      // version of getting SIGCHLD
+
       let ast = Shed::install(spec);
       let root = ast.get_root().unwrap();
       let mut d = super::Dispatcher::new(source);
@@ -348,6 +369,11 @@ impl super::Dispatcher {
 
     let cmd_name = tree.command_for(node).map(|tk| tk.slice());
 
-    StageThread::new(handle).with_name(cmd_name)
+    Ok(
+      StageThread::new(handle)
+        .with_name(cmd_name)
+        .with_notif(notif_rd)
+        .with_channels(channels),
+    )
   }
 }

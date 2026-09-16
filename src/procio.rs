@@ -167,6 +167,11 @@ pub(crate) fn pipes_high_no_cloexec() -> nix::Result<(OwnedFd, OwnedFd)> {
   Ok((move_high_no_cloexec(r)?, move_high_no_cloexec(w)?))
 }
 
+pub(crate) fn pipes_high_nonblocking() -> nix::Result<(OwnedFd, OwnedFd)> {
+  let (r, w) = nix::unistd::pipe2(OFlag::O_NONBLOCK)?;
+  Ok((move_high(r)?, move_high(w)?))
+}
+
 /// Step one of our redirection building pipeline.
 ///
 /// The parser uses these to create `RedirSpecs`.
@@ -643,6 +648,23 @@ pub(crate) trait Sink: Send + Sync {
       "seek not supported on this i/o sink",
     ))
   }
+
+  /// close-like method for any sinks that need such a thing
+  ///
+  /// default is a no-op
+  fn cancel(&self) {}
+}
+
+/// Drain an fd, discarding the bytes it contains
+pub(crate) fn drain_fd(fd: BorrowedFd) {
+  let mut tmp = [0u8; 256];
+  loop {
+    match unistd::read(fd, &mut tmp) {
+      Ok(0) => break,
+      Ok(_) | Err(Errno::EINTR) => {}
+      Err(_) => break,
+    }
+  }
 }
 
 pub(crate) fn drain_sink(sink: &dyn Sink) -> io::Result<Vec<u8>> {
@@ -658,7 +680,6 @@ pub(crate) fn drain_sink(sink: &dyn Sink) -> io::Result<Vec<u8>> {
       }
       Err(e) if e.kind() == io::ErrorKind::Interrupted => {
         // Interrupted by a signal; retry the read.
-        // TODO: make sure this handles Ctrl+C and stuff
       }
       Err(e) => {
         return Err(e);
@@ -1018,6 +1039,16 @@ impl Sink for ThreadSink {
       ThreadSink::Write(_) => SinkKind::WritePipe,
     }
   }
+  fn cancel(&self) {
+    // close both sides so any blocked worker will wake up and unwind
+    let (Self::Read(pipe) | Self::Write(pipe)) = self;
+    {
+      let mut buf = pipe.buf.lock().unwrap();
+      buf.reader_open = false;
+      buf.writer_open = false;
+    }
+    pipe.notif.notify_all();
+  }
   fn flush(&self) -> io::Result<()> {
     Ok(())
   }
@@ -1033,9 +1064,6 @@ impl Sink for ThreadSink {
       .filter(PollTimeout::is_some)
       .and_then(|t| t.duration());
 
-    // a blocking poll waits for data or the writer's close instead of reporting
-    // the queue as empty. A concurrent writer thread has usually not produced yet
-    // when the reader first polls.
     buf = match timeout_dur {
       None => pipe
         .notif

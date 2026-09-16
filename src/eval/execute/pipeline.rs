@@ -186,7 +186,7 @@ impl super::Dispatcher {
 
       result = if thread_this_stage {
         let stage_sinks = Shed::sinks(|s| s.clone());
-        let handle = self.spawn_stage(tree, *cmd, stage_sinks);
+        let handle = self.spawn_stage(tree, *cmd, stage_sinks)?;
         self
           .job_stack
           .curr_job_mut()
