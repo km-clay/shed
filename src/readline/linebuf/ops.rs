@@ -5,15 +5,16 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::{
   eval::lex,
-  procio, sherr, shopt,
+  procio,
+  readline::linebuf::edit::RecordPolicy,
+  sherr, shopt,
   state::{SourceId, terminal, vars::VarStr},
   status_msg, util,
 };
 
 use super::{
-  CharClass, DEFAULT_VIEWPORT_HEIGHT, Edit, HighlightCache, Line, Lines, MotionKind, Pos,
-  SelectMode, ShResult, Shed, edit, editcmd::Motion, editmode::AddressRange, highlight,
-  types::Grapheme,
+  CharClass, DEFAULT_VIEWPORT_HEIGHT, HighlightCache, Line, Lines, MotionKind, Pos, SelectMode,
+  ShResult, Shed, edit, editcmd::Motion, editmode::AddressRange, highlight, types::Grapheme,
 };
 
 use super::char_class::{CharClassIter, CharClassIterRev};
@@ -827,12 +828,14 @@ impl super::LineBuf {
     self.fix_cursor();
   }
   pub(crate) fn set_buffer(&mut self, s: &str) {
-    self.lines = Lines::to_lines(s);
-    if self.lines.is_empty() {
-      self.lines.push(Line::default());
-    }
-    self.clear_concats();
-    self.fix_cursor();
+    self.edit_with(RecordPolicy::Skip, |this| {
+      this.lines = Lines::to_lines(s);
+      if this.lines.is_empty() {
+        this.lines.push(Line::default());
+      }
+      this.clear_concats();
+      this.fix_cursor();
+    });
   }
   pub(crate) fn fix_cursor(&mut self) {
     // we are now going to enforce some invariants and do some bookkeeping
@@ -860,16 +863,6 @@ impl super::LineBuf {
 
     // update viewport scroll offset
     self.update_scroll_offset();
-  }
-  pub(crate) fn stop_undo_merge(&mut self) {
-    self.merging_undos = false;
-    self.set_top_merging(false);
-    // Barrier so the next edit can't fold into the just-closed group.
-    self.undo_stack.push(Edit::barrier(self.cursor.pos));
-  }
-  pub(crate) fn start_undo_merge(&mut self) {
-    self.merging_undos = true;
-    self.set_top_merging(true);
   }
   pub(crate) fn equalize_rows(&mut self, line_nums: Vec<usize>) {
     for row in line_nums {

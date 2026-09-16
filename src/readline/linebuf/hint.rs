@@ -6,7 +6,7 @@ use crate::{
   util::pos::Pos,
 };
 
-use super::Lines;
+use super::{Lines, edit::RecordPolicy};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum Hint {
@@ -115,7 +115,8 @@ impl super::LineBuf {
     let first_hint_pos = Pos::new(last_row, self.lines.get(last_row).map_or(0, Line::len));
 
     // replace our buffer with the full hint
-    self.lines = hint.lines().clone();
+    let hint_lines = hint.lines().clone();
+    self.edit_with(RecordPolicy::Break, |this| this.lines = hint_lines);
 
     // track old/new cursor position
     let old_cursor_pos = self.cursor.pos;

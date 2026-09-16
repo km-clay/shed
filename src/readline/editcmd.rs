@@ -255,11 +255,39 @@ impl EditCmd {
       .as_ref()
       .is_some_and(|v| matches!(v.1, Verb::Undo | Verb::Redo))
   }
+  pub(crate) fn is_char_insert(&self) -> bool {
+    self.verb.as_ref().is_some_and(|v| v.1.is_char_insert())
+  }
+  pub(crate) fn is_kill(&self) -> bool {
+    self.verb.as_ref().is_some_and(|v| v.1 == Verb::Kill)
+  }
+  pub(crate) fn is_killring_op(&self) -> bool {
+    self
+      .verb
+      .as_ref()
+      .is_some_and(|v| matches!(v.1, Verb::KillCycle | Verb::KillPut))
+  }
+  pub(crate) fn starts_merge(&self) -> bool {
+    self
+      .verb
+      .as_ref()
+      .is_some_and(|v| matches!(v.1, Verb::Change))
+  }
   pub(crate) fn is_line_motion(&self) -> bool {
     self
       .motion
       .as_ref()
       .is_some_and(|m| matches!(m.1, Motion::LineUp | Motion::LineDown))
+      || self
+        .verb
+        .as_ref()
+        .is_some_and(|v| v.1 == Verb::AcceptLineOrNewline)
+  }
+  pub(crate) fn is_vertical(&self) -> bool {
+    matches!(
+      self.motion().map(|m| &m.1),
+      Some(Motion::LineUp | Motion::LineDown)
+    )
   }
   /// If a `EditCmd` has a linewise motion, but no verb, we change it to charwise
   pub(crate) fn is_mode_transition(&self) -> bool {
@@ -438,6 +466,7 @@ impl Verb {
         | Self::EndOfFile
         | Self::IncrementNumber(_)
         | Self::DecrementNumber(_)
+        | Self::ExCmd(_)
     )
   }
   pub(crate) fn is_char_insert(&self) -> bool {

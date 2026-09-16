@@ -1,3 +1,8 @@
+use std::{
+  mem,
+  sync::atomic::{AtomicU64, Ordering},
+};
+
 use bstr::ByteSlice;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -15,14 +20,100 @@ use super::{
   context::{CtxTk, CtxTkRule},
 };
 
+static EDIT_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+fn fetch_epoch() -> u64 {
+  EDIT_EPOCH.fetch_add(1, Ordering::Relaxed)
+}
+
+/// The `LineBuf`'s undo/redo stack, and some edit-related state fields
+#[derive(Clone, Debug, Default)]
+pub(super) struct EditStack {
+  undo: Vec<Edit>,
+  redo: Vec<Edit>,
+  current: Edit,
+
+  /// The depth of current [`LineBuf::edit()`](super::LineBuf::edit) recursion
+  edit_depth: usize,
+  merging_undos: bool,
+}
+
+impl EditStack {
+  pub(crate) fn new() -> Self {
+    Self::default()
+  }
+  pub(crate) fn push(&mut self, edit: Edit) {
+    self.undo.push(mem::replace(&mut self.current, edit));
+  }
+  pub(crate) fn stop_merge(&mut self) {
+    self.current.finalize(); // crunches the edit into a delta
+    self.current.stop_merge();
+  }
+  pub(crate) fn start_merge(&mut self) {
+    self.current.merging = true;
+  }
+  pub(crate) fn start_merge_undos(&mut self) {
+    self.merging_undos = true;
+    self.start_merge();
+  }
+  pub(crate) fn stop_merge_undos(&mut self) {
+    self.merging_undos = false;
+    self.stop_merge();
+  }
+  pub(crate) fn merging_undos(&self) -> bool {
+    self.merging_undos
+  }
+  pub(crate) fn undo(&mut self) -> Option<&Edit> {
+    // this method lets us perform the three way swap without an intermediate variable. cool!
+    // replace() swaps in the popped undo with the current edit, and then the old self.current
+    // is immediately passed by value to self.redo.push()
+    self
+      .redo
+      .push(mem::replace(&mut self.current, self.undo.pop()?));
+
+    // the edit we just left, caller applies undo() with it
+    self.redo.last()
+  }
+  pub(crate) fn redo(&mut self) -> Option<&Edit> {
+    // same thing here, just backwards
+    self
+      .undo
+      .push(mem::replace(&mut self.current, self.redo.pop()?));
+
+    // the edit we just entered into, caller applies redo() with it
+    Some(&self.current)
+  }
+  pub(crate) fn record(
+    &mut self,
+    old: Lines,
+    new: Lines,
+    old_cursor: Pos,
+    new_cursor: Pos,
+    want_merge: bool,
+  ) {
+    // TODO: implement undo tree instead of clearing redo stack
+    // overkill for a shell line editor? yes, i don't care
+    self.redo.clear();
+
+    if self.current.merging {
+      self.current.set_new(new, new_cursor);
+    } else if want_merge {
+      self.push(Edit::snapshot(old, new, old_cursor, new_cursor, true));
+    } else {
+      self.push(Edit::diff(&old, &new, old_cursor, new_cursor));
+    }
+  }
+}
+
 /// One undo step. Finalized steps are stored compactly as a positional delta;
 /// only an actively-merging entry keeps full buffer snapshots, and there is at
 /// most one of those at a time (the undo-stack top while a merge is open).
 #[derive(Clone, Debug)]
 pub(crate) struct Edit {
-  pub old_cursor: Pos,
-  pub new_cursor: Pos,
-  pub merging: bool,
+  old_cursor: Pos,
+  new_cursor: Pos,
+  merging: bool,
+  epoch: u64,
   body: EditBody,
 }
 
@@ -39,12 +130,19 @@ enum EditBody {
   },
 }
 
+impl Default for Edit {
+  fn default() -> Self {
+    Self::empty(Pos::MIN)
+  }
+}
+
 impl Edit {
   fn delta(at: Pos, removed: VarStr, inserted: VarStr, old_cursor: Pos, new_cursor: Pos) -> Self {
     Edit {
       old_cursor,
       new_cursor,
       merging: false,
+      epoch: fetch_epoch(),
       body: EditBody::Delta {
         at,
         removed,
@@ -57,11 +155,35 @@ impl Edit {
       old_cursor,
       new_cursor,
       merging,
+      epoch: fetch_epoch(),
       body: EditBody::Snapshot { old, new },
     }
   }
+  pub(crate) fn old_cursor(&self) -> Pos {
+    self.old_cursor
+  }
+  pub(crate) fn new_cursor(&self) -> Pos {
+    self.new_cursor
+  }
+  pub(crate) fn merging(&self) -> bool {
+    self.merging
+  }
+  pub(crate) fn epoch(&self) -> u64 {
+    self.epoch
+  }
+  pub(crate) fn stop_merge(&mut self) {
+    self.merging = false;
+  }
+  fn diff(old: &Lines, new: &Lines, old_cursor: Pos, new_cursor: Pos) -> Self {
+    let Diff {
+      start,
+      removed,
+      inserted,
+    } = Diff::new(old, new);
+    Self::delta(start, removed, inserted, old_cursor, new_cursor)
+  }
   /// An empty step, used to break a merge chain without recording a change.
-  pub(super) fn barrier(cursor: Pos) -> Self {
+  pub(super) fn empty(cursor: Pos) -> Self {
     Edit::delta(cursor, VarStr::default(), VarStr::default(), cursor, cursor)
   }
   pub(crate) fn is_empty(&self) -> bool {
@@ -529,70 +651,96 @@ pub(super) fn extract_range_contiguous(buf: &mut Lines, start: Pos, end: Pos) ->
   Lines(extracts)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum RecordPolicy {
+  Merge,
+  Break,
+  Skip,
+  Restart,
+}
+
 impl super::LineBuf {
-  /// Provides a public interface for editing the buffer in a way that is recognized by the undo system.
-  /// Any change made by the provided function will be tracked in the undo stack.
-  pub(crate) fn edit<T, F: FnMut(&mut Self) -> T>(&mut self, mut f: F) -> T {
+  fn ascend(&mut self) {
+    self.null_caches();
+    self.edit_stack.edit_depth -= 1;
+  }
+  fn descend(&mut self) {
+    self.null_caches();
+    self.edit_stack.edit_depth += 1;
+  }
+  pub(crate) fn stop_undo_merge(&mut self) {
+    self.edit_stack.stop_merge_undos();
+  }
+  pub(crate) fn start_undo_merge(&mut self) {
+    self.edit_stack.start_merge_undos();
+  }
+  pub(crate) fn edit_with<T, F: FnOnce(&mut Self) -> T>(
+    &mut self,
+    policy: RecordPolicy,
+    f: F,
+  ) -> T {
+    if self.edit_stack.edit_depth > 0 {
+      self.descend();
+      let res = f(self);
+      self.ascend();
+      return res;
+    }
+
     let before = self.lines.clone();
     let old_cursor = self.cursor.pos;
 
+    self.descend();
     let res = f(self);
+    self.ascend();
 
     if self.is_empty() {
-      self.set_hint(None);
+      self.clear_hint();
     }
 
     let new_cursor = self.cursor.pos;
-    self.handle_edit(before, new_cursor, old_cursor);
+    let changed = self.lines != before;
+
+    match policy {
+      RecordPolicy::Skip => {}
+      RecordPolicy::Break => {
+        self.edit_stack.stop_merge();
+        if changed {
+          self.handle_edit(before, new_cursor, old_cursor, false);
+        }
+      }
+      RecordPolicy::Restart => {
+        self.edit_stack.stop_merge();
+        if changed {
+          self.handle_edit(before, new_cursor, old_cursor, true);
+        }
+      }
+      RecordPolicy::Merge => {
+        if changed {
+          self.handle_edit(before, new_cursor, old_cursor, true);
+        }
+      }
+    }
 
     res
   }
-  pub(crate) fn handle_edit(&mut self, old: Lines, new_cursor: Pos, old_cursor: Pos) {
-    self.record_edit(old, old_cursor, new_cursor, self.merging_undos);
+  /// Provides a public interface for editing the buffer in a way that is recognized by the undo system.
+  /// Any change made by the provided function will be tracked in the undo stack.
+  pub(crate) fn edit<T, F: FnOnce(&mut Self) -> T>(&mut self, f: F) -> T {
+    self.edit_with(RecordPolicy::Break, f)
   }
-  /// Record an edit from `old` (the pre-edit buffer) to the current buffer. An
-  /// open merge at the top of the stack absorbs the change; otherwise a new
-  /// entry is pushed, kept as snapshots when `want_merge` so later edits fold in.
-  pub(super) fn record_edit(
+  pub(crate) fn handle_edit(
     &mut self,
     old: Lines,
-    old_cursor: Pos,
     new_cursor: Pos,
+    old_cursor: Pos,
     want_merge: bool,
   ) {
-    if self.undo_stack.last().is_some_and(|e| e.merging) {
-      let new = self.lines.clone();
-      self.undo_stack.last_mut().unwrap().set_new(new, new_cursor);
-    } else if want_merge {
-      let new = self.lines.clone();
-      self
-        .undo_stack
-        .push(Edit::snapshot(old, new, old_cursor, new_cursor, true));
-    } else {
-      let Diff {
-        start,
-        removed,
-        inserted,
-      } = Diff::new(&old, &self.lines);
-      self.undo_stack.push(Edit::delta(
-        start, removed, inserted, old_cursor, new_cursor,
-      ));
-    }
+    self
+      .edit_stack
+      .record(old, self.lines.clone(), old_cursor, new_cursor, want_merge);
   }
-  /// Open or close the top entry as a merge target, converting its
-  /// representation so that "merging ⟺ snapshot" always holds.
-  pub(super) fn set_top_merging(&mut self, merging: bool) {
-    if merging {
-      if self.undo_stack.last().is_some_and(|e| !e.merging) {
-        let current = self.lines.clone();
-        let top = self.undo_stack.last_mut().unwrap();
-        top.make_snapshot(&current);
-        top.merging = true;
-      }
-    } else if let Some(top) = self.undo_stack.last_mut() {
-      top.finalize();
-      top.merging = false;
-    }
+  pub(crate) fn epoch(&self) -> u64 {
+    self.edit_stack.current.epoch()
   }
 }
 
