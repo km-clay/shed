@@ -26,7 +26,7 @@ use crate::{
 };
 
 mod complete;
-pub(crate) use complete::{FuzzyBuilder, fuzzy_best_match, match_positions};
+pub(crate) use complete::{CandidateStream, FuzzyBuilder, fuzzy_best_match, match_positions};
 mod context;
 pub(crate) use context::{NestedSub, nested_subs};
 mod core;

@@ -23,7 +23,9 @@ mod grid;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use fuzzy::{FuzzyCompleter, FuzzySelector, ScoredCandidate, SelectorResponse};
+pub(crate) use fuzzy::{
+  CandidateStream, FuzzyCompleter, FuzzySelector, ScoredCandidate, SelectorResponse,
+};
 
 pub(crate) use grid::GridCompleter;
 

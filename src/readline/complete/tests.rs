@@ -1880,3 +1880,77 @@ fn compspec_nospace_suppresses_space() {
     "-o nospace should suppress the trailing space"
   );
 }
+
+#[test]
+fn merge_new_preserves_selection_and_order() {
+  let _g = TestGuard::new();
+  let mut sel = FuzzySelector::new();
+  sel.activate(vec![
+    Candidate::from("alpha").with_weight(1),
+    Candidate::from("bravo").with_weight(2),
+    Candidate::from("charlie").with_weight(3),
+  ]);
+
+  // empty query scores everything 0, so order is weight-descending; the
+  // cursor rests on the top item
+  assert_eq!(sel.selected_candidate().unwrap().as_str(), "charlie");
+
+  // a higher-weight arrival takes the top slot, pushing charlie to index 1.
+  // an index-pinned cursor would now point at delta; identity-pinning keeps
+  // it on charlie
+  sel.merge_new(vec![Candidate::from("delta").with_weight(4)]);
+
+  assert_eq!(sel.selected_candidate().unwrap().as_str(), "charlie");
+  let order: Vec<i32> = sel
+    .filtered()
+    .iter()
+    .map(|sc| sc.candidate.weight())
+    .collect();
+  assert_eq!(order, vec![4, 3, 2, 1]);
+}
+
+#[test]
+fn merge_new_scores_arrivals_against_active_query() {
+  let _g = TestGuard::new();
+  let mut sel = FuzzySelector::new();
+  sel.activate(vec![Candidate::from("foobar")]);
+  sel.set_query("foo");
+  assert_eq!(sel.filtered().len(), 1);
+
+  // "food" matches "foo"; "xyz" does not — only the match joins `filtered`,
+  // but both are retained in `candidates` for a later broader query
+  sel.merge_new(vec![Candidate::from("food"), Candidate::from("xyz")]);
+  assert_eq!(sel.filtered().len(), 2);
+  assert_eq!(sel.candidates().len(), 3);
+
+  // broadening the query rescans the full candidate set, late arrivals included
+  sel.set_query("xy");
+  assert_eq!(sel.filtered()[0].content(), "xyz");
+}
+
+#[test]
+fn candidate_stream_delivers_all_batches() {
+  let stream = CandidateStream::spawn(|sink| {
+    for i in 0..3 {
+      sink.send(vec![Candidate::from(format!("item{i}").as_str())]);
+    }
+  })
+  .unwrap();
+
+  let mut got = vec![];
+  while let Some(batch) = stream.recv() {
+    got.extend(batch.into_iter().map(|c| c.as_str().to_string()));
+  }
+  assert_eq!(got, vec!["item0", "item1", "item2"]);
+}
+
+#[test]
+fn candidate_stream_cancels_without_hanging() {
+  // producer loops until the consumer goes away; dropping the stream must
+  // set cancel (and close the channel), then join without blocking
+  let stream =
+    CandidateStream::spawn(|sink| while sink.send(vec![Candidate::from("x")]) {}).unwrap();
+
+  assert!(stream.recv().is_some());
+  drop(stream); // returns only once the producer thread has joined
+}

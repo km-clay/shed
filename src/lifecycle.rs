@@ -419,6 +419,7 @@ pub(crate) fn exit_signaled(sig: Signal) {
 ///
 /// Ideally this should be executed at the top of any `ForkResult::Child` block in the codebase
 pub(super) fn setup_child() {
+  crate::signal::disarm_wake_fd();
   if !db::FORKED_CHILD.load(Ordering::SeqCst) {
     return;
   }

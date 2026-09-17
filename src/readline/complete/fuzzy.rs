@@ -1,12 +1,22 @@
-use std::convert::Into;
+use std::{
+  convert::Into,
+  os::fd::{AsFd, BorrowedFd, OwnedFd},
+  sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+  },
+  thread,
+};
 
 use nix::{
   errno::Errno,
   poll::{PollFd, PollFlags, PollTimeout, poll},
+  unistd::write,
 };
 
 use crate::{
-  flush_term,
+  flush_term, procio,
   readline::Pos,
   sherr,
   state::terminal::{TermCap, Terminal},
@@ -408,10 +418,93 @@ impl QueryEditor {
 
 pub(crate) enum SelectorResponse {
   Accept(Candidate),
-  /// Selection changed; the caller may preview it without committing.
   Preview(Candidate),
   Dismiss,
   Consumed,
+}
+
+/// Sender for candidates streamed asynchronously to the fuzzy picker
+pub(crate) struct CandidateSink {
+  tx: mpsc::Sender<Vec<Candidate>>,
+  wake: OwnedFd,
+  cancel: Arc<AtomicBool>,
+}
+
+impl CandidateSink {
+  pub(crate) fn send(&self, batch: Vec<Candidate>) -> bool {
+    if self.cancelled() {
+      return false;
+    }
+    if batch.is_empty() {
+      return true;
+    }
+    if self.tx.send(batch).is_err() {
+      return false;
+    }
+    let _ = write(self.wake.as_fd(), &[0]);
+    true
+  }
+  pub(crate) fn cancelled(&self) -> bool {
+    self.cancel.load(Ordering::Relaxed)
+  }
+}
+
+/// Receiver for candidates streamed asynchronously to the fuzzy picker.
+#[derive(Debug)]
+pub(crate) struct CandidateStream {
+  rx: mpsc::Receiver<Vec<Candidate>>,
+  wake_rd: OwnedFd,
+  cancel: Arc<AtomicBool>,
+  handle: Option<thread::JoinHandle<()>>,
+}
+
+impl CandidateStream {
+  pub(crate) fn spawn<F>(producer: F) -> ShResult<Self>
+  where
+    F: FnOnce(CandidateSink) + Send + 'static,
+  {
+    let (tx, rx) = mpsc::channel();
+    let (wake_rd, wake_wr) = procio::pipes_high_nonblocking()?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let sink = CandidateSink {
+      tx,
+      wake: wake_wr,
+      cancel: Arc::clone(&cancel),
+    };
+    let handle = thread::spawn(move || producer(sink));
+    Ok(Self {
+      rx,
+      wake_rd,
+      cancel,
+      handle: Some(handle),
+    })
+  }
+
+  pub(crate) fn wake_fd(&self) -> BorrowedFd<'_> {
+    self.wake_rd.as_fd()
+  }
+
+  pub(crate) fn drain(&self) -> Vec<Candidate> {
+    procio::drain_fd(self.wake_rd.as_fd());
+    let mut out = vec![];
+    while let Ok(batch) = self.rx.try_recv() {
+      out.extend(batch);
+    }
+    out
+  }
+
+  pub(crate) fn recv(&self) -> Option<Vec<Candidate>> {
+    self.rx.recv().ok()
+  }
+}
+
+impl Drop for CandidateStream {
+  fn drop(&mut self) {
+    self.cancel.store(true, Ordering::Relaxed);
+    if let Some(handle) = self.handle.take() {
+      let _ = handle.join();
+    }
+  }
 }
 
 #[derive(Debug, Default)]
@@ -422,6 +515,7 @@ pub(crate) struct FuzzyBuilder {
   score_cb: Option<ScoreCallback>,
   highlight_cb: Option<HighlightCallback>,
   inline: bool,
+  stream: Option<CandidateStream>,
 }
 
 impl FuzzyBuilder {
@@ -458,6 +552,10 @@ impl FuzzyBuilder {
     self.highlight_cb = Some(cb);
     self
   }
+  pub(crate) fn with_stream(mut self, stream: CandidateStream) -> Self {
+    self.stream = Some(stream);
+    self
+  }
   pub(crate) fn build(self) -> FuzzySelector {
     let Self {
       entries,
@@ -466,6 +564,7 @@ impl FuzzyBuilder {
       score_cb,
       highlight_cb,
       inline,
+      stream: _,
     } = self;
 
     let candidates = entries
@@ -484,8 +583,9 @@ impl FuzzyBuilder {
     selector.set_query(search_query);
     selector
   }
-  pub(crate) fn pick(self) -> ShResult<Option<String>> {
-    if self.entries.is_empty() || Shed::term(Terminal::test_mode) {
+  pub(crate) fn pick(mut self) -> ShResult<Option<String>> {
+    let mut stream = self.stream.take();
+    if (self.entries.is_empty() && stream.is_none()) || Shed::term(Terminal::test_mode) {
       return Ok(None);
     }
     let Some(tty) = Shed::term(Terminal::tty) else {
@@ -511,18 +611,43 @@ impl FuzzyBuilder {
       flush_term!("{down}\r\x1b[{col}C\x1b[5 q").ok();
 
       let mut decided = None;
-      match poll(&mut [tty_fd.clone()], PollTimeout::NONE) {
+      let mut poll_fds = vec![tty_fd.clone()];
+      if let Some(s) = &stream {
+        poll_fds.push(PollFd::new(
+          s.wake_fd(),
+          PollFlags::POLLIN | PollFlags::POLLHUP,
+        ));
+      }
+
+      match poll(&mut poll_fds, PollTimeout::NONE) {
         Ok(0) => decided = Some(None), // eof, treat as cancel
         Ok(_) => {
-          Shed::term_mut(Terminal::read)?;
-          for key in Shed::term_mut(Terminal::drain_keys) {
-            match selector.handle_key(key)? {
-              SelectorResponse::Accept(c) => decided = Some(Some(c.as_str().to_string())),
-              SelectorResponse::Dismiss => decided = Some(None),
-              SelectorResponse::Preview(_) | SelectorResponse::Consumed => {}
+          if poll_fds[0]
+            .revents()
+            .is_some_and(|r| r.contains(PollFlags::POLLIN))
+          {
+            Shed::term_mut(Terminal::read)?;
+            for key in Shed::term_mut(Terminal::drain_keys) {
+              match selector.handle_key(key)? {
+                SelectorResponse::Accept(c) => decided = Some(Some(c.as_str().to_string())),
+                SelectorResponse::Dismiss => decided = Some(None),
+                SelectorResponse::Preview(_) | SelectorResponse::Consumed => {}
+              }
+              if decided.is_some() {
+                break;
+              }
             }
-            if decided.is_some() {
-              break;
+          }
+
+          let stream_revents = poll_fds.get(1).and_then(PollFd::revents);
+          if let Some(revents) = stream_revents
+            && revents.intersects(PollFlags::POLLIN | PollFlags::POLLHUP)
+          {
+            if let Some(s) = &stream {
+              selector.merge_new(s.drain());
+            }
+            if revents.contains(PollFlags::POLLHUP) {
+              stream = None;
             }
           }
         }
@@ -751,16 +876,7 @@ impl FuzzySelector {
         })
         .collect()
     };
-    // Sort ascending by (score, weight) then reverse, rather than sorting
-    // descending directly: the reverse also flips full ties into reverse-insert
-    // order, which keeps history (loaded oldest-first) showing newest at top.
-    scored.sort_by(|a, b| {
-      a.score
-        .unwrap_or(i32::MIN)
-        .cmp(&b.score.unwrap_or(i32::MIN))
-        .then(a.candidate.weight().cmp(&b.candidate.weight()))
-    });
-    scored.reverse();
+    Self::sort_display(&mut scored);
     self.cursor.set_max(scored.len());
     // Highlight the top match and scroll home after every (re)score.
     self.cursor.set(0);
@@ -768,6 +884,83 @@ impl FuzzySelector {
     self.filtered = scored;
     self.last_query = raw;
     self.effective_query = query;
+  }
+
+  // Sort ascending by (score, weight) then reverse, rather than sorting
+  // descending directly: the reverse also flips full ties into reverse-insert
+  // order, which keeps history (loaded oldest-first) showing newest at top.
+  fn sort_display(scored: &mut [ScoredCandidate]) {
+    scored.sort_by(|a, b| {
+      a.score
+        .unwrap_or(i32::MIN)
+        .cmp(&b.score.unwrap_or(i32::MIN))
+        .then(a.candidate.weight().cmp(&b.candidate.weight()))
+    });
+    scored.reverse();
+  }
+
+  fn cmp_display(a: &ScoredCandidate, b: &ScoredCandidate) -> std::cmp::Ordering {
+    b.score
+      .unwrap_or(i32::MIN)
+      .cmp(&a.score.unwrap_or(i32::MIN))
+      .then(b.candidate.weight().cmp(&a.candidate.weight()))
+  }
+
+  fn merge_display(
+    existing: Vec<ScoredCandidate>,
+    batch: Vec<ScoredCandidate>,
+  ) -> Vec<ScoredCandidate> {
+    let mut out = Vec::with_capacity(existing.len() + batch.len());
+    let mut a = existing.into_iter().peekable();
+    let mut b = batch.into_iter().peekable();
+    while let (Some(x), Some(y)) = (a.peek(), b.peek()) {
+      if Self::cmp_display(x, y) == std::cmp::Ordering::Greater {
+        out.push(b.next().unwrap());
+      } else {
+        out.push(a.next().unwrap());
+      }
+    }
+    out.extend(a);
+    out.extend(b);
+    out
+  }
+
+  fn selected_key(&self) -> Option<String> {
+    self
+      .filtered
+      .get(self.cursor.get())
+      .map(|sc| sc.content().to_string())
+  }
+
+  pub(crate) fn merge_new(&mut self, arrivals: Vec<Candidate>) {
+    if arrivals.is_empty() {
+      return;
+    }
+    let query_chars: Vec<char> = self.effective_query.chars().collect();
+    let score_fn = self.score_cb.unwrap_or(fuzzy_match_score);
+
+    let mut batch: Vec<ScoredCandidate> = arrivals
+      .iter()
+      .filter_map(|c| {
+        let score = score_fn(c, &query_chars, false);
+        (score > i32::MIN).then(|| {
+          let mut sc = ScoredCandidate::new(c.clone());
+          sc.score = Some(score);
+          sc
+        })
+      })
+      .collect();
+    Self::sort_display(&mut batch);
+
+    let pinned = self.selected_key();
+    self.candidates.extend(arrivals);
+    self.filtered = Self::merge_display(std::mem::take(&mut self.filtered), batch);
+    self.cursor.set_max(self.filtered.len());
+    if let Some(key) = pinned
+      && let Some(i) = self.filtered.iter().position(|sc| sc.content() == key)
+    {
+      self.cursor.set(i);
+    }
   }
 
   /// `(max name width, max desc width incl. parens)` over a column's

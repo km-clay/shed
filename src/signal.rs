@@ -290,6 +290,11 @@ pub(crate) fn wake_fd() -> BorrowedFd<'static> {
   ensure_wake_pipe().as_fd()
 }
 
+/// Stop this process from writing the wake byte.
+pub(crate) fn disarm_wake_fd() {
+  THREAD_WAKE_WR.store(-1, Ordering::SeqCst);
+}
+
 pub(crate) fn install_signal_handlers() {
   ensure_wake_pipe();
 

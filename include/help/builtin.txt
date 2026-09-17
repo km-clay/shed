@@ -1957,9 +1957,11 @@ SCRY                                             *builtin-scry* *scry*
   same fuzzy finder used for tab completion and history search, exposed as a
   command so it can be dropped into a pipeline.
 
-  The picker is only shown when stdin has data and/or positional arguments are
-  passed, and the shell is attached to a terminal; with nothing piped in and no
-  arguments, `scry` exits 0 without doing anything.
+  The picker is only shown when there are candidates to pick from and the shell
+  is attached to a terminal. Candidates come from stdin and positional
+  arguments, or, when neither is given, from the `$SCRY_DEFAULT_CMD` command
+  (see Environment below). With no candidate source at all, `scry` exits 0
+  without doing anything.
 
   Input Options ~
 
@@ -1972,11 +1974,27 @@ SCRY                                             *builtin-scry* *scry*
 
   Output Options ~
 
-    `-Q`, `--quote-out`    shell-quote the selected line before printing it
-    `-n`                   omit the trailing newline on the selected line
-    `-l`, `--list`         skip the interactive picker and print the ranked
-                           candidates to stdout, best match first; honors `-s`
-                           for filtering and `-Q`/`-n` for formatting
+    `-Q`, `--quote-out`    shell-quote each line before printing it
+    `-n`                   omit the trailing newline (the picker selection and
+                           `--sort` output only; streamed `-l` output is always
+                           newline-separated)
+    `-l`, `--list`         skip the interactive picker and print matching
+                           candidates to stdout in input order, streaming each
+                           match as it arrives rather than buffering, so it fits
+                           in a pipeline; honors `-s` for filtering
+    `-S`, `--sort`         with `-l`, rank matches best-first instead of input
+                           order; this buffers all input before printing, since
+                           ranking needs the whole set
+
+  Environment ~
+
+  `$SCRY_DEFAULT_CMD`                             *scry-default-cmd*
+
+      When `scry` is invoked with nothing on stdin and no positional
+      arguments, this command is run through the shell and its output
+      (one candidate per line) becomes the candidate list. Being run
+      through the shell, it can use builtins, functions, and pipelines.
+      Unset or empty, `scry` has nothing to pick from and exits 0.
 
   Exit status:
 
@@ -1991,8 +2009,13 @@ SCRY                                             *builtin-scry* *scry*
       `find . -type d -print0 | scry -0`   pick a directory, NUL-safe
       `scry ./src/**/*.rs`                 pick files from a directory
                                            using a glob pattern
-      `scry -l -s test ./src/*.rs`         list matching files, ranked,
-                                           without the picker
+      `find . -type f | scry -l -s x`      stream matching paths in input
+                                           order as they are found
+      `scry -l -S -s x ./src/*.rs`         list matching files ranked
+                                           best-first (buffered)
+      `SCRY_DEFAULT_CMD='find . -type f'`  bare `scry` picks from the
+      `scry`                               command's output when nothing
+                                           is piped in
 
   See also: |quoted-streams|, |builtin-hist|
 
