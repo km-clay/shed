@@ -482,6 +482,11 @@ impl ShErr {
   }
   pub(crate) fn build_report(&self) -> Option<Report<'_, Span>> {
     let span = self.src_span.as_ref()?;
+    // If the source backing the primary span has been dropped, we can't slice a
+    // snippet; render as a span-less message instead of failing to fetch.
+    if get_source(span.source()).is_none() {
+      return None;
+    }
     let kind = if self.kind().is_warning() {
       ReportKind::Warning
     } else {
@@ -495,7 +500,14 @@ impl ShErr {
     );
     report = report.with_message(self.kind.to_string());
 
-    for (_, label) in group_labels(self.labels.clone()) {
+    // Drop labels whose source is gone, so ariadne never fetches a missing one.
+    let labels = self
+      .labels
+      .iter()
+      .filter(|l| get_source(l.span().source()).is_some())
+      .cloned()
+      .collect::<Vec<_>>();
+    for (_, label) in group_labels(labels) {
       report = report.with_label(label);
     }
     for note in &self.notes {
@@ -537,6 +549,13 @@ impl ShErr {
   }
   fn default_write(&self, fd: &mut impl Write) {
     writeln!(fd, "\n{}", self.kind).ok();
+    // No snippet here (span-less, or the source was dropped), so surface the
+    // label messages inline — they carry the specific detail.
+    for label in &self.labels {
+      if let Some(msg) = &label.message {
+        writeln!(fd, "{msg}").ok();
+      }
+    }
     for note in &self.notes {
       writeln!(fd, "note: {note}").ok();
     }
