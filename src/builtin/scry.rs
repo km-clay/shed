@@ -12,7 +12,7 @@ use crate::{
   expand::escape,
   opt, out, outln,
   procio::{self, Sink, SinkIo},
-  readline::{Candidate, CandidateStream, FuzzyBuilder, ScoredCandidate, fuzzy_match_score},
+  readline::{self, Candidate, CandidateStream, FuzzyBuilder, ScoredCandidate},
   state::source,
   try_var,
   util::{
@@ -229,10 +229,6 @@ impl Scry {
     }
   }
 
-  fn matches(item: &str, query: &[char]) -> bool {
-    fuzzy_match_score(item, query, false) > i32::MIN
-  }
-
   fn print_list_unsorted(
     entries: &[(String, i32)],
     query: Option<&str>,
@@ -240,7 +236,7 @@ impl Scry {
   ) -> ShResult<()> {
     let query: Vec<char> = query.unwrap_or_default().chars().collect();
     for (item, _) in entries {
-      if Self::matches(item, &query) {
+      if readline::is_subsequence(item, &query) {
         Self::emit_item(item, quote_out);
       }
     }
@@ -258,7 +254,7 @@ impl Scry {
 
     for (arg, _) in args.arguments() {
       let arg = arg.to_string();
-      if Self::matches(&arg, &query) {
+      if readline::is_subsequence(&arg, &query) {
         Self::emit_item(&arg, quote_out);
       }
     }
@@ -266,7 +262,7 @@ impl Scry {
     let stream = Self::spawn_stdin_stream(stdin, null_in)?;
     while let Some(batch) = stream.recv() {
       for cand in batch {
-        if Self::matches(cand.as_str(), &query) {
+        if readline::is_subsequence(cand.as_str(), &query) {
           Self::emit_item(cand.as_str(), quote_out);
         }
       }

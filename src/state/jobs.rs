@@ -428,12 +428,6 @@ impl JobBldr {
       send_hup: true,
     }
   }
-  pub(crate) fn has_thread_members(&self) -> bool {
-    self
-      .children
-      .iter()
-      .any(|m| matches!(m, JobMember::Thread(_)))
-  }
   pub(crate) fn push_member(&mut self, member: JobMember) {
     self.children.push(member);
   }

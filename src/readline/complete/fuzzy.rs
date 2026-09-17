@@ -1,4 +1,5 @@
 use std::{
+  cell::RefCell,
   convert::Into,
   os::fd::{AsFd, BorrowedFd, OwnedFd},
   sync::{
@@ -33,6 +34,10 @@ use super::{
   state::terminal::TermGuard,
   write_term,
 };
+
+thread_local! {
+  static DP: RefCell<(Vec<i32>, Vec<i32>)> = const { RefCell::new((Vec::new(), Vec::new())) };
+}
 
 /// Collapse a candidate to a single display row: newlines become the visible
 /// `␤` glyph, tabs expand to spaces, and other control bytes are dropped. This
@@ -148,6 +153,20 @@ fn subseq_window(candidate: &[char], query: &[char]) -> Option<(usize, usize)> {
   Some((first, end + 1))
 }
 
+/// Fast, zero-alloc subsequence check
+pub(crate) fn is_subsequence(candidate: &str, query: &[char]) -> bool {
+  let mut qi = 0;
+  for c in candidate.chars() {
+    if c.eq_ignore_ascii_case(&query[qi]) {
+      qi += 1;
+      if qi == query.len() {
+        return true;
+      }
+    }
+  }
+  false
+}
+
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ClampedUsize {
   val: usize,
@@ -247,7 +266,7 @@ impl ScoredCandidate {
 }
 
 pub(crate) fn fuzzy_match_score(
-  candidate: &str,
+  candidate: &Candidate,
   query_chars: &[char],
   penalize_len_diff: bool,
 ) -> i32 {
@@ -255,13 +274,13 @@ pub(crate) fn fuzzy_match_score(
     return 0;
   }
 
-  let candidate_chars: Vec<char> = candidate.chars().collect();
-  let Some((mut score, _)) = fuzzy_align(&candidate_chars, query_chars, false) else {
+  let chars = candidate.chars();
+  let Some((mut score, _)) = fuzzy_align(chars, query_chars, false) else {
     return i32::MIN;
   };
 
   if penalize_len_diff {
-    let len_diff = (candidate_chars.len() as isize - query_chars.len() as isize).unsigned_abs();
+    let len_diff = (chars.len() as isize - query_chars.len() as isize).unsigned_abs();
     score -= (len_diff as i32) * 2;
   }
 
@@ -309,17 +328,6 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
     b
   };
 
-  // `prev`/`curr` are the DP row for the previous / current query char:
-  // `prev[i]` = best score aligning query[..=j] with query[j] landing on
-  // candidate[i]. The first query char can start anywhere it matches.
-  let mut prev = vec![NEG; n];
-  let cand_chars = candidate.iter().enumerate().skip(start).take(end);
-  for (i, &c) in cand_chars {
-    if c.eq_ignore_ascii_case(&query[0]) {
-      prev[i] = char_bonus(i, query[0]);
-    }
-  }
-
   // parent[j][i] = candidate index used for query[j-1] when query[j] lands on
   // i; only needed to backtrack `positions`.
   let mut parent = if track {
@@ -327,71 +335,86 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
   } else {
     vec![]
   };
+  let mut best_score = NEG;
 
-  let mut curr = vec![NEG; n];
-  for j in 1..m {
-    let qch = query[j];
-
-    curr.fill(NEG);
-
-    // running_gap = max over k <= i-2 of `prev[k] + k*GAP_EXTEND` (plus its
-    // argmax). Adding the i-dependent term below recovers the affine gap
-    // penalty for the best gapped predecessor in O(1).
-    let mut running_gap = NEG;
-    let mut running_gap_k = usize::MAX;
+  // `prev`/`curr` are the DP row for the previous / current query char:
+  // `prev[i]` = best score aligning query[..=j] with query[j] landing on
+  // candidate[i]. The first query char can start anywhere it matches.
+  let best_i = DP.with_borrow_mut(|(prev, curr)| {
+    prev.clear();
+    prev.resize(n, NEG);
+    curr.clear();
+    curr.resize(n, NEG);
 
     for i in start..end {
-      let mut best = NEG;
-      let mut best_k = usize::MAX;
-
-      // Consecutive predecessor (k = i-1, no gap).
-      if i >= 1 && prev[i - 1] > NEG {
-        let consec = prev[i - 1] + Sc::BONUS_CONSECUTIVE;
-        if consec > best {
-          best = consec;
-          best_k = i - 1;
-        }
-      }
-      // Best gapped predecessor (k <= i-2), recovered from the running max.
-      if running_gap > NEG {
-        let gapped = running_gap - Sc::PENALTY_GAP_START - (i as i32 - 2) * Sc::PENALTY_GAP_EXTEND;
-        if gapped > best {
-          best = gapped;
-          best_k = running_gap_k;
-        }
-      }
-
-      if best > NEG && candidate[i].eq_ignore_ascii_case(&qch) {
-        curr[i] = char_bonus(i, qch) + best;
-        if track {
-          parent[j][i] = best_k;
-        }
-      }
-
-      // Fold k = i-1 into the running max so it's available for i+1.
-      if i >= 1 && prev[i - 1] > NEG {
-        let val = prev[i - 1] + (i as i32 - 1) * Sc::PENALTY_GAP_EXTEND;
-        if val > running_gap {
-          running_gap = val;
-          running_gap_k = i - 1;
-        }
+      if candidate[i].eq_ignore_ascii_case(&query[0]) {
+        prev[i] = char_bonus(i, query[0]);
       }
     }
 
-    std::mem::swap(&mut prev, &mut curr);
-  }
+    for j in 1..m {
+      let qch = query[j];
 
-  // Best end position for the last query char.
-  let mut best_i = None;
-  let mut best_score = NEG;
-  let prev_chars = prev.iter().enumerate().skip(start).take(end);
-  for (i, &c) in prev_chars {
-    if c > best_score {
-      best_score = c;
-      best_i = Some(i);
+      curr.fill(NEG);
+
+      // running_gap = max over k <= i-2 of `prev[k] + k*GAP_EXTEND` (plus its
+      // argmax). Adding the i-dependent term below recovers the affine gap
+      // penalty for the best gapped predecessor in O(1).
+      let mut running_gap = NEG;
+      let mut running_gap_k = usize::MAX;
+
+      for i in start..end {
+        let mut best = NEG;
+        let mut best_k = usize::MAX;
+
+        // Consecutive predecessor (k = i-1, no gap).
+        if i >= 1 && prev[i - 1] > NEG {
+          let consec = prev[i - 1] + Sc::BONUS_CONSECUTIVE;
+          if consec > best {
+            best = consec;
+            best_k = i - 1;
+          }
+        }
+        // Best gapped predecessor (k <= i-2), recovered from the running max.
+        if running_gap > NEG {
+          let gapped =
+            running_gap - Sc::PENALTY_GAP_START - (i as i32 - 2) * Sc::PENALTY_GAP_EXTEND;
+          if gapped > best {
+            best = gapped;
+            best_k = running_gap_k;
+          }
+        }
+
+        if best > NEG && candidate[i].eq_ignore_ascii_case(&qch) {
+          curr[i] = char_bonus(i, qch) + best;
+          if track {
+            parent[j][i] = best_k;
+          }
+        }
+
+        // Fold k = i-1 into the running max so it's available for i+1.
+        if i >= 1 && prev[i - 1] > NEG {
+          let val = prev[i - 1] + (i as i32 - 1) * Sc::PENALTY_GAP_EXTEND;
+          if val > running_gap {
+            running_gap = val;
+            running_gap_k = i - 1;
+          }
+        }
+      }
+
+      std::mem::swap(prev, curr);
     }
-  }
-  let best_i = best_i?;
+
+    // Best end position for the last query char.
+    let mut best_i = None;
+    for i in start..end {
+      if prev[i] > best_score {
+        best_score = prev[i];
+        best_i = Some(i);
+      }
+    }
+    best_i
+  })?;
 
   let positions = if track {
     let mut positions = vec![0usize; m];
@@ -734,7 +757,7 @@ pub(crate) fn fuzzy_best_match(
 }
 
 /// Callback type for scoring a candidate against the query.
-type ScoreCallback = fn(&str, &[char], bool) -> i32;
+type ScoreCallback = fn(&Candidate, &[char], bool) -> i32;
 /// Transforms the raw typed query into the text actually matched against (e.g.
 /// zd's read-only `~`/`$VAR` expansion). The query box still shows the raw text.
 type QueryTransform = fn(&str) -> String;

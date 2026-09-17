@@ -18,7 +18,9 @@ use bstr::ByteSlice;
 use nix::sys::signal::Signal;
 
 mod fuzzy;
-pub(crate) use fuzzy::{FuzzyBuilder, fuzzy_best_match, fuzzy_match_score, match_positions};
+pub(crate) use fuzzy::{
+  FuzzyBuilder, fuzzy_best_match, fuzzy_match_score, is_subsequence, match_positions,
+};
 mod grid;
 #[cfg(test)]
 mod tests;
@@ -319,7 +321,8 @@ pub(crate) struct Candidate {
   content: String,
   weight: i32,
   desc: Option<String>,
-  id: Option<usize>, // for stuff like history that cares about the original index
+  id: Option<usize>,  // for stuff like history that cares about the original index
+  chars: Box<[char]>, // for stuff like the fuzzy picker that wants to read this really fast
 }
 
 impl Eq for Candidate {}
@@ -346,56 +349,31 @@ impl From<PathBuf> for Candidate {
   fn from(value: PathBuf) -> Self {
     let path_raw = value.to_string_lossy().into_owned();
     let desc = file_desc(&value);
-    Self {
-      content: path_raw,
-      weight: 0,
-      desc: Some(desc.to_str_lossy().into_owned()),
-      id: None,
-    }
+    Self::new(path_raw, 0, Some(desc.to_str_lossy().into_owned()), None)
   }
 }
 
 impl From<String> for Candidate {
   fn from(value: String) -> Self {
-    Self {
-      content: value,
-      weight: 0,
-      desc: None,
-      id: None,
-    }
+    Self::new(value, 0, None, None)
   }
 }
 
 impl From<Cow<'_, str>> for Candidate {
   fn from(value: Cow<'_, str>) -> Self {
-    Self {
-      content: value.into_owned(),
-      weight: 0,
-      desc: None,
-      id: None,
-    }
+    Self::new(value.into_owned(), 0, None, None)
   }
 }
 
 impl From<VarStr> for Candidate {
   fn from(value: VarStr) -> Self {
-    Self {
-      content: value.to_str_lossy().into_owned(),
-      weight: 0,
-      desc: None,
-      id: None,
-    }
+    Self::new(value.to_str_lossy().into_owned(), 0, None, None)
   }
 }
 
 impl From<&VarStr> for Candidate {
   fn from(value: &VarStr) -> Self {
-    Self {
-      content: value.to_str_lossy().into_owned(),
-      weight: 0,
-      desc: None,
-      id: None,
-    }
+    Self::new(value.to_str_lossy().into_owned(), 0, None, None)
   }
 }
 
@@ -407,12 +385,7 @@ impl From<Rc<Utility>> for Candidate {
 
 impl From<&state::meta::Utility> for Candidate {
   fn from(value: &state::meta::Utility) -> Self {
-    Self {
-      content: value.name().to_str_lossy().into_owned(),
-      weight: 0,
-      desc: None,
-      id: None,
-    }
+    Self::new(value.name().to_str_lossy().into_owned(), 0, None, None)
   }
 }
 
@@ -424,23 +397,13 @@ impl From<state::meta::Utility> for Candidate {
 
 impl From<&String> for Candidate {
   fn from(value: &String) -> Self {
-    Self {
-      content: value.into(),
-      weight: 0,
-      desc: None,
-      id: None,
-    }
+    Self::new(value.into(), 0, None, None)
   }
 }
 
 impl From<&str> for Candidate {
   fn from(value: &str) -> Self {
-    Self {
-      content: value.into(),
-      weight: 0,
-      desc: None,
-      id: None,
-    }
+    Self::new(value.into(), 0, None, None)
   }
 }
 
@@ -452,12 +415,7 @@ impl From<&&str> for Candidate {
 
 impl From<(usize, String)> for Candidate {
   fn from(value: (usize, String)) -> Self {
-    Self {
-      content: value.1,
-      weight: 0,
-      desc: None,
-      id: Some(value.0),
-    }
+    Self::new(value.1, 0, None, Some(value.0))
   }
 }
 
@@ -481,6 +439,16 @@ impl std::ops::Deref for Candidate {
 }
 
 impl Candidate {
+  pub(crate) fn new(content: String, weight: i32, desc: Option<String>, id: Option<usize>) -> Self {
+    let chars = content.chars().collect();
+    Self {
+      content,
+      weight,
+      desc,
+      id,
+      chars,
+    }
+  }
   pub(crate) fn is_match(&self, other: &str) -> bool {
     let ignore_case = shopt!(prompt.completion_ignore_case);
     if ignore_case {
@@ -490,6 +458,9 @@ impl Candidate {
     } else {
       self.content.starts_with(other)
     }
+  }
+  pub(crate) fn chars(&self) -> &[char] {
+    &self.chars
   }
   pub(crate) fn content(&self) -> &str {
     &self.content

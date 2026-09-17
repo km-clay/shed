@@ -484,9 +484,8 @@ impl ShErr {
     let span = self.src_span.as_ref()?;
     // If the source backing the primary span has been dropped, we can't slice a
     // snippet; render as a span-less message instead of failing to fetch.
-    if get_source(span.source()).is_none() {
-      return None;
-    }
+    get_source(span.source())?;
+
     let kind = if self.kind().is_warning() {
       ReportKind::Warning
     } else {

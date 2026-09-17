@@ -11,7 +11,7 @@ use std::{
 use crate::{
   expand::escape,
   opt, outln, procio,
-  readline::{self, FuzzyBuilder},
+  readline::{self, Candidate, FuzzyBuilder},
   sherr,
   state::{Shed, cwd, db, paths, terminal::Terminal},
   try_var,
@@ -590,13 +590,14 @@ fn highlight_dir(display: &str, query: &str) -> Option<Vec<usize>> {
   (!positions.is_empty()).then(|| positions.into_iter().map(|p| p + offset).collect())
 }
 
-fn fuzzy_score_dir(cand: &str, chars: &[char], penalize_len_diff: bool) -> i32 {
-  let path = Path::new(cand);
+fn fuzzy_score_dir(cand: &Candidate, chars: &[char], penalize_len_diff: bool) -> i32 {
+  let content = cand.content();
+  let path = Path::new(content);
 
   // An exact path match is unambiguous, so it always wins. This breaks ties like
   // "/home/me" vs "/home/me/projects" for the query "/home/me", where the matched
   // prefix otherwise scores identically for both.
-  if chars.iter().copied().eq(cand.chars()) {
+  if chars.iter().copied().eq(content.chars()) {
     return i32::MAX;
   }
 
@@ -604,7 +605,7 @@ fn fuzzy_score_dir(cand: &str, chars: &[char], penalize_len_diff: bool) -> i32 {
   // match on the final segment ("fer" -> ".../fern") outranks one smeared across
   // parent directories. Double-counting the basename is the point.
   if let Some(base) = path.file_name().and_then(|b| b.to_str()) {
-    let base_score = readline::fuzzy_match_score(base, chars, penalize_len_diff);
+    let base_score = readline::fuzzy_match_score(&base.into(), chars, penalize_len_diff);
     let full = readline::fuzzy_match_score(cand, chars, penalize_len_diff);
     if base_score > i32::MIN && full > i32::MIN {
       return full.saturating_add(base_score);
@@ -1214,8 +1215,8 @@ pub(super) mod tests {
   #[test]
   fn score_dir_exact_path_wins() {
     let q = qchars("/home/me");
-    let exact = super::fuzzy_score_dir("/home/me", &q, false);
-    let longer = super::fuzzy_score_dir("/home/me/projects", &q, false);
+    let exact = super::fuzzy_score_dir(&"/home/me".into(), &q, false);
+    let longer = super::fuzzy_score_dir(&"/home/me/projects".into(), &q, false);
     assert_eq!(exact, i32::MAX);
     assert!(
       exact > longer,
@@ -1227,8 +1228,8 @@ pub(super) mod tests {
   fn score_dir_basename_outranks_smeared() {
     let q = qchars("dev");
     // Basename "dev" matches cleanly; the other only matches across parent segments.
-    let basename = super::fuzzy_score_dir("/a/b/dev", &q, false);
-    let smeared = super::fuzzy_score_dir("/d/e/v/zzz", &q, false);
+    let basename = super::fuzzy_score_dir(&"/a/b/dev".into(), &q, false);
+    let smeared = super::fuzzy_score_dir(&"/d/e/v/zzz".into(), &q, false);
     assert!(basename > smeared);
   }
 
@@ -1236,7 +1237,7 @@ pub(super) mod tests {
   fn score_dir_no_match_is_min() {
     let q = qchars("zzz");
     assert_eq!(
-      super::fuzzy_score_dir("/home/me/projects", &q, false),
+      super::fuzzy_score_dir(&"/home/me/projects".into(), &q, false),
       i32::MIN
     );
   }

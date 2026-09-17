@@ -1803,8 +1803,12 @@ fn best_match_no_match_is_none() {
   assert!(fuzzy_best_match("zzz", entries, None, None).is_none());
 }
 
-fn only_target(cand: &str, _q: &[char], _p: bool) -> i32 {
-  if cand == "target" { 1000 } else { i32::MIN }
+fn only_target(cand: &Candidate, _q: &[char], _p: bool) -> i32 {
+  if cand.content() == "target" {
+    1000
+  } else {
+    i32::MIN
+  }
 }
 
 #[test]
@@ -1830,9 +1834,13 @@ fn best_match_applies_query_transform() {
   );
 }
 
-fn flat_score(cand: &str, q: &[char], _p: bool) -> i32 {
+fn flat_score(cand: &Candidate, q: &[char], _p: bool) -> i32 {
   let q: String = q.iter().collect();
-  if cand.contains(&q) { 777 } else { i32::MIN }
+  if cand.content().contains(&q) {
+    777
+  } else {
+    i32::MIN
+  }
 }
 
 #[test]
@@ -1953,4 +1961,26 @@ fn candidate_stream_cancels_without_hanging() {
 
   assert!(stream.recv().is_some());
   drop(stream); // returns only once the producer thread has joined
+}
+
+#[test]
+fn windowed_match_uses_absolute_indices() {
+  // Query matches in the middle, so subseq_window starts at index > 0. The DP
+  // must index absolutely, or the backtrack walks a usize::MAX sentinel.
+  assert_eq!(
+    super::fuzzy::match_positions("xxxpag", "pag"),
+    vec![3, 4, 5]
+  );
+  assert_eq!(
+    super::fuzzy::match_positions("home/pagedmov", "pag"),
+    vec![5, 6, 7]
+  );
+
+  let scored = super::fuzzy::fuzzy_match_score(&Candidate::from("xxxpag"), &['p', 'a', 'g'], false);
+  assert!(scored > i32::MIN);
+  // a non-subsequence is rejected by the prefilter
+  assert_eq!(
+    super::fuzzy::fuzzy_match_score(&Candidate::from("xxxpag"), &['z', 'z', 'z'], false),
+    i32::MIN
+  );
 }
