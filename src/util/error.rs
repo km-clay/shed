@@ -619,8 +619,7 @@ impl From<rusqlite::Error> for ShErr {
 
 impl From<std::io::Error> for ShErr {
   fn from(e: std::io::Error) -> Self {
-    let msg = std::io::Error::last_os_error();
-    ShErr::simple(ShErrKind::IoErr(e.kind()), varstr!("{msg}"))
+    ShErr::simple(ShErrKind::IoErr(e.kind()), varstr!("{e}"))
   }
 }
 

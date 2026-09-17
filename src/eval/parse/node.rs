@@ -21,6 +21,7 @@ use super::{
 use crate::{
   builtin::{ForkBehavior, fork_behavior_for},
   expand::subshell,
+  readline::{NestedSub, nested_subs},
   state::{
     Shed,
     logic::{IsInternal, ShFunc},
@@ -291,7 +292,26 @@ pub(crate) enum NdRule {
   },
 }
 
+fn contains_sub_intro(src: &[u8]) -> bool {
+  src.contains(&b'`')
+    || src
+      .windows(2)
+      .any(|w| w[1] == b'(' && matches!(w[0], b'$' | b'<' | b'>'))
+}
+
 pub(crate) fn node_fork_behavior(tree: &Ast, node_id: NodeId) -> Option<ForkBehavior> {
+  let src = tree.span_for(node_id).slice();
+  if contains_sub_intro(src.as_bytes())
+    && nested_subs(src.as_bytes())
+      .into_iter()
+      .any(|sub| match sub {
+        NestedSub::Proc => true,
+        NestedSub::Cmd(body) => subshell::is_internal(body.as_bytes()).is_none(),
+      })
+  {
+    return None;
+  }
+
   let mut acc: Option<ForkBehavior> = Some(ForkBehavior::Never);
   tree.walk_tree(node_id, &mut |id, tree| {
     let node = &tree[id];
