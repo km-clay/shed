@@ -90,6 +90,21 @@ impl super::Dispatcher {
     let pipe_style = shopt!(core.pipeline_style);
     let fork_only = matches!(pipe_style, PipeStyle::Fork);
 
+    // If any stage runs internally, the pgid of the job is set to the shell's
+    let has_in_process = self.fg_job
+      && !fork_only
+      && num_cmds > 1
+      && cmds
+        .iter()
+        .any(|c| node::node_fork_behavior(tree, *c) == Some(ForkBehavior::Never));
+    if has_in_process {
+      self
+        .job_stack
+        .curr_job_mut()
+        .unwrap()
+        .set_pgid(unistd::getpgrp());
+    }
+
     // Per-stage statuses of the in-process tail, captured for the PIPESTATUS
     // splice and pipefail blame after the forked prefix is waited on.
     let mut tail_status: Option<(i32, Span)> = None;
