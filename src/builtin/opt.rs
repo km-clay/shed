@@ -273,7 +273,7 @@ fn parse_opts_inner(
           .bytes()
           .find(|ch| !specs.iter().any(|s| s.is_short_match(*ch)))
           .unwrap();
-        return Err(sherr!(ParseErr @ span, "Unknown option '-{unknown}'"));
+        return Err(sherr!(ParseErr @ span, "Unknown option '-{}'", unknown as char));
       } else {
         words.push(Word::Arg(word, span));
       }
