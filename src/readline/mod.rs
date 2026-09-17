@@ -4,6 +4,7 @@ use std::{collections::VecDeque, io::Write, sync::mpsc, time::Instant};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use crate::readline::editmode::ExNdRule;
 use crate::{
   autocmd, builtin, eval, exec_term, expand,
   expand::{alias, prompt},
@@ -322,6 +323,7 @@ impl Default for Prompt {
 enum LineCmd {
   Execute(EditCmd),
   SubmitLine(EditCmd),
+  ForceSubmit,
   AppendHint,
   ScrollHist(isize),
   ScrollHistVirtual(EditCmd),
@@ -926,8 +928,14 @@ impl ShedLine {
       // Implied submission: if the keymap left a non-empty search/ex pending
       // (e.g. it ended in `/foo`), run it so the trailing `<CR>` is optional.
       // A bare `/` or `:` that opened an empty prompt is left for the user.
-      if self.core.mode.pending_seq().is_some_and(|p| !p.is_empty()) {
-        self.core.submit_cmdline()?;
+      if self.core.mode.pending_seq().is_some_and(|p| !p.is_empty())
+        && matches!(
+          self.core.mode.report_mode(),
+          ModeReport::Ex | ModeReport::Search | ModeReport::RevSearch
+        )
+        && let Some(event) = self.handle_key(&KeyEvent(KeyCode::Enter, ModKeys::NONE))?
+      {
+        return Ok(Some(event));
       }
       self.needs_redraw = true;
     }
@@ -1346,6 +1354,12 @@ impl ShedLine {
   }
 
   fn submit(&mut self) -> ShResult<Option<ReadlineEvent>> {
+    if matches!(
+      self.core.mode.report_mode(),
+      ModeReport::Ex | ModeReport::Search | ModeReport::RevSearch
+    ) {
+      self.core.reset_mode(false)?;
+    }
     self.core.editor.clear_hint();
     self
       .core
@@ -1439,20 +1453,32 @@ impl ShedLine {
 
     if cmd.verb_is(&Verb::EndOfFile) && self.core.focused_editor().is_empty() {
       return Ok(Some(LineCmd::EndOfFile));
-    } else if cmd.is_quit() {
-      if self.core.editor.open_file().is_some() {
-        return Ok(Some(LineCmd::ResetWidget));
-      }
-      return Ok(Some(LineCmd::Quit));
-    } else if cmd.is_write_quit() {
-      if self.core.editor.open_file().is_some() {
-        return Ok(Some(LineCmd::WriteQuit));
-      }
-      return Ok(Some(LineCmd::Quit));
     } else if cmd.verb_is(&Verb::AcceptHint) {
       return Ok(Some(LineCmd::AppendHint));
     }
 
+    if let Some(rule) = cmd.ex_nd_rule() {
+      match rule {
+        ExNdRule::WriteQuit => {
+          if self.core.editor.open_file().is_some() {
+            return Ok(Some(LineCmd::WriteQuit));
+          }
+          return Ok(Some(LineCmd::Quit));
+        }
+        ExNdRule::Quit => {
+          if self.core.editor.open_file().is_some() {
+            return Ok(Some(LineCmd::ResetWidget));
+          }
+          return Ok(Some(LineCmd::Quit));
+        }
+        ExNdRule::Submit => return Ok(Some(LineCmd::ForceSubmit)),
+        ExNdRule::Breakline => {
+          cmd.set_verb(verb!(Verb::InsertChar('\n')));
+          return Ok(Some(LineCmd::Execute(cmd)));
+        }
+        _ => {}
+      }
+    }
     Ok(Some(LineCmd::Execute(cmd)))
   }
 
@@ -1467,7 +1493,7 @@ impl ShedLine {
 
     let is_ctrl_d_motion = cmd.motion_is(&Motion::HalfScreenDown);
 
-    let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD);
+    let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD) || cmd.ex_nd_rule().is_some();
     if is_ex_cmd {
       self.ex_history.push(&cmd.raw_seq).ok();
       self.ex_history.reset();
@@ -1528,7 +1554,7 @@ impl ShedLine {
 
     if before != after {
       self.history.mark_mask_stale();
-    } else if before == after && has_edit_verb {
+    } else if before == after && has_edit_verb && !is_ex_cmd {
       Shed::term_mut(Terminal::send_bell).ok();
     } else if before_cursor == after_cursor && is_ctrl_d_motion {
       if self.ctrl_d_warning_counter == 3 || self.core.editor.is_empty() {
@@ -1656,6 +1682,14 @@ impl ShedLine {
       LineCmd::TriggerHistSearch => {
         self.start_hist_search();
         Ok(None)
+      }
+      LineCmd::ForceSubmit => {
+        if shopt!(prompt.expand_aliases) {
+          self.core.editor.attempt_alias_expansion();
+        }
+        self.core.editor.attempt_history_expansion(&self.history);
+
+        self.submit()
       }
       LineCmd::SubmitLine(cmd) => {
         if shopt!(prompt.expand_aliases) && self.core.editor.attempt_alias_expansion() {

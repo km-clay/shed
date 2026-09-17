@@ -86,6 +86,7 @@ impl super::LineBuf {
       // Intercepted by the editor driver (ShedLine interactively, EditorCore
       // headlessly) before reaching here. Erroring rather than panicking keeps
       // a stray one from taking down the whole shell.
+      ExNdRule::Breakline | ExNdRule::Submit |
       ExNdRule::Normal { .. } | ExNdRule::WriteQuit | ExNdRule::Quit => {
         Err(crate::sherr!(ExecFail, "ex command is handled by the editor driver, not the buffer"))
       }

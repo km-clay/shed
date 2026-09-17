@@ -9,6 +9,7 @@ use super::editmode::{
 use super::linebuf::LineBuf;
 use super::register::RegisterName;
 
+use crate::readline::editmode::ExNdRule;
 use crate::{
   autocmd, defer,
   expand::alias,
@@ -466,9 +467,10 @@ impl EditorCore {
       let lines = self.normal_seq_lines(&cmd)?;
       return self.run_normal_seq(&lines, &seq);
     }
-    // `:q`/`:wq` are interactive-submit concepts; there is nothing to quit when
-    // driving the editor headlessly.
-    if cmd.is_quit() || cmd.is_write_quit() {
+
+    // interactive-only commands; these can only drive command prompts
+    // and have no bearing on the editor itself
+    if cmd.ex_nd_rule().is_some_and(ExNdRule::is_interactive_cmd) {
       return Ok(());
     }
 

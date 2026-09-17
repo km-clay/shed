@@ -289,7 +289,7 @@ pub(crate) fn fuzzy_match_score(
 
 /// Maximum-scoring alignment of `query` within `candidate`.
 ///
-/// Runs an O(n·m) dynamic program (Smith–Waterman with affine gaps) using the
+/// Runs an O(n*m) dynamic program (Smith–Waterman with affine gaps) using the
 /// same boundary / consecutive / gap constants the greedy scorer uses. The only
 /// change is that it considers *every* alignment and keeps the best one,
 /// so a contiguous run like `spin` inside `... spin` beats a scattered
@@ -407,12 +407,15 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
 
     // Best end position for the last query char.
     let mut best_i = None;
-    for i in start..end {
-      if prev[i] > best_score {
-        best_score = prev[i];
+    let prev_chars = prev.iter().enumerate().take(end).skip(start);
+
+    for (i, &c) in prev_chars {
+      if c > best_score {
+        best_score = c;
         best_i = Some(i);
       }
     }
+
     best_i
   })?;
 

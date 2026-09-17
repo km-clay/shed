@@ -203,44 +203,16 @@ fn find_normal_seq(node: &ExNode) -> Option<(&str, bool)> {
 }
 
 impl EditCmd {
-  pub(crate) fn is_quit(&self) -> bool {
-    matches!(
-      self.verb.as_ref(),
-      Some(Cmd(
-        _,
-        Verb::ExCmd(ExNode {
-          address: _,
-          bang: _,
-          kind: ExNdRule::Quit
-        })
-      ))
-    )
-  }
-  pub(crate) fn is_write_quit(&self) -> bool {
-    matches!(
-      self.verb.as_ref(),
-      Some(Cmd(
-        _,
-        Verb::ExCmd(ExNode {
-          address: _,
-          bang: _,
-          kind: ExNdRule::WriteQuit
-        })
-      ))
-    )
-  }
   pub(crate) fn is_shell_cmd(&self) -> bool {
-    matches!(
-      self.verb.as_ref(),
-      Some(Cmd(
-        _,
-        Verb::ExCmd(ExNode {
-          address: _,
-          bang: _,
-          kind: ExNdRule::Shell(_)
-        })
-      ))
-    )
+    self
+      .ex_nd_rule()
+      .is_some_and(|k| matches!(k, ExNdRule::Shell(_)))
+  }
+  pub(crate) fn ex_nd_rule(&self) -> Option<&ExNdRule> {
+    self.verb().and_then(|v| match &v.1 {
+      Verb::ExCmd(node) => Some(&node.kind),
+      _ => None,
+    })
   }
   pub(crate) fn is_submit_action(&self) -> bool {
     self

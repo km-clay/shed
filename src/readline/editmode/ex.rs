@@ -263,6 +263,8 @@ pub(crate) const COMMANDS: &[(&str, ExCommand)] = &[
   ("stash", ExCommand::Stash),
   ("expand", ExCommand::Expand),
   ("help", ExCommand::Help),
+  ("submit", ExCommand::Submit),
+  ("breakline", ExCommand::Breakline),
 ];
 
 #[derive(Debug, Clone)]
@@ -332,6 +334,8 @@ pub(crate) enum ExCommand {
   WriteQuit,
   Help,
   Shell,
+  Submit,
+  Breakline,
 
   Unknown,
 }
@@ -844,6 +848,18 @@ pub(crate) enum ExNdRule {
   Shell(String),
 
   Stash(StashArgs),
+
+  Submit,
+  Breakline,
+}
+
+impl ExNdRule {
+  pub(crate) fn is_interactive_cmd(&self) -> bool {
+    matches!(
+      self,
+      ExNdRule::Quit | ExNdRule::WriteQuit | ExNdRule::Submit | ExNdRule::Breakline
+    )
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1049,6 +1065,8 @@ impl ExParser {
       ExCommand::Quit => ExR::success(ExNdRule::Quit),
       ExCommand::WriteQuit => ExR::success(ExNdRule::WriteQuit),
       ExCommand::Expand => ExR::success(ExNdRule::Expand),
+      ExCommand::Submit => ExR::success(ExNdRule::Submit),
+      ExCommand::Breakline => ExR::success(ExNdRule::Breakline),
       ExCommand::Unknown => ExR::error(format!(
         "not an editor command: {}",
         tk.span.slice().to_str_lossy()
