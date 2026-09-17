@@ -1996,6 +1996,14 @@ SCRY                                             *builtin-scry* *scry*
       through the shell, it can use builtins, functions, and pipelines.
       Unset or empty, `scry` has nothing to pick from and exits 0.
 
+  `$SCRY_DEFAULT_OPTS`                            *scry-default-opts*
+
+      Default options applied to every `scry` invocation, as if prepended
+      to the command line. Options given on the command line override
+      them (last occurrence wins), so e.g. `SCRY_DEFAULT_OPTS='-p pick'`
+      sets a default prompt that an explicit `-p` still replaces. Parsed
+      like shell words, so quoting works: `SCRY_DEFAULT_OPTS='-p "pick a file"'`.
+
   Exit status:
 
     `0`    a candidate was selected, or there was no input to pick from
