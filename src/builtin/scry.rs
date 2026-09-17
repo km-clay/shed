@@ -1,3 +1,4 @@
+use bstr::ByteSlice;
 use itertools::Itertools;
 
 use crate::{
@@ -6,6 +7,7 @@ use crate::{
   opt, out, outln,
   procio::{self, SinkIo},
   readline::{FuzzyBuilder, ScoredCandidate},
+  try_var,
   util::{self, error::ShResult},
 };
 
@@ -28,13 +30,18 @@ impl super::Builtin for Scry {
     true
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let input = self
+    let mut input = self
       .get_input(&mut args)
       .map(procio::bytes_to_string)
       .unwrap_or_default();
 
     if input.is_empty() && args.no_arguments() {
-      return util::with_status(0);
+      match try_var!("SCRY_DEFAULT_CMD") {
+        Some(cmd) if !cmd.trim().is_empty() => {
+          input = procio::capture_command(cmd.as_bytes(), None, Some(&"scry".into()))?.to_string();
+        }
+        _ => return util::with_status(0),
+      }
     }
 
     let mut null_in/*----*/= false;
