@@ -117,6 +117,37 @@ pub(crate) fn match_positions(text: &str, query: &str) -> Vec<usize> {
     .unwrap_or_default()
 }
 
+fn subseq_window(candidate: &[char], query: &[char]) -> Option<(usize, usize)> {
+  let mut qi = 0;
+  let mut first = 0;
+
+  for (i, &c) in candidate.iter().enumerate() {
+    if c.eq_ignore_ascii_case(&query[qi]) {
+      if qi == 0 {
+        first = i;
+      }
+
+      qi += 1;
+
+      if qi == query.len() {
+        break;
+      }
+    }
+  }
+
+  if qi != query.len() {
+    return None;
+  }
+
+  let qlast = *query.last().unwrap();
+  let end = candidate
+    .iter()
+    .rposition(|&c| c.eq_ignore_ascii_case(&qlast))
+    .unwrap();
+
+  Some((first, end + 1))
+}
+
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ClampedUsize {
   val: usize,
@@ -243,7 +274,7 @@ pub(crate) fn fuzzy_match_score(
 /// same boundary / consecutive / gap constants the greedy scorer uses. The only
 /// change is that it considers *every* alignment and keeps the best one,
 /// so a contiguous run like `spin` inside `... spin` beats a scattered
-/// `s`…`p`…`in` walk.
+/// `s`...`p`...`in` walk.
 ///
 /// Returns `(best_score, positions)`, or `None` if `query` is not a
 /// subsequence of `candidate`. `positions` is filled only when `track` is set
@@ -262,6 +293,11 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
   if m > n {
     return None;
   }
+
+  // this does two things: filters out non-matches quickly,
+  // and tells us what parts of the string have the subsequence
+  let (start, end) = subseq_window(candidate, query)?;
+
   let char_bonus = |i: usize, qch: char| -> i32 {
     let mut b = 0;
     if i == 0 {
@@ -277,7 +313,8 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
   // `prev[i]` = best score aligning query[..=j] with query[j] landing on
   // candidate[i]. The first query char can start anywhere it matches.
   let mut prev = vec![NEG; n];
-  for (i, &c) in candidate.iter().enumerate() {
+  let cand_chars = candidate.iter().enumerate().skip(start).take(end);
+  for (i, &c) in cand_chars {
     if c.eq_ignore_ascii_case(&query[0]) {
       prev[i] = char_bonus(i, query[0]);
     }
@@ -303,7 +340,7 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
     let mut running_gap = NEG;
     let mut running_gap_k = usize::MAX;
 
-    for i in 0..n {
+    for i in start..end {
       let mut best = NEG;
       let mut best_k = usize::MAX;
 
@@ -347,9 +384,10 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
   // Best end position for the last query char.
   let mut best_i = None;
   let mut best_score = NEG;
-  for (i, &s) in prev.iter().enumerate() {
-    if s > best_score {
-      best_score = s;
+  let prev_chars = prev.iter().enumerate().skip(start).take(end);
+  for (i, &c) in prev_chars {
+    if c > best_score {
+      best_score = c;
       best_i = Some(i);
     }
   }
@@ -695,6 +733,7 @@ pub(crate) fn fuzzy_best_match(
     .map(|(.., text)| text)
 }
 
+/// Callback type for scoring a candidate against the query.
 type ScoreCallback = fn(&str, &[char], bool) -> i32;
 /// Transforms the raw typed query into the text actually matched against (e.g.
 /// zd's read-only `~`/`$VAR` expansion). The query box still shows the raw text.
