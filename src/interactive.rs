@@ -337,6 +337,11 @@ fn shed_loop_iter(
   if let Some(fd) = socket_poll {
     poll_fds.push(fd.clone());
   }
+  let hint_raw = readline.hint_wake_fd().as_raw_fd();
+  poll_fds.push(PollFd::new(
+    unsafe { BorrowedFd::borrow_raw(hint_raw) },
+    PollFlags::POLLIN,
+  ));
 
   if shopt!(set.vi) != *vi_mode {
     // the editing mode option changed.
@@ -444,11 +449,21 @@ fn shed_loop_iter(
     }
   }
 
-  // check socket fd
+  // check completion-hint worker fd (always pushed last)
   if poll_fds
-    .get(1)
-    .and_then(nix::poll::PollFd::revents)
+    .last()
+    .and_then(PollFd::revents)
     .is_some_and(|r| r.contains(PollFlags::POLLIN))
+  {
+    readline.apply_hint();
+  }
+
+  // check socket fd
+  if socket_poll.is_some()
+    && poll_fds
+      .get(1)
+      .and_then(PollFd::revents)
+      .is_some_and(|r| r.contains(PollFlags::POLLIN))
   {
     let requests = Shed::read_socket();
     for (conn, req) in requests {

@@ -1,6 +1,17 @@
 use nix::poll::PollTimeout;
 use std::string::ToString;
-use std::{collections::VecDeque, io::Write, sync::mpsc, time::Instant};
+use std::{
+  collections::VecDeque,
+  io::Write,
+  os::fd::{AsFd, BorrowedFd, OwnedFd},
+  sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+  },
+  thread,
+  time::Instant,
+};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -11,7 +22,7 @@ use crate::{
   interactive::{self, LoopAction, Redraw},
   key, keys,
   keys::{KeyCode, KeyEvent, KeyMap, KeyMapFlags, KeyMapMatch, ModKeys},
-  match_loop, motion, procio, queue_term, sherr, shopt, socket,
+  match_loop, motion, procio, queue_term, sherr, shopt,
   state::{
     self, Shed, db,
     logic::AutoCmdKind,
@@ -394,23 +405,89 @@ struct CompHintRequest {
   cursor_pos: usize,
 }
 
+impl CompHintRequest {
+  fn reply(self, comp: &mut dyn Completer) -> Option<HintReply> {
+    let Self {
+      req_gen,
+      buffer,
+      cursor_pos,
+    } = self;
+
+    comp.reset();
+    let line = comp
+      .complete(buffer, cursor_pos, 1, complete::CompSource::Shell)
+      .ok()
+      .flatten()
+      .map(CompMatch::into_line)?;
+    let token_start = comp.token_span().0;
+
+    Some(HintReply {
+      req_gen,
+      token_start,
+      line,
+    })
+  }
+}
+
+struct HintReply {
+  req_gen: u64,
+  token_start: usize,
+  line: String,
+}
+
 struct HintWorker {
-  channel: Option<mpsc::Sender<CompHintRequest>>,
+  req_tx: mpsc::Sender<CompHintRequest>,
+  res_rx: mpsc::Receiver<HintReply>,
+  wake_rd: OwnedFd,
+  cancel: Arc<AtomicBool>,
   req_gen: u64,
   last_sent: Option<(String, usize)>,
 }
 
 impl HintWorker {
-  pub(crate) fn new() -> Self {
-    let (channel, receiver) = mpsc::channel::<CompHintRequest>();
-    std::thread::spawn(move || Self::main(&receiver));
-    Self {
-      channel: Some(channel),
+  fn new() -> ShResult<Self> {
+    let spec = Shed::completion_spec();
+    let (req_tx, req_rx) = mpsc::channel::<CompHintRequest>();
+    let (res_tx, res_rx) = mpsc::channel::<HintReply>();
+    let (wake_rd, wake_wr) = procio::pipes_high_nonblocking()?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_cancel = Arc::clone(&cancel);
+
+    thread::spawn(move || {
+      Shed::install(spec);
+      let mut completer = SimpleCompleter::default();
+      while let Ok(mut req) = req_rx.recv() {
+        while let Ok(newer) = req_rx.try_recv() {
+          // drain all, take only the most recent
+          req = newer;
+        }
+
+        if worker_cancel.load(Ordering::Relaxed) {
+          break;
+        }
+
+        let Some(reply) = req.reply(&mut completer) else {
+          continue;
+        };
+
+        if res_tx.send(reply).is_err() {
+          break;
+        }
+        let _ = nix::unistd::write(wake_wr.as_fd(), &[0]);
+      }
+    });
+
+    Ok(Self {
+      req_tx,
+      res_rx,
+      wake_rd,
+      cancel,
       req_gen: 0,
       last_sent: None,
-    }
+    })
   }
-  pub(crate) fn dispatch_worker(&mut self, buffer: String, cursor_pos: usize) {
+
+  fn dispatch_worker(&mut self, buffer: String, cursor_pos: usize) {
     if self
       .last_sent
       .as_ref()
@@ -425,41 +502,26 @@ impl HintWorker {
       buffer,
       cursor_pos,
     };
-    if let Some(channel) = &self.channel {
-      channel.send(req).ok();
-    }
+    self.req_tx.send(req).ok();
   }
-  fn main(receiver: &mpsc::Receiver<CompHintRequest>) {
-    let mut completer = SimpleCompleter::default();
-    while let Ok(mut req) = receiver.recv() {
-      while let Ok(newer) = receiver.try_recv() {
-        // drain until newest
-        req = newer;
-      }
-      let CompHintRequest {
-        req_gen,
-        buffer,
-        cursor_pos,
-      } = req;
-      completer.reset();
-      let source = complete::CompSource::Shell;
-      let outcome = completer
-        .complete(buffer, cursor_pos, 1, source)
-        .ok()
-        .flatten();
 
-      let Some(outcome) = outcome else { continue };
+  fn wake_fd(&self) -> BorrowedFd<'_> {
+    self.wake_rd.as_fd()
+  }
 
-      match outcome {
-        CompMatch::Exact { line }
-        | CompMatch::CommonPrefix { line }
-        | CompMatch::Cycled { line } => {
-          let token_start = completer.token_span().0;
-          let msg = socket::authorize(format_args!("set-comp-hint {req_gen} {token_start} {line}"));
-          socket::send_to_socket(&msg).ok();
-        }
-      }
+  fn take_reply(&self) -> Option<HintReply> {
+    procio::drain_fd(self.wake_rd.as_fd());
+    let mut latest = None;
+    while let Ok(reply) = self.res_rx.try_recv() {
+      latest = Some(reply);
     }
+    latest
+  }
+}
+
+impl Drop for HintWorker {
+  fn drop(&mut self) {
+    self.cancel.store(true, Ordering::Relaxed);
   }
 }
 
@@ -545,7 +607,7 @@ impl ShedLine {
       hist_preview_orig: None,
       cursor_pos_callback: None,
       overlay_cursor_offset: 0,
-      worker: HintWorker::new(),
+      worker: HintWorker::new()?,
     };
     Shed::vars_mut(|v| {
       v.set_var(
@@ -623,6 +685,7 @@ impl ShedLine {
 
   /// Reset readline state for a new prompt
   pub(crate) fn reset(&mut self, full_redraw: bool) -> ShResult<()> {
+    self.respawn_hint_worker();
     // Clear old display before resetting state - old_layout must survive
     // so print_line can call clear_rows with the full multi-line layout
     self.refresh_ui();
@@ -1026,8 +1089,28 @@ impl ShedLine {
     }
   }
 
-  pub(crate) fn worker_req_gen(&mut self) -> u64 {
-    self.worker.req_gen
+  pub(crate) fn hint_wake_fd(&self) -> BorrowedFd<'_> {
+    self.worker.wake_fd()
+  }
+
+  pub(crate) fn respawn_hint_worker(&mut self) {
+    if let Ok(worker) = HintWorker::new() {
+      self.worker = worker;
+    }
+  }
+
+  pub(crate) fn apply_hint(&mut self) {
+    let Some(reply) = self.worker.take_reply() else {
+      return;
+    };
+    if reply.req_gen != self.worker.req_gen || reply.line.is_empty() {
+      return;
+    }
+    self.core.editor.set_hint(Some(Hint::Completion {
+      lines: Lines::to_lines(&reply.line),
+      token_start: reply.token_start,
+    }));
+    self.needs_redraw = true;
   }
 
   fn dispatch_key(&mut self, key: KeyEvent) -> ShResult<Option<ReadlineEvent>> {

@@ -53,6 +53,11 @@ impl super::Shed {
       logic: shed.logic.borrow().clone(),
     })
   }
+  pub(crate) fn completion_spec() -> ForkSpec {
+    let mut parsed = crate::eval::parse::ParsedSrc::new(":".into());
+    let _ = parsed.parse_src();
+    Self::fork_spec(Sinks::new(), Arc::new(parsed.into_ast()))
+  }
   pub(crate) fn install(spec: ForkSpec) -> Arc<Ast> {
     let ForkSpec {
       frame,

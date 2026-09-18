@@ -40,7 +40,6 @@ use crate::{
   },
   status_msg, system_msg, try_var,
   util::{
-    self,
     error::{ShErr, ShResult},
     pos::Pos,
     random,
@@ -242,12 +241,6 @@ impl QueryHeader {
 /// Possible queries to the socket's private interface
 #[derive(Debug)]
 pub(crate) enum PrivateHeader {
-  SetCompletionHint {
-    req_gen: u64,       // request generation
-    token_start: usize, // byte offset of token
-    line: VarStr,
-  },
-
   /// Used for reporting errors from child processes.
   PostError(VarStr),
 }
@@ -316,23 +309,6 @@ impl SocketRequest {
       .unwrap_or((rest.trim(), b""));
 
     let header = match kind {
-      b"set-comp-hint" => {
-        let (req_gen_str, rest) = payload.split_once_str(" ").unwrap_or((payload, b""));
-        let (token_start_str, line) = rest.split_once_str(" ").unwrap_or((rest, b""));
-
-        let Some(req_gen) = util::parse_bytes::<u64>(req_gen_str) else {
-          return err;
-        };
-        let Some(token_start) = util::parse_bytes::<usize>(token_start_str) else {
-          return err;
-        };
-
-        PrivateHeader::SetCompletionHint {
-          req_gen,
-          token_start,
-          line: line.into(),
-        }
-      }
       b"post-error" => PrivateHeader::PostError(payload.into()),
       _ => return err,
     };
@@ -608,20 +584,6 @@ pub(super) fn handle_socket_request(
     SocketRequest::Private(req) => match req {
       PrivateHeader::PostError(err) => {
         system_msg!("{err}");
-      }
-      PrivateHeader::SetCompletionHint {
-        req_gen,
-        token_start,
-        line,
-      } => {
-        let cur_gen = readline.worker_req_gen();
-        if cur_gen == req_gen && !line.is_empty() {
-          readline.editor_mut().set_hint(Some(Hint::Completion {
-            lines: Lines::to_lines(&line.to_str_lossy()),
-            token_start,
-          }));
-          readline.mark_dirty();
-        }
       }
     },
   }
