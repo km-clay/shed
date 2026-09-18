@@ -243,7 +243,7 @@ processes.
 
           `remote` mode causes the shell to stop handling keys itself.
           Every key event is broadcast over the socket as a
-          `line>>key_event>>` event (see *socket-event-key*), and the
+          `line>>key_event>>` event (see |socket-event-key|), and the
           shell does nothing else with it. A subscriber is expected to
           be listening and to drive the editor via `line::set::*` in
           response.
@@ -307,7 +307,7 @@ processes.
   `line>>key_event>> {key}`
 
       Broadcast only while the editor is in `remote` mode
-      (see *socket-line-mode*). `{key}` is a single key event in
+      (see |socket-line-mode|). `{key}` is a single key event in
       keymap notation, e.g. `a`, `<Enter>`, `<C-x>`, `<S-Tab>`.
 
       Subscribers typically read keys, apply whatever editing logic
@@ -392,7 +392,7 @@ processes.
           `autocmd post-change-dir '{`
           `  {`
           `    git_branch=$(git branch --show-current 2>/dev/null)`
-          `    printf "msg::status::%s" "$git_branch" \`
+          `    printf "msg::status::%s" "$git_branch" \\`
           `      | socat - UNIX-CONNECT:$SHED_SOCK`
           `  } &`
           `}'`
@@ -449,5 +449,5 @@ processes.
       socket does not care what's on the other end, it just
       forwards keys out and accepts state back.
 
-      See *socket-line-mode* for the auto-fallback behavior that
+      See |socket-line-mode| for the auto-fallback behavior that
       protects users from being locked out if the subscriber dies.

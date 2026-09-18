@@ -17,7 +17,7 @@ Categories:
    7. |system|(commands-system)        systemctl, journalctl, uname, dmesg, sysctl, lscpu
    8. |git|(commands-git)           branch, stash, rebase, cherry-pick, reflog, reset, bisect, worktree
    9. |multimedia|(commands-multimedia)    ffmpeg, imagemagick, mpv, yt-dlp
-  10. |cryptography|(commands-crypto)  ssh-keygen, gpg, openssl, sha256sum, age
+  10. |cryptography|(commands-crypto)        ssh-keygen, gpg, openssl, sha256sum, age
 
 ==============================================================================
 1. Archives                                      *commands-archives*
@@ -269,7 +269,7 @@ Categories:
       POST request:
 
           `curl -X POST -d 'key=value' https://api.example.com`
-          `curl -X POST -H 'Content-Type: application/json' \`
+          `curl -X POST -H 'Content-Type: application/json' \\`
           `  -d '{"key": "value"}' https://api.example.com`
 
       Headers:
@@ -1466,7 +1466,7 @@ Categories:
 
       Create thumbnail:
 
-          `convert input.png -thumbnail 150x150^ -gravity center \`
+          `convert input.png -thumbnail 150x150^ -gravity center \\`
           `  -extent 150x150 thumb.png`
 
       Strip metadata:
@@ -1596,7 +1596,7 @@ Categories:
 
       Generate a self-signed certificate:
 
-          `openssl req -x509 -newkey rsa:4096 -keyout key.pem \`
+          `openssl req -x509 -newkey rsa:4096 -keyout key.pem \\`
           `  -out cert.pem -days 365 -nodes`
 
       View certificate info:
