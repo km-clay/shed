@@ -27,7 +27,7 @@ use super::{
   sherr,
   state::{
     Shed,
-    jobs::{Job, JobData, JobID, SIG_EXIT_OFFSET, take_term},
+    jobs::{self, Job, JobData, JobID},
     logic::TrapTarget,
     meta::MetaTab,
     params,
@@ -45,6 +45,14 @@ use crate::{
 
 static THREAD_WAKE_WR: AtomicI32 = AtomicI32::new(-1);
 static THREAD_WAKE_RD: OnceLock<OwnedFd> = OnceLock::new();
+
+/// Exit statuses caused by signals are the signal number + 128
+///
+/// e.g. SIGINT = 2, 2 + 128 = 130
+pub(crate) const SIG_EXIT_OFFSET: i32 = 128;
+pub(crate) fn signal_status(sig: Signal) -> i32 {
+  sig as i32 + SIG_EXIT_OFFSET
+}
 
 /// A bitset representing all signals that have been received but not yet handled by `check_signals`.
 /// "indexed" by bit shifting the signal number (e.g. `1 << SIGINT` for SIGINT).
@@ -232,7 +240,6 @@ pub(crate) fn check_signals() -> ShResult<()> {
   }
   if got_signal(Signal::SIGTSTP) {
     run_trap(Signal::SIGTSTP)?;
-    terminal_stop()?;
   }
   if got_signal(Signal::SIGCHLD) && REAPING_ENABLED.load(Ordering::SeqCst) {
     run_trap(Signal::SIGCHLD)?;
@@ -305,6 +312,7 @@ pub(crate) fn install_signal_handlers() {
     for sig in MISC_SIGNALS {
       sigaction(*sig, &action).unwrap();
     }
+    sigaction(Signal::SIGTSTP, &action).unwrap();
   }
 }
 
@@ -324,7 +332,7 @@ pub(crate) fn sig_setup() {
   }
 
   let _ = setpgid(Pid::from_raw(0), Pid::from_raw(0));
-  take_term().ok();
+  jobs::take_term().ok();
 }
 
 /// Reset signal dispositions to `SIG_DFL`.
@@ -334,6 +342,7 @@ pub(crate) fn reset_signals(is_fg: bool) {
   let default = SigAction::new(SigHandler::SigDfl, SaFlags::empty(), SigSet::empty());
   unsafe {
     sigaction(Signal::SIGPIPE, &default).ok();
+    sigaction(Signal::SIGTSTP, &default).ok();
     if !is_fg {
       sigaction(Signal::SIGTTIN, &default).ok();
       sigaction(Signal::SIGTTOU, &default).ok();
@@ -371,20 +380,6 @@ pub(crate) fn hang_up(_: libc::c_int) {
   Shed::jobs_mut(|j| {
     j.hang_up();
   });
-}
-
-/// Send SIGTSTP to the foreground job, if any, to stop it and return control of the terminal to the shell.
-///
-/// This is called when the user presses Ctrl-Z, or when a SIGTSTP signal is received.
-pub(crate) fn terminal_stop() -> ShResult<()> {
-  Shed::jobs_mut(|j| {
-    if let Some(job) = j.get_fg_mut() {
-      job.killpg(Signal::SIGTSTP)
-    } else {
-      Ok(())
-    }
-  })
-  // TODO: It seems like there is supposed to be a take_term() call here, needs testing
 }
 
 pub(crate) fn interrupt() -> ShResult<()> {

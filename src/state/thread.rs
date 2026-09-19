@@ -5,7 +5,8 @@ use nix::sys::signal::Signal;
 use crate::{
   eval::parse::ast::Ast,
   procio::Sinks,
-  state::{jobs::SIG_EXIT_OFFSET, logic::LogTab, scopes, shopt::ShOpts, vars::VarTab},
+  signal,
+  state::{logic::LogTab, scopes, shopt::ShOpts, vars::VarTab},
   util::error::LabelBuilder,
 };
 
@@ -27,7 +28,7 @@ pub(crate) struct StageResult {
 impl Default for StageResult {
   fn default() -> Self {
     Self {
-      status: SIG_EXIT_OFFSET + Signal::SIGABRT as i32,
+      status: signal::signal_status(Signal::SIGABRT),
     }
   }
 }

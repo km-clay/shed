@@ -436,8 +436,8 @@ struct HintReply {
 }
 
 struct HintWorker {
-  req_tx: mpsc::Sender<CompHintRequest>,
-  res_rx: mpsc::Receiver<HintReply>,
+  request_tx: mpsc::Sender<CompHintRequest>,
+  reply_rx: mpsc::Receiver<HintReply>,
   wake_rd: OwnedFd,
   cancel: Arc<AtomicBool>,
   req_gen: u64,
@@ -446,31 +446,32 @@ struct HintWorker {
 
 impl HintWorker {
   fn new() -> ShResult<Self> {
-    let spec = Shed::completion_spec();
-    let (req_tx, req_rx) = mpsc::channel::<CompHintRequest>();
-    let (res_tx, res_rx) = mpsc::channel::<HintReply>();
+    let (request_tx, request_rx) = mpsc::channel::<CompHintRequest>();
+    let (reply_tx, reply_rx) = mpsc::channel::<HintReply>();
     let (wake_rd, wake_wr) = procio::pipes_high_nonblocking()?;
+
+    let spec = Shed::completion_spec();
     let cancel = Arc::new(AtomicBool::new(false));
     let worker_cancel = Arc::clone(&cancel);
 
     thread::spawn(move || {
       Shed::install(spec);
       let mut completer = SimpleCompleter::default();
-      while let Ok(mut req) = req_rx.recv() {
-        while let Ok(newer) = req_rx.try_recv() {
+      while let Ok(mut request) = request_rx.recv() {
+        while let Ok(newer) = request_rx.try_recv() {
           // drain all, take only the most recent
-          req = newer;
+          request = newer;
         }
 
         if worker_cancel.load(Ordering::Relaxed) {
           break;
         }
 
-        let Some(reply) = req.reply(&mut completer) else {
+        let Some(reply) = request.reply(&mut completer) else {
           continue;
         };
 
-        if res_tx.send(reply).is_err() {
+        if reply_tx.send(reply).is_err() {
           break;
         }
         let _ = nix::unistd::write(wake_wr.as_fd(), &[0]);
@@ -478,8 +479,8 @@ impl HintWorker {
     });
 
     Ok(Self {
-      req_tx,
-      res_rx,
+      request_tx,
+      reply_rx,
       wake_rd,
       cancel,
       req_gen: 0,
@@ -502,7 +503,7 @@ impl HintWorker {
       buffer,
       cursor_pos,
     };
-    self.req_tx.send(req).ok();
+    self.request_tx.send(req).ok();
   }
 
   fn wake_fd(&self) -> BorrowedFd<'_> {
@@ -512,7 +513,7 @@ impl HintWorker {
   fn take_reply(&self) -> Option<HintReply> {
     procio::drain_fd(self.wake_rd.as_fd());
     let mut latest = None;
-    while let Ok(reply) = self.res_rx.try_recv() {
+    while let Ok(reply) = self.reply_rx.try_recv() {
       latest = Some(reply);
     }
     latest
