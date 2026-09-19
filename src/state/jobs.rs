@@ -659,9 +659,9 @@ impl Job {
       display: self.display(job_order, JobCmdFlags::PIDS).clone(),
       timer: pid.and_then(|pid| {
         self
-          .processes_mut()
-          .find(|chld| chld.pid() == pid)
-          .and_then(ChildProc::take_timer)
+          .members_mut()
+          .find(|m| m.pid() == pid)
+          .and_then(JobMember::take_timer)
       }),
     }
   }
@@ -694,7 +694,11 @@ impl Job {
     Some(pipe_status.collect())
   }
   pub(crate) fn get_pids(&self) -> Vec<Pid> {
-    self.processes().map(ChildProc::pid).collect::<Vec<Pid>>()
+    self
+      .children()
+      .iter()
+      .map(JobMember::pid)
+      .collect::<Vec<Pid>>()
   }
   pub(crate) fn children(&self) -> &[JobMember] {
     &self.children
@@ -705,11 +709,11 @@ impl Job {
       JobMember::Thread(_) => None,
     })
   }
-  pub(crate) fn processes_mut(&mut self) -> impl Iterator<Item = &mut ChildProc> {
-    self.children.iter_mut().filter_map(|m| match m {
-      JobMember::Process(child) => Some(child),
-      JobMember::Thread(_) => None,
-    })
+  pub(crate) fn members(&self) -> impl Iterator<Item = &JobMember> {
+    self.children.iter()
+  }
+  pub(crate) fn members_mut(&mut self) -> impl Iterator<Item = &mut JobMember> {
+    self.children.iter_mut()
   }
   pub(crate) fn is_done(&self) -> bool {
     self.children.iter().all(JobMember::terminated)
@@ -768,7 +772,7 @@ impl Job {
   pub(crate) fn update_by_id(&mut self, id: JobID, stat: WtStat) {
     match id {
       JobID::Pid(pid) => {
-        if let Some(child) = self.processes_mut().find(|c| c.pid() == pid) {
+        if let Some(child) = self.members_mut().find(|c| c.pid() == pid) {
           child.set_stat(stat);
         }
       }
@@ -920,7 +924,7 @@ pub(crate) fn wait_bg(id: &JobID) -> ShResult<()> {
           if signal::has_actionable_pending() {
             let sig = signal::first_actionable_signal().unwrap_or(0);
             signal::check_signals()?;
-            Shed::set_status(SIG_EXIT_OFFSET + sig);
+            Shed::set_status(signal::SIG_EXIT_OFFSET + sig);
             return Ok(());
           }
         }
@@ -1087,7 +1091,8 @@ impl JobTab {
       self.next_open_pos()
     };
     job.set_tabid(tab_pos);
-    let last_pid = job.processes().last().map(ChildProc::pid);
+    let pids = job.get_pids();
+    let last_pid = pids.last();
     self.order.push(tab_pos);
     if tab_pos >= self.jobs.len() {
       self.jobs.resize_with(tab_pos + 1, || None);
@@ -1118,11 +1123,10 @@ impl JobTab {
         .jobs
         .iter()
         .find_map(|job| job.as_ref().filter(|j| j.pgid() == pgid)),
-      JobID::Pid(pid) => self.jobs.iter().find_map(|job| {
-        job
-          .as_ref()
-          .filter(|j| j.processes().any(|c| c.pid() == pid))
-      }),
+      JobID::Pid(pid) => self
+        .jobs
+        .iter()
+        .find_map(|job| job.as_ref().filter(|j| j.get_pids().contains(&pid))),
       JobID::TableID(id) => self.jobs.get(id).and_then(|job| job.as_ref()),
       JobID::Command(cmd) => self.jobs.iter().find_map(|job| {
         job.as_ref().filter(|j| {
@@ -1142,8 +1146,8 @@ impl JobTab {
     };
     match id {
       JobID::Pid(pid) => {
-        if let Some(child) = job.processes_mut().find(|c| c.pid() == *pid) {
-          child.set_stat(stat);
+        if let Some(member) = job.members_mut().find(|m| m.pid() == *pid) {
+          member.set_stat(stat);
         }
       }
       JobID::Pgid(_) | JobID::TableID(_) | JobID::Command(_) => {
@@ -1157,11 +1161,10 @@ impl JobTab {
         .jobs
         .iter_mut()
         .find_map(|job| job.as_mut().filter(|j| j.pgid() == pgid)),
-      JobID::Pid(pid) => self.jobs.iter_mut().find_map(|job| {
-        job
-          .as_mut()
-          .filter(|j| j.processes().any(|c| c.pid() == pid))
-      }),
+      JobID::Pid(pid) => self
+        .jobs
+        .iter_mut()
+        .find_map(|job| job.as_mut().filter(|j| j.members().any(|m| m.pid() == pid))),
       JobID::TableID(id) => self.jobs.get_mut(id).and_then(|job| job.as_mut()),
       JobID::Command(cmd) => self.jobs.iter_mut().find_map(|job| {
         job.as_mut().filter(|j| {
