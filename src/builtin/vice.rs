@@ -1,6 +1,12 @@
-use std::{io::Write, path::Path};
+use std::{
+  fs::OpenOptions,
+  io::{Read, Write},
+  path::Path,
+  sync::Arc,
+};
 
 use bitflags::bitflags;
+use bstr::ByteSlice;
 
 use crate::{
   builtin::opt::{Opt, OptSpec},
@@ -8,8 +14,9 @@ use crate::{
   expand::{alias, escape},
   keys::KeyEvent,
   opt, outln,
+  procio::{self, OsSink, Sink, SinkIo, SinkLines},
   readline::EditorCore,
-  sherr,
+  sherr, signal,
   state::vars::VarStr,
   util::{
     self,
@@ -189,6 +196,10 @@ impl Vice {
         }
         ViceCmd::Repeat(num_cmds, num_repeats) => {
           for _ in 0..num_repeats {
+            if signal::interrupt_pending() {
+              return Err(sherr!(Interrupt, "interrupted"));
+            }
+
             let repeat_cmds = spent_cmds.split_off(spent_cmds.len().saturating_sub(num_cmds));
             Self::exec_cmds(core, prog, repeat_cmds, fields, spent_cmds)?;
             if core.editor.search_failed() {
@@ -229,9 +240,9 @@ impl Vice {
     })
   }
 
-  fn run_inplace(file: &str, input: &str, prog: &ViceProg, span: Span) -> ShResult<bool> {
+  fn run_inplace(file: &str, stream: Arc<dyn Sink>, prog: &ViceProg, span: Span) -> ShResult<bool> {
     let mut collected = String::new();
-    let ok = Self::run(input, prog, span, |record| {
+    let ok = Self::run(stream, prog, span, |record| {
       collected.push_str(record);
       // Linewise emits one record per line; whole-buffer mode is written
       // back verbatim, so only the linewise records get terminators.
@@ -248,48 +259,80 @@ impl Vice {
     Ok(true)
   }
 
-  fn run_stream(input: &str, prog: &ViceProg, span: Span) -> ShResult<bool> {
-    Self::run(input, prog, span, |record| {
+  fn run_stream(stream: Arc<dyn Sink>, prog: &ViceProg, span: Span) -> ShResult<bool> {
+    Self::run(stream, prog, span, |record| {
       outln!("{record}");
       Ok(())
     })
   }
 
-  /// Drive `input` through the program, handing each output record to `sink`.
-  /// Linewise mode reuses one editor across lines; otherwise the whole input is
-  /// a single buffer. Returns `false` when a whole-buffer run is aborted by a
-  /// failed search (the caller turns that into a non-zero exit); in linewise
-  /// mode an aborted line is simply skipped and the run still succeeds.
-  fn run(
-    input: &str,
+  /// Run the program in linewise mode, emitting one record per line.
+  fn run_lines(
+    stream: Arc<dyn Sink>,
     prog: &ViceProg,
     span: Span,
     mut sink: impl FnMut(&str) -> ShResult<()>,
   ) -> ShResult<bool> {
-    if prog.lines() {
-      let mut emitted_line = false;
-      let mut core = EditorCore::empty();
-      for line in input.lines() {
-        core.set_buffer(line);
-        let record = Self::render(&mut core, prog, span)?;
-        if core.editor.search_failed() && record.is_empty() {
-          continue;
-        }
-        emitted_line = true;
-        sink(&record)?;
+    let mut emitted_line = false;
+    let mut core = EditorCore::empty();
+    let mut lines = SinkLines::new(stream);
+
+    while let Some(line) = lines.next_line()? {
+      if signal::sigint_pending() {
+        return Err(sherr!(Interrupt, "interrupted"));
       }
-      Ok(emitted_line)
-    } else {
-      let mut core = EditorCore::headless(input);
+
+      let line = line.to_str_lossy();
+      core.set_buffer(&line);
+
       let record = Self::render(&mut core, prog, span)?;
-      let aborted = core.editor.search_failed();
-      // emit whatever was captured before an abort; drop only if nothing was
-      let emit = !(aborted && record.is_empty());
-      if emit {
-        sink(&record)?;
+      if core.editor.search_failed() && record.is_empty() {
+        continue;
       }
-      // match linewise: the run "succeeds" whenever it produced output
-      Ok(emit)
+
+      emitted_line = true;
+      sink(&record)?;
+    }
+    Ok(emitted_line)
+  }
+
+  /// Run the program against the whole input buffer, capturing all output
+  fn run_buffered(
+    stream: Arc<dyn Sink>,
+    prog: &ViceProg,
+    span: Span,
+    mut sink: impl FnMut(&str) -> ShResult<()>,
+  ) -> ShResult<bool> {
+    let mut buf = Vec::new();
+    if let Err(e) = SinkIo(stream).read_to_end(&mut buf) {
+      return Err(sherr!(ExecFail @ span, "Failed to read input: '{e}'"));
+    }
+    let input = buf.to_str_lossy();
+
+    let mut core = EditorCore::headless(&input);
+    let record = Self::render(&mut core, prog, span)?;
+    let aborted = core.editor.search_failed();
+
+    // emit whatever was captured before an abort; drop only if nothing was
+    let emit = !(aborted && record.is_empty());
+    if emit {
+      sink(&record)?;
+    }
+    // match linewise: the run "succeeds" whenever it produced output
+    Ok(emit)
+  }
+
+  /// Route to either the linewise mode or the buffered mode
+  fn run(
+    stream: Arc<dyn Sink>,
+    prog: &ViceProg,
+    span: Span,
+    sink: impl FnMut(&str) -> ShResult<()>,
+  ) -> ShResult<bool> {
+    if prog.lines() {
+      Self::run_lines(stream, prog, span, sink)
+    } else {
+      Self::run_buffered(stream, prog, span, sink)
     }
   }
 
@@ -343,23 +386,24 @@ impl super::Builtin for Vice {
     let (arg_vec, opts) = args.take_argv();
     let prog = Self::parse_cmds(&opts).promote_err(span)?;
 
-    if arg_vec.is_empty()
-      && let Some(input) = self.get_input_str(&mut args)
-    {
-      let ok = Self::run_stream(&input, &prog, span)?;
+    if arg_vec.is_empty() {
+      let stream = procio::stdin_sink()?;
+      let ok = Self::run_stream(stream, &prog, span)?;
       return util::with_status(i32::from(!ok));
     }
 
     let mut ok = true;
-    for (file, span) in arg_vec {
-      let Ok(content) = std::fs::read_to_string(&file) else {
-        return Err(sherr!(ExecFail @ span, "Failed to read file: '{file}'"));
-      };
+    for (path, span) in arg_vec {
+      let file = OpenOptions::new()
+        .read(true)
+        .open(&path)
+        .map_err(|e| sherr!(ExecFail @ span, "Failed to open file '{}': '{e}'", &path))?;
+      let stream = Arc::new(OsSink::new(file.into()));
 
       let file_ok = if prog.inplace() {
-        Self::run_inplace(&file.to_str_lossy(), &content, &prog, span)?
+        Self::run_inplace(&path.to_str_lossy(), stream, &prog, span)?
       } else {
-        Self::run_stream(&content, &prog, span)?
+        Self::run_stream(stream, &prog, span)?
       };
       ok = ok && file_ok;
     }

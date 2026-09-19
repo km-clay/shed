@@ -1267,6 +1267,48 @@ impl std::fmt::Write for SinkIo {
   }
 }
 
+pub(crate) struct SinkLines {
+  sink: Arc<dyn Sink>,
+  overflow: Vec<u8>,
+  eof: bool,
+}
+impl SinkLines {
+  pub(crate) fn new(sink: Arc<dyn Sink>) -> Self {
+    Self {
+      sink,
+      overflow: vec![],
+      eof: false,
+    }
+  }
+  pub(crate) fn next_line(&mut self) -> io::Result<Option<Vec<u8>>> {
+    loop {
+      if let Some(nl) = self.overflow.find_byte(b'\n') {
+        let mut line: Vec<u8> = self.overflow.drain(..=nl).collect();
+        line.pop(); // drop the newline
+        return Ok(Some(line));
+      }
+      if self.eof {
+        if self.overflow.is_empty() {
+          return Ok(None);
+        }
+        return Ok(Some(std::mem::take(&mut self.overflow)));
+      }
+
+      let mut chunk = [0u8; 8192];
+      match self.sink.read(&mut chunk) {
+        Ok(0) => self.eof = true,
+        Ok(n) => self.overflow.extend_from_slice(&chunk[..n]),
+        Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+          if signal::sigint_pending() {
+            return Err(e); // got Ctrl+C or something
+          }
+        }
+        Err(e) => return Err(e),
+      }
+    }
+  }
+}
+
 /// The virtual fd table that `shed` uses for I/O redirection
 ///
 /// The wrapped `table` is a [`HashMap`] of [`RawFd`] -> [`Arc<dyn Sink>`]. The `RawFd` is the target fd (e.g. 0 for stdin, 1 for stdout, etc.), and the [`Sink`] is the source of data for that fd.
