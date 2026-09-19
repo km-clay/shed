@@ -193,6 +193,11 @@ impl FmtSpec {
     Ok(out)
   }
 
+  /// Upper bound on a resolved field width or precision. Caps the memory a
+  /// pathological spec (e.g. `%.999999999d`) can demand, and stays within the
+  /// `u16` range the `format!` width/precision machinery accepts.
+  const MAX_FIELD: usize = u16::MAX as usize;
+
   fn resolve_width<I: Iterator<Item = Vec<u8>>>(
     &self,
     args: &mut Peekable<I>,
@@ -205,9 +210,9 @@ impl FmtSpec {
     match raw {
       Some(n) if n < 0 => Ok((
         self.flags | PrintFlags::JUST_LEFT,
-        Some(n.unsigned_abs() as usize),
+        Some((n.unsigned_abs() as usize).min(Self::MAX_FIELD)),
       )),
-      Some(n) => Ok((self.flags, Some(n as usize))),
+      Some(n) => Ok((self.flags, Some((n as usize).min(Self::MAX_FIELD)))),
       None => Ok((self.flags, None)),
     }
   }
@@ -223,7 +228,7 @@ impl FmtSpec {
     };
     match raw {
       Some(n) if n < 0 => Ok(None),
-      Some(n) => Ok(Some(n as usize)),
+      Some(n) => Ok(Some((n as usize).min(Self::MAX_FIELD))),
       None => Ok(None),
     }
   }
@@ -240,9 +245,7 @@ impl FmtSpec {
 
     let mut digits: String = abs.to_string();
     if let Some(p) = prec {
-      while digits.chars().count() < p {
-        digits.insert(0, '0');
-      }
+      digits = format!("{digits:0>p$}");
     }
 
     let digits = digits.as_bytes();
@@ -263,9 +266,7 @@ impl FmtSpec {
 
     let mut digits = n.to_string();
     if let Some(p) = prec {
-      while digits.chars().count() < p {
-        digits.insert(0, '0');
-      }
+      digits = format!("{digits:0>p$}");
     }
 
     let digits = digits.as_bytes();
@@ -286,9 +287,7 @@ impl FmtSpec {
 
     let mut digits = format!("{n:o}");
     if let Some(p) = prec {
-      while digits.chars().count() < p {
-        digits.insert(0, '0');
-      }
+      digits = format!("{digits:0>p$}");
     }
 
     // # flag for %o: ensure at least one leading 0.
@@ -320,9 +319,7 @@ impl FmtSpec {
       Case::Upper => format!("{n:X}"),
     };
     if let Some(p) = prec {
-      while digits.chars().count() < p {
-        digits.insert(0, '0');
-      }
+      digits = format!("{digits:0>p$}");
     }
 
     // # flag for %x/%X: prepend 0x/0X for non-zero values.
