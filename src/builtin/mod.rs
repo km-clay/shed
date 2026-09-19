@@ -842,13 +842,11 @@ impl Builtin for CommandBuiltin {
 
     if use_default_path {
       let Some(default_path) = params::get_default_path() else {
+        let span = sub_ast[sub_ast[root].get_span()];
         #[cfg(target_os = "android")]
-        return Err(
-          sherr!(ExecFail @ sub_ast[root].get_span(), "the -p flag is not supported on Android"),
-        );
+        return Err(sherr!(ExecFail @ span, "the -p flag is not supported on Android"));
 
         #[cfg(not(target_os = "android"))]
-        let span = sub_ast[sub_ast[root].get_span()];
         return Err(sherr!(ExecFail @ span, "unable to get default path"));
       };
       // TODO: Find a way to do this that doesn't involve forcing a full PATH rehash twice
