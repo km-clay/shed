@@ -25,7 +25,10 @@ use std::{
   ops::Deref,
   os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
   path::Path,
-  sync::{Arc, Condvar, Mutex, OnceLock},
+  sync::{
+    Arc, Condvar, Mutex, OnceLock,
+    atomic::{AtomicBool, Ordering},
+  },
 };
 
 use bstr::ByteSlice;
@@ -248,7 +251,7 @@ impl RedirBldr {
           } else {
             // strip the tabs
             let mut out = Vec::new();
-            for line in body.lines() {
+            for line in ByteSlice::lines(body.as_bytes()) {
               let tabs = line.iter().take_while(|&&b| b == b'\t').count();
               out.extend_from_slice(&line[tabs..]);
               out.push(b'\n');
@@ -656,6 +659,11 @@ pub(crate) trait Sink: Send + Sync {
   ///
   /// default is a no-op
   fn cancel(&self) {}
+
+  /// SIGTSTP-like method for suspending reads/writes
+  fn suspend(&self) {}
+  /// SIGCONT-like method for resuming reads/writes
+  fn resume(&self) {}
 }
 
 /// Drain an fd, discarding the bytes it contains
@@ -955,15 +963,13 @@ impl ThreadSink {
   }
 
   fn pipe_lock(&mut self) -> std::sync::MutexGuard<'_, PipeBuf> {
-    match self {
-      ThreadSink::Read(p) | ThreadSink::Write(p) => p.buf.lock().unwrap(),
-    }
+    let (ThreadSink::Read(p) | ThreadSink::Write(p)) = self;
+    p.buf.lock().unwrap()
   }
 
   fn notify_all(&self) {
-    match self {
-      ThreadSink::Read(p) | ThreadSink::Write(p) => p.notif.notify_all(),
-    }
+    let (ThreadSink::Read(p) | ThreadSink::Write(p)) = self;
+    p.notif.notify_all();
   }
 
   fn is_writer(&self) -> bool {
@@ -1230,6 +1236,132 @@ impl Sink for CloseSink {
   }
 }
 
+pub(crate) struct SinkControl {
+  suspended: AtomicBool,
+  cancelled: AtomicBool,
+  lock: Mutex<()>,
+  cv: Condvar,
+}
+
+impl SinkControl {
+  fn new() -> Self {
+    Self {
+      suspended: AtomicBool::new(false),
+      cancelled: AtomicBool::new(false),
+      lock: Mutex::new(()),
+      cv: Condvar::new(),
+    }
+  }
+  fn suspended(&self) -> bool {
+    self.suspended.load(Ordering::Relaxed)
+  }
+  fn cancelled(&self) -> bool {
+    self.cancelled.load(Ordering::Relaxed)
+  }
+  pub(crate) fn resume(&self) {
+    {
+      let _g = self.lock.lock().unwrap();
+      self.suspended.store(false, Ordering::Relaxed);
+    }
+    self.cv.notify_all();
+  }
+  pub(crate) fn cancel(&self) {
+    {
+      let _g = self.lock.lock().unwrap();
+      self.cancelled.store(true, Ordering::Relaxed);
+    }
+    self.cv.notify_all();
+  }
+  pub(crate) fn suspend(&self) {
+    self.suspended.store(true, Ordering::Relaxed);
+  }
+  fn checkpoint(&self) -> io::Result<()> {
+    if self.suspended() {
+      let mut g = self.lock.lock().unwrap();
+      while self.suspended() && !self.cancelled() {
+        g = self.cv.wait(g).unwrap();
+      }
+    }
+
+    if self.cancelled() {
+      Err(ebadf())
+    } else {
+      Ok(())
+    }
+  }
+}
+
+/// A type of sink that can be internally suspended and cancelled
+///
+/// Used for job control of threaded builtins
+pub(crate) struct GatedSink {
+  sink: Arc<dyn Sink>,
+  control: Arc<SinkControl>,
+}
+
+impl GatedSink {
+  pub(crate) fn wrap(sink: Arc<dyn Sink>) -> Arc<dyn Sink> {
+    Arc::new(Self {
+      sink,
+      control: Arc::new(SinkControl::new()),
+    })
+  }
+}
+
+impl Sink for GatedSink {
+  fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
+    self.control.checkpoint()?;
+    self.sink.read(buf)
+  }
+
+  fn write(&self, buf: &[u8]) -> io::Result<usize> {
+    self.control.checkpoint()?;
+    self.sink.write(buf)
+  }
+
+  fn poll(&self, timeout: Option<PollTimeout>) -> io::Result<usize> {
+    self.control.checkpoint()?;
+    self.sink.poll(timeout)
+  }
+
+  fn flush(&self) -> io::Result<()> {
+    self.sink.flush()
+  }
+
+  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
+    self.sink.as_os_fd()
+  }
+
+  fn kind(&self) -> SinkKind {
+    self.sink.kind()
+  }
+
+  fn has_data(&self) -> bool {
+    self.sink.has_data()
+  }
+
+  fn was_truncated(&self) -> bool {
+    self.sink.was_truncated()
+  }
+
+  fn seek(&self, pos: io::SeekFrom) -> io::Result<u64> {
+    self.sink.seek(pos)
+  }
+
+  fn cancel(&self) {
+    self.control.cancel();
+    self.sink.cancel();
+  }
+  fn suspend(&self) {
+    self.control.suspend();
+    self.sink.suspend();
+  }
+  fn resume(&self) {
+    self.control.resume();
+    self.sink.resume();
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SinkKind {
   Buffer,
@@ -1364,11 +1496,13 @@ impl Sinks {
   pub(crate) fn os_pipes() -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
     OsPipe::pipes()
   }
+  pub(crate) fn gated_os_pipes() -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
+    let (rd, wr) = OsPipe::pipes()?;
+    Ok((rd, GatedSink::wrap(wr)))
+  }
   pub(crate) fn thread_pipes() -> (Arc<dyn Sink>, Arc<dyn Sink>) {
-    let (read, write) = ThreadSink::new();
-    let read = Arc::new(read);
-    let write = Arc::new(write);
-    (read, write)
+    let (rd, wr) = ThreadSink::new();
+    (Arc::new(rd), GatedSink::wrap(Arc::new(wr)))
   }
   /// Get an empty redir guard
   pub(crate) fn redir_scope() -> RedirGuard {

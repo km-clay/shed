@@ -5,7 +5,7 @@ use nix::{
 
 use crate::{
   eval::lex::Span,
-  outln, sherr, signal,
+  outln, procio, sherr, signal,
   state::{
     Shed,
     jobs::{self, JobCmdFlags, JobID, JobTab},
@@ -122,6 +122,7 @@ pub(super) fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResu
   };
 
   job.killpg(Signal::SIGCONT)?;
+  job.resume_threads();
 
   match behavior {
     JobBehavior::Foregound => {
@@ -130,7 +131,7 @@ pub(super) fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResu
     }
     JobBehavior::Background => {
       let job_order = Shed::jobs(|j| j.order().to_vec());
-      crate::procio::out_bytes(&job.display_bytes(&job_order, JobCmdFlags::PIDS));
+      procio::out_bytes(&job.display_bytes(&job_order, JobCmdFlags::PIDS));
       Shed::jobs_mut(|j| j.insert_job(job, true));
     }
   }

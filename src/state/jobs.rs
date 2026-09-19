@@ -9,7 +9,10 @@ use std::{
     fd::{AsFd, BorrowedFd, OwnedFd},
     unix::thread::JoinHandleExt,
   },
-  sync::Weak,
+  sync::{
+    Arc, Weak,
+    atomic::{AtomicBool, Ordering},
+  },
   thread,
 };
 
@@ -48,8 +51,6 @@ use super::{
   vars::ShellParam,
 };
 
-pub(crate) const SIG_EXIT_OFFSET: i32 = 128;
-
 bitflags! {
   #[derive(Debug, Copy, Clone)]
   pub struct JobCmdFlags: u8 {
@@ -86,7 +87,7 @@ impl fmt::Display for DisplayWaitStatus {
 pub(crate) fn code_from_status(stat: &WtStat) -> Option<i32> {
   match stat {
     WtStat::Exited(_, exit_code) => Some(*exit_code),
-    WtStat::Stopped(_, sig) | WtStat::Signaled(_, sig, _) => Some(SIG_EXIT_OFFSET + *sig as i32),
+    WtStat::Stopped(_, sig) | WtStat::Signaled(_, sig, _) => Some(signal::signal_status(*sig)),
     _ => None,
   }
 }
@@ -111,7 +112,7 @@ impl Outcome {
   pub(crate) fn code(self) -> Option<i32> {
     match self {
       Outcome::Exited(code) => Some(code),
-      Outcome::Signaled(sig) | Outcome::Stopped(sig) => Some(SIG_EXIT_OFFSET + sig as i32),
+      Outcome::Signaled(sig) | Outcome::Stopped(sig) => Some(signal::signal_status(sig)),
       Outcome::Running => None,
     }
   }
@@ -144,7 +145,11 @@ impl JobMember {
     match self {
       JobMember::Process(child_proc) => Ok(child_proc.wait(flags)?.into()),
       JobMember::Thread(stage_thread) => {
-        let outcome = stage_thread.wait()?;
+        let outcome = match stage_thread.wait()? {
+          stopped @ Outcome::Stopped(_) => return Ok(stopped),
+          outcome => outcome,
+        };
+
         stage_thread.join();
         Ok(match outcome {
           // interrupt wins
@@ -152,6 +157,12 @@ impl JobMember {
           _ => stage_thread.outcome(),
         })
       }
+    }
+  }
+  pub(crate) fn pid(&self) -> Pid {
+    match self {
+      JobMember::Process(child_proc) => child_proc.pid(),
+      JobMember::Thread(_) => Pid::this(),
     }
   }
   pub(crate) fn take_timer(&mut self) -> Option<CmdTimer> {
@@ -206,6 +217,7 @@ pub(crate) struct StageThread {
   timer: Option<CmdTimer>,
   notif: Option<OwnedFd>,
   channels: Vec<Weak<dyn Sink>>,
+  suspended: AtomicBool,
 }
 
 impl fmt::Debug for StageThread {
@@ -216,6 +228,7 @@ impl fmt::Debug for StageThread {
       .field("timer", &self.timer)
       .field("notif", &self.notif)
       .field("channels", &self.channels.len())
+      .field("suspended", &self.suspended.load(Ordering::Relaxed))
       .finish()
   }
 }
@@ -228,6 +241,7 @@ impl StageThread {
       timer: None,
       notif: None,
       channels: Vec::new(),
+      suspended: AtomicBool::new(false),
     }
   }
   pub(crate) fn with_name(mut self, name: Option<VarStr>) -> Self {
@@ -251,16 +265,27 @@ impl StageThread {
     }
   }
   fn cancel(&self) {
+    self.control(|s| s.cancel());
+
+    if let Some(id) = self.pthread_id() {
+      id.interrupt();
+    }
+  }
+  fn suspend(&self) {
+    self.suspended.store(true, Ordering::Relaxed);
+    self.control(|s| s.suspend());
+  }
+  fn resume(&self) {
+    self.suspended.store(false, Ordering::Relaxed);
+    self.control(|s| s.resume());
+  }
+  fn control<F: Fn(Arc<dyn Sink>)>(&self, f: F) {
     for ch in &self.channels {
       if let Some(ch) = ch.upgrade() {
         // call Sink::cancel, which makes ThreadSink
         // close both sides of the pipe
-        ch.cancel();
+        f(ch);
       }
-    }
-
-    if let Some(id) = self.pthread_id() {
-      id.interrupt();
     }
   }
   fn is_finished(&self) -> bool {
@@ -273,6 +298,7 @@ impl StageThread {
     match &self.status {
       Some(StageStatus::Complete(result)) => Outcome::Exited(result.status()),
       Some(StageStatus::Panicked) => Outcome::Signaled(Signal::SIGABRT),
+      _ if self.suspended.load(Ordering::Relaxed) => Outcome::Stopped(Signal::SIGTSTP),
       _ => Outcome::Running,
     }
   }
@@ -291,18 +317,27 @@ impl StageThread {
 
         return Ok(Outcome::Signaled(Signal::SIGINT));
       }
+      if signal::sigtstp_pending() {
+        self.suspend();
+
+        return Ok(Outcome::Stopped(Signal::SIGTSTP));
+      }
 
       poll(&mut poll_fds, PollTimeout::NONE)?;
 
-      // if we are here, the poll got a revent.
       // if it was our notif_fd (poll_fds[0]), the thread is done
       // if it was the wake_fd (poll_fds[1]), we got a signal
-
-      if poll_fds[0].revents().is_some() {
+      if poll_fds[0]
+        .revents()
+        .is_some_and(|r| r.intersects(PollFlags::POLLIN | PollFlags::POLLHUP))
+      {
         return Ok(Outcome::Exited(Shed::get_status()));
       }
 
-      if poll_fds[1].revents().is_some() {
+      if poll_fds[1]
+        .revents()
+        .is_some_and(|r| r.intersects(PollFlags::POLLIN))
+      {
         procio::drain_fd(poll_fds[1].as_fd());
         if signal::sigint_pending() {
           self.cancel();
@@ -363,9 +398,6 @@ impl ChildProc {
   }
   pub(crate) fn pid(&self) -> Pid {
     self.pid
-  }
-  pub(crate) fn take_timer(&mut self) -> Option<CmdTimer> {
-    self.timer.take()
   }
   pub(crate) fn cmd(&self) -> Option<VarStr> {
     self.command.clone()
@@ -480,6 +512,7 @@ pub(crate) struct JobData {
   pub timer: Option<CmdTimer>,
 }
 
+/// Watcher thread that handles SIGINT and SIGTSTP for threaded builtins
 #[derive(Debug)]
 pub(crate) struct Watcher {
   handle: Option<thread::JoinHandle<()>>,
@@ -528,16 +561,20 @@ impl Watcher {
         .revents()
         .is_some_and(|r| r.intersects(PollFlags::POLLIN))
       {
+        // wake pipe has been poked
+        // check signals
         procio::drain_fd(wake_fd);
-        if signal::sigint_pending() {
-          for ch in &channels {
-            if let Some(ch) = ch.upgrade() {
+        for ch in &channels {
+          if let Some(ch) = ch.upgrade() {
+            if signal::sigint_pending() {
               ch.cancel();
-            }
-          }
 
-          for id in &workers {
-            id.interrupt();
+              for id in &workers {
+                id.interrupt();
+              }
+            } else if signal::sigtstp_pending() {
+              ch.suspend();
+            }
           }
         }
       }
@@ -595,6 +632,24 @@ impl Job {
       .map(|c| c.cmd().unwrap_or_default())
       .collect()
   }
+  pub(crate) fn suspend_threads(&self) {
+    for child in self.children() {
+      let JobMember::Thread(t) = child else {
+        continue;
+      };
+
+      t.suspend();
+    }
+  }
+  pub(crate) fn resume_threads(&self) {
+    for child in self.children() {
+      let JobMember::Thread(t) = child else {
+        continue;
+      };
+
+      t.resume();
+    }
+  }
   pub(crate) fn take_job_data(&mut self, job_order: &[usize], pid: Option<Pid>) -> JobData {
     JobData {
       table_id: varstr!("{}", self.tabid().unwrap_or_default()),
@@ -633,7 +688,7 @@ impl Job {
     }
     let pipe_status = stats.iter().map(|stat| match stat {
       Outcome::Exited(code) => *code,
-      Outcome::Signaled(sig) => SIG_EXIT_OFFSET + *sig as i32,
+      Outcome::Signaled(sig) => signal::signal_status(*sig),
       Outcome::Running | Outcome::Stopped(_) => unreachable!(),
     });
     Some(pipe_status.collect())
@@ -854,6 +909,7 @@ pub(crate) fn wait_bg(id: &JobID) -> ShResult<()> {
   defer! {
     enable_reaping();
   };
+
   if let JobID::Pid(pid) = id {
     let stat = loop {
       match waitpid(*pid, None) {
@@ -889,11 +945,8 @@ pub(crate) fn wait_bg(id: &JobID) -> ShResult<()> {
       if !pipefail || stage_code != 0 {
         code = stage_code;
       }
-      match status {
-        Outcome::Signaled(sig) if *sig == Signal::SIGTSTP => {
-          was_stopped = true;
-        }
-        _ => {}
+      if let Outcome::Stopped(_) = status {
+        was_stopped = true;
       }
     }
 
@@ -932,17 +985,15 @@ pub(crate) fn wait_fg(job: Job, interactive: bool) -> ShResult<()> {
     if !pipefail || stage_code != 0 {
       code = stage_code;
     }
-    if let Outcome::Signaled(sig) = status {
-      match sig {
-        Signal::SIGTSTP if interactive => {
-          was_stopped = true;
-          Shed::jobs_mut(|j| j.fg_to_bg(*sig))?;
-        }
-        Signal::SIGINT => {
-          kill(getpid(), Signal::SIGINT)?;
-        }
-        _ => {}
+    match status {
+      Outcome::Stopped(sig) if interactive => {
+        was_stopped = true;
+        Shed::jobs_mut(|j| j.fg_to_bg(*sig))?;
       }
+      Outcome::Signaled(Signal::SIGINT) => {
+        kill(getpid(), Signal::SIGINT)?;
+      }
+      _ => {}
     }
   }
   Shed::set_pipe_status(&statuses)?;
@@ -1143,6 +1194,7 @@ impl JobTab {
     let fg = std::mem::take(&mut self.fg);
     if let Some(mut job) = fg {
       job.set_stats(WtStat::Stopped(job.pgid(), sig));
+      job.suspend_threads();
       self.insert_job(job, false);
     }
     Ok(())
@@ -1338,7 +1390,7 @@ mod tests {
     };
     wait_bg(&JobID::Pid(pid)).unwrap();
     // code_from_status maps Signaled(sig) → SIG_EXIT_OFFSET + sig.
-    assert_eq!(Shed::get_status(), SIG_EXIT_OFFSET + Signal::SIGTERM as i32);
+    assert_eq!(Shed::get_status(), signal::signal_status(Signal::SIGTERM));
   }
 
   // ===================== Job::display =====================

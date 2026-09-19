@@ -151,8 +151,16 @@ pub(crate) fn signals_pending() -> bool {
   SIGNALS.load(Ordering::SeqCst) != 0 || SHOULD_QUIT.load(Ordering::SeqCst)
 }
 
+pub(crate) fn interrupt_pending() -> bool {
+  sigint_pending() || sigtstp_pending()
+}
+
 pub(crate) fn sigint_pending() -> bool {
   SIGNALS.load(Ordering::SeqCst) & (1 << Signal::SIGINT as u64) != 0
+}
+
+pub(crate) fn sigtstp_pending() -> bool {
+  SIGNALS.load(Ordering::SeqCst) & (1 << Signal::SIGTSTP as u64) != 0
 }
 
 /// Whether a pending signal warrants interrupting a blocking `read`/`wait`.
@@ -429,7 +437,7 @@ pub(crate) fn child_signaled(pid: Pid, sig: Signal) {
     }
   });
   if sig == Signal::SIGINT {
-    take_term().unwrap();
+    jobs::take_term().unwrap();
   }
 }
 
@@ -445,7 +453,7 @@ pub(crate) fn child_stopped(pid: Pid, sig: Signal) -> ShResult<()> {
       j.fg_to_bg(sig).unwrap();
     }
   });
-  take_term()?;
+  jobs::take_term()?;
   Ok(())
 }
 
@@ -497,7 +505,7 @@ pub(crate) fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   }
 
   if is_fg {
-    return take_term();
+    return jobs::take_term();
   }
 
   // If it was a background job, we need to notify the main loop

@@ -190,8 +190,13 @@ impl super::Dispatcher {
       if i + 1 < num_cmds {
         // middle segment, get pipes
         let (read, write) = if use_thread_pipes {
+          // builtin -> builtin
           Sinks::thread_pipes()
+        } else if thread_this_stage {
+          // builtin -> external
+          Sinks::gated_os_pipes()?
         } else {
+          // external -> external
           Sinks::os_pipes()?
         };
         sinks.push(Arc::downgrade(&read));
