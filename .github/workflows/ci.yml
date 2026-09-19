@@ -41,6 +41,24 @@ jobs:
       - uses: cachix/install-nix-action@v27
       - run: nix build --no-link
 
+  termux-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # checkout runs on the glibc host; only the build runs inside Termux,
+      # because a `container:` job breaks checkout (GitHub's injected Node is
+      # glibc-linked and won't run in the bionic Termux image).
+      - name: Build with cargo inside Termux (x86_64)
+        run: |
+          docker run --rm -v "$PWD:/repo" termux/termux-docker:x86_64 bash -lc '
+            set -eux
+            pkg update -y
+            pkg install -y rust clang
+            export CARGO_TARGET_DIR="$HOME/target"
+            cd /repo
+            cargo build --locked
+          '
+
   mac-build:
     runs-on: macos-latest
     steps:
