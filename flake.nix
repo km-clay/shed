@@ -33,6 +33,7 @@
       targets = [
         "x86_64-unknown-linux-musl"
         "aarch64-unknown-linux-gnu"
+        "aarch64-linux-android"
         "x86_64-apple-darwin"
         "aarch64-apple-darwin"
       ];
@@ -50,6 +51,39 @@
       "x86_64-apple-darwin"
       "aarch64-apple-darwin"
     ];
+
+    # android can't go through cargo-zigbuild
+    # so we need a dedicated checker for it
+    androidTriple = "aarch64-linux-android";
+    androidSupported = system == "x86_64-linux";
+    androidPkgs = import nixpkgs {
+      inherit system;
+      overlays = [ rust-overlay.overlays.default ];
+      config.allowUnfree = true;
+    };
+    androidCC = androidPkgs.pkgsCross.aarch64-android-prebuilt.stdenv.cc;
+
+    androidCheck = pkgs.stdenv.mkDerivation {
+      name = "check-${androidTriple}";
+      src = self;
+      cargoDeps = rustPlatform.importCargoLock { lockFile = ./Cargo.lock; };
+      nativeBuildInputs = [
+        rustToolchain
+        rustPlatform.cargoSetupHook
+        androidCC
+      ];
+      buildPhase = ''
+        runHook preBuild
+        export HOME=$(mktemp -d)
+        export CC_aarch64_linux_android="${androidCC}/bin/${androidCC.targetPrefix}cc"
+        export AR_aarch64_linux_android="${androidCC}/bin/${androidCC.targetPrefix}ar"
+        export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${androidCC}/bin/${androidCC.targetPrefix}cc"
+        cargo check --target ${androidTriple} --offline
+        runHook postBuild
+      '';
+      installPhase = "touch $out";
+      dontFixup = true;
+    };
 
     mkCheck = triple:
       pkgs.stdenv.mkDerivation {
@@ -123,7 +157,12 @@
     checks = (builtins.listToAttrs (map (t: {
       name = "check-${t}";
       value = mkCheck t;
-    }) checkTargets)) // {
+    }) checkTargets))
+    // pkgs.lib.optionalAttrs androidSupported {
+      # only fold this in if our system can build it
+      "check-${androidTriple}" = androidCheck;
+    }
+    // {
       tests = self.packages.${system}.default;
     };
   }) // {

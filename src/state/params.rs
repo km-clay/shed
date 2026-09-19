@@ -16,6 +16,7 @@ use crate::{
   varstr,
 };
 
+#[cfg(not(target_os = "android"))]
 use nix::libc;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -250,7 +251,7 @@ pub(crate) fn inc_sh_lvl() -> ShResult<()> {
 
 /// The process-wide history database connection.
 #[cfg(target_os = "android")]
-pub fn get_default_path() -> Option<String> {
+pub(crate) fn get_default_path() -> Option<String> {
   // Android does not have conf_str or _CS_PATH
   // So we return None here.
   None
