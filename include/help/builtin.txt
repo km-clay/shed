@@ -80,6 +80,7 @@ The following builtins are available:
   `vice`        slice and edit text with vim motions        |builtin-vice|
   `wait`        wait for background jobs to finish          |builtin-wait|
   `width`       print the display width of a string         |builtin-width|
+  `yes`         print lines of 'y' or a string endlessly    |builtin-yes|
   `zd`          jump to a directory from history            |builtin-zd|
 
 ==============================================================================
@@ -3171,6 +3172,59 @@ VICE                                             *builtin-vice* *vice*
   This is a `shed` extension; `bash` and `POSIX` do not provide it.
 
   See also: |quoted-streams|, |builtin-quote|, |keymap|(builtin-keymap)
+
+==============================================================================
+YES                                              *builtin-yes* *yes*
+
+  `yes [{words}...]`
+
+  Endlessly write lines consisting of either `y`, or any arbitrary strings
+
+  The repeated line comes from the first of these that applies:
+
+    - the {words} operands, joined with a single space each
+    - with no operands, the entire contents read from standard input, when
+      stdin is not a terminal (e.g. a pipe or file redirection)
+    - `y`, when there are no operands and stdin is the terminal
+
+  Each line is followed by a newline, and the same line is written over and
+  over with no delay. `yes` runs a fork-free `coreutils`-style `yes` in the
+  current shell, so it is cheap to spawn as a pipeline stage.
+
+  `yes` runs until either it is interrupted with `Ctrl+C` (SIGINT) or its
+  output can no longer be written because the downstream consumer closed the
+  pipe (SIGPIPE), as in `yes | head`. It is meant to feed a stage that reads
+  a bounded amount and then stops, or to be suspended/killed as a job.
+
+  Examples ~
+
+      `yes`
+                                repeat `y` forever, one per line
+
+      `yes ok`
+                                repeat `ok` forever
+
+      `yes foo bar biz`
+                                repeat `foo bar biz` (operands joined by
+                                single spaces) forever
+
+      `yes | head -n 5`
+                                print `y` five times: `head` closes the pipe
+                                after its fifth line and `yes` stops
+
+      `yes | thru -L 4096`
+                                feed an unbounded `y` stream into a stage
+                                that caps it at 4 KB
+
+      `printf 'retry\n' | yes`
+                                with no operands, repeat the text read from
+                                stdin instead of `y`
+
+  This builtin is a `shed` extension. `bash` and `POSIX` do not provide it;
+  `coreutils` provides an external `yes`, which `shed` supersedes with a
+  builtin that runs without forking.
+
+  See also: |builtin-thru|, |builtin-vice|
 
 ==============================================================================
 ZD                                               *builtin-zd* *zd*

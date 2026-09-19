@@ -151,16 +151,30 @@ pub(crate) fn signals_pending() -> bool {
   SIGNALS.load(Ordering::SeqCst) != 0 || SHOULD_QUIT.load(Ordering::SeqCst)
 }
 
+pub(crate) fn take_signal(sig: Signal) -> bool {
+  let mask = 1 << sig as u64;
+  let prev = SIGNALS.fetch_and(!mask, Ordering::SeqCst);
+  prev & mask != 0
+}
+
 pub(crate) fn interrupt_pending() -> bool {
   sigint_pending() || sigtstp_pending()
 }
 
+pub(crate) fn sigpipe_pending() -> bool {
+  signal_pending(Signal::SIGPIPE)
+}
+
 pub(crate) fn sigint_pending() -> bool {
-  SIGNALS.load(Ordering::SeqCst) & (1 << Signal::SIGINT as u64) != 0
+  signal_pending(Signal::SIGINT)
 }
 
 pub(crate) fn sigtstp_pending() -> bool {
-  SIGNALS.load(Ordering::SeqCst) & (1 << Signal::SIGTSTP as u64) != 0
+  signal_pending(Signal::SIGTSTP)
+}
+
+fn signal_pending(sig: Signal) -> bool {
+  SIGNALS.load(Ordering::SeqCst) & (1 << sig as u64) != 0
 }
 
 /// Whether a pending signal warrants interrupting a blocking `read`/`wait`.

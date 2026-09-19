@@ -5,7 +5,7 @@
 //! the [`Builtin`] trait. The builtins are registered in the [`BUILTIN_TABLE`] static variable, which
 //! is used to look up builtins by name.
 
-use nix::unistd::Pid;
+use nix::{sys::signal::Signal, unistd::Pid};
 use std::{
   fs,
   io::{self, Read},
@@ -24,7 +24,7 @@ use crate::{
   expand::{arithmetic, escape},
   lifecycle, outln,
   procio::{self, RedirSet, SinkIo, Sinks},
-  sherr, signal,
+  sherr, shopt, signal,
   state::{
     Shed, cmd,
     jobs::ChildProc,
@@ -195,6 +195,7 @@ register_builtins! {
   b"vice"     => vice::Vice,
   b"wait"     => jobctl::Wait,
   b"width"    => width::Width,
+  b"yes"      => Yes,
   b"zd"       => cd::Zd,
 }
 
@@ -412,7 +413,7 @@ pub(super) trait Builtin: Sync {
             Shed::meta(MetaTab::in_loop)
           }
           ShErrKind::FuncReturn(_) => Shed::meta(MetaTab::in_func),
-          _ if crate::shopt!(set.errexit) => {
+          _ if shopt!(set.errexit) => {
             // propagate if this is enabled
             *kind = ShErrKind::ErrInterrupt;
             true
@@ -423,6 +424,7 @@ pub(super) trait Builtin: Sync {
         if should_propagate {
           let status = match e.kind() {
             ShErrKind::Custom(_, code) | ShErrKind::CleanExit(code) => *code,
+            ShErrKind::Interrupt => signal::signal_status(Signal::SIGINT),
             _ => 1,
           };
           Shed::set_status(status);
@@ -555,6 +557,36 @@ impl std::io::Read for ThruSource {
         SinkIo(stdin).read(buf)
       }
     }
+  }
+}
+
+struct Yes;
+impl Builtin for Yes {
+  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
+    let line = match self.get_input_str(&mut args) {
+      Some(i) => i,
+      None => {
+        if args.no_arguments() {
+          String::from("y")
+        } else {
+          argv::join_raw_arg_iter(args.arguments()).0.to_string()
+        }
+      }
+    };
+
+    loop {
+      if signal::sigint_pending() {
+        return Err(sherr!(Interrupt, "interrupted"));
+      }
+      if signal::take_signal(Signal::SIGPIPE) {
+        // broken pipe
+        let status = signal::signal_status(Signal::SIGPIPE);
+        return util::with_status(status);
+      }
+      outln!("{line}");
+    }
+    // unreachable! this builtin can only be exited with
+    // explicit interruption, or a broken pipe.
   }
 }
 
