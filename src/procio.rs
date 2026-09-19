@@ -1310,7 +1310,9 @@ impl GatedSink {
 
 impl Sink for GatedSink {
   fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-    self.control.checkpoint()?;
+    if self.control.checkpoint().is_err() {
+      return Ok(0);
+    }
     self.sink.read(buf)
   }
 
@@ -1498,11 +1500,11 @@ impl Sinks {
   }
   pub(crate) fn gated_os_pipes() -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
     let (rd, wr) = OsPipe::pipes()?;
-    Ok((rd, GatedSink::wrap(wr)))
+    Ok((GatedSink::wrap(rd), GatedSink::wrap(wr)))
   }
   pub(crate) fn thread_pipes() -> (Arc<dyn Sink>, Arc<dyn Sink>) {
     let (rd, wr) = ThreadSink::new();
-    (Arc::new(rd), GatedSink::wrap(Arc::new(wr)))
+    (GatedSink::wrap(Arc::new(rd)), GatedSink::wrap(Arc::new(wr)))
   }
   /// Get an empty redir guard
   pub(crate) fn redir_scope() -> RedirGuard {

@@ -218,6 +218,7 @@ pub(crate) struct StageThread {
   notif: Option<OwnedFd>,
   channels: Vec<Weak<dyn Sink>>,
   suspended: AtomicBool,
+  killed: Option<Signal>,
 }
 
 impl fmt::Debug for StageThread {
@@ -229,6 +230,7 @@ impl fmt::Debug for StageThread {
       .field("notif", &self.notif)
       .field("channels", &self.channels.len())
       .field("suspended", &self.suspended.load(Ordering::Relaxed))
+      .field("killed", &self.killed)
       .finish()
   }
 }
@@ -242,6 +244,7 @@ impl StageThread {
       notif: None,
       channels: Vec::new(),
       suspended: AtomicBool::new(false),
+      killed: None,
     }
   }
   pub(crate) fn with_name(mut self, name: Option<VarStr>) -> Self {
@@ -279,6 +282,11 @@ impl StageThread {
     self.suspended.store(false, Ordering::Relaxed);
     self.control(|s| s.resume());
   }
+  fn kill(&mut self, sig: Signal) {
+    self.killed = Some(sig);
+    self.cancel();
+    self.join();
+  }
   fn control<F: Fn(Arc<dyn Sink>)>(&self, f: F) {
     for ch in &self.channels {
       if let Some(ch) = ch.upgrade() {
@@ -295,6 +303,9 @@ impl StageThread {
     )
   }
   fn outcome(&self) -> Outcome {
+    if let Some(sig) = self.killed {
+      return Outcome::Signaled(sig);
+    }
     match &self.status {
       Some(StageStatus::Complete(result)) => Outcome::Exited(result.status()),
       Some(StageStatus::Panicked) => Outcome::Signaled(Signal::SIGABRT),
@@ -565,15 +576,13 @@ impl Watcher {
         // check signals
         procio::drain_fd(wake_fd);
         for ch in &channels {
-          if let Some(ch) = ch.upgrade() {
-            if signal::sigint_pending() {
-              ch.cancel();
+          if let Some(ch) = ch.upgrade()
+            && signal::sigint_pending()
+          {
+            ch.cancel();
 
-              for id in &workers {
-                id.interrupt();
-              }
-            } else if signal::sigtstp_pending() {
-              ch.suspend();
+            for id in &workers {
+              id.interrupt();
             }
           }
         }
@@ -725,6 +734,15 @@ impl Job {
       sig => WtStat::Signaled(self.pgid, sig, false),
     };
     self.set_stats(stat);
+    for child in &mut self.children {
+      if let JobMember::Thread(t) = child {
+        match sig {
+          Signal::SIGCONT => t.resume(),
+          Signal::SIGSTOP | Signal::SIGTSTP | Signal::SIGTTIN | Signal::SIGTTOU => t.suspend(),
+          _ => t.kill(sig),
+        }
+      }
+    }
     // if the job has our pgrp, we need to signal the job's processes individually
     // or else the shell itself will get hit.
     if self.pgid == getpgrp() {

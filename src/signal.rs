@@ -161,10 +161,6 @@ pub(crate) fn interrupt_pending() -> bool {
   sigint_pending() || sigtstp_pending()
 }
 
-pub(crate) fn sigpipe_pending() -> bool {
-  signal_pending(Signal::SIGPIPE)
-}
-
 pub(crate) fn sigint_pending() -> bool {
   signal_pending(Signal::SIGINT)
 }
