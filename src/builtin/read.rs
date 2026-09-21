@@ -35,6 +35,7 @@ bitflags! {
     const N_CHARS = 		0b0000_1000;
     const TIMEOUT = 		0b0001_0000;
     const QUOTED  = 		0b0010_0000;
+    const RAW = 			0b0100_0000;
   }
 }
 pub(super) struct Read;
@@ -46,6 +47,7 @@ impl super::Builtin for Read {
       OptSpec::new_long("quoted").short(b'q'),
       OptSpec::new_short("array", b'a').argc(1),
       OptSpec::new_short("n-chars", b'n').argc(1),
+      OptSpec::new_short("raw-chars", b'N').argc(1),
       OptSpec::new_short("timeout", b't').argc(1),
       OptSpec::new_short("prompt", b'p').argc(1),
       OptSpec::new_short("delim", b'd').argc(1),
@@ -73,6 +75,14 @@ impl super::Builtin for Read {
             .parse::<usize>()
             .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
           max_bytes = Some(bytes);
+        }
+        "raw-chars" => {
+          let n = opt.value()?;
+          let bytes = n
+            .parse::<usize>()
+            .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
+          max_bytes = Some(bytes);
+          flags |= ReadFlags::RAW;
         }
         "prompt" => {
           let p = opt.value()?;
@@ -119,6 +129,12 @@ impl super::Builtin for Read {
       }
     });
 
+    if flags.contains(ReadFlags::RAW) {
+      let sink = procio::stdin_sink()?;
+      let input = raw_read(&*sink, max_bytes.unwrap_or(0))?;
+      return assign_raw(&input, &arg_vec);
+    }
+
     let input = do_read(
       delim,
       !flags.contains(ReadFlags::NO_ESCAPE),
@@ -140,6 +156,54 @@ impl super::Builtin for Read {
       }
     }
   }
+}
+
+/// Read exactly `n` bytes verbatim, ignoring delimiters, escapes, and IFS splitting
+fn raw_read(sink: &dyn Sink, n: usize) -> ShResult<Vec<u8>> {
+  let mut buf = Vec::with_capacity(n.min(CHUNK_SIZE));
+  let mut chunk = [0u8; CHUNK_SIZE];
+  while buf.len() < n {
+    let want = (n - buf.len()).min(chunk.len());
+    match sink.read(&mut chunk[..want]) {
+      Ok(0) => break,
+      Ok(r) => buf.extend_from_slice(&chunk[..r]),
+      Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+        if signal::sigint_pending() {
+          Shed::set_status(130);
+          return Ok(Vec::new());
+        }
+      }
+      Err(e) => return Err(e.into()),
+    }
+  }
+  Shed::set_status(i32::from(buf.len() != n));
+  Ok(buf)
+}
+
+/// Assign raw bytes to the first named variable (or `REPLY`), with no field
+/// splitting; any further named variables are cleared.
+fn assign_raw(input: &[u8], vars: &[(VarStr, Span)]) -> ShResult<()> {
+  let target = vars
+    .first()
+    .map(|(name, _)| name.to_str_lossy().into_owned());
+  let name = target.as_deref().unwrap_or("REPLY");
+  Shed::vars_mut(|v| {
+    v.set_var(
+      name,
+      VarKind::string(VarStr::from(input)),
+      VarFlags::empty(),
+    )
+  })?;
+  for (extra, _) in vars.iter().skip(1) {
+    Shed::vars_mut(|v| {
+      v.set_var(
+        &extra.to_str_lossy(),
+        VarKind::string(VarStr::default()),
+        VarFlags::empty(),
+      )
+    })?;
+  }
+  Ok(())
 }
 
 fn do_read(
@@ -173,11 +237,11 @@ fn walking_read(
       Ok(n) => n,
       Err(e) if e.kind() == io::ErrorKind::Interrupted => {
         if signal::sigint_pending() {
-          state::Shed::set_status(130);
+          Shed::set_status(130);
           return Ok(Vec::new());
         }
         if signal::has_actionable_pending() {
-          state::Shed::set_status(1);
+          Shed::set_status(1);
           return Ok(buf);
         }
         continue; // untrapped SIGCHLD/SIGWINCH etc., retry the poll
@@ -185,7 +249,7 @@ fn walking_read(
       Err(e) => return Err(e.into()),
     };
     if ready == 0 {
-      state::Shed::set_status(1);
+      Shed::set_status(1);
       return Ok(buf); // timeout
     }
 
@@ -194,11 +258,11 @@ fn walking_read(
       Ok(n) => n,
       Err(e) if e.kind() == io::ErrorKind::Interrupted => {
         if signal::sigint_pending() {
-          state::Shed::set_status(130);
+          Shed::set_status(130);
           return Ok(Vec::new());
         }
         if signal::has_actionable_pending() {
-          state::Shed::set_status(1);
+          Shed::set_status(1);
           return Ok(buf);
         }
         continue; // untrapped SIGCHLD/SIGWINCH etc., retry the read
@@ -207,7 +271,7 @@ fn walking_read(
     };
 
     if n == 0 {
-      state::Shed::set_status(1);
+      Shed::set_status(1);
       return Ok(buf); // EOF
     }
 
@@ -235,7 +299,7 @@ fn walking_read(
     }
   }
 
-  state::Shed::set_status(0);
+  Shed::set_status(0);
   Ok(buf)
 }
 
@@ -271,7 +335,7 @@ fn seeking_read(
     let n = match sink.read(&mut buf) {
       Ok(0) => {
         if line.is_empty() {
-          state::Shed::set_status(1);
+          Shed::set_status(1);
           return Ok(Vec::new());
         }
         return finalize(line, escape_aware);
@@ -281,11 +345,11 @@ fn seeking_read(
       Err(e) if e.kind() == io::ErrorKind::Interrupted => {
         if signal::sigint_pending() {
           // we got ctrl+c
-          state::Shed::set_status(130);
+          Shed::set_status(130);
           return Ok(Vec::new());
         }
         if signal::has_actionable_pending() {
-          state::Shed::set_status(1);
+          Shed::set_status(1);
           return finalize(line, escape_aware);
         }
         continue;
@@ -342,7 +406,7 @@ fn seeking_read(
 }
 
 fn finalize(mut line: Vec<u8>, escape_aware: bool) -> ShResult<Vec<u8>> {
-  state::Shed::set_status(0);
+  Shed::set_status(0);
   if escape_aware {
     line = unescape(&line);
   }
@@ -994,6 +1058,23 @@ mod tests {
     let _g = TestGuard::new();
     test_input("read -n 3 short < <(echo -n 'helloworld')").unwrap();
     assert_eq!(var!("short"), "hel");
+  }
+
+  #[test]
+  fn read_dash_bigN_ignores_delimiter() {
+    // `-N` reads exactly N bytes verbatim; a newline in the middle is data,
+    // not a delimiter (`-n` would stop at it).
+    let _g = TestGuard::new();
+    test_input("read -N 3 raw < <(printf 'a\\nb')").unwrap();
+    assert_eq!(var!("raw"), "a\nb");
+  }
+
+  #[test]
+  fn read_dash_bigN_does_not_trim_whitespace() {
+    // No IFS trimming: leading/trailing whitespace bytes are kept.
+    let _g = TestGuard::new();
+    test_input("read -N 3 raw < <(printf ' x ')").unwrap();
+    assert_eq!(var!("raw"), " x ");
   }
 
   #[test]
