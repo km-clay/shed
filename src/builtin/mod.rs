@@ -22,7 +22,7 @@ use crate::{
     },
   },
   expand::{arithmetic, escape},
-  lifecycle, outln,
+  lifecycle, opt, outln,
   procio::{self, RedirSet, SinkIo, Sinks},
   sherr, shopt, signal,
   state::{
@@ -600,15 +600,17 @@ impl Builtin for Thru {
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new("count").short(b'c').long("count"),
-      OptSpec::new("append").short(b'a').long("append"),
-      OptSpec::new("tee").short(b't').long("tee").argc(1),
-      OptSpec::new("limit").short(b'L').long("limit").argc(1),
+      opt!("count" | b'c'),
+      opt!("append" | b'a'),
+      opt!("report-eof" | b'E'),
+      opt!("tee" | b't', 1),
+      opt!("limit" | b'L', 1),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut count = false;
     let mut append = false;
+    let mut report_eof = false;
     let mut tee: Option<VarStr> = None;
     let mut limit = None;
 
@@ -617,6 +619,7 @@ impl Builtin for Thru {
         "append" => append = true,
         "count" => count = true,
         "tee" => tee = Some(opt.value()?.into()),
+        "report-eof" => report_eof = true,
         "limit" => {
           let arg = opt.value()?;
           let Ok(parsed) = arg.parse::<usize>() else {
@@ -713,7 +716,8 @@ impl Builtin for Thru {
       errln!("thru: {byte_count} bytes");
     }
 
-    util::with_status(0)
+    let status = i32::from(report_eof && byte_count == 0);
+    util::with_status(status)
   }
 }
 

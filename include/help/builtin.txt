@@ -2753,7 +2753,7 @@ STAT                                             *builtin-stat* *stat*
 ==============================================================================
 THRU                                             *builtin-thru* *thru*
 
-  `thru [-c] [-t {dest}] [-a] [-L {bytes}] [{file}...]`
+  `thru [-c] [-t {dest}] [-a] [-L {bytes}] [-E] [{file}...]`
 
   Pass input to standard output unchanged: a fork-free `cat`. With one or
   more {file} arguments it reads each in order; with none it reads standard
@@ -2789,10 +2789,19 @@ THRU                                             *builtin-thru* *thru*
                   the pass-through output.
 
     `-L {bytes}`, `--limit {bytes}`
-                  Pass through at most {bytes} bytes of input. Excess
-                  input is discarded. The byte count snaps down to the
-                  nearest UTF-8 character boundary so multi-byte characters
-                  are never split.
+                  Pass through at most {bytes} bytes of input, then stop;
+                  any further input is left unread. The cut is byte-exact
+                  and binary-safe: it is not adjusted to a character
+                  boundary, so a multi-byte character straddling the limit
+                  is split. Combine with `seek` to read a byte range out of
+                  a file descriptor.
+
+    `-E`, `--report-eof`
+                  Exit non-zero when no bytes were passed through, so a
+                  loop stops at end of input the way `read` does:
+                  `while thru -L {n} -E <&{fd}; do ...; done`. Without this
+                  flag `thru` always exits 0 (like `cat` on an empty file).
+                  A read error that moved no bytes also exits non-zero.
 
   Behavior notes ~
 
