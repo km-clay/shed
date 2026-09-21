@@ -85,6 +85,7 @@ pub(crate) struct StrongSpan {
 }
 
 impl Span {
+  /// Upgrade a [`Span`] to a [`StrongSpan`], which carries a `SourceHandle` with it.
   pub(crate) fn upgrade(self) -> StrongSpan {
     StrongSpan {
       span: self,

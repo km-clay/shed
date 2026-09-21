@@ -372,7 +372,7 @@ impl ArrIndex {
   /// expansions and command substitutions will be evaluated.
   pub(crate) fn parse(s: &str, allow_side_effects: bool) -> ShResult<Self> {
     let input = SegStream::from_bytes(s.as_bytes());
-    let expanded = var::expand_raw_inner(&mut input.cursor(), allow_side_effects, false)?;
+    let expanded = var::expand_raw_inner(None, &mut input.cursor(), allow_side_effects, false)?;
     let s = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
     match s.as_str() {
       "@" => Ok(Self::AllSplit),
@@ -408,7 +408,7 @@ impl ArrIndex {
         )),
         VarKindTag::AssocArr => Ok(Self::Key(s)),
         VarKindTag::Arr | VarKindTag::Str | VarKindTag::Int | VarKindTag::Magic => {
-          let evaluated = arithmetic::expand_arithmetic(s.as_bytes())?;
+          let evaluated = arithmetic::expand_arithmetic(None, s.as_bytes())?;
           let n: usize = evaluated
             .to_str_lossy()
             .parse()
@@ -503,18 +503,18 @@ impl VarName {
           let l = &rest[split_pos + 1..];
           let s_input = SegStream::from_bytes(s.as_bytes());
           let l_input = SegStream::from_bytes(l.as_bytes());
-          let s_exp = var::expand_raw(&mut s_input.cursor()).map_or_else(
+          let s_exp = var::expand_raw(None, &mut s_input.cursor()).map_or_else(
             |_| s.to_string(),
             |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
           );
-          let l_exp = var::expand_raw(&mut l_input.cursor()).map_or_else(
+          let l_exp = var::expand_raw(None, &mut l_input.cursor()).map_or_else(
             |_| l.to_string(),
             |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
           );
           (s_exp.parse::<usize>().ok(), l_exp.parse::<usize>().ok())
         } else {
           let rest_input = SegStream::from_bytes(rest.as_bytes());
-          let expanded = var::expand_raw(&mut rest_input.cursor()).map_or_else(
+          let expanded = var::expand_raw(None, &mut rest_input.cursor()).map_or_else(
             |_| rest.to_string(),
             |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
           );

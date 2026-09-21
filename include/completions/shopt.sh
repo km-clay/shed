@@ -66,6 +66,7 @@ _shopt_comp() {
       max_recurse_depth
       xpg_echo
       compact_errors
+      fork_trace
       max_read_limit
       pipeline_style
       lastpipe
@@ -79,6 +80,7 @@ _shopt_comp() {
       "maximum depth of nested function calls"
       "whether or not 'echo' expands escape sequences by default"
       "collapse error stack traces to a single call-site label"
+      "print a profile of each fork() the shell executes"
       "byte cap for command substitution / pipeline output before truncation"
       "how pipeline stages run: 'fork' or 'thread'"
       "run the last pipeline stage in the current shell if it's a builtin/function"

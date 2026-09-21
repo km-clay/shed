@@ -550,6 +550,10 @@ pub(crate) struct ShOptCore {
   #[default(false)]
   pub compact_errors: bool,
 
+  /// If set, the shell will print a trace for each `fork()` call it executes.
+  #[default(false)]
+  pub fork_trace: bool,
+
   /// Output byte cap for command substitutions and pipelines; excess is truncated
   #[default(ReadLimit::default())]
   pub max_read_limit: ReadLimit,

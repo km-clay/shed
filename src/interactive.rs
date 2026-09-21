@@ -703,6 +703,11 @@ pub(crate) fn run_prompt_command(
       _ => e.print_error(),
     }
   }
+
+  if let Some(report) = Shed::report_forks() {
+    errln!("{report}");
+  }
+
   Ok(LoopAction::Continue)
 }
 

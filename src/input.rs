@@ -91,7 +91,12 @@ pub(crate) fn read_commands(args: Vec<String>) -> ShResult<()> {
     }
   });
 
-  execute::exec_nonint(commands.into(), None)
+  let res = execute::exec_nonint(commands.into(), None);
+  if let Some(report) = Shed::report_forks() {
+    errln!("{report}");
+  }
+
+  res
 }
 
 /// Read and execute the script at a given path
@@ -135,7 +140,12 @@ pub(crate) fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult
     }
   });
 
-  execute::exec_nonint(input.into(), Some(source_path.into()))
+  let res = execute::exec_nonint(input.into(), None);
+  if let Some(report) = Shed::report_forks() {
+    errln!("{report}");
+  }
+
+  res
 }
 
 #[cfg(test)]

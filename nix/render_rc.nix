@@ -66,6 +66,7 @@ lib: cfg: let
     "shopt core.max_recurse_depth=${toString cfg.shopts.core.max_recurse_depth}"
     "shopt core.xpg_echo=${boolToString cfg.shopts.core.xpg_echo}"
     "shopt core.compact_errors=${boolToString cfg.shopts.core.compact_errors}"
+    "shopt core.fork_trace=${boolToString cfg.shopts.core.fork_trace}"
     "shopt core.max_read_limit=${toString cfg.shopts.core.max_read_limit}"
     "shopt core.pipeline_style='${cfg.shopts.core.pipeline_style}'"
     "shopt core.lastpipe=${boolToString cfg.shopts.core.lastpipe}"

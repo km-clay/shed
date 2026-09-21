@@ -257,6 +257,11 @@
                   default = false;
                   description = "Collapse error stack traces to a single call-site label, hiding intermediate function-call context";
                 };
+                fork_trace = lib.mkOption {
+                  type = lib.types.bool;
+                  default = false;
+                  description = "Print a profile of each fork() the shell executes, rendered as an annotated source diagnostic grouped by call site";
+                };
                 max_read_limit = lib.mkOption {
                   type = lib.types.either lib.types.int lib.types.str;
                   default = "1gib";

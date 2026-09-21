@@ -30,11 +30,12 @@ use nix::{
 
 use super::opt::{Opt, OptSpec};
 use crate::{
-  eval, lifecycle,
+  eval::{self, execute, lex::Span},
+  lifecycle,
   procio::{self, OsSink, Sink},
   sherr, shopt, signal,
   state::{
-    Shed,
+    ForkKind, Shed,
     vars::{VarFlags, VarKind, VarStr},
   },
   util::{
@@ -408,13 +409,13 @@ impl super::Builtin for Accept {
 
     match argv_iter.next() {
       None => Self::bind_mode(listen as i32, None, var),
-      Some((arg, _)) => {
+      Some((arg, span)) => {
         if let Ok(fd) = arg.to_str_lossy().parse::<u32>()
           && fd < 10
         {
           Self::bind_mode(listen as i32, Some(fd as RawFd), var)
         } else {
-          Self::serve_mode(listen as i32, arg)
+          Self::serve_mode(span, listen as i32, arg)
         }
       }
     }
@@ -444,10 +445,10 @@ impl Accept {
     let conn = Self::accept_conn(listen)?;
     install_socket_fd(conn, target_fd, var_name, "SHED_ACCEPT")
   }
-  fn serve_mode(listen: RawFd, handler: VarStr) -> ShResult<()> {
+  fn serve_mode(span: Span, listen: RawFd, handler: VarStr) -> ShResult<()> {
     let conn = Self::accept_conn(listen)?;
 
-    match unsafe { nix::unistd::fork()? } {
+    match execute::traced_fork(span, ForkKind::Builtin)? {
       ForkResult::Parent { child: _ } => {
         nix::unistd::close(conn).ok();
         util::with_status(0)

@@ -16,6 +16,7 @@ use nix::{
   unistd::{self, Pid},
 };
 
+use crate::state::ForkKind;
 use crate::{
   builtin::ForkBehavior,
   eval::{
@@ -154,11 +155,12 @@ impl super::Dispatcher {
         }
         guard.apply_set(&out_rdrs)?;
         if is_bg {
+          let span = tree.span_for(cmds[i]);
           let name = tree
             .command_for(cmds[i])
             .map(|tk| tk.slice())
             .unwrap_or_default();
-          result = self.run_fork(name.as_bytes(), move |s| {
+          result = self.run_fork(name.as_bytes(), ForkKind::Background, span, move |s| {
             super::catch_exit(
               || s.exec_internal_segment(tree, cmds[i]).map(|_| ()),
               super::exit_with,
@@ -209,8 +211,9 @@ impl super::Dispatcher {
       }
 
       let cmd_node = &tree[*cmd];
+      let span = tree.span_for(*cmd);
 
-      spans.push(tree.span_for(*cmd));
+      spans.push(span);
 
       result = if thread_this_stage {
         let stage_sinks = Shed::sinks(|s| s.clone());
@@ -226,7 +229,7 @@ impl super::Dispatcher {
           .push_member(jobs::JobMember::Thread(handle));
         Ok(())
       } else if should_fork_segment(cmd_node) {
-        self.run_fork(&cmd_name, |s| {
+        self.run_fork(&cmd_name, ForkKind::Command, span, |s| {
           super::catch_exit(|| s.dispatch_node(tree, *cmd), super::exit_with);
         })
       } else {
@@ -337,7 +340,7 @@ impl super::Dispatcher {
     flags: NdFlags,
   ) -> ShResult<()> {
     let cmd = &tree[cmd_id];
-    let span = cmd.get_span();
+    let span = tree.span_for(cmd_id);
     let context = cmd.context;
     // it's a single command
     // just thread it through dispatch_node directly.
@@ -349,7 +352,7 @@ impl super::Dispatcher {
         .map(|tk| tree[tk].slice())
         .unwrap_or_default();
 
-      self.run_fork(name.as_bytes(), |s| {
+      self.run_fork(name.as_bytes(), ForkKind::Command, span, |s| {
         if let Err(e) = s.dispatch_node(tree, cmd_id) {
           e.print_error();
         }
@@ -364,7 +367,7 @@ impl super::Dispatcher {
       // but you never know
       jobs::dispatch_job(job, false, Shed::term(Terminal::interactive))?;
     }
-    super::check_err(flags, None, Some(tree[span]), &tree[context])?;
+    super::check_err(flags, None, Some(span), &tree[context])?;
     res
   }
 }

@@ -1,6 +1,7 @@
 use bstr::ByteSlice;
 
 use crate::{
+  eval::lex::Span,
   expand::{stream::SegStream, var},
   match_loop,
   state::vars::VarStr,
@@ -14,11 +15,11 @@ use crate::{
 /// Check if a string contains valid brace expansion patterns.
 /// Returns true if there's a valid {a,b} or {1..5} pattern at the outermost
 /// level.
-fn has_braces(s: &[u8]) -> bool {
+fn has_braces(span: Option<Span>, s: &[u8]) -> bool {
   if !s.contains(&b'{') {
     return false;
   }
-  let s = var::expand_raw(&mut SegStream::from_bytes(s).cursor())
+  let s = var::expand_raw(span, &mut SegStream::from_bytes(s).cursor())
     .map_or_else(|_| VarStr::from(s), |sg| VarStr::from(sg.into_bytes()));
   let mut bytes = SliceCursor::new(&s);
   let mut depth = 0;
@@ -62,7 +63,7 @@ fn has_braces(s: &[u8]) -> bool {
 
 /// Expand braces in a string, zsh-style: one level per call, loop until  done.
 /// Returns a Vec of expanded strings.
-pub(super) fn expand_braces_full(input: &[u8]) -> Vec<VarStr> {
+pub(super) fn expand_braces_full(span: Option<Span>, input: &[u8]) -> Vec<VarStr> {
   if !input.contains(&b'{') {
     return vec![input.into()];
   }
@@ -74,7 +75,7 @@ pub(super) fn expand_braces_full(input: &[u8]) -> Vec<VarStr> {
     let mut new_results = Vec::new();
 
     for word in results {
-      if has_braces(&word) {
+      if has_braces(span, &word) {
         let expanded = expand_one_brace(&word);
         if expanded.len() > 1 || expanded.first() != Some(&word) {
           any_expanded = true;
@@ -350,7 +351,7 @@ mod tests {
 
   // ===================== has_braces =====================
   fn has_braces(s: &str) -> bool {
-    super::has_braces(s.as_bytes())
+    super::has_braces(None, s.as_bytes())
   }
 
   #[test]
@@ -492,31 +493,34 @@ mod tests {
 
   #[test]
   fn braces_simple_list() {
-    assert_eq!(expand_braces_full(b"{a,b,c}"), vec!["a", "b", "c"]);
+    assert_eq!(expand_braces_full(None, b"{a,b,c}"), vec!["a", "b", "c"]);
   }
 
   #[test]
   fn braces_with_prefix_suffix() {
     assert_eq!(
-      expand_braces_full(b"pre{a,b}post"),
+      expand_braces_full(None, b"pre{a,b}post"),
       vec!["preapost", "prebpost"]
     );
   }
 
   #[test]
   fn braces_nested() {
-    assert_eq!(expand_braces_full(b"{a,{b,c}}"), vec!["a", "b", "c"]);
+    assert_eq!(expand_braces_full(None, b"{a,{b,c}}"), vec!["a", "b", "c"]);
   }
 
   #[test]
   fn braces_numeric_range() {
-    assert_eq!(expand_braces_full(b"{1..5}"), vec!["1", "2", "3", "4", "5"]);
+    assert_eq!(
+      expand_braces_full(None, b"{1..5}"),
+      vec!["1", "2", "3", "4", "5"]
+    );
   }
 
   #[test]
   fn braces_range_with_step() {
     assert_eq!(
-      expand_braces_full(b"{1..10..2}"),
+      expand_braces_full(None, b"{1..10..2}"),
       vec!["1", "3", "5", "7", "9"]
     );
   }
@@ -524,51 +528,57 @@ mod tests {
   #[test]
   fn braces_alpha_range() {
     assert_eq!(
-      expand_braces_full(b"{a..f}"),
+      expand_braces_full(None, b"{a..f}"),
       vec!["a", "b", "c", "d", "e", "f"]
     );
   }
 
   #[test]
   fn braces_reverse_range() {
-    assert_eq!(expand_braces_full(b"{5..1}"), vec!["5", "4", "3", "2", "1"]);
+    assert_eq!(
+      expand_braces_full(None, b"{5..1}"),
+      vec!["5", "4", "3", "2", "1"]
+    );
   }
 
   #[test]
   fn braces_reverse_alpha() {
-    assert_eq!(expand_braces_full(b"{z..v}"), vec!["z", "y", "x", "w", "v"]);
+    assert_eq!(
+      expand_braces_full(None, b"{z..v}"),
+      vec!["z", "y", "x", "w", "v"]
+    );
   }
 
   #[test]
   fn braces_zero_padded() {
     assert_eq!(
-      expand_braces_full(b"{01..05}"),
+      expand_braces_full(None, b"{01..05}"),
       vec!["01", "02", "03", "04", "05"]
     );
   }
 
   #[test]
   fn braces_no_expansion() {
-    assert_eq!(expand_braces_full(b"hello"), vec!["hello"]);
+    assert_eq!(expand_braces_full(None, b"hello"), vec!["hello"]);
   }
 
   #[test]
   fn braces_multiple_groups() {
     assert_eq!(
-      expand_braces_full(b"{a,b}{1,2}"),
+      expand_braces_full(None, b"{a,b}{1,2}"),
       vec!["a1", "a2", "b1", "b2"]
     );
   }
 
   #[test]
   fn braces_empty_element() {
-    let result = expand_braces_full(b"pre{,a}post");
+    let result = expand_braces_full(None, b"pre{,a}post");
     assert_eq!(result, vec!["prepost", "preapost"]);
   }
 
   #[test]
   fn braces_cursed() {
-    let result = expand_braces_full(b"foo{a,{1,2,3,{1..4},5},c}{5..1}bar");
+    let result = expand_braces_full(None, b"foo{a,{1,2,3,{1..4},5},c}{5..1}bar");
     assert_eq!(
       result,
       vec![

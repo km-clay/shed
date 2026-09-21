@@ -18,7 +18,13 @@ use std::{
   time::SystemTime,
 };
 
-use crate::state::jobs::Outcome;
+use crate::{
+  HashMap,
+  eval::lex::Span,
+  state::{jobs::Outcome, source::StrongSpan},
+  util::error,
+  varstr,
+};
 
 use super::{
   autocmd, builtin, errln, eval, expand, keys, match_loop, procio, readline, sherr,
@@ -55,6 +61,70 @@ pub(crate) use source::{
 
 thread_local! {
   static SHED: Shed = Shed::new();
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ForkSpan {
+  source: SourceId,
+  start: usize,
+  end: usize,
+}
+
+impl From<Span> for ForkSpan {
+  fn from(value: Span) -> Self {
+    Self {
+      source: value.source(),
+      start: value.start(),
+      end: value.end(),
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ForkKind {
+  Command,
+  Builtin,
+  Function,
+  Compound,
+  Subshell,
+  CommandSub,
+  ProcSub,
+  Background,
+}
+
+impl ForkKind {
+  fn name(self) -> &'static str {
+    match self {
+      Self::Command => "command",
+      Self::Builtin => "builtin",
+      Self::Function => "function",
+      Self::Compound => "compound",
+      Self::Subshell => "subshell",
+      Self::CommandSub => "command substitution",
+      Self::ProcSub => "process substitution",
+      Self::Background => "background job",
+    }
+  }
+  fn color(self) -> ariadne::Color {
+    use ariadne::Color;
+    match self {
+      Self::Command => Color::Red,
+      Self::Builtin => Color::Yellow,
+      Self::Function => Color::Cyan,
+      Self::Compound => Color::Blue,
+      Self::Subshell => Color::Magenta,
+      Self::CommandSub => Color::Green,
+      Self::ProcSub => Color::Fixed(208),
+      Self::Background => Color::Fixed(39),
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+struct ForkStat {
+  count: usize,
+  span: StrongSpan,
+  kind: ForkKind,
 }
 
 pub(crate) struct ForgetSpec {
@@ -223,6 +293,9 @@ pub(super) struct Shed {
   /// The call context stack, used for traceback and error reporting
   call_context: RefCell<Vec<LabelBuilder>>,
 
+  /// Fork statistics for specific spans
+  fork_profile: RefCell<HashMap<ForkSpan, ForkStat>>,
+
   /// Internal I/O sinks, used to allow builtins to chain in pipelines without forking.
   sinks: RefCell<procio::Sinks>,
 
@@ -250,7 +323,9 @@ impl Shed {
 
       socket: RefCell::new(None),
       subscribers: RefCell::new(vec![]),
+
       call_context: RefCell::new(vec![]),
+      fork_profile: RefCell::new(HashMap::default()),
 
       sinks: RefCell::new(procio::Sinks::new()),
 
@@ -423,6 +498,43 @@ impl Shed {
         subs.remove(i);
       }
     });
+  }
+
+  pub(crate) fn record_fork(span: Span, kind: ForkKind) {
+    SHED.with(|shed| {
+      if !shed.shopts.borrow().core.fork_trace {
+        return;
+      }
+
+      let fork_span = ForkSpan::from(span);
+      let mut profile = shed.fork_profile.borrow_mut();
+      let stat = profile.entry(fork_span).or_insert_with(|| ForkStat {
+        count: 0,
+        span: span.upgrade(),
+        kind,
+      });
+
+      stat.count += 1;
+    });
+  }
+
+  pub(crate) fn report_forks() -> Option<String> {
+    SHED.with(|shed| {
+      let mut profile = shed.fork_profile.borrow_mut();
+      let profile = std::mem::take(&mut *profile);
+      if profile.is_empty() {
+        return None;
+      }
+      let total: usize = profile.values().map(|s| s.count).sum();
+      let labels = profile
+        .values()
+        .map(|stat| {
+          let msg = varstr!("{} \u{d7}{}", stat.kind.name(), stat.count);
+          (stat.span.clone(), stat.kind.color(), msg)
+        })
+        .collect();
+      error::render_report(format!("{total} forks"), labels)
+    })
   }
 
   pub(crate) fn system_msg_pending() -> bool {
@@ -762,6 +874,7 @@ impl Shed {
       socket: RefCell::new(self.socket.borrow().clone()),
       subscribers: RefCell::new(self.subscribers.borrow().clone()),
       call_context: RefCell::new(self.call_context.borrow().clone()),
+      fork_profile: RefCell::new(self.fork_profile.borrow().clone()),
       sinks: RefCell::new(self.sinks.borrow().clone()),
       saved: RefCell::new(None),
       status_code: AtomicI32::new(self.status_code.load(Ordering::Relaxed)),

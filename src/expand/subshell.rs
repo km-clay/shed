@@ -8,6 +8,7 @@ use crate::{
   errln,
   eval::{
     execute,
+    lex::Span,
     parse::{ParsedSrc, node},
   },
   expand::arithmetic,
@@ -15,7 +16,7 @@ use crate::{
   procio::{self, OsSink, RedirType, Sinks},
   readline::{self, NestedSub},
   sherr, shopt,
-  state::{Shed, meta::MetaTab, terminal::Terminal, vars::VarStr},
+  state::{ForkKind, Shed, meta::MetaTab, terminal::Terminal, vars::VarStr},
   util::{error::ShResult, guards},
 };
 
@@ -24,7 +25,7 @@ use nix::sys::wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid};
 use nix::unistd::{ForkResult, fork};
 use nix::{errno::Errno, libc::STDOUT_FILENO};
 
-pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
+pub(crate) fn expand_proc_sub(span: Option<Span>, raw: &str, is_input: bool) -> ShResult<String> {
   let (rpipe, wpipe) = procio::pipes_high_no_cloexec()?;
   let rpipe_raw = rpipe.as_raw_fd();
   let wpipe_raw = wpipe.as_raw_fd();
@@ -51,7 +52,13 @@ pub(crate) fn expand_proc_sub(raw: &str, is_input: bool) -> ShResult<String> {
     _ => unreachable!(),
   };
 
-  match unsafe { fork()? } {
+  let fork_res = if let Some(span) = span {
+    execute::traced_fork(span, ForkKind::ProcSub)?
+  } else {
+    unsafe { fork()? }
+  };
+
+  match fork_res {
     ForkResult::Child => {
       lifecycle::setup_child();
 
@@ -142,9 +149,9 @@ pub(crate) fn internal_cmd_sub(raw: &[u8]) -> ShResult<VarStr> {
 }
 
 /// Get the command output of a given command input as a String
-pub(crate) fn expand_cmd_sub(raw: &[u8]) -> ShResult<VarStr> {
+pub(crate) fn expand_cmd_sub(span: Option<Span>, raw: &[u8]) -> ShResult<VarStr> {
   if raw.starts_with(b"(") && raw.ends_with(b")") {
-    return arithmetic::expand_arithmetic_wrapped(raw);
+    return arithmetic::expand_arithmetic_wrapped(span, raw);
   }
   // command subs add an xtrace layer
   let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
@@ -155,7 +162,13 @@ pub(crate) fn expand_cmd_sub(raw: &[u8]) -> ShResult<VarStr> {
 
   let (rpipe, wpipe) = procio::pipes_high()?;
 
-  match unsafe { fork()? } {
+  let fork_res = if let Some(span) = span {
+    execute::traced_fork(span, ForkKind::CommandSub)?
+  } else {
+    unsafe { fork()? }
+  };
+
+  match fork_res {
     ForkResult::Child => {
       lifecycle::setup_child();
 
@@ -219,7 +232,7 @@ mod tests {
   #[test]
   fn cmd_sub_echo() {
     let _guard = TestGuard::new();
-    let result = expand_cmd_sub(b"echo hello").unwrap();
+    let result = expand_cmd_sub(None, b"echo hello").unwrap();
     assert_eq!(result, "hello");
   }
 
@@ -299,13 +312,13 @@ mod tests {
   #[test]
   fn cmd_sub_trailing_newlines_stripped() {
     let _guard = TestGuard::new();
-    let result = expand_cmd_sub(b"printf 'hello\\n\\n'").unwrap();
+    let result = expand_cmd_sub(None, b"printf 'hello\\n\\n'").unwrap();
     assert_eq!(result, "hello");
   }
 
   #[test]
   fn cmd_sub_arithmetic() {
-    let result = expand_cmd_sub(b"(1+2)").unwrap();
+    let result = expand_cmd_sub(None, b"(1+2)").unwrap();
     assert_eq!(result, "3");
   }
 
@@ -313,14 +326,14 @@ mod tests {
   fn cmd_sub_only_final_newline_is_stripped() {
     // Internal newlines must survive; just the trailing run is removed.
     let _g = TestGuard::new();
-    let result = expand_cmd_sub(b"printf 'a\\nb\\nc\\n'").unwrap();
+    let result = expand_cmd_sub(None, b"printf 'a\\nb\\nc\\n'").unwrap();
     assert_eq!(result, "a\nb\nc");
   }
 
   #[test]
   fn cmd_sub_empty_output() {
     let _g = TestGuard::new();
-    let result = expand_cmd_sub(b"true").unwrap();
+    let result = expand_cmd_sub(None, b"true").unwrap();
     assert_eq!(result, "");
   }
 
@@ -343,7 +356,10 @@ mod tests {
 
     let tmp = tempfile::TempDir::new().unwrap();
     // `cd` is builtin-only, so this takes the in-process path (internal_cmd_sub).
-    let _ = expand_cmd_sub(format!("cd {}", canon(tmp.path()).display()).as_bytes());
+    let _ = expand_cmd_sub(
+      None,
+      format!("cd {}", canon(tmp.path()).display()).as_bytes(),
+    );
 
     let after = std::env::current_dir().unwrap();
     // Restore before asserting so a regression can't leak into sibling tests.
@@ -361,7 +377,7 @@ mod tests {
     // way out (via exit_shed) and the output must land in the captured sub — not
     // leak to the parent. Exercises trap-forces-fork + setup_child + exit_shed.
     let _g = TestGuard::new();
-    let result = expand_cmd_sub(b"trap 'echo trapped' EXIT; true").unwrap();
+    let result = expand_cmd_sub(None, b"trap 'echo trapped' EXIT; true").unwrap();
     assert_eq!(result, "trapped");
   }
 
@@ -370,14 +386,14 @@ mod tests {
     // `(exit N)` would hit the arithmetic fast-path; use a bare
     // command that genuinely exits with the desired status.
     let _g = TestGuard::new();
-    expand_cmd_sub(b"false").unwrap();
+    expand_cmd_sub(None, b"false").unwrap();
     assert_eq!(crate::state::Shed::get_status(), 1);
   }
 
   #[test]
   fn cmd_sub_zero_status_on_success() {
     let _g = TestGuard::new();
-    expand_cmd_sub(b"true").unwrap();
+    expand_cmd_sub(None, b"true").unwrap();
     assert_eq!(crate::state::Shed::get_status(), 0);
   }
 
@@ -386,7 +402,7 @@ mod tests {
     // The outer-parens-check fast-path routes "(N+M)" to the arithmetic
     // expander, not to fork+exec. Verify by giving an arithmetic input
     // that wouldn't be valid as a shell command.
-    let result = expand_cmd_sub(b"(10*5)").unwrap();
+    let result = expand_cmd_sub(None, b"(10*5)").unwrap();
     assert_eq!(result, "50");
   }
 
@@ -399,6 +415,7 @@ mod tests {
     let _g = TestGuard::new();
     // 2^18 = 262144 chars — comfortably above a typical 64KB pipe buf.
     let result = expand_cmd_sub(
+      None,
       b"s=x; for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do s=$s$s; done; echo \"$s\"",
     )
     .unwrap();
@@ -414,7 +431,7 @@ mod tests {
     // parent (so we could write through it); the format is the
     // /dev/fd/N path.
     let _g = TestGuard::new();
-    let path = expand_proc_sub("echo hello", true).unwrap();
+    let path = expand_proc_sub(None, "echo hello", true).unwrap();
     assert!(
       path.starts_with("/dev/fd/"),
       "expected /dev/fd/... path, got: {path:?}"
@@ -429,7 +446,7 @@ mod tests {
     // TestGuard teardown on macOS (master close blocks waiting for
     // the slave fds the orphan inherited).
     let _g = TestGuard::new();
-    let path = expand_proc_sub("true", false).unwrap();
+    let path = expand_proc_sub(None, "true", false).unwrap();
     assert!(
       path.starts_with("/dev/fd/"),
       "expected /dev/fd/... path, got: {path:?}"
@@ -442,7 +459,7 @@ mod tests {
     // command's stdout. This exercises the full plumbing: dup target
     // fd 1 in the child, parent reads via /dev/fd.
     let _g = TestGuard::new();
-    let path = expand_proc_sub("echo proc_sub_marker_xyz", false).unwrap();
+    let path = expand_proc_sub(None, "echo proc_sub_marker_xyz", false).unwrap();
     // Open the path and read; the child writes 'proc_sub_marker_xyz\n'.
     let content = std::fs::read_to_string(&path).unwrap();
     assert!(content.contains("proc_sub_marker_xyz"), "got: {content:?}");

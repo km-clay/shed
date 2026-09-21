@@ -160,7 +160,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
     let val = match (kind, raw_val) {
       (DeclareKind::Str, Some(v)) => assignment_value(v, span.slice().as_bytes()),
       (DeclareKind::Int, Some(v)) => {
-        let evaluated = arithmetic::expand_arithmetic(v).promote_err(span)?;
+        let evaluated = arithmetic::expand_arithmetic(Some(span), v).promote_err(span)?;
         let n = evaluated.to_str_lossy().parse::<i32>().map_err(
           |_| sherr!(ExecFail @ span, "declare -i: invalid arithmetic '{}'", v.to_str_lossy()),
         )?;

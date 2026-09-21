@@ -4,6 +4,7 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::state::ForkKind;
 use crate::{
   defer, errln,
   expand::case,
@@ -242,8 +243,7 @@ impl super::Dispatcher {
     };
 
     if fork_builtins {
-      log::trace!("Forking compound command: {name}");
-      self.run_fork(name.as_bytes(), |s| {
+      self.run_fork(name.as_bytes(), ForkKind::Compound, blame, |s| {
         super::catch_exit(|| logic(s, tree), super::exit_with);
       })?;
       Ok(())
@@ -288,7 +288,7 @@ impl super::Dispatcher {
     let body_display = body_raw.graphemes(true).take(70).collect::<String>();
     let name = format!("( {body_display} )");
 
-    self.run_fork(name.as_bytes(), |s| {
+    self.run_fork(name.as_bytes(), ForkKind::Subshell, span, |s| {
       super::catch_exit(|| s.dispatch_node(tree, *body), super::exit_with);
     })?;
 
@@ -317,7 +317,8 @@ impl super::Dispatcher {
         let CaseNode { patterns, body } = &tree[block];
 
         for pattern in patterns {
-          let pattern_exp = case::expand_case_pattern(pattern.span.slice().as_bytes())?;
+          let pattern_exp =
+            case::expand_case_pattern(Some(pattern.span), pattern.span.slice().as_bytes())?;
           if pattern_exp.is_empty() {
             if pattern_raw.is_empty() {
               let _guard = guards::shared_scope_guard();

@@ -91,6 +91,33 @@ pub(crate) fn get_context(msg: impl Into<LabelMsg>, span: Span) -> LabelBuilder 
   LabelBuilder::new(span).with_color(color).with_message(msg)
 }
 
+pub(crate) fn render_report(
+  title: impl Display,
+  labels: Vec<(StrongSpan, Color, VarStr)>,
+) -> Option<String> {
+  let anchor = labels.first()?.0.clone();
+  get_source(anchor.source())?;
+
+  let mut report = Report::build(ReportKind::Custom("profile", Color::Fixed(99)), anchor)
+    .with_config(
+      ariadne::Config::default()
+        .with_index_type(ariadne::IndexType::Byte)
+        .with_tab_width(shopt!(line.tab_width))
+        .with_color(true),
+    )
+    .with_message(title.to_string());
+
+  let mut cache = SpanCache::default();
+  for (span, color, msg) in labels {
+    cache.add(span.source());
+    report = report.with_label(Label::new(span).with_message(msg).with_color(color));
+  }
+
+  let mut buf = vec![];
+  report.finish().write(cache, &mut buf).ok()?;
+  Some(procio::bytes_to_string(buf))
+}
+
 fn group_labels(labels: Vec<LabelBuilder>) -> Vec<(Span, Label<StrongSpan>)> {
   let n = labels.len();
   if n == 0 {
@@ -286,6 +313,26 @@ impl From<LabelBuilder> for ariadne::Label<StrongSpan> {
 #[derive(Default)]
 struct SpanCache {
   entries: HashMap<SourceId, (ariadne::Source<String>, String)>,
+}
+
+impl SpanCache {
+  fn add(&mut self, id: SourceId) {
+    if self.entries.contains_key(&id) {
+      return;
+    }
+    if let Some(text) = get_source(id) {
+      let name = get_source_name(id)
+        .map(|n| n.to_str_lossy().into_owned())
+        .unwrap_or_default();
+      self.entries.insert(
+        id,
+        (
+          ariadne::Source::from(text.to_str_lossy().into_owned()),
+          name,
+        ),
+      );
+    }
+  }
 }
 
 impl ariadne::Cache<SourceId> for SpanCache {
@@ -522,28 +569,11 @@ impl ShErr {
   /// falls back to a snippet-less message.
   fn build_cache(&self) -> SpanCache {
     let mut cache = SpanCache::default();
-    let mut add = |id: SourceId| {
-      if cache.entries.contains_key(&id) {
-        return;
-      }
-      if let Some(text) = get_source(id) {
-        let name = get_source_name(id)
-          .map(|n| n.to_str_lossy().into_owned())
-          .unwrap_or_default();
-        cache.entries.insert(
-          id,
-          (
-            ariadne::Source::from(text.to_str_lossy().into_owned()),
-            name,
-          ),
-        );
-      }
-    };
     if let Some(span) = &self.src_span {
-      add(span.source());
+      cache.add(span.source());
     }
     for span in self.labels.iter().map(LabelBuilder::span) {
-      add(span.source());
+      cache.add(span.source());
     }
     cache
   }

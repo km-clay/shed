@@ -16,7 +16,7 @@ use std::{convert::Into, sync::Arc};
 use smallvec::{SmallVec, smallvec};
 
 use crate::{
-  eval::lex::{Tk, TkFlags, TkRule},
+  eval::lex::{Span, Tk, TkFlags, TkRule},
   match_loop, shopt,
   state::{
     params,
@@ -115,6 +115,7 @@ impl Tk {
 }
 
 pub(crate) struct Expander {
+  span: Option<Span>,
   flags: TkFlags,
   noglob: bool,
   nosplit: bool,
@@ -125,11 +126,13 @@ pub(crate) struct Expander {
 impl Expander {
   pub(crate) fn new(raw: &Tk) -> Self {
     let tk_raw = raw.slice();
-    Self::from_raw(&tk_raw, raw.flags)
+    let mut new = Self::from_raw(&tk_raw, raw.flags);
+    new.span = Some(raw.span);
+    new
   }
   pub(crate) fn from_raw(raw: &[u8], flags: TkFlags) -> Self {
     let raw = if raw.contains(&b'{') {
-      brace::expand_braces_full(raw).join_with(" ")
+      brace::expand_braces_full(None, raw).join_with(" ")
     } else {
       VarStr::from(raw)
     };
@@ -153,6 +156,7 @@ impl Expander {
   }
   fn from_segs(raw: stream::SegStream, flags: TkFlags) -> Self {
     Self {
+      span: None,
       raw,
       noglob: false,
       nosplit: false,
@@ -251,7 +255,7 @@ impl Expander {
   }
   pub(crate) fn expand_inner(self, mark_split: bool) -> ShResult<stream::SegStream> {
     let mut cursor = self.raw.cursor();
-    let raw = var::expand_raw_inner(&mut cursor, self.allow_side_effects, mark_split)?;
+    let raw = var::expand_raw_inner(self.span, &mut cursor, self.allow_side_effects, mark_split)?;
 
     Ok(raw)
   }
@@ -466,6 +470,7 @@ mod tests {
       markers::EXPAND_END
     );
     let exp = Expander {
+      span: None,
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: false,
@@ -483,6 +488,7 @@ mod tests {
 
     let raw = format!("{}a:b:c{}", markers::EXPAND_START, markers::EXPAND_END);
     let exp = Expander {
+      span: None,
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: false,
@@ -506,6 +512,7 @@ mod tests {
       markers::EXPAND_END
     );
     let exp = Expander {
+      span: None,
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: false,
@@ -522,6 +529,7 @@ mod tests {
 
     let raw = format!("{}hello world{}", markers::DUB_QUOTE, markers::DUB_QUOTE);
     let exp = Expander {
+      span: None,
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: false,
@@ -540,6 +548,7 @@ mod tests {
 
     let raw = format!("hello{}world", render(&escape::unescape_str(b"\\ ")));
     let exp = Expander {
+      span: None,
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: true,
@@ -556,6 +565,7 @@ mod tests {
 
     let raw = format!("hello{}world", render(&escape::unescape_str(b"\\\t")));
     let exp = Expander {
+      span: None,
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: true,
@@ -573,6 +583,7 @@ mod tests {
 
     let raw = format!("a{}b:c", render(&escape::unescape_str(b"\\:")));
     let exp = Expander {
+      span: None,
       allow_side_effects: true,
       raw: to_segstream(&raw),
       noglob: true,

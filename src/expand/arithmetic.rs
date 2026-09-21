@@ -3,6 +3,7 @@ use std::{cell::Cell, str::FromStr};
 use bstr::ByteSlice;
 
 use crate::{
+  eval::lex::Span,
   match_loop, sherr,
   state::{
     Shed,
@@ -207,7 +208,7 @@ fn resolve_var_num(name: &str) -> ShResult<i64> {
   }
   ARITH_DEPTH.with(|d| d.set(d.get() + 1));
   let _guard = DepthGuard;
-  let result = expand_arithmetic(trimmed)?;
+  let result = expand_arithmetic(None, trimmed)?;
   result
     .to_str_lossy()
     .parse::<i64>()
@@ -1236,9 +1237,9 @@ impl ArithTk {
 
 /// Evaluate an arithmetic expression string, returning the result.
 /// The caller is responsible for stripping any `((...))` or `(...)` wrappers.
-pub(crate) fn expand_arithmetic(expr: &[u8]) -> ShResult<VarStr> {
+pub(crate) fn expand_arithmetic(span: Option<Span>, expr: &[u8]) -> ShResult<VarStr> {
   let unescaped = escape::unescape_math(expr)?;
-  let expanded = var::expand_raw(&mut unescaped.cursor())?.into_bytes();
+  let expanded = var::expand_raw(span, &mut unescaped.cursor())?.into_bytes();
   let tokens = ArithTk::tokenize(&expanded)?;
   let rpn = ArithTk::to_rpn(tokens)?;
   let result = ArithTk::eval_rpn(&rpn)?;
@@ -1254,12 +1255,12 @@ pub(crate) fn eval_expanded(expr: &[u8]) -> ShResult<i64> {
 
 /// Strip `((...))` or `(...)` wrappers and evaluate. Convenience for call sites
 /// that receive the raw token including its delimiters.
-pub(crate) fn expand_arithmetic_wrapped(raw: &[u8]) -> ShResult<VarStr> {
+pub(crate) fn expand_arithmetic_wrapped(span: Option<Span>, raw: &[u8]) -> ShResult<VarStr> {
   let mut expr = raw.trim();
   while let Some(inner) = strip_enclosing_parens(expr) {
     expr = inner.trim();
   }
-  expand_arithmetic(expr)
+  expand_arithmetic(span, expr)
 }
 
 fn strip_enclosing_parens(s: &[u8]) -> Option<&[u8]> {
@@ -1280,7 +1281,7 @@ mod tests {
 
   fn arith(s: &str) -> f64 {
     // Tests pass raw expressions - no outer ((...)) wrapper stripping
-    expand_arithmetic(s.as_bytes())
+    expand_arithmetic(None, s.as_bytes())
       .unwrap()
       .to_str_lossy()
       .parse::<f64>()
@@ -1310,7 +1311,7 @@ mod tests {
     // Regression: greedy `((`/`))` stripping dropped a real paren when the body
     // began/ended with one, so these all raised a parse error.
     let w = |s: &str| {
-      expand_arithmetic_wrapped(s.as_bytes())
+      expand_arithmetic_wrapped(None, s.as_bytes())
         .unwrap()
         .to_str_lossy()
         .parse::<f64>()
@@ -1380,8 +1381,8 @@ mod tests {
   #[test]
   fn arith_radix_invalid() {
     // base out of range, and a digit out of range for the base
-    assert!(expand_arithmetic(b"1#0").is_err());
-    assert!(expand_arithmetic(b"2#5").is_err());
+    assert!(expand_arithmetic(None, b"1#0").is_err());
+    assert!(expand_arithmetic(None, b"2#5").is_err());
   }
 
   #[test]
@@ -1404,11 +1405,11 @@ mod tests {
     // Self-reference must error (via the depth cap), not overflow the stack.
     let _g = TestGuard::new();
     Shed::vars_mut(|v| v.set_var("z", VarKind::string("z".into()), VarFlags::empty())).unwrap();
-    assert!(expand_arithmetic(b"z").is_err());
+    assert!(expand_arithmetic(None, b"z").is_err());
     // Mutual reference likewise.
     Shed::vars_mut(|v| v.set_var("p", VarKind::string("q".into()), VarFlags::empty())).unwrap();
     Shed::vars_mut(|v| v.set_var("q", VarKind::string("p".into()), VarFlags::empty())).unwrap();
-    assert!(expand_arithmetic(b"p").is_err());
+    assert!(expand_arithmetic(None, b"p").is_err());
   }
 
   #[test]
@@ -1797,27 +1798,27 @@ mod tests {
   #[test]
   fn arith_division_by_zero_errors() {
     let _g = TestGuard::new();
-    assert!(expand_arithmetic(b"(5 / 0)").is_err());
+    assert!(expand_arithmetic(None, b"(5 / 0)").is_err());
   }
 
   #[test]
   fn arith_modulo_by_zero_errors() {
     let _g = TestGuard::new();
-    assert!(expand_arithmetic(b"(5 % 0)").is_err());
+    assert!(expand_arithmetic(None, b"(5 % 0)").is_err());
   }
 
   #[test]
   fn arith_div_assign_by_zero_errors() {
     let _g = TestGuard::new();
     Shed::vars_mut(|v| v.set_var("x", VarKind::Str("5".into()), VarFlags::empty())).unwrap();
-    assert!(expand_arithmetic(b"(x /= 0)").is_err());
+    assert!(expand_arithmetic(None, b"(x /= 0)").is_err());
   }
 
   #[test]
   fn arith_mod_assign_by_zero_errors() {
     let _g = TestGuard::new();
     Shed::vars_mut(|v| v.set_var("x", VarKind::Str("5".into()), VarFlags::empty())).unwrap();
-    assert!(expand_arithmetic(b"(x %= 0)").is_err());
+    assert!(expand_arithmetic(None, b"(x %= 0)").is_err());
   }
 
   // ===================== ArithOp::from_str =====================

@@ -1,7 +1,7 @@
 use bstr::ByteSlice;
 
 use crate::{
-  eval::lex::TkFlags,
+  eval::lex::{Span, TkFlags},
   expand::{
     Expander, arithmetic,
     stream::{SegStream, Unit},
@@ -168,8 +168,12 @@ pub(crate) fn parse_param_exp(body: &SegStream) -> ShResult<ParamExp> {
 /// variable/command markers and is an arithmetic expression, so it is
 /// first `$`-expanded, and then evaluated as
 /// arithmetic
-fn eval_slice_index(stream: &SegStream, allow_side_effects: bool) -> ShResult<i64> {
-  let expanded = var::expand_raw_inner(&mut stream.cursor(), allow_side_effects, false)?;
+fn eval_slice_index(
+  span: Option<Span>,
+  stream: &SegStream,
+  allow_side_effects: bool,
+) -> ShResult<i64> {
+  let expanded = var::expand_raw_inner(span, &mut stream.cursor(), allow_side_effects, false)?;
   let bytes = expanded.into_bytes();
   // An empty index (e.g. an unset variable) is 0, as in an empty arith context.
   if bytes.iter().all(u8::is_ascii_whitespace) {
@@ -190,7 +194,11 @@ fn resolve_offset(pos: i64, n: i64) -> i64 {
 
 /// Expand an array subscript (`[...]`) in a `${...}` body *before* the body is
 /// flattened for name/operator parsing, so `${arr[$i]}` resolves `$i`.
-fn expand_body_subscripts(body: &SegStream, allow_side_effects: bool) -> ShResult<SegStream> {
+fn expand_body_subscripts(
+  span: Option<Span>,
+  body: &SegStream,
+  allow_side_effects: bool,
+) -> ShResult<SegStream> {
   let mut out = SegStream::new();
   let mut cursor = body.cursor();
   let mut in_name = true;
@@ -221,6 +229,7 @@ fn expand_body_subscripts(body: &SegStream, allow_side_effects: bool) -> ShResul
           }
         }
         out.append(var::expand_raw_inner(
+          span,
           &mut inner.cursor(),
           allow_side_effects,
           false,
@@ -239,13 +248,16 @@ fn expand_body_subscripts(body: &SegStream, allow_side_effects: bool) -> ShResul
 }
 
 pub(crate) fn perform_param_expansion(
+  span: Option<Span>,
   body: &SegStream,
   allow_side_effects: bool,
 ) -> ShResult<SegStream> {
-  perform_param_expansion_inner(body, allow_side_effects).map(SegStream::reinterpret_sentinels)
+  perform_param_expansion_inner(span, body, allow_side_effects)
+    .map(SegStream::reinterpret_sentinels)
 }
 
 fn perform_param_expansion_inner(
+  span: Option<Span>,
   body: &SegStream,
   allow_side_effects: bool,
 ) -> ShResult<SegStream> {
@@ -255,7 +267,7 @@ fn perform_param_expansion_inner(
   // operator against a lossy string view; the operand (the suffix after the
   // operator) keeps its markers and is sliced back off `body` once we know the
   // split point.
-  let body = expand_body_subscripts(body, allow_side_effects)?;
+  let body = expand_body_subscripts(span, body, allow_side_effects)?;
   let body_bytes = body.to_bytes();
   let raw = String::from_utf8_lossy(&body_bytes);
   let mut var_name = util::scratch_buf();
@@ -421,18 +433,19 @@ fn perform_param_expansion_inner(
       ParamExp::DefaultUnsetOrNull(default) => {
         match Shed::vars(try_get).filter(|v| !v.is_empty()) {
           Some(val) => Ok(val.into()),
-          None => var::expand_raw_inner(&mut default.cursor(), allow_side_effects, false),
+          None => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
         }
       }
       ParamExp::DefaultUnset(default) => match Shed::vars(try_get) {
         Some(val) => Ok(val.into()),
-        None => var::expand_raw_inner(&mut default.cursor(), allow_side_effects, false),
+        None => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
       },
       ParamExp::SetDefaultUnsetOrNull(default) => {
         if let Some(val) = Shed::vars(try_get).filter(|v| !v.is_empty()) {
           Ok(val.into())
         } else {
-          let expanded = var::expand_raw_inner(&mut default.cursor(), allow_side_effects, false)?;
+          let expanded =
+            var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
           if allow_side_effects {
             let stored = VarStr::from(expanded.to_bytes());
             Shed::vars_mut(|v| {
@@ -446,7 +459,8 @@ fn perform_param_expansion_inner(
         if let Some(val) = Shed::vars(try_get) {
           Ok(val.into())
         } else {
-          let expanded = var::expand_raw_inner(&mut default.cursor(), allow_side_effects, false)?;
+          let expanded =
+            var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
           if allow_side_effects {
             let stored = VarStr::from(expanded.to_bytes());
             Shed::vars_mut(|v| {
@@ -457,11 +471,11 @@ fn perform_param_expansion_inner(
         }
       }
       ParamExp::AltSetNotNull(alt) => match Shed::vars(try_get).filter(|v| !v.is_empty()) {
-        Some(_) => var::expand_raw_inner(&mut alt.cursor(), allow_side_effects, false),
+        Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
         None => Ok(SegStream::new()),
       },
       ParamExp::AltNotNull(alt) => match Shed::vars(try_get) {
-        Some(_) => var::expand_raw_inner(&mut alt.cursor(), allow_side_effects, false),
+        Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
         None => Ok(SegStream::new()),
       },
       ParamExp::ErrUnsetOrNull(err) => {
@@ -471,7 +485,7 @@ fn perform_param_expansion_inner(
           if !allow_side_effects {
             return Ok(SegStream::new());
           }
-          let expanded = var::expand_raw_inner(&mut err.cursor(), allow_side_effects, false)?;
+          let expanded = var::expand_raw_inner(span, &mut err.cursor(), allow_side_effects, false)?;
           Err(sherr!(
             ExecFail,
             "{}",
@@ -486,7 +500,7 @@ fn perform_param_expansion_inner(
           if !allow_side_effects {
             return Ok(SegStream::new());
           }
-          let expanded = var::expand_raw_inner(&mut err.cursor(), allow_side_effects, false)?;
+          let expanded = var::expand_raw_inner(span, &mut err.cursor(), allow_side_effects, false)?;
           Err(sherr!(
             ExecFail,
             "{}",
@@ -495,7 +509,7 @@ fn perform_param_expansion_inner(
         }
       }
       ParamExp::SliceOpen(offset) => {
-        let pos = eval_slice_index(&offset, allow_side_effects)?;
+        let pos = eval_slice_index(span, &offset, allow_side_effects)?;
         let value = Shed::vars(get);
         let bytes = value.as_bytes();
         let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();
@@ -510,8 +524,8 @@ fn perform_param_expansion_inner(
           .ok_or_else(|| sherr!(ExecFail, "substring expression < 0"))
       }
       ParamExp::SliceClosed(offset, length) => {
-        let pos = eval_slice_index(&offset, allow_side_effects)?;
-        let len = eval_slice_index(&length, allow_side_effects)?;
+        let pos = eval_slice_index(span, &offset, allow_side_effects)?;
+        let len = eval_slice_index(span, &length, allow_side_effects)?;
         let value = Shed::vars(get);
         let bytes = value.as_bytes();
         let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();

@@ -3,7 +3,7 @@ use std::os::unix::ffi::OsStrExt;
 use nix::unistd::{Uid, User};
 
 use crate::{
-  eval::lex,
+  eval::lex::{self, Span},
   match_loop, sherr, shopt,
   state::{Shed, vars::VarStr},
   try_var,
@@ -18,6 +18,7 @@ use super::{
 };
 
 pub(crate) fn expand_raw_inner(
+  span: Option<Span>,
   chars: &mut SegCursor,
   allow_side_effects: bool,
   mark_split: bool,
@@ -86,6 +87,7 @@ pub(crate) fn expand_raw_inner(
       // an *output* proc sub `>(...)`; `<(...)` (In) redirects the child's
       // stdout into the pipe and is the `false` case.
       let fd_path = subshell::expand_proc_sub(
+        span,
         &String::from_utf8_lossy(&inner),
         matches!(kind, ProcSubKind::Out),
       )?;
@@ -100,7 +102,7 @@ pub(crate) fn expand_raw_inner(
       result.push_marker(Marker::Quote(q));
     }
     Unit::Mark(Marker::VarSub) => {
-      let expanded = expand_var(chars, allow_side_effects)?;
+      let expanded = expand_var(span, chars, allow_side_effects)?;
 
       if mark_split && qt_state.outside() {
         result.push_marker(Marker::ExpandStart);
@@ -117,11 +119,15 @@ pub(crate) fn expand_raw_inner(
   Ok(result)
 }
 
-pub(crate) fn expand_raw(stream: &mut SegCursor) -> ShResult<SegStream> {
-  expand_raw_inner(stream, true, false)
+pub(crate) fn expand_raw(span: Option<Span>, stream: &mut SegCursor) -> ShResult<SegStream> {
+  expand_raw_inner(span, stream, true, false)
 }
 
-pub(crate) fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> ShResult<SegStream> {
+pub(crate) fn expand_var(
+  span: Option<Span>,
+  stream: &mut SegCursor,
+  allow_side_effects: bool,
+) -> ShResult<SegStream> {
   let mut var_name = SegStream::new();
   let mut brace_depth: i32 = 0;
   let mut inner_brace_depth: i32 = 0;
@@ -150,7 +156,7 @@ pub(crate) fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> Sh
         return Ok(out);
       }
       if allow_side_effects {
-        let expanded = subshell::expand_cmd_sub(&subsh_body)?;
+        let expanded = subshell::expand_cmd_sub(span, &subsh_body)?;
         return Ok(SegStream::from_bytes(expanded.as_bytes()));
       }
       return Ok(SegStream::from_bytes(&subsh_body));
@@ -162,7 +168,7 @@ pub(crate) fn expand_var(stream: &mut SegCursor, allow_side_effects: bool) -> Sh
     }
     Unit::Byte(b'}') if brace_depth > 0 && inner_brace_depth == 0 && !in_subsh => {
       stream.bump();
-      return param::perform_param_expansion(&var_name, allow_side_effects);
+      return param::perform_param_expansion(span, &var_name, allow_side_effects);
     }
     Unit::Mark(Marker::Escape) if brace_depth > 0 => {
       stream.bump();
@@ -286,7 +292,7 @@ mod tests {
   // these assertions (markers as sentinel chars). Plain-text results compare
   // unchanged; the tilde tests check the quote-marker wrapping.
   fn expand_raw(cur: &mut crate::expand::stream::SegCursor) -> super::ShResult<String> {
-    super::expand_raw(cur).map(|seg| {
+    super::expand_raw(None, cur).map(|seg| {
       use crate::expand::stream::StreamSeg;
       let mut out = String::new();
       for s in &seg.stream() {

@@ -72,7 +72,7 @@ impl super::Dispatcher {
         VarKind::arr_from_tk(&tree[*val])?
       } else if is_integer {
         let raw = tree[*val].expand_no_split()?;
-        let n = arithmetic::expand_arithmetic(raw.as_bytes())
+        let n = arithmetic::expand_arithmetic(Some(span), raw.as_bytes())
           .ok()
           .and_then(|s| s.to_str_lossy().parse::<i32>().ok())
           .unwrap_or(0);

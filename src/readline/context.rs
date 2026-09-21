@@ -799,7 +799,7 @@ fn check_path_exists(path: &str) -> bool {
   }
 
   let unescaped = escape::unescape_str(path.as_bytes());
-  let Ok(expanded) = var::expand_raw_inner(&mut unescaped.cursor(), false, false) else {
+  let Ok(expanded) = var::expand_raw_inner(None, &mut unescaped.cursor(), false, false) else {
     return false;
   };
   let stripped = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();

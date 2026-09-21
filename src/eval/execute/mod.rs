@@ -13,7 +13,8 @@ use super::{
 };
 use crate::{
   builtin::{self, BUILTIN_NAMES},
-  state,
+  errln,
+  state::{self, ForkKind},
 };
 use crate::{
   eval::parse::{NdFlags, NdRule, ParsedSrc},
@@ -35,7 +36,12 @@ use crate::{
 };
 
 use bstr::ByteSlice;
-use std::{ffi::CString, os::fd::RawFd, rc::Rc};
+use std::{
+  cell::{Cell, RefCell},
+  ffi::CString,
+  os::fd::RawFd,
+  rc::Rc,
+};
 
 use nix::unistd::{self, ForkResult, Pid};
 
@@ -57,8 +63,14 @@ pub(crate) use control::dispatch_deferred_cmd;
 thread_local! {
   // Last expanded word of the most recently expanded argv, the raw material for
   // `$_`. Written by `prepare_argv_with`, consumed by `commit_underscore`.
-  static LAST_ARG: std::cell::RefCell<Option<VarStr>> = const { std::cell::RefCell::new(None) };
-  static SUPPRESS_UNDERSCORE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+  static LAST_ARG: RefCell<Option<VarStr>> = const { RefCell::new(None) };
+  static SUPPRESS_UNDERSCORE: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(crate) fn traced_fork(span: Span, kind: ForkKind) -> ShResult<ForkResult> {
+  Shed::record_fork(span, kind);
+
+  Ok(unsafe { nix::unistd::fork()? })
 }
 
 pub(crate) fn prepare_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
@@ -252,7 +264,13 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
     return dispatcher.dispatch_node(&ast, cmd_id).try_blame(blame);
   }
 
-  dispatcher.begin_dispatch(&ast)
+  let res = dispatcher.begin_dispatch(&ast);
+
+  if let Some(report) = Shed::report_forks() {
+    errln!("{report}");
+  }
+
+  res
 }
 
 /// Execute interactively.
@@ -443,22 +461,24 @@ impl Dispatcher {
     let NdRule::Arithmetic { body } = &tree[arith].class else {
       unreachable!()
     };
-    let result = arithmetic::expand_arithmetic_wrapped(tree[*body].slice().as_bytes())?;
+    let span = tree.span_for(arith);
+    let body = tree[*body].slice();
+    let result = arithmetic::expand_arithmetic_wrapped(Some(span), body.as_bytes())?;
     let val: f64 = result.to_str_lossy().parse().unwrap_or(0.0);
     Shed::set_status_from_bool(val != 0.0);
     Ok(())
   }
   fn exec_builtin(&mut self, tree: &Ast, cmd_id: NodeId, cmd_name: &[u8]) -> ShResult<()> {
     let fork_builtins = Shed::meta_mut(MetaTab::take_fork);
+    let span = tree.span_for(cmd_id);
 
     let Some(builtin) = builtin::lookup_builtin(cmd_name) else {
-      sherr!(NotFound @ tree.span_for(cmd_id), "builtin not found: {}", cmd_name.to_str_lossy())
-        .print_error();
+      sherr!(NotFound @ span, "builtin not found: {}", cmd_name.to_str_lossy()).print_error();
       return util::with_status(127);
     };
 
     if fork_builtins {
-      self.run_fork(cmd_name, |s| {
+      self.run_fork(cmd_name, ForkKind::Builtin, span, |s| {
         catch_exit(|| builtin.setup_builtin(tree, cmd_id, s), exit_with);
       })?;
       Ok(())
@@ -478,10 +498,16 @@ impl Dispatcher {
       Ok(())
     }
   }
-  fn run_fork(&mut self, name: &[u8], f: impl FnOnce(&mut Self)) -> ShResult<()> {
+  fn run_fork(
+    &mut self,
+    name: &[u8],
+    kind: ForkKind,
+    span: Span,
+    f: impl FnOnce(&mut Self),
+  ) -> ShResult<()> {
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
     let interactive = Shed::term(Terminal::interactive);
-    match unsafe { unistd::fork()? } {
+    match traced_fork(span, kind)? {
       ForkResult::Child => {
         lifecycle::setup_child();
 

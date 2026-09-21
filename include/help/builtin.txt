@@ -2178,6 +2178,7 @@ SHOPT                                            *builtin-shopt* *shopt*
     `bell_enabled`          allow the terminal bell
     `compact_errors`        collapse error stack traces to a single label
     `dotglob`               include dotfiles in glob patterns
+    `fork_trace`            print a profile of each `fork()` the shell executes
     `interactive_comments`  allow `#` comments in interactive input
     `max_read_limit`        byte cap for |command-sub|(script-command-sub) & |pipeline|(script-pipelines) output
     `max_recurse_depth`     max recursive function call depth

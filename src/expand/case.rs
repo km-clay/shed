@@ -4,14 +4,14 @@ use super::{
   var,
 };
 
-use crate::{state::vars::VarStr, util::error::ShResult};
+use crate::{eval::lex::Span, state::vars::VarStr, util::error::ShResult};
 
 /// Expand a case pattern: performs variable/command expansion while preserving
 /// glob metacharacters that were inside quotes as literals (by backslash-escaping them).
 /// Unquoted glob chars (*, ?, [) pass through for `glob_to_regex` to interpret.
-pub(crate) fn expand_case_pattern(raw: &[u8]) -> ShResult<VarStr> {
+pub(crate) fn expand_case_pattern(span: Option<Span>, raw: &[u8]) -> ShResult<VarStr> {
   let unescaped = escape::unescape_str(raw);
-  let expanded = var::expand_raw(&mut unescaped.cursor())?;
+  let expanded = var::expand_raw(span, &mut unescaped.cursor())?;
 
   let mut result: Vec<u8> = Vec::new();
   let mut in_quote = false;

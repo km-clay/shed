@@ -222,7 +222,7 @@ pub(crate) fn expand_prompt(raw: &[u8]) -> ShResult<String> {
 
   if shopt!(prompt.substitute) {
     let marked = escape::unescape_prompt(&result);
-    let expanded = var::expand_raw_inner(&mut marked.cursor(), true, false)?;
+    let expanded = var::expand_raw_inner(None, &mut marked.cursor(), true, false)?;
     result = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
   }
 
@@ -313,7 +313,7 @@ fn func_expand(input: &str, out: &mut String) -> ShResult<()> {
   shopt_mut!(set.errexit = false);
   shopt_mut!(set.noexec = false);
   shopt_mut!(set.xtrace = false);
-  let res = subshell::expand_cmd_sub(input.as_bytes());
+  let res = subshell::expand_cmd_sub(None, input.as_bytes());
   shopt_mut!(set.errexit = errexit);
   shopt_mut!(set.noexec = noexec);
   shopt_mut!(set.xtrace = xtrace);

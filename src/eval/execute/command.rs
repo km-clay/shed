@@ -21,6 +21,7 @@ use nix::{
   unistd::{self, ForkResult, Pid},
 };
 
+use crate::state::ForkKind;
 use crate::{
   HashSet, autocmd,
   builtin::{self, Builtin},
@@ -85,11 +86,12 @@ impl super::Dispatcher {
 
     if let AssignBehavior::Set = assign_behavior {
       if Shed::meta_mut(MetaTab::take_fork) {
+        let span = tree.span_for(cmd_id);
         let child = tree.break_off(cmd_id);
         let Some(root) = child.get_root() else {
           unreachable!()
         };
-        return self.run_fork(b"", move |s| {
+        return self.run_fork(b"", ForkKind::Command, span, move |s| {
           super::catch_exit(|| s.exec_cmd(&child, root), super::exit_with);
         });
       }
@@ -305,7 +307,8 @@ impl super::Dispatcher {
       child_logic(existing_pgid);
     }
 
-    match unsafe { unistd::fork()? } {
+    let cmd_span = expanded.first().map(|(_, s)| *s).unwrap_or_default();
+    match super::traced_fork(cmd_span, ForkKind::Command)? {
       ForkResult::Child => child_logic(existing_pgid),
       ForkResult::Parent { child } => {
         let timer = self.take_timer();

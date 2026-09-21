@@ -535,7 +535,7 @@ impl Builtin for Let {
     }
     let mut last = 0i64;
     for (expr, _) in args.arguments() {
-      let result = arithmetic::expand_arithmetic(expr.as_bytes())?;
+      let result = arithmetic::expand_arithmetic(Some(args.cmd_span()), expr.as_bytes())?;
       last = result.to_str_lossy().trim().parse::<i64>().unwrap_or(0);
     }
     util::with_status(i32::from(last == 0))
