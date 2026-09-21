@@ -83,8 +83,8 @@ pub(super) fn get_ex_context_tokens(input: &str) -> Vec<CtxTk> {
 
 /// A command, backtick, or process substitution found nested inside a word.
 pub(crate) enum NestedSub {
-  Cmd(VarStr),
-  Proc,
+  Cmd(Span, VarStr),
+  Proc(Span),
 }
 
 /// Collect every command, backtick, or process
@@ -93,7 +93,7 @@ pub(crate) fn nested_subs(input: &[u8]) -> Vec<NestedSub> {
   fn collect(tk: &CtxTk, out: &mut Vec<NestedSub>) {
     match tk.class() {
       CtxTkRule::ProcSubIn | CtxTkRule::ProcSubOut => {
-        out.push(NestedSub::Proc);
+        out.push(NestedSub::Proc(tk.span));
         return;
       }
       CtxTkRule::CmdSub => {
@@ -102,7 +102,7 @@ pub(crate) fn nested_subs(input: &[u8]) -> Vec<NestedSub> {
           .strip_prefix(b"$(".as_slice())
           .and_then(|s| s.strip_suffix(b")".as_slice()))
           .unwrap_or(s);
-        out.push(NestedSub::Cmd(body.into()));
+        out.push(NestedSub::Cmd(tk.span, body.into()));
         return;
       }
       CtxTkRule::BacktickSub => {
@@ -111,7 +111,7 @@ pub(crate) fn nested_subs(input: &[u8]) -> Vec<NestedSub> {
           .strip_prefix(b"`".as_slice())
           .and_then(|s| s.strip_suffix(b"`".as_slice()))
           .unwrap_or(s);
-        out.push(NestedSub::Cmd(body.into()));
+        out.push(NestedSub::Cmd(tk.span, body.into()));
         return;
       }
       _ => {}

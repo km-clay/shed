@@ -21,7 +21,7 @@ thread_local! {
   static LAST_SOURCE: RefCell<Option<(SourceId, Arc<Source>)>> = const { RefCell::new(None) };
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct SourceId(i32);
 
 impl SourceId {

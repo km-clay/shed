@@ -75,7 +75,6 @@ impl super::Dispatcher {
     let func = &tree[func_id];
     if Shed::meta_mut(MetaTab::take_fork) {
       let func_body = tree.break_off(func_id);
-      let func_span = tree.span_for(func_id);
 
       let Some(root) = func_body.get_root() else {
         return Err(sherr!(
@@ -89,7 +88,7 @@ impl super::Dispatcher {
         .map(|tk| tk.slice())
         .unwrap_or_default();
 
-      return self.run_fork(name.as_bytes(), ForkKind::Function, func_span, |s| {
+      return self.run_fork(name.as_bytes(), ForkKind::Function, &func_body, root, |s| {
         super::catch_exit(|| s.exec_func(&func_body, root), super::exit_with);
       });
     }

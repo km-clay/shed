@@ -20,7 +20,14 @@ use std::{
 
 use crate::{
   HashMap,
-  eval::lex::Span,
+  builtin::ForkBehavior,
+  eval::{
+    lex::Span,
+    parse::{
+      ast::{Ast, NodeId},
+      node,
+    },
+  },
   state::{jobs::Outcome, source::StrongSpan},
   util::error,
   varstr,
@@ -125,6 +132,93 @@ struct ForkStat {
   count: usize,
   span: StrongSpan,
   kind: ForkKind,
+  blames: Vec<ForkBlame>,
+}
+
+impl ForkStat {
+  fn new(span: StrongSpan, kind: ForkKind) -> Self {
+    Self {
+      count: 0,
+      span,
+      kind,
+      blames: vec![],
+    }
+  }
+  fn count(&self) -> usize {
+    self.count * self.blames().len().max(1)
+  }
+  fn set_blames(&mut self, blames: Vec<ForkBlame>) {
+    self.blames = blames;
+  }
+  pub(crate) fn blames(&self) -> &[ForkBlame] {
+    &self.blames
+  }
+
+  fn into_render_data(self) -> Vec<LabelBuilder> {
+    let mut data = vec![];
+    let msg = varstr!("{} \u{d7}{}", self.kind.name(), self.count());
+    let label = LabelBuilder::new(self.span.trimmed())
+      .with_color(self.kind.color())
+      .with_message(msg);
+    data.push(label);
+
+    for blame in self.blames {
+      let ForkBlame {
+        span,
+        behavior: _,
+        kind,
+      } = blame;
+      let msg = varstr!("forked here, {}", kind.name());
+      let label = LabelBuilder::new(span.trimmed())
+        .with_color(kind.color())
+        .with_message(msg);
+
+      data.push(label);
+    }
+
+    data
+  }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ForkBlame {
+  span: StrongSpan,
+  behavior: ForkBehavior,
+  kind: ForkKind,
+}
+
+impl ForkBlame {
+  pub(crate) fn new(span: Span, behavior: ForkBehavior, kind: ForkKind) -> Self {
+    Self {
+      span: span.upgrade(),
+      behavior,
+      kind,
+    }
+  }
+  pub(crate) fn external(span: Span) -> Self {
+    Self::new(span, ForkBehavior::Always, ForkKind::Command)
+  }
+  pub(crate) fn command(span: Span, behavior: ForkBehavior) -> Self {
+    Self::new(span, behavior, ForkKind::Command)
+  }
+  pub(crate) fn builtin(span: Span, behavior: ForkBehavior) -> Self {
+    Self::new(span, behavior, ForkKind::Builtin)
+  }
+  pub(crate) fn function(span: Span, behavior: ForkBehavior) -> Self {
+    Self::new(span, behavior, ForkKind::Function)
+  }
+  pub(crate) fn subshell(span: Span, behavior: ForkBehavior) -> Self {
+    Self::new(span, behavior, ForkKind::Subshell)
+  }
+  pub(crate) fn command_sub(span: Span, behavior: ForkBehavior) -> Self {
+    Self::new(span, behavior, ForkKind::CommandSub)
+  }
+  pub(crate) fn proc_sub(span: Span, behavior: ForkBehavior) -> Self {
+    Self::new(span, behavior, ForkKind::ProcSub)
+  }
+  pub(crate) fn behavior(&self) -> ForkBehavior {
+    self.behavior
+  }
 }
 
 pub(crate) struct ForgetSpec {
@@ -508,13 +602,45 @@ impl Shed {
 
       let fork_span = ForkSpan::from(span);
       let mut profile = shed.fork_profile.borrow_mut();
-      let stat = profile.entry(fork_span).or_insert_with(|| ForkStat {
-        count: 0,
-        span: span.upgrade(),
-        kind,
-      });
+      let stat = profile
+        .entry(fork_span)
+        .or_insert_with(|| ForkStat::new(span.upgrade(), kind));
 
       stat.count += 1;
+    });
+  }
+
+  pub(crate) fn blame_forks(tree: &Ast, node_id: NodeId) {
+    let span = tree.span_for(node_id);
+    let fork_span = ForkSpan::from(span);
+
+    // return early if fork_trace is disabled, or this
+    // node has already been blamed.
+    let needs_blame = SHED.with(|shed| {
+      if !shed.shopts.borrow().core.fork_trace {
+        return false;
+      }
+
+      let profile = shed.fork_profile.borrow();
+      let Some(stat) = profile.get(&fork_span) else {
+        return false;
+      };
+      stat.blames().is_empty()
+    });
+    if !needs_blame {
+      return;
+    }
+
+    let blames = node::node_fork_report(tree, node_id)
+      .into_iter()
+      .filter(|b| matches!(b.behavior(), ForkBehavior::Always))
+      .collect();
+
+    SHED.with(|shed| {
+      let mut profile = shed.fork_profile.borrow_mut();
+      if let Some(stat) = profile.get_mut(&fork_span) {
+        stat.set_blames(blames);
+      }
     });
   }
 
@@ -525,15 +651,29 @@ impl Shed {
       if profile.is_empty() {
         return None;
       }
-      let total: usize = profile.values().map(|s| s.count).sum();
-      let labels = profile
-        .values()
-        .map(|stat| {
-          let msg = varstr!("{} \u{d7}{}", stat.kind.name(), stat.count);
-          (stat.span.clone(), stat.kind.color(), msg)
-        })
-        .collect();
-      error::render_report(format!("{total} forks"), labels)
+
+      // One fork report per source. storing (num_forks, labels)
+      let mut by_source: HashMap<SourceId, (usize, Vec<LabelBuilder>)> = HashMap::default();
+      for stat in profile.into_values() {
+        let src = stat.span.source();
+        let count = stat.count();
+        let (total, labels) = by_source.entry(src).or_insert_with(|| (0, vec![]));
+        *total += count;
+        labels.extend(stat.into_render_data());
+      }
+
+      let mut sources: Vec<(SourceId, (usize, Vec<LabelBuilder>))> =
+        by_source.into_iter().collect();
+      sources.sort_by_key(|(src, _)| *src);
+
+      let mut out = String::new();
+      for (_src, (count, labels)) in sources {
+        let title = varstr!("{count} forks");
+        if let Some(report) = error::render_report(title, labels) {
+          out.push_str(&report);
+        }
+      }
+      (!out.is_empty()).then_some(out)
     })
   }
 

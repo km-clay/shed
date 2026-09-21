@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use bstr::ByteSlice;
 
 use crate::{
+  defer,
   expand::{escape, subshell, var},
   match_loop, shopt, shopt_mut,
   state::{Shed, jobs::Outcome, paths, vars::VarStr},
@@ -199,6 +200,23 @@ fn tokenize_prompt(raw: &[u8]) -> Vec<PromptTk> {
 }
 
 pub(crate) fn expand_prompt(raw: &[u8]) -> ShResult<String> {
+  let errexit = shopt!(set.errexit);
+  let noexec = shopt!(set.noexec);
+  let xtrace = shopt!(set.xtrace);
+  let fork_trace = shopt!(core.fork_trace);
+
+  defer! {
+    shopt_mut!(set.errexit = errexit);
+    shopt_mut!(set.noexec = noexec);
+    shopt_mut!(set.xtrace = xtrace);
+    shopt_mut!(core.fork_trace = fork_trace);
+  };
+
+  shopt_mut!(set.errexit = false);
+  shopt_mut!(set.noexec = false);
+  shopt_mut!(set.xtrace = false);
+  shopt_mut!(core.fork_trace = false);
+
   let mut tokens = tokenize_prompt(raw).into_iter();
   let mut result = String::new();
 
@@ -306,19 +324,9 @@ fn ascii_oct(n: i32, out: &mut String) {
 }
 
 fn func_expand(input: &str, out: &mut String) -> ShResult<()> {
-  let errexit = shopt!(set.errexit);
-  let noexec = shopt!(set.noexec);
-  let xtrace = shopt!(set.xtrace);
+  let res = subshell::expand_cmd_sub(None, input.as_bytes())?;
 
-  shopt_mut!(set.errexit = false);
-  shopt_mut!(set.noexec = false);
-  shopt_mut!(set.xtrace = false);
-  let res = subshell::expand_cmd_sub(None, input.as_bytes());
-  shopt_mut!(set.errexit = errexit);
-  shopt_mut!(set.noexec = noexec);
-  shopt_mut!(set.xtrace = xtrace);
-
-  out.push_str(&res?.to_str_lossy());
+  out.push_str(&res.to_str_lossy());
   Ok(())
 }
 

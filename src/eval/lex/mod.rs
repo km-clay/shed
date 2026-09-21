@@ -149,6 +149,22 @@ impl Span {
   pub(crate) fn range(&self) -> Range<usize> {
     self.start..self.end
   }
+  /// Returns a new span that trims whitespace on the edges of this span
+  pub(crate) fn trimmed(&self) -> Span {
+    let Some(text) = self.try_slice() else {
+      return *self;
+    };
+    let bytes = text.as_bytes();
+    let leading = bytes.iter().take_while(|b| b.is_ascii_whitespace()).count();
+    let trailing = bytes
+      .iter()
+      .rev()
+      .take_while(|b| b.is_ascii_whitespace())
+      .count();
+    let start = self.start + leading;
+    let end = self.end.saturating_sub(trailing).max(start);
+    Span::new(start, end, self.source)
+  }
   pub(crate) fn merge_inplace(&mut self, other: Span) {
     if self.source != other.source {
       return;

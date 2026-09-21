@@ -478,7 +478,7 @@ impl Dispatcher {
     };
 
     if fork_builtins {
-      self.run_fork(cmd_name, ForkKind::Builtin, span, |s| {
+      self.run_fork(cmd_name, ForkKind::Builtin, tree, cmd_id, |s| {
         catch_exit(|| builtin.setup_builtin(tree, cmd_id, s), exit_with);
       })?;
       Ok(())
@@ -502,19 +502,21 @@ impl Dispatcher {
     &mut self,
     name: &[u8],
     kind: ForkKind,
-    span: Span,
+    tree: &Ast,
+    node: NodeId,
     f: impl FnOnce(&mut Self),
   ) -> ShResult<()> {
+    let span = tree.span_for(node);
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
     let interactive = Shed::term(Terminal::interactive);
-    match traced_fork(span, kind)? {
+
+    let res = traced_fork(span, kind);
+
+    match res? {
       ForkResult::Child => {
         lifecycle::setup_child();
 
         // only give a new job its own group under interactive job control.
-        // in a script, the child stays in the shell's process group
-        // otherwise a backgrounded subshell claims the tty and stops the
-        // entire script with SIGTTOU
         if let Some(pgid) = existing_pgid {
           let _ = unistd::setpgid(Pid::from_raw(0), pgid);
         } else if interactive {
@@ -522,10 +524,9 @@ impl Dispatcher {
         }
         signal::reset_signals(self.fg_job);
 
-        // Materialize the virtual fd table onto this child's real fds so an
-        // exec'd command sees the redirs the parent set up (otherwise it runs
-        // with stale inherited fds — e.g. reads the terminal instead of a pipe).
-        // Internal high fds are CLOEXEC, so exec closes the leftovers.
+        // commit fd table redirections
+        // fd table redirs are virtual and lazy,
+        // this is where they are actually evaluated
         if let Err(e) = Shed::sinks(|s| s.commit_redirects()) {
           ShErr::from(e).print_error();
           lifecycle::exit_shed(true, 1);
@@ -541,6 +542,10 @@ impl Dispatcher {
         lifecycle::exit_shed(true, Shed::get_status());
       }
       ForkResult::Parent { child } => {
+        if kind == ForkKind::Compound {
+          Shed::blame_forks(tree, node);
+        }
+
         let timer = self.take_timer();
         let job = self.job_stack.curr_job_mut().unwrap();
         let child_pgid = if let Some(pgid) = existing_pgid {

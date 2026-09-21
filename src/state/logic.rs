@@ -58,8 +58,7 @@ impl super::vars::ValueBytes for ShAlias {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IsInternal {
-  Yes(ForkBehavior),
-  No,
+  Resolved(ForkBehavior),
   Checking,
 }
 
@@ -126,9 +125,9 @@ impl ShFunc {
     match self {
       Self::Defined { is_internal: i, .. } => {
         match i {
-          Some(IsInternal::No | IsInternal::Checking) | None => *i = Some(is_internal),
-          Some(IsInternal::Yes(i)) => {
-            if let IsInternal::Yes(fork_behavior) = is_internal
+          Some(IsInternal::Checking) | None => *i = Some(is_internal),
+          Some(IsInternal::Resolved(i)) => {
+            if let IsInternal::Resolved(fork_behavior) = is_internal
               && (*i) < fork_behavior
             {
               *i = fork_behavior;

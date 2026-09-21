@@ -18,7 +18,6 @@ use nix::{
 
 use crate::state::ForkKind;
 use crate::{
-  builtin::ForkBehavior,
   eval::{
     lex::Span,
     parse::{NdFlags, Node, node},
@@ -92,12 +91,8 @@ impl super::Dispatcher {
     let fork_only = matches!(pipe_style, PipeStyle::Fork);
 
     // If any stage runs internally, the pgid of the job is set to the shell's
-    let has_in_process = self.fg_job
-      && !fork_only
-      && num_cmds > 1
-      && cmds
-        .iter()
-        .any(|c| node::node_fork_behavior(tree, *c) == Some(ForkBehavior::Never));
+    let has_in_process =
+      self.fg_job && !fork_only && num_cmds > 1 && cmds.iter().any(|c| !node::node_forks(tree, *c));
     if has_in_process {
       self
         .job_stack
@@ -118,6 +113,7 @@ impl super::Dispatcher {
     while let Some((i, cmd)) = cmd_iter.next() {
       let mut guard = Sinks::redir_scope();
 
+      let cmd_forks = node::node_forks(tree, *cmd);
       let cmd_name = tree
         .command_for(*cmd)
         .map(|s| s.slice())
@@ -126,26 +122,19 @@ impl super::Dispatcher {
       // now we decide if we are threading this pipeline stage or not
       // builtins get a thread instead of a fork
       let cmd_node = &tree[*cmd];
-      let thread_this_stage = num_cmds > 1
-        && !is_bg
-        && !fork_only
-        && !should_fork_segment(cmd_node)
-        && node::node_fork_behavior(tree, *cmd) == Some(ForkBehavior::Never);
+      let thread_this_stage =
+        num_cmds > 1 && !is_bg && !fork_only && !should_fork_segment(cmd_node) && !cmd_forks;
 
       // if the next stage is also threaded, we can use our threaded in-process pipes
       // instead of using a syscall to create os pipes
       let use_thread_pipes = if let Some((_, n_cmd)) = cmd_iter.peek() {
         let next_node = &tree[**n_cmd];
-        thread_this_stage
-          && !should_fork_segment(next_node)
-          && node::node_fork_behavior(tree, **n_cmd) == Some(ForkBehavior::Never)
+        thread_this_stage && !should_fork_segment(next_node) && !node::node_forks(tree, **n_cmd)
       } else {
         false
       };
 
-      let run_in_shell = lastpipe
-        && i == num_cmds - 1
-        && node::node_fork_behavior(tree, *cmd) == Some(ForkBehavior::Never);
+      let run_in_shell = lastpipe && i == num_cmds - 1 && !cmd_forks;
       let will_fork = (num_cmds > 1 || is_bg) && !thread_this_stage && !run_in_shell;
       let _fork = Shed::meta_mut(|m| m.enter_fork(will_fork));
 
@@ -155,17 +144,22 @@ impl super::Dispatcher {
         }
         guard.apply_set(&out_rdrs)?;
         if is_bg {
-          let span = tree.span_for(cmds[i]);
           let name = tree
             .command_for(cmds[i])
             .map(|tk| tk.slice())
             .unwrap_or_default();
-          result = self.run_fork(name.as_bytes(), ForkKind::Background, span, move |s| {
-            super::catch_exit(
-              || s.exec_internal_segment(tree, cmds[i]).map(|_| ()),
-              super::exit_with,
-            );
-          });
+          result = self.run_fork(
+            name.as_bytes(),
+            ForkKind::Background,
+            tree,
+            cmds[i],
+            move |s| {
+              super::catch_exit(
+                || s.exec_internal_segment(tree, cmds[i]).map(|_| ()),
+                super::exit_with,
+              );
+            },
+          );
           break;
         }
         if Shed::term(Terminal::interactive) {
@@ -229,7 +223,7 @@ impl super::Dispatcher {
           .push_member(jobs::JobMember::Thread(handle));
         Ok(())
       } else if should_fork_segment(cmd_node) {
-        self.run_fork(&cmd_name, ForkKind::Command, span, |s| {
+        self.run_fork(&cmd_name, ForkKind::Command, tree, *cmd, |s| {
           super::catch_exit(|| s.dispatch_node(tree, *cmd), super::exit_with);
         })
       } else {
@@ -352,7 +346,7 @@ impl super::Dispatcher {
         .map(|tk| tree[tk].slice())
         .unwrap_or_default();
 
-      self.run_fork(name.as_bytes(), ForkKind::Command, span, |s| {
+      self.run_fork(name.as_bytes(), ForkKind::Command, tree, cmd_id, |s| {
         if let Err(e) = s.dispatch_node(tree, cmd_id) {
           e.print_error();
         }

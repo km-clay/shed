@@ -91,11 +91,21 @@ pub(crate) fn get_context(msg: impl Into<LabelMsg>, span: Span) -> LabelBuilder 
   LabelBuilder::new(span).with_color(color).with_message(msg)
 }
 
-pub(crate) fn render_report(
-  title: impl Display,
-  labels: Vec<(StrongSpan, Color, VarStr)>,
-) -> Option<String> {
-  let anchor = labels.first()?.0.clone();
+pub(crate) fn render_report(title: impl Display, mut labels: Vec<LabelBuilder>) -> Option<String> {
+  labels.retain(|label| get_source(label.span().source()).is_some());
+
+  let mut labels = group_labels(labels);
+
+  // this sorting method magically makes ariadne nest the labels.
+  // don't mess with this, i have no idea why or how it works but it just does
+  labels.sort_by(|(a, _), (b, _)| {
+    a.source()
+      .cmp(&b.source())
+      .then_with(|| a.end().cmp(&b.end()))
+      .then_with(|| a.start().cmp(&b.start()))
+  });
+
+  let anchor = labels.first()?.0.upgrade();
   get_source(anchor.source())?;
 
   let mut report = Report::build(ReportKind::Custom("profile", Color::Fixed(99)), anchor)
@@ -108,9 +118,9 @@ pub(crate) fn render_report(
     .with_message(title.to_string());
 
   let mut cache = SpanCache::default();
-  for (span, color, msg) in labels {
+  for (span, label) in labels {
     cache.add(span.source());
-    report = report.with_label(Label::new(span).with_message(msg).with_color(color));
+    report = report.with_label(label);
   }
 
   let mut buf = vec![];

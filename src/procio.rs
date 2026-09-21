@@ -1537,11 +1537,13 @@ impl Sinks {
     #[cfg(not(linux_like))]
     const FD_DIR: &str = "/dev/fd";
 
-    let keep: HashSet<RawFd> = self
+    let mut keep: HashSet<RawFd> = self
       .table
       .values()
       .filter_map(|s| s.as_os_fd().ok().map(|fd| fd.as_raw_fd()))
       .collect();
+    // keep the wake fd alive
+    keep.insert(signal::wake_fd().as_raw_fd());
 
     let Ok(entries) = std::fs::read_dir(FD_DIR) else {
       return;

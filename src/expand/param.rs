@@ -764,7 +764,7 @@ mod tests {
   }
 
   fn test_param_expansion(val: &str) -> ShResult<VarStr> {
-    perform_param_expansion(&SegStream::from_bytes(val.as_bytes()), true)
+    perform_param_expansion(None, &SegStream::from_bytes(val.as_bytes()), true)
       .map(|s| VarStr::from(s.into_bytes()))
   }
 

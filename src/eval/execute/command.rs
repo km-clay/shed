@@ -86,12 +86,11 @@ impl super::Dispatcher {
 
     if let AssignBehavior::Set = assign_behavior {
       if Shed::meta_mut(MetaTab::take_fork) {
-        let span = tree.span_for(cmd_id);
         let child = tree.break_off(cmd_id);
         let Some(root) = child.get_root() else {
           unreachable!()
         };
-        return self.run_fork(b"", ForkKind::Command, span, move |s| {
+        return self.run_fork(b"", ForkKind::Command, tree, cmd_id, move |s| {
           super::catch_exit(|| s.exec_cmd(&child, root), super::exit_with);
         });
       }

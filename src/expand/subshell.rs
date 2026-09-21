@@ -4,7 +4,6 @@ use std::{
 };
 
 use crate::{
-  builtin::ForkBehavior,
   errln,
   eval::{
     execute,
@@ -90,30 +89,33 @@ pub(crate) fn expand_proc_sub(span: Option<Span>, raw: &str, is_input: bool) -> 
   }
 }
 
-pub(crate) fn is_internal(raw: &[u8]) -> Option<ForkBehavior> {
+pub(crate) fn is_internal(raw: &[u8]) -> bool {
   let mut parser = ParsedSrc::with_name("is_internal check".into(), raw.into());
 
   if parser.parse_src().is_err() {
-    return None;
+    return false;
   }
 
   let ast = parser.into_ast();
   let roots = ast.roots();
 
-  let mut behavior = ForkBehavior::Never;
+  let mut forks = false;
   for root in roots.iter().copied() {
-    behavior = behavior.max(node::node_fork_behavior(&ast, root)?);
+    if node::node_forks(&ast, root) {
+      forks = true;
+      break;
+    }
   }
 
   let has_forking_sub = readline::nested_subs(raw).into_iter().any(|sub| match sub {
-    NestedSub::Proc => true,
-    NestedSub::Cmd(body) => is_internal(body.as_bytes()).is_none(),
+    NestedSub::Proc(_) => true,
+    NestedSub::Cmd(_, body) => !is_internal(body.as_bytes()),
   });
   if has_forking_sub {
-    return None;
+    return false;
   }
 
-  Some(behavior)
+  !forks
 }
 
 pub(crate) fn internal_cmd_sub(raw: &[u8]) -> ShResult<VarStr> {
@@ -156,7 +158,7 @@ pub(crate) fn expand_cmd_sub(span: Option<Span>, raw: &[u8]) -> ShResult<VarStr>
   // command subs add an xtrace layer
   let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
 
-  if is_internal(raw).is_some() {
+  if is_internal(raw) {
     return internal_cmd_sub(raw);
   }
 
@@ -246,25 +248,25 @@ mod tests {
   #[test]
   fn is_internal_plain_builtin_body() {
     let _g = TestGuard::new();
-    assert!(is_internal(b"echo hi").is_some());
-    assert!(is_internal(b"printf '%s' x").is_some());
+    assert!(is_internal(b"echo hi"));
+    assert!(is_internal(b"printf '%s' x"));
   }
 
   #[test]
   fn is_internal_all_builtin_nesting_stays_inprocess() {
     let _g = TestGuard::new();
-    assert!(is_internal(br#"echo "$(echo 1)""#).is_some());
-    assert!(is_internal(br#"echo "$(( 2 + 3 ))""#).is_some());
-    assert!(is_internal(br#"echo "$( { echo y; } )""#).is_some());
-    assert!(is_internal(br#"echo "$(read v < /dev/null; echo $v)""#).is_some());
+    assert!(is_internal(br#"echo "$(echo 1)""#));
+    assert!(is_internal(br#"echo "$(( 2 + 3 ))""#));
+    assert!(is_internal(br#"echo "$( { echo y; } )""#));
+    assert!(is_internal(br#"echo "$(read v < /dev/null; echo $v)""#));
   }
 
   #[test]
   fn is_internal_nested_external_forks() {
     let _g = TestGuard::new();
-    assert!(is_internal(br#"echo "$(echo 1 | cat)""#).is_none());
-    assert!(is_internal(br#"echo "$(echo "$(echo 1 | cat)")""#).is_none());
-    assert!(is_internal(br#"echo "`echo 7 | cat`""#).is_none());
+    assert!(!is_internal(br#"echo "$(echo 1 | cat)""#));
+    assert!(!is_internal(br#"echo "$(echo "$(echo 1 | cat)")""#));
+    assert!(!is_internal(br#"echo "`echo 7 | cat`""#));
   }
 
   #[test]
@@ -273,21 +275,21 @@ mod tests {
     // command present" heuristic would miss. Redirects, by contrast, apply
     // through the fd table and stay in-process.
     let _g = TestGuard::new();
-    assert!(is_internal(br#"echo "$( (echo x) )""#).is_none());
+    assert!(!is_internal(br#"echo "$( (echo x) )""#));
   }
 
   #[test]
   fn is_internal_sub_in_param_exp_and_arith() {
     let _g = TestGuard::new();
-    assert!(is_internal(br#"echo "${foo:+$(echo 1 | cat)}""#).is_none());
-    assert!(is_internal(br#"echo "$(( $(echo 3 | cat) + 1 ))""#).is_none());
+    assert!(!is_internal(br#"echo "${foo:+$(echo 1 | cat)}""#));
+    assert!(!is_internal(br#"echo "$(( $(echo 3 | cat) + 1 ))""#));
   }
 
   #[test]
   fn is_internal_single_quoted_sub_is_literal() {
     // A `$(…)` inside single quotes is literal text, not a substitution.
     let _g = TestGuard::new();
-    assert!(is_internal(br"echo '$(echo nope | cat)'").is_some());
+    assert!(is_internal(br"echo '$(echo nope | cat)'"));
   }
 
   #[test]
@@ -296,17 +298,17 @@ mod tests {
     // caller — the AST walk alone can't see into the body's word tokens. (#145)
     let _g = TestGuard::new();
     test_input(r#"f() { echo "$(echo 1 | cat)"; }"#).unwrap();
-    assert!(is_internal(b"f").is_none());
+    assert!(!is_internal(b"f"));
 
     test_input(r#"g() { echo "$( (echo x) )"; }"#).unwrap();
-    assert!(is_internal(b"g").is_none());
+    assert!(!is_internal(b"g"));
   }
 
   #[test]
   fn is_internal_all_builtin_function_stays_inprocess() {
     let _g = TestGuard::new();
     test_input(r#"h() { echo "$(echo 1)"; }"#).unwrap();
-    assert!(is_internal(b"h").is_some());
+    assert!(is_internal(b"h"));
   }
 
   #[test]

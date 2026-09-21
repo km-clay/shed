@@ -223,7 +223,7 @@ impl super::Dispatcher {
   pub(super) fn run_compound<F>(
     &mut self,
     name: &str,
-    node: NodeId,
+    node_id: NodeId,
     tree: &Ast,
     mut logic: F,
   ) -> ShResult<()>
@@ -231,8 +231,8 @@ impl super::Dispatcher {
     F: FnMut(&mut Self, &Ast) -> ShResult<()>,
   {
     let fork_builtins = Shed::meta_mut(MetaTab::take_fork);
-    let blame = tree.span_for(node);
-    let node = &tree[node];
+    let blame = tree.span_for(node_id);
+    let node = &tree[node_id];
     let redirs = &tree[node.redirs];
 
     let redirs = RedirSet::from(redirs);
@@ -243,7 +243,7 @@ impl super::Dispatcher {
     };
 
     if fork_builtins {
-      self.run_fork(name.as_bytes(), ForkKind::Compound, blame, |s| {
+      self.run_fork(name.as_bytes(), ForkKind::Compound, tree, node_id, |s| {
         super::catch_exit(|| logic(s, tree), super::exit_with);
       })?;
       Ok(())
@@ -288,7 +288,7 @@ impl super::Dispatcher {
     let body_display = body_raw.graphemes(true).take(70).collect::<String>();
     let name = format!("( {body_display} )");
 
-    self.run_fork(name.as_bytes(), ForkKind::Subshell, span, |s| {
+    self.run_fork(name.as_bytes(), ForkKind::Subshell, tree, *body, |s| {
       super::catch_exit(|| s.dispatch_node(tree, *body), super::exit_with);
     })?;
 
