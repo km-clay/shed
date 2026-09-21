@@ -1441,7 +1441,6 @@ impl SimpleCompleter {
       }
       CompResult::CommonPrefix { result } => {
         self.candidates = vec![result];
-        self.add_spaces();
         self.selected_idx = 0;
         self.original_input = line;
         self.active = false;

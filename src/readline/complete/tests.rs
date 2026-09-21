@@ -969,6 +969,30 @@ fn tab_completes_directory_with_slash() {
 }
 
 #[test]
+fn tab_common_prefix_adds_no_trailing_space() {
+  let tmp = std::env::temp_dir().join("shed_test_tab_prefix");
+  let _ = std::fs::create_dir_all(tmp.join("cmpfx_one"));
+  let _ = std::fs::create_dir_all(tmp.join("cmpfx_two"));
+
+  let (mut vi, _g) = test_vi("");
+  std::env::set_current_dir(&tmp).unwrap();
+
+  // Two dirs share the prefix `cmpfx_`; completing an ambiguous prefix must
+  // land inside the word (no trailing space) so a second Tab opens the menu.
+  Shed::term_mut(|t| t.feed_bytes(b"cd cmp\t"));
+  let keys = Shed::term_mut(Terminal::drain_keys);
+  let _ = vi.process_input(keys);
+
+  let line = vi.core.editor.to_string();
+  assert_eq!(
+    line, "cd cmpfx_",
+    "ambiguous common prefix must not get a trailing space: {line:?}"
+  );
+
+  std::fs::remove_dir_all(&tmp).ok();
+}
+
+#[test]
 fn tab_after_equals() {
   let tmp = std::env::temp_dir().join("shed_test_tab_eq");
   let _ = std::fs::create_dir_all(&tmp);
