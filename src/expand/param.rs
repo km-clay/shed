@@ -8,17 +8,17 @@ use crate::{
     var,
   },
   match_loop, sherr, shopt,
-  state::vars::VarStr,
   state::{
-    Shed, scopes::ScopeStack, vars::ArrIndex, vars::ShellParam, vars::VarFlags, vars::VarKind,
-    vars::VarName,
+    Shed,
+    scopes::ScopeStack,
+    vars::{ArrIndex, ShellParam, VarFlags, VarKind, VarName, VarStr},
   },
-  util,
   util::{
+    self,
     error::ShResult,
     strops::{ByteCursor, SliceCursor},
   },
-  var,
+  var, varstr,
 };
 
 #[derive(Debug)]
@@ -298,7 +298,8 @@ fn perform_param_expansion_inner(
     return Ok(
       match var.kind() {
         VarKind::Magic(func) => func().unwrap_or_default().len(),
-        VarKind::Str(_) | VarKind::Int(_) => var.to_string().len(),
+        VarKind::Str(v) => v.as_bytes().len(),
+        VarKind::Int(i) => varstr!("{i}").len(),
         VarKind::Arr(items) => items.len(),
         VarKind::AssocArr(items) => items.len(),
         VarKind::Unset => 0,
@@ -309,11 +310,6 @@ fn perform_param_expansion_inner(
   }
 
   // Scan for the variable name (may include [index]) and the operator.
-  // Delimiters are all ASCII, so byte scanning is UTF-8-safe, and the byte
-  // count of `var_name` is the exact offset at which the operand begins — it
-  // is fed straight to `body.split_off_front` below. (Scanning a lossy string
-  // view would desync those offsets on non-UTF-8 input, since each invalid
-  // byte becomes a 3-byte U+FFFD.)
   let mut cur = SliceCursor::new(&body_bytes);
   let mut is_glob_index = false;
   let mut seen_bracket = false;
