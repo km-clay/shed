@@ -202,10 +202,6 @@ of the name, or when using any of the operators below.
   pattern matched, a slice was in range, or a value changed does not affect
   `$?`.
 
-  This matches POSIX and every other shell: a simple command consisting
-  only of assignments completes with status `0` (or, if it contained a
-  command substitution, that substitution's status).
-
       `x=hello`
       `y=${x%z}`             # `z` is not a suffix of `x`...
       `echo $?`              # ...but $? is still 0
@@ -215,10 +211,6 @@ of the name, or when using any of the operators below.
       `if [ "$foo" != "${foo#prefix-}" ]; then`
       `  echo "had a prefix"`
       `fi`
-
-  Note: earlier versions of shed derived `$?` from whether an expansion
-  matched. That non-standard behavior was removed for POSIX conformance —
-  it broke portable scripts relying on `a=${b%c}` being a no-op success.
 
 ==============================================================================
 See also: |redirect| |glob| |arith|
