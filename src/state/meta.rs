@@ -1064,11 +1064,12 @@ impl MetaTab {
     let envp: Vec<CString> = flat
       .into_iter()
       .map(|(k, v)| {
-        let mut bytes = Vec::with_capacity(k.len() + v.len() + 2);
-        bytes.extend_from_slice(k.as_bytes());
+        let mut bytes = VarStr::with_capacity(k.len() + v.len() + 2);
+        bytes.push_slice(k.as_bytes());
         bytes.push(b'=');
-        bytes.extend_from_slice(v.as_bytes());
-        unsafe { CString::from_vec_unchecked(bytes) }
+        bytes.push_slice(v.as_bytes());
+
+        bytes.to_cstring_lossy()
       })
       .collect();
 

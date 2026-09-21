@@ -9,7 +9,7 @@
 use std::{
   borrow::Cow,
   collections::VecDeque,
-  ffi::OsStr,
+  ffi::{CString, OsStr},
   fmt::{self, Display},
   ops::{Deref, RangeBounds},
   os::unix::ffi::{OsStrExt, OsStringExt},
@@ -627,6 +627,10 @@ impl VarStr {
     &self.0
   }
 
+  pub(crate) fn with_capacity(capacity: usize) -> Self {
+    Self(HipByt::with_capacity(capacity))
+  }
+
   pub(crate) fn contains_slice(&self, needle: &[u8]) -> bool {
     self.0.windows(needle.len()).any(|window| window == needle)
   }
@@ -639,6 +643,17 @@ impl VarStr {
   /// Lossy UTF-8 view (invalid bytes -> `U+FFFD`).
   pub(crate) fn to_str_lossy(&self) -> Cow<'_, str> {
     String::from_utf8_lossy(&self.0)
+  }
+
+  pub(crate) fn to_cstring(&self) -> Option<CString> {
+    CString::new(self.as_bytes()).ok()
+  }
+
+  pub(crate) fn to_cstring_lossy(&self) -> CString {
+    let mut bytes = self.as_bytes().to_vec();
+    bytes.retain(|&b| b != 0);
+
+    unsafe { CString::from_vec_unchecked(bytes) }
   }
 
   pub(crate) fn try_slice(&self, range: impl RangeBounds<usize>) -> Option<Self> {
@@ -719,6 +734,12 @@ impl From<SmallVec<[u8; 24]>> for VarStr {
 impl From<VarStr> for PathBuf {
   fn from(value: VarStr) -> Self {
     PathBuf::from(OsStr::from_bytes(value.as_bytes()))
+  }
+}
+
+impl From<PathBuf> for VarStr {
+  fn from(value: PathBuf) -> Self {
+    Self(HipByt::from(value.as_os_str().as_bytes()))
   }
 }
 

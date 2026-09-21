@@ -11,7 +11,6 @@
 use std::{
   convert::Infallible,
   ffi::{CStr, CString},
-  os::unix::ffi::OsStrExt,
   sync::Arc,
   thread,
 };
@@ -60,9 +59,10 @@ pub(crate) fn reexec_as_script(
   if classify::is_binary_file(script) {
     return Err(Errno::ENOEXEC);
   }
-  let interp = std::env::current_exe().map_err(|_| Errno::ENOEXEC)?;
-  let interp = CString::new(interp.as_os_str().as_bytes()).unwrap_or_default();
+  let interp = VarStr::from(std::env::current_exe().map_err(|_| Errno::ENOEXEC)?);
+  let interp = interp.to_cstring_lossy();
   let mut new_args = vec![interp.clone(), script.to_owned()];
+
   new_args.extend(args.iter().skip(1).cloned());
   unistd::execve(&interp, &new_args, env)
 }
@@ -215,11 +215,14 @@ impl super::Dispatcher {
 
       let mut exec_file: Option<CString> = None;
       let Err(e) = if let Some(path) = exec_path {
-        let path_bytes = path.as_os_str().to_str().unwrap_or_default().as_bytes();
-        let c_path = CString::new(path_bytes).unwrap_or_default();
+        let path = VarStr::from(path);
+        let c_path = path.to_cstring_lossy();
+
         let mut envp = exec_args.envp.to_vec();
+
         envp.retain(|e| !e.as_bytes().starts_with(b"_="));
-        envp.push(unsafe { CString::from_vec_unchecked([b"_=", path_bytes].concat()) });
+        let path = VarStr::from([b"_=", path.as_bytes()].concat());
+        envp.push(path.to_cstring_lossy());
 
         exec_file = Some(c_path.clone());
         unistd::execve(&c_path, &exec_args.argv, &envp)

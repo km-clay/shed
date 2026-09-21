@@ -158,14 +158,13 @@ impl ExecArgs {
     Self { cmd, argv, envp }
   }
   pub(crate) fn get_cmd(argv: &[(VarStr, Span)]) -> (CString, Span) {
-    let cmd = argv[0].0.as_bytes();
-    let span = argv[0].1;
-    (CString::new(cmd).unwrap(), span)
+    let (cmd, span) = &argv[0];
+    (cmd.to_cstring_lossy(), *span)
   }
   pub(crate) fn get_argv(argv: Vec<(VarStr, Span)>) -> Rc<[CString]> {
     argv
       .into_iter()
-      .map(|s| CString::new(s.0).unwrap())
+      .map(|s| s.0.to_cstring_lossy())
       .collect::<Vec<CString>>()
       .into()
   }

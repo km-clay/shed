@@ -261,7 +261,7 @@ impl FileInfo {
 
   #[cfg(linux_like)]
   fn fmt_sec_ctx(&self, f: &mut impl fmt::Write) -> fmt::Result {
-    let Ok(path) = std::ffi::CString::new(self.name.as_bytes()) else {
+    let Some(path) = self.name.to_cstring() else {
       return write!(f, "?");
     };
     let attr = c"security.selinux";

@@ -3,10 +3,12 @@
 use nix::errno::Errno;
 use nix::unistd::execve;
 use std::convert::Infallible;
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, OsStr};
+use std::os::unix::ffi::OsStrExt;
 
 use crate::eval::execute::reexec_as_script;
 use crate::state::Shed;
+use crate::state::vars::VarStr;
 
 pub(crate) fn execvpe(
   filename: &CStr,
@@ -19,10 +21,10 @@ pub(crate) fn execvpe(
   let mut is_denied = false;
 
   if filename.to_bytes().contains(&b'/') {
-    let path_str = filename.to_string_lossy();
-    let path_bytes = path_str.as_bytes();
-    envp.retain(|e| !e.as_bytes().starts_with(b"_="));
-    envp.push(unsafe { CString::from_vec_unchecked([b"_=", path_bytes].concat()) });
+    let path_bytes = filename.to_bytes();
+
+    let path = VarStr::from([b"_=", path_bytes].concat());
+    envp.push(path.to_cstring_lossy());
 
     let Err(e) = execve(filename, args, &envp);
     let Errno::ENOEXEC = e else {
@@ -33,13 +35,14 @@ pub(crate) fn execvpe(
 
   let path = Shed::vars(|v| v.get_var("PATH"));
   for dir in std::env::split_paths(&path) {
-    let full_path_str = dir.join(filename.to_str().unwrap());
+    let full_path = dir.join(OsStr::from_bytes(filename.to_bytes()));
+    let full_path_str = VarStr::from(full_path);
 
-    let path_bytes = full_path_str.to_str().unwrap_or_default().as_bytes();
     envp.retain(|e| !e.as_bytes().starts_with(b"_="));
-    envp.push(unsafe { CString::from_vec_unchecked([b"_=", path_bytes].concat()) });
+    let path = VarStr::from([b"_=", full_path_str.as_bytes()].concat());
+    envp.push(path.to_cstring_lossy());
 
-    let c_path = std::ffi::CString::new(full_path_str.to_str().unwrap()).unwrap();
+    let c_path = full_path_str.to_cstring_lossy();
     let Err(e) = execve(c_path.as_c_str(), args, &envp);
     match e {
       Errno::ENOEXEC => {
