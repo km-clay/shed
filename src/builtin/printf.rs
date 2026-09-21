@@ -125,6 +125,15 @@ fn parse_num_arg<T: std::str::FromStr + Default>(arg: Option<Vec<u8>>) -> (T, Op
   let Some(arg) = arg else {
     return (T::default(), None);
   };
+
+  // posix thing: if a char leads with a quote, we parse it
+  // as an integer, returning its actual byte value
+  if let Some((&quote, rest)) = arg.split_first()
+    && matches!(quote, b'\'' | b'"')
+  {
+    let byte = rest.first().copied().unwrap_or(0);
+    return (byte.to_string().parse().unwrap_or_default(), None);
+  }
   match arg.to_str_lossy().parse() {
     Ok(v) => (v, None),
     Err(_) => (
@@ -972,6 +981,28 @@ mod tests {
     let guard = TestGuard::new();
     test_input(r"printf '%i' 42").unwrap();
     assert_eq!(guard.read_output(), "42");
+  }
+
+  #[test]
+  fn printf_char_constant_yields_code() {
+    let guard = TestGuard::new();
+    test_input(r#"printf '%d' "'A""#).unwrap();
+    assert_eq!(guard.read_output(), "65");
+  }
+
+  #[test]
+  fn printf_char_constant_bare_quote_is_zero() {
+    let guard = TestGuard::new();
+    test_input(r#"printf '%d' "'""#).unwrap();
+    assert_eq!(guard.read_output(), "0");
+  }
+
+  #[test]
+  fn printf_char_constant_is_byte_value() {
+    // 'é' is 0xC3 0xA9 in UTF-8; byte-native semantics take the first byte.
+    let guard = TestGuard::new();
+    test_input(r#"printf '%d' "'é""#).unwrap();
+    assert_eq!(guard.read_output(), "195");
   }
 
   #[test]
