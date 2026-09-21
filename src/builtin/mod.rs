@@ -542,24 +542,6 @@ impl Builtin for Let {
   }
 }
 
-/// A source of bytes for the `thru` builtin, which can be either a file or stdin.
-enum ThruSource {
-  File(fs::File),
-  Stdin,
-}
-impl std::io::Read for ThruSource {
-  /// Read bytes from the source into the provided buffer, returning the number of bytes read.
-  fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-    match self {
-      ThruSource::File(f) => f.read(buf),
-      ThruSource::Stdin => {
-        let stdin = procio::stdin_sink().map_err(|_| procio::ebadf())?;
-        SinkIo(stdin).read(buf)
-      }
-    }
-  }
-}
-
 struct Yes;
 impl Builtin for Yes {
   fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
@@ -587,6 +569,24 @@ impl Builtin for Yes {
     }
     // unreachable! this builtin can only be exited with
     // explicit interruption, or a broken pipe.
+  }
+}
+
+/// A source of bytes for the `thru` builtin, which can be either a file or stdin.
+enum ThruSource {
+  File(fs::File),
+  Stdin,
+}
+impl std::io::Read for ThruSource {
+  /// Read bytes from the source into the provided buffer, returning the number of bytes read.
+  fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    match self {
+      ThruSource::File(f) => f.read(buf),
+      ThruSource::Stdin => {
+        let stdin = procio::stdin_sink().map_err(|_| procio::ebadf())?;
+        SinkIo(stdin).read(buf)
+      }
+    }
   }
 }
 

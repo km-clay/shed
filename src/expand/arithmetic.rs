@@ -1245,6 +1245,13 @@ pub(crate) fn expand_arithmetic(expr: &[u8]) -> ShResult<VarStr> {
   Ok(result.into())
 }
 
+/// Eval a pre-expanded expression
+pub(crate) fn eval_expanded(expr: &[u8]) -> ShResult<i64> {
+  let tokens = ArithTk::tokenize(expr)?;
+  let rpn = ArithTk::to_rpn(tokens)?;
+  ArithTk::eval_rpn(&rpn)
+}
+
 /// Strip `((...))` or `(...)` wrappers and evaluate. Convenience for call sites
 /// that receive the raw token including its delimiters.
 pub(crate) fn expand_arithmetic_wrapped(raw: &[u8]) -> ShResult<VarStr> {

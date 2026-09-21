@@ -3,7 +3,7 @@ use bstr::ByteSlice;
 use crate::{
   eval::lex::TkFlags,
   expand::{
-    Expander,
+    Expander, arithmetic,
     stream::{SegStream, Unit},
     var,
   },
@@ -35,8 +35,8 @@ pub(crate) enum ParamExp {
   AltNotNull(SegStream),                   // +
   ErrUnsetOrNull(SegStream),               // :?
   ErrUnset(SegStream),                     // ?
-  SliceOpen(i64),                          // :pos  (pos may be negative: from end)
-  SliceClosed(i64, i64),                   // :pos:len  (either may be negative)
+  SliceOpen(SegStream),                    // :offset
+  SliceClosed(SegStream, SegStream),       // :offset:length
   RemShortestPrefix(SegStream),            // #pattern
   RemLongestPrefix(SegStream),             // ##pattern
   RemShortestSuffix(SegStream),            // %pattern
@@ -64,7 +64,7 @@ fn split_search_repl(rest: SegStream) -> (SegStream, SegStream) {
   }
 }
 
-pub(crate) fn parse_param_exp(body: &SegStream, allow_side_effects: bool) -> ShResult<ParamExp> {
+pub(crate) fn parse_param_exp(body: &SegStream) -> ShResult<ParamExp> {
   use ParamExp as PE;
 
   let parse_err = || Err(sherr!(SyntaxErr, "Invalid parameter expansion",));
@@ -151,45 +151,31 @@ pub(crate) fn parse_param_exp(body: &SegStream, allow_side_effects: bool) -> ShR
     return Ok(PE::ErrUnset(body.split_off_front(1).1));
   }
 
-  // Substring. The offset/length are numeric; a lossy str view suffices (a
-  // variable offset like `${v:$x}` is not resolved through this path).
-  if let Some((pos, len)) = parse_pos_len(&String::from_utf8_lossy(&lead), allow_side_effects) {
-    return Ok(match len {
-      Some(l) => PE::SliceClosed(pos, l),
-      None => PE::SliceOpen(pos),
+  // The `:` operators are handled above, so a
+  // remaining leading `:` is a substring slice.
+  if lead.first() == Some(&b':') {
+    let operand = body.split_off_front(1).1;
+    return Ok(match operand.split_once_unescaped(b':') {
+      Some((offset, length)) => PE::SliceClosed(offset, length),
+      None => PE::SliceOpen(operand),
     });
   }
 
   parse_err()
 }
 
-/// Expand and parse one signed substring component (offset or length).
-///
-/// Handles bash's disambiguating forms for a negative offset: a leading space
-/// (`${v: -2}`) and a single layer of surrounding parens (`${v:(-2)}`).
-fn parse_signed_component(s: &str, allow_side_effects: bool) -> Option<i64> {
-  let input = SegStream::from_bytes(s.as_bytes());
-  let expanded = var::expand_raw_inner(&mut input.cursor(), allow_side_effects, false)
-    .map_or_else(|_| s.as_bytes().to_vec(), SegStream::into_bytes);
-  let expanded = String::from_utf8_lossy(&expanded);
-  let trimmed = expanded.trim();
-  let trimmed = trimmed
-    .strip_prefix('(')
-    .and_then(|t| t.strip_suffix(')'))
-    .map_or(trimmed, str::trim);
-  trimmed.parse::<i64>().ok()
-}
-
-pub(crate) fn parse_pos_len(s: &str, allow_side_effects: bool) -> Option<(i64, Option<i64>)> {
-  let raw = s.strip_prefix(':')?;
-  if let Some((start, len)) = raw.split_once(':') {
-    Some((
-      parse_signed_component(start, allow_side_effects)?,
-      parse_signed_component(len, allow_side_effects),
-    ))
-  } else {
-    Some((parse_signed_component(raw, allow_side_effects)?, None))
+/// Resolve one substring index (offset or length). The operand may carry
+/// variable/command markers and is an arithmetic expression, so it is
+/// first `$`-expanded, and then evaluated as
+/// arithmetic
+fn eval_slice_index(stream: &SegStream, allow_side_effects: bool) -> ShResult<i64> {
+  let expanded = var::expand_raw_inner(&mut stream.cursor(), allow_side_effects, false)?;
+  let bytes = expanded.into_bytes();
+  // An empty index (e.g. an unset variable) is 0, as in an empty arith context.
+  if bytes.iter().all(u8::is_ascii_whitespace) {
+    return Ok(0);
   }
+  arithmetic::eval_expanded(&bytes)
 }
 
 /// Resolve a possibly-negative substring offset against a char count `n`.
@@ -398,7 +384,7 @@ fn perform_param_expansion_inner(
 
   let operand = body.split_off_front(var_name.len()).1;
   let _ = &rest;
-  if let Ok(expansion) = parse_param_exp(&operand, allow_side_effects) {
+  if let Ok(expansion) = parse_param_exp(&operand) {
     match expansion {
       ParamExp::ToUpperAll => {
         let value = Shed::vars(get);
@@ -512,7 +498,8 @@ fn perform_param_expansion_inner(
           ))
         }
       }
-      ParamExp::SliceOpen(pos) => {
+      ParamExp::SliceOpen(offset) => {
+        let pos = eval_slice_index(&offset, allow_side_effects)?;
         let value = Shed::vars(get);
         let bytes = value.as_bytes();
         let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();
@@ -526,7 +513,9 @@ fn perform_param_expansion_inner(
           .map(SegStream::from)
           .ok_or_else(|| sherr!(ExecFail, "substring expression < 0"))
       }
-      ParamExp::SliceClosed(pos, len) => {
+      ParamExp::SliceClosed(offset, length) => {
+        let pos = eval_slice_index(&offset, allow_side_effects)?;
+        let len = eval_slice_index(&length, allow_side_effects)?;
         let value = Shed::vars(get);
         let bytes = value.as_bytes();
         let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();
@@ -761,7 +750,7 @@ mod tests {
   use crate::tests::testutil::{TestGuard, test_input};
 
   fn test_param_parse(val: &str) -> ParamExp {
-    parse_param_exp(&SegStream::from_bytes(val.as_bytes()), true).unwrap()
+    parse_param_exp(&SegStream::from_bytes(val.as_bytes())).unwrap()
   }
 
   fn test_param_expansion(val: &str) -> ShResult<VarStr> {
@@ -888,31 +877,31 @@ mod tests {
   #[test]
   fn param_exp_substr() {
     let exp = test_param_parse(":2");
-    assert!(matches!(exp, ParamExp::SliceOpen(2)));
+    assert!(matches!(exp, ParamExp::SliceOpen(ref s) if s == "2"));
   }
 
   #[test]
   fn param_exp_substr_len() {
     let exp = test_param_parse(":1:3");
-    assert!(matches!(exp, ParamExp::SliceClosed(1, 3)));
+    assert!(matches!(exp, ParamExp::SliceClosed(ref a, ref b) if a == "1" && b == "3"));
   }
 
   #[test]
   fn param_exp_substr_negative_offset_parses() {
     let exp = test_param_parse(": -2");
-    assert!(matches!(exp, ParamExp::SliceOpen(-2)));
+    assert!(matches!(exp, ParamExp::SliceOpen(ref s) if s == " -2"));
   }
 
   #[test]
   fn param_exp_substr_paren_negative_offset_parses() {
     let exp = test_param_parse(":(-2)");
-    assert!(matches!(exp, ParamExp::SliceOpen(-2)));
+    assert!(matches!(exp, ParamExp::SliceOpen(ref s) if s == "(-2)"));
   }
 
   #[test]
   fn param_exp_substr_negative_length_parses() {
     let exp = test_param_parse(":1:-1");
-    assert!(matches!(exp, ParamExp::SliceClosed(1, -1)));
+    assert!(matches!(exp, ParamExp::SliceClosed(ref a, ref b) if a == "1" && b == "-1"));
   }
 
   fn set_v_abcdef() {
