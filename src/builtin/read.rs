@@ -11,7 +11,7 @@ use crate::{
   procio::{self, Sink},
   sherr, signal,
   state::{
-    self, Shed, params,
+    Shed, params,
     terminal::Terminal,
     vars::{VarFlags, VarKind, VarStr},
   },
@@ -1061,7 +1061,7 @@ mod tests {
   }
 
   #[test]
-  fn read_dash_bigN_ignores_delimiter() {
+  fn read_dash_big_n_ignores_delimiter() {
     // `-N` reads exactly N bytes verbatim; a newline in the middle is data,
     // not a delimiter (`-n` would stop at it).
     let _g = TestGuard::new();
@@ -1070,7 +1070,7 @@ mod tests {
   }
 
   #[test]
-  fn read_dash_bigN_does_not_trim_whitespace() {
+  fn read_dash_big_n_does_not_trim_whitespace() {
     // No IFS trimming: leading/trailing whitespace bytes are kept.
     let _g = TestGuard::new();
     test_input("read -N 3 raw < <(printf ' x ')").unwrap();

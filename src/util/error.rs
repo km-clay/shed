@@ -7,6 +7,7 @@ use std::fmt::{self, Debug, Display};
 use std::io::Write;
 use std::sync::Arc;
 
+use crate::state::source::StrongSpan;
 use crate::{
   HashMap,
   eval::lex::Span,
@@ -90,7 +91,7 @@ pub(crate) fn get_context(msg: impl Into<LabelMsg>, span: Span) -> LabelBuilder 
   LabelBuilder::new(span).with_color(color).with_message(msg)
 }
 
-fn group_labels(labels: Vec<LabelBuilder>) -> Vec<(Span, Label<Span>)> {
+fn group_labels(labels: Vec<LabelBuilder>) -> Vec<(Span, Label<StrongSpan>)> {
   let n = labels.len();
   if n == 0 {
     return labels
@@ -99,7 +100,7 @@ fn group_labels(labels: Vec<LabelBuilder>) -> Vec<(Span, Label<Span>)> {
       .collect();
   }
 
-  let labels: Vec<(Span, Label<Span>)> = labels
+  let labels: Vec<(Span, Label<StrongSpan>)> = labels
     .into_iter()
     .map(|label| (label.span(), label.into()))
     .collect();
@@ -125,7 +126,7 @@ fn group_labels(labels: Vec<LabelBuilder>) -> Vec<(Span, Label<Span>)> {
   // marks the chain we want to render last.
   let primary = chain_id[0];
 
-  let mut annotated: Vec<(usize, Span, Label<Span>)> = labels
+  let mut annotated: Vec<(usize, Span, Label<StrongSpan>)> = labels
     .into_iter()
     .enumerate()
     .map(|(i, (s, l))| (chain_id[i], s, l))
@@ -238,7 +239,7 @@ impl From<String> for LabelMsg {
 
 #[derive(Debug, Clone)]
 pub(crate) struct LabelBuilder {
-  span: Span,
+  span: StrongSpan,
   message: Option<LabelMsg>,
   color: Option<Color>,
 }
@@ -246,7 +247,7 @@ pub(crate) struct LabelBuilder {
 impl LabelBuilder {
   pub(crate) fn new(span: Span) -> Self {
     Self {
-      span,
+      span: span.upgrade(),
       message: None,
       color: None,
     }
@@ -260,11 +261,11 @@ impl LabelBuilder {
     self
   }
   pub(crate) fn span(&self) -> Span {
-    self.span
+    *self.span
   }
 }
 
-impl From<LabelBuilder> for ariadne::Label<Span> {
+impl From<LabelBuilder> for ariadne::Label<StrongSpan> {
   fn from(val: LabelBuilder) -> Self {
     let mut label = ariadne::Label::new(val.span);
     if let Some(message) = val.message {
@@ -305,7 +306,7 @@ impl ariadne::Cache<SourceId> for SpanCache {
 #[derive(Debug)]
 pub(crate) struct ShErr {
   kind: ShErrKind,
-  src_span: Option<Span>,
+  src_span: Option<StrongSpan>,
   labels: Vec<LabelBuilder>,
   notes: Vec<VarStr>,
 
@@ -320,7 +321,7 @@ impl ShErr {
   pub(crate) fn new(kind: ShErrKind, span: Span) -> Self {
     Self {
       kind,
-      src_span: Some(span),
+      src_span: Some(span.upgrade()),
       labels: vec![],
       notes: vec![],
       io_guards: vec![],
@@ -444,13 +445,13 @@ impl ShErr {
     self.with_label(label)
   }
   pub(crate) fn blame(mut self, span: Span) -> Self {
-    self.src_span = Some(span);
+    self.src_span = Some(span.upgrade());
     self
   }
   pub(crate) fn try_blame(self, span: Span) -> Self {
     match self {
       ShErr { src_span: None, .. } => Self {
-        src_span: Some(span),
+        src_span: Some(span.upgrade()),
         ..self
       },
       _ => self,
@@ -478,9 +479,9 @@ impl ShErr {
     self
   }
   pub(crate) fn src_span(&self) -> Option<&Span> {
-    self.src_span.as_ref()
+    self.src_span.as_deref()
   }
-  pub(crate) fn build_report(&self) -> Option<Report<'_, Span>> {
+  pub(crate) fn build_report(&self) -> Option<Report<'_, StrongSpan>> {
     let span = self.src_span.as_ref()?;
     // If the source backing the primary span has been dropped, we can't slice a
     // snippet; render as a span-less message instead of failing to fetch.
@@ -491,7 +492,7 @@ impl ShErr {
     } else {
       ReportKind::Error
     };
-    let mut report = Report::build(kind, *span).with_config(
+    let mut report = Report::build(kind, span.clone()).with_config(
       ariadne::Config::default()
         .with_index_type(ariadne::IndexType::Byte)
         .with_tab_width(shopt!(line.tab_width))

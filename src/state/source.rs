@@ -61,7 +61,7 @@ impl SourceHandle {
   /// Create a clone of the inner `Arc<Source>` that this `SourceHandle` wraps
   ///
   /// We use this instead of deriving `Clone`, because `SourceHandle` is meant to be a unique handle to a source,
-  /// and if we have to share ownership, we want to be explicit about doing so. It's also easier to grep, so that's nice
+  /// and if we have to share ownership, we want to be make it clear. It's also easier to grep, so that's nice
   ///
   /// `SourceHandle` is meant to define the lifetime for a source input, so it's important that we keep the refcount as low
   /// as possible.
@@ -70,6 +70,58 @@ impl SourceHandle {
       ptr: Arc::clone(&self.ptr),
       id: self.id,
     }
+  }
+}
+
+/// A variant of [`Span`] that carries a `SourceHandle` with it.
+///
+/// These are used in cases where a `Span` could reasonably outlive its source.
+/// This is best effort; if the source is already dropped, the `StrongSpan` will still be valid,
+/// but any attempt to access the source text will panic.
+#[derive(Debug)]
+pub(crate) struct StrongSpan {
+  span: Span,
+  handle: Option<SourceHandle>,
+}
+
+impl Span {
+  pub(crate) fn upgrade(self) -> StrongSpan {
+    StrongSpan {
+      span: self,
+      handle: handle_for(self.source()),
+    }
+  }
+}
+
+impl Clone for StrongSpan {
+  fn clone(&self) -> Self {
+    Self {
+      span: self.span,
+      handle: self.handle.as_ref().map(SourceHandle::share_handle),
+    }
+  }
+}
+
+impl Deref for StrongSpan {
+  type Target = Span;
+  fn deref(&self) -> &Self::Target {
+    &self.span
+  }
+}
+
+impl ariadne::Span for StrongSpan {
+  type SourceId = self::SourceId;
+
+  fn source(&self) -> &Self::SourceId {
+    ariadne::Span::source(&self.span)
+  }
+
+  fn start(&self) -> usize {
+    self.span.start()
+  }
+
+  fn end(&self) -> usize {
+    self.span.end()
   }
 }
 
