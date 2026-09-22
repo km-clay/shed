@@ -677,7 +677,7 @@ impl Builtin for Thru {
       };
       let path = src.unwrap_or_else(|| "stdin".into());
 
-      let mut buf = [0u8; 8192];
+      let mut buf = [0u8; 16384];
       loop {
         let cap = limit.map_or(buf.len(), |r| r.min(buf.len()));
         if cap == 0 {
