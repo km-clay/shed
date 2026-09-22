@@ -1722,7 +1722,8 @@ UNQUOTE                                          *builtin-unquote* *unquote*
 ==============================================================================
 READ                                             *builtin-read* *read*
 
-  `read [-r] [-s] [-q] [-p {prompt}] [-d {delim}] [-a {array}] [name ...]`
+  `read [-r] [-s] [-q] [-p {prompt}] [-d {delim}] [-a {array}]`
+  `     [-n {count}] [-N {count}] [-t {seconds}] [name ...]`
 
   Read one line from standard input. The line is split by `$IFS` and
   assigned to {name}s in order. If there are more words than names,
@@ -1736,7 +1737,11 @@ READ                                             *builtin-read* *read*
   `-p {prompt}`      display {prompt} before reading (no newline added)
   `-d {delim}`       read until {delim} byte instead of newline
   `-a {name}`        read all fields into array {name}
-  `-n {bytes}`       read at most {bytes} bytes
+  `-n {count}`       return after at most {count} bytes, but stop early
+                     at the delimiter; the result is still `$IFS`-split
+  `-N {count}`       read exactly {count} bytes verbatim, ignoring the
+                     delimiter, `$IFS`, and escapes. Byte-exact; use this
+                     for binary. See "Byte counts" below.
   `-t {seconds}`     timeout after {seconds} of inactivity
 
   Quoted mode ~
@@ -1757,6 +1762,33 @@ READ                                             *builtin-read* *read*
 
     `-q` implies `-r`. Backslash escape processing happens at the lexer
     level inside `$'...'` sequences, not at the byte level.
+
+  Byte counts (`-n` vs `-N`) ~
+
+    Both flags cap how many bytes are read, but they are not variants of
+    one option — they read in fundamentally different ways.
+
+    `-n {count}` reads *up to* {count} bytes and stops early if the
+    delimiter (a newline, or the `-d` byte) appears first. Whatever it
+    reads is then treated as a normal line: split on `$IFS` and, unless
+    `-r` is given, escape-processed. Use it for "read at most {count}
+    bytes of the current line".
+
+    `-N {count}` reads *exactly* {count} bytes and treats them as opaque
+    data. The delimiter is ignored (a newline in the middle is just
+    another byte), no `$IFS` splitting is done, and no escape processing
+    happens. The raw bytes are assigned verbatim to the first {name}
+    (or `$REPLY`). It succeeds only if all {count} bytes were read
+    before EOF.
+
+    `-N` is the option for binary. Because it bypasses the delimiter,
+    `$IFS`, and escapes, it preserves every byte exactly, including NUL
+    and newline bytes. `-n` corrupts binary: it halts at newline bytes
+    and trims `$IFS` whitespace from the result.
+
+    To step through input one raw byte at a time:
+
+        `while IFS= read -N 1 byte; do ...; done`
 
   Examples:
 
