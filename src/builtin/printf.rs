@@ -10,7 +10,7 @@ use crate::{
   util::{
     self,
     error::ShResult,
-    strops::{ByteCursor, SliceCursor},
+    strops::{self, ByteCursor, SliceCursor},
   },
 };
 
@@ -39,6 +39,7 @@ enum Conversion {
   FixedPointDecimal,
   Scientific(Case),
   ShortestFloat(Case),
+  HumanSize,
   Char,
   Str,
   RepeatStr,
@@ -175,28 +176,24 @@ impl FmtSpec {
 
     // Numeric conversions return a `Rendered` (they may report a bad number);
     // the rest produce plain text and are wrapped with `Rendered::new`.
+    #[rustfmt::skip]
     let out = match &self.conversion {
-      Conversion::Percent => Rendered::new("%".into()),
-      Conversion::SignedDecimal => Self::apply_signed_int(args, flags, width, prec)?,
-      Conversion::UnsignedDecimal => Self::apply_unsigned_int(args, flags, width, prec)?,
-      Conversion::UnsignedOctal => Self::apply_unsigned_octal(args, flags, width, prec)?,
-      Conversion::UnsignedHex(case) => Self::apply_unsigned_hex(args, flags, width, prec, case)?,
-      Conversion::FixedPointDecimal => Self::apply_fixed_float(args, flags, width, prec)?,
-      Conversion::Scientific(case) => Self::apply_scientific(args, flags, width, prec, case)?,
-      Conversion::ShortestFloat(case) => {
-        Self::apply_shortest_float(args, flags, width, prec, case)?
-      }
-      Conversion::Char => Rendered::new(Self::apply_char(args, flags, width)?),
-      Conversion::Str => Rendered::new(Self::apply_str(args, flags, width, prec)?),
-      Conversion::RepeatStr => Rendered::new(Self::apply_repeat_str(args, width)?),
-      Conversion::AnsiC => Rendered::new(Self::apply_ansi_c(args, flags, width, prec)?),
-      Conversion::ShellQuote => Rendered::new(Self::apply_shell_quote(args, flags, width)?),
-      Conversion::StrfTime(format) => Rendered::new(Self::apply_strftime(
-        args,
-        flags,
-        width,
-        &format.to_str_lossy(),
-      )?),
+      Conversion::SignedDecimal       => Self::apply_signed_int(args, flags, width, prec)?,
+      Conversion::UnsignedDecimal     => Self::apply_unsigned_int(args, flags, width, prec)?,
+      Conversion::UnsignedOctal       => Self::apply_unsigned_octal(args, flags, width, prec)?,
+      Conversion::UnsignedHex(case)   => Self::apply_unsigned_hex(args, flags, width, prec, case)?,
+      Conversion::FixedPointDecimal   => Self::apply_fixed_float(args, flags, width, prec)?,
+      Conversion::Scientific(case)    => Self::apply_scientific(args, flags, width, prec, case)?,
+      Conversion::HumanSize           => Self::apply_human_size(args, flags, width)?,
+      Conversion::ShortestFloat(case) => Self::apply_shortest_float(args, flags, width, prec, case)?,
+
+      Conversion::Percent             => Rendered::new("%".into()),
+      Conversion::Char                => Rendered::new(Self::apply_char(args, flags, width)?),
+      Conversion::Str                 => Rendered::new(Self::apply_str(args, flags, width, prec)?),
+      Conversion::RepeatStr           => Rendered::new(Self::apply_repeat_str(args, width)?),
+      Conversion::AnsiC               => Rendered::new(Self::apply_ansi_c(args, flags, width, prec)?),
+      Conversion::ShellQuote          => Rendered::new(Self::apply_shell_quote(args, flags, width)?),
+      Conversion::StrfTime(fmt)       => Rendered::new(Self::apply_strftime(args, flags, width, &fmt.to_str_lossy())?),
     };
 
     Ok(out)
@@ -261,6 +258,20 @@ impl FmtSpec {
 
     Ok(Rendered {
       text: pad_to_width(digits, sign, flags, width, prec.is_none()),
+      errors: err.into_iter().collect(),
+    })
+  }
+
+  fn apply_human_size<I: Iterator<Item = Vec<u8>>>(
+    args: &mut Peekable<I>,
+    flags: PrintFlags,
+    width: Option<usize>,
+  ) -> ShResult<Rendered> {
+    let (n, err): (u64, _) = parse_num_arg(args.next());
+    let mut s = String::new();
+    strops::format_size(n, &mut s).ok();
+    Ok(Rendered {
+      text: pad_to_width(s.as_bytes(), b"", flags, width, true),
       errors: err.into_iter().collect(),
     })
   }
@@ -614,6 +625,7 @@ impl FmtSpec {
       b'r' => Ok(Conversion::RepeatStr),
       b'b' => Ok(Conversion::AnsiC),
       b'q' => Ok(Conversion::ShellQuote),
+      b'h' => Ok(Conversion::HumanSize),
       b'(' => {
         let mut strftime = util::scratch_buf();
         match_loop!(cur.next_byte() => b, {
