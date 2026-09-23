@@ -176,21 +176,11 @@ fn get_poll_timeout(readline: &mut ShedLine) -> ShedPollTimeout {
 }
 
 /// Perform the initial setup for an interactive shell session.
-fn interactive_setup(args: &lifecycle::ShedArgs) -> ShResult<TermGuard> {
-  let raw_mode = Shed::term_mut(Terminal::setup_terminal)?;
-  Shed::logic_mut(LogTab::register_autoload_comps);
-
-  sig_setup();
-
-  MetaTab::ensure_meta_table()?;
-  if let Err(e) = Shed::create_socket() {
-    status_msg!("failed to create socket: {e}");
-  }
-
-  if let Some(msg) = MetaTab::welcome_message(args.welcome) {
-    outln!("\n{msg}\n\n");
-  }
-
+fn interactive_setup(
+  args: &mut lifecycle::ShedArgs,
+  pre_commands: Option<Input>,
+) -> ShResult<TermGuard> {
+  Shed::meta_mut(|m| m.set_interactive_shell(true));
   if args.login_shell && !args.no_rc {
     rc::source_login().ok();
   }
@@ -209,9 +199,44 @@ fn interactive_setup(args: &lifecycle::ShedArgs) -> ShResult<TermGuard> {
     e.print_error();
   }
 
+  if args.interactive
+    && let Some(cmds) = pre_commands
+  {
+    let script_args = std::mem::take(&mut args.script_args);
+    let res = match cmds {
+      Input::DashC(cmd) => execute::exec_dash_c(&cmd, script_args),
+      Input::Stdin(cmd) => input::exec_stdin(cmd, script_args),
+      Input::Script(content, path_buf) => input::run_script(content, path_buf, script_args),
+    };
+
+    if args.force_prompt {
+      if let Err(e) = res {
+        e.print_error();
+      }
+      // fallthrough to prompt
+    } else {
+      res?;
+      return Err(sherr!(CleanExit(0), ""));
+    }
+  }
+
   if let Some(welcome) = try_var!("SHELL_WELCOME") {
     // support for systemd's run0 message
     errln!("\n{welcome}\n\n");
+  }
+
+  let raw_mode = Shed::term_mut(Terminal::setup_terminal)?;
+  Shed::logic_mut(LogTab::register_autoload_comps);
+
+  sig_setup();
+
+  MetaTab::ensure_meta_table()?;
+  if let Err(e) = Shed::create_socket() {
+    status_msg!("failed to create socket: {e}");
+  }
+
+  if let Some(msg) = MetaTab::welcome_message(args.welcome) {
+    outln!("\n{msg}\n\n");
   }
 
   Shed::term_mut(Terminal::reserve_status_rows).ok();
@@ -225,28 +250,9 @@ pub(super) fn shed_interactive(
   script_keys: Option<Vec<KeyEvent>>,
   pre_commands: Option<Input>,
 ) -> ShResult<()> {
-  let _raw_mode = interactive_setup(&args)?;
+  let _raw_mode = interactive_setup(&mut args, pre_commands)?;
   cmd::try_hash();
-  Shed::meta_mut(|m| m.set_interactive_shell(true));
   let _ = PARENT_PROCESS_ID.set(getppid());
-
-  if let Some(input) = pre_commands {
-    let script_args = std::mem::take(&mut args.script_args);
-    let res = match input {
-      Input::DashC(cmd) => execute::exec_dash_c(&cmd, script_args),
-      Input::Stdin(cmd) => input::exec_stdin(cmd, script_args),
-      Input::Script(content, path_buf) => input::run_script(content, path_buf, script_args),
-    };
-
-    if args.force_prompt {
-      if let Err(e) = res {
-        e.print_error();
-      }
-      // fallthrough to prompt
-    } else {
-      return res;
-    }
-  }
 
   let mut readline = match ShedLine::new(Prompt::new()) {
     Ok(rl) => rl,
