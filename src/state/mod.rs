@@ -575,6 +575,14 @@ impl Shed {
     access_mut!(SHED, terminal, f)
   }
 
+  pub(crate) fn hist_branch() -> String {
+    SHED.with(|shed| shed.meta.borrow().current_branch().into())
+  }
+
+  pub(crate) fn set_hist_branch(branch: String) {
+    SHED.with(|shed| shed.meta.borrow_mut().set_current_branch(branch));
+  }
+
   /// Broadcast a message to all subscribers of the IPC socket.
   fn broadcast<F>(mut f: F)
   where

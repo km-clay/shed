@@ -598,6 +598,9 @@ pub(crate) struct MetaTab {
   // not to be confused with interactive context guarding with Terminal and TermGuard
   interactive_shell: bool,
 
+  // the current command history branch
+  hist_branch: String,
+
   // command running duration
   runtime_start: Option<Instant>,
   runtime_stop: Option<Instant>,
@@ -661,6 +664,7 @@ impl Clone for MetaTab {
     Self {
       shell_time: self.shell_time,
       interactive_shell: self.interactive_shell,
+      hist_branch: self.hist_branch.clone(),
       runtime_start: self.runtime_start,
       runtime_stop: self.runtime_stop,
       dir_stack: self.dir_stack.clone(),
@@ -694,6 +698,7 @@ impl Default for MetaTab {
     Self {
       shell_time: Instant::now(),
       interactive_shell: false,
+      hist_branch: "main".into(),
       runtime_start: None,
       runtime_stop: None,
       last_job: None,
@@ -747,6 +752,13 @@ impl MetaTab {
 
   pub(crate) fn set_last_cmdsub_status(&mut self, status: i32) {
     self.last_cmdsub_status = Some(status);
+  }
+
+  pub(crate) fn current_branch(&self) -> &str {
+    &self.hist_branch
+  }
+  pub(crate) fn set_current_branch(&mut self, branch: String) {
+    self.hist_branch = branch;
   }
 
   pub(crate) fn peek_fwd(&self, count: usize) -> Option<Rc<PathBuf>> {

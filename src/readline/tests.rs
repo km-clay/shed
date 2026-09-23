@@ -560,7 +560,7 @@ use crate::readline::history::History;
 #[test]
 fn hist_push_returns_id() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_push_id");
+  let hist = History::empty("test_push_id", &Shed::hist_branch());
   let id1 = hist.push("cmd1").unwrap();
   let id2 = hist.push("cmd2").unwrap();
   assert!(id1.is_some());
@@ -571,7 +571,7 @@ fn hist_push_returns_id() {
 #[test]
 fn hist_push_empty_returns_none() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_push_empty");
+  let hist = History::empty("test_push_empty", &Shed::hist_branch());
   let id = hist.push("").unwrap();
   assert!(id.is_none());
   assert_eq!(hist.entry_count(), 0);
@@ -580,7 +580,7 @@ fn hist_push_empty_returns_none() {
 #[test]
 fn hist_entry_count() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_count");
+  let hist = History::empty("test_count", &Shed::hist_branch());
   assert_eq!(hist.entry_count(), 0);
   hist.push("cmd1").unwrap();
   assert_eq!(hist.entry_count(), 1);
@@ -592,7 +592,7 @@ fn hist_entry_count() {
 #[test]
 fn hist_last_id() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_last_id");
+  let hist = History::empty("test_last_id", &Shed::hist_branch());
   assert_eq!(hist.last_id(), 0);
   hist.push("cmd1").unwrap();
   assert_eq!(hist.last_id(), 1);
@@ -603,7 +603,7 @@ fn hist_last_id() {
 #[test]
 fn hist_last_returns_most_recent() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_last");
+  let hist = History::empty("test_last", &Shed::hist_branch());
   assert!(hist.last().is_none());
   hist.push("first").unwrap();
   hist.push("second").unwrap();
@@ -614,7 +614,7 @@ fn hist_last_returns_most_recent() {
 #[test]
 fn hist_query_with_filter() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_query_filter");
+  let hist = History::empty("test_query_filter", &Shed::hist_branch());
   hist.push("echo foo").unwrap();
   hist.push("ls -la").unwrap();
   hist.push("echo bar").unwrap();
@@ -633,7 +633,7 @@ fn hist_query_with_filter() {
 #[test]
 fn hist_query_range() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_query_range");
+  let hist = History::empty("test_query_range", &Shed::hist_branch());
   hist.push("cmd1").unwrap();
   hist.push("cmd2").unwrap();
   hist.push("cmd3").unwrap();
@@ -648,7 +648,7 @@ fn hist_query_range() {
 #[test]
 fn hist_ids_are_sequential() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_sequential");
+  let hist = History::empty("test_sequential", &Shed::hist_branch());
   hist.push("a").unwrap();
   hist.push("b").unwrap();
   hist.push("c").unwrap();
@@ -664,7 +664,7 @@ fn hist_ids_are_sequential() {
 #[test]
 fn hist_delete_removes_entries() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_delete");
+  let hist = History::empty("test_delete", &Shed::hist_branch());
   hist.push("echo foo").unwrap();
   hist.push("echo bar").unwrap();
   hist.push("echo baz").unwrap();
@@ -684,7 +684,7 @@ fn hist_delete_purges_search_cache_no_resurrect() {
   // deleted command lingered in the search cache (SEARCH_ENTRIES / Ctrl-R) and
   // was resurrected into scroll history by merge_search_entries.
   let _g = TestGuard::new();
-  let mut hist = History::empty("test_delete_search_cache");
+  let mut hist = History::empty("test_delete_search_cache", &Shed::hist_branch());
   hist.push("keep one").unwrap();
   hist.push("secret token").unwrap();
   hist.push("keep two").unwrap();
@@ -739,7 +739,7 @@ fn sync_picks_up_command_in_watermark_second() {
   // advanced the watermark past that second — missed for the rest of the
   // session. `query_since` now uses `>=`, so the boundary second is included.
   let _g = TestGuard::new();
-  let hist = History::empty("test_watermark_same_second");
+  let hist = History::empty("test_watermark_same_second", &Shed::hist_branch());
 
   // Another session recorded this command at second `t`; our search cache
   // doesn't have it yet.
@@ -762,7 +762,7 @@ fn sync_picks_up_command_in_watermark_second() {
 #[test]
 fn trim_removes_deleted_commands_not_front_of_cache() {
   let _g = TestGuard::new();
-  let mut hist = History::empty("test_trim_match");
+  let mut hist = History::empty("test_trim_match", &Shed::hist_branch());
   hist.set_max_size_for_test(3);
 
   // Simulate the pre-load DB state: four old unique commands committed with
@@ -796,7 +796,7 @@ fn trim_removes_deleted_commands_not_front_of_cache() {
 #[test]
 fn push_allocates_id_from_db_max_not_stale() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_push_id_alloc");
+  let hist = History::empty("test_push_id_alloc", &Shed::hist_branch());
 
   // Another session committed id 100 out of band (row count is 1, max id 100).
   hist.insert_raw_with_id_for_test("from other session", 100, 1_721_234_567);
@@ -813,7 +813,7 @@ fn push_allocates_id_from_db_max_not_stale() {
 #[test]
 fn hist_delete_reids_contiguously() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_reid");
+  let hist = History::empty("test_reid", &Shed::hist_branch());
   hist.push("cmd1").unwrap();
   hist.push("cmd2").unwrap();
   hist.push("cmd3").unwrap();
@@ -831,7 +831,7 @@ fn hist_delete_reids_contiguously() {
 #[test]
 fn hist_delete_creates_backup() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_backup");
+  let hist = History::empty("test_backup", &Shed::hist_branch());
   hist.push("echo foo").unwrap();
   hist.push("echo bar").unwrap();
 
@@ -846,7 +846,7 @@ fn hist_delete_creates_backup() {
 #[test]
 fn hist_restore_recovers_deleted_entries() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_restore");
+  let hist = History::empty("test_restore", &Shed::hist_branch());
   hist.push("echo foo").unwrap();
   hist.push("echo bar").unwrap();
   hist.push("echo baz").unwrap();
@@ -865,7 +865,7 @@ fn hist_restore_recovers_deleted_entries() {
 #[test]
 fn hist_restore_preserves_new_entries() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_restore_new");
+  let hist = History::empty("test_restore_new", &Shed::hist_branch());
   hist.push("cmd1").unwrap();
   hist.push("cmd2").unwrap();
   hist.push("cmd3").unwrap();
@@ -893,7 +893,7 @@ fn hist_restore_preserves_new_entries() {
 #[test]
 fn hist_restore_no_backup_errors() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_no_backup");
+  let hist = History::empty("test_no_backup", &Shed::hist_branch());
   hist.push("echo foo").unwrap();
 
   assert!(hist.restore_backup().is_err());
@@ -902,7 +902,7 @@ fn hist_restore_no_backup_errors() {
 #[test]
 fn hist_restore_ids_are_contiguous() {
   let _g = TestGuard::new();
-  let hist = History::empty("test_restore_ids");
+  let hist = History::empty("test_restore_ids", &Shed::hist_branch());
   hist.push("cmd1").unwrap();
   hist.push("cmd2").unwrap();
   hist.push("cmd3").unwrap();
@@ -1892,13 +1892,16 @@ mod readline_mod_coverage {
   use crate::keys::{KeyCode, KeyEvent, KeyMap, KeyMapFlags, ModKeys};
   use crate::motion;
   use crate::readline::editcmd::{CmdFlags, EditCmd, Motion};
+  use crate::readline::history::{CacheKey, MAIN_HIST_TABLE_NAME};
   use crate::readline::{SimpleEditor, StatusLine};
   use crate::state::vars::{VarFlags, VarKind};
 
   // ─── SimpleEditor ────────────────────────────────────────────────
 
   fn simple_editor_with_history(entries: &[&str]) -> SimpleEditor {
-    crate::readline::history::History::clear_global_caches_for_test("simple_editor_test");
+    crate::readline::history::History::clear_global_caches_for_test(&CacheKey::dummy(
+      "simple_editor_test",
+    ));
     let mut ed = SimpleEditor::new(Some("simple_editor_test"));
     {
       let hist = ed.history.as_mut().unwrap();
@@ -2114,8 +2117,10 @@ mod readline_mod_coverage {
     // When the current buffer is a prefix of a single history entry,
     // start_hist_search adopts that entry into the editor (no finder).
     // SEARCH_ENTRIES is a process-global cache keyed by table name, so we
-    // wipe the "shed_history" key before pushing to keep len()==1.
-    crate::readline::history::History::clear_global_caches_for_test("shed_history");
+    // wipe the MAIN_HIST_TABLE_NAME key before pushing to keep len()==1.
+    crate::readline::history::History::clear_global_caches_for_test(&CacheKey::dummy(
+      MAIN_HIST_TABLE_NAME,
+    ));
     let (mut line, _g) = fresh_emacs_line();
     line.history.push("echo foobar").unwrap();
     line.history.refresh_hist_entries();
@@ -2132,7 +2137,9 @@ mod readline_mod_coverage {
 
   #[test]
   fn start_hist_search_with_multiple_matches_opens_finder() {
-    crate::readline::history::History::clear_global_caches_for_test("shed_history");
+    crate::readline::history::History::clear_global_caches_for_test(&CacheKey::dummy(
+      MAIN_HIST_TABLE_NAME,
+    ));
     let (mut line, _g) = fresh_emacs_line();
     line.history.push("git status").unwrap();
     line.history.push("git diff").unwrap();
@@ -2201,7 +2208,9 @@ mod readline_mod_coverage {
   }
 
   fn line_with_virt_history(initial: &str, entries: &[&str]) -> (ShedLine, TestGuard) {
-    crate::readline::history::History::clear_global_caches_for_test("shed_history");
+    crate::readline::history::History::clear_global_caches_for_test(&CacheKey::dummy(
+      MAIN_HIST_TABLE_NAME,
+    ));
     let (mut line, g) = fresh_emacs_line();
     for entry in entries {
       line.history.push(entry).unwrap();

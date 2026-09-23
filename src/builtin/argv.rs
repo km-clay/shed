@@ -39,6 +39,10 @@ impl BuiltinArgs {
     &self.argv
   }
 
+  pub(crate) fn unpack(self) -> (Vec<Word>, Span, Span) {
+    (self.argv, self.span, self.cmd_span)
+  }
+
   /// Get an iterator over the arguments (non-option words) of the builtin.
   pub(crate) fn arguments(&self) -> impl Iterator<Item = (&VarStr, Span)> {
     self.argv.iter().filter_map(|word| match word {

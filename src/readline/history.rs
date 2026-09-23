@@ -1,6 +1,8 @@
 use std::{
   cmp::Ordering,
   env,
+  fmt::Display,
+  ops::Deref,
   str::FromStr,
   sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock},
   time::{Duration, SystemTime, UNIX_EPOCH},
@@ -16,7 +18,11 @@ use super::{
   sherr, shopt,
   util::error::ShResult,
 };
-use crate::{HashMap, state::db, util::random::Uuid};
+use crate::{
+  HashMap,
+  state::{Shed, db},
+  util::random::Uuid,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct HistEntry {
@@ -28,7 +34,9 @@ pub(crate) struct HistEntry {
   pub token: Uuid,
 }
 
-type HistTables = HashMap<String, Vec<HistEntry>>;
+type HistTables = HashMap<CacheKey, Vec<HistEntry>>;
+
+pub(crate) const MAIN_HIST_TABLE_NAME: &str = "shed_history";
 
 static HIST_ENTRIES: LazyLock<Arc<RwLock<HistTables>>> =
   LazyLock::new(|| Arc::new(RwLock::new(HashMap::default())));
@@ -36,15 +44,27 @@ static HIST_ENTRIES: LazyLock<Arc<RwLock<HistTables>>> =
 static SEARCH_ENTRIES: LazyLock<Arc<RwLock<HistTables>>> =
   LazyLock::new(|| Arc::new(RwLock::new(HashMap::default())));
 
-static SEARCH_WATERMARKS: LazyLock<Arc<RwLock<HashMap<String, i64>>>> =
+static SEARCH_WATERMARKS: LazyLock<Arc<RwLock<HashMap<CacheKey, i64>>>> =
   LazyLock::new(|| Arc::new(RwLock::new(HashMap::default())));
 
-fn num_entries(table: &str) -> usize {
+fn num_entries(key: &CacheKey) -> usize {
   HIST_ENTRIES
     .read()
     .ok()
-    .and_then(|cache| cache.get(table).map(Vec::len))
+    .and_then(|cache| cache.get(key).map(Vec::len))
     .unwrap_or(0)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MergeResult {
+  FastForward,
+  UpToDate,
+  Merged,
+}
+
+fn timestamp_secs(ts: SystemTime) -> i64 {
+  ts.duration_since(UNIX_EPOCH)
+    .map_or(0, |d| d.as_secs() as i64)
 }
 
 impl Default for HistEntry {
@@ -70,53 +90,169 @@ impl HistEntry {
   }
 }
 
-fn query_since(since_ts: i64, conn: &Connection, table: &str) -> Vec<HistEntry> {
+fn query_since(since_ts: i64, conn: &Connection, table: &Table, branch: &Branch) -> Vec<HistEntry> {
   let sql = format!(
     r"
+    WITH RECURSIVE reachable(token) AS (
+      SELECT head FROM branches WHERE name = ?1
+      UNION
+      SELECT CASE k WHEN 0 THEN h.parent ELSE h.joint END
+      FROM {table} h
+      JOIN reachable r ON h.token = r.token
+      CROSS JOIN (SELECT 0 AS k UNION ALL SELECT 1) ks
+      WHERE (k = 0 AND h.parent IS NOT NULL)
+         OR (k = 1 AND h.joint IS NOT NULL)
+    )
     SELECT command, MAX(timestamp) as ts, runtime, cwd, status, token FROM {table}
+    WHERE token IN (SELECT token FROM reachable) AND joint IS NULL
     GROUP BY command
-    HAVING MAX(timestamp) >= ?1
+    HAVING MAX(timestamp) >= ?2
     ORDER BY ts ASC
     "
   );
   let Ok(mut stmt) = conn.prepare(&sql) else {
     return vec![];
   };
-  match stmt.query_map(rusqlite::params![since_ts], History::row_to_entry) {
+  match stmt.query_map(rusqlite::params![**branch, since_ts], History::row_to_entry) {
     Ok(iter) => iter.filter_map(Result::ok).collect(),
     Err(_) => vec![],
   }
 }
 
-fn query_masked(prefix: Option<&str>, conn: &Connection, table: &str) -> Vec<HistEntry> {
-  let sql = match prefix {
-    Some(_) => format!(
-      r"
-      SELECT command, MAX(timestamp) as ts, runtime, cwd, status, token FROM {table}
-      WHERE command LIKE ?1 || '%'
-      GROUP BY command
-      ORDER BY ts ASC
+fn query_masked(
+  prefix: Option<&str>,
+  conn: &Connection,
+  table: &Table,
+  branch: &Branch,
+) -> Vec<HistEntry> {
+  use std::fmt::Write;
+  let mut sql = String::new();
+
+  let _ = write!(
+    sql,
+    r"
+    WITH RECURSIVE reachable(token) AS (
+      SELECT head FROM branches WHERE name = ?1
+      UNION
+      SELECT CASE k WHEN 0 THEN h.parent ELSE h.joint END
+      FROM {table} h
+      JOIN reachable r ON h.token = r.token
+      CROSS JOIN (SELECT 0 AS k UNION ALL SELECT 1) ks
+      WHERE (k = 0 AND h.parent IS NOT NULL)
+         OR (k = 1 AND h.joint IS NOT NULL)
+    )
+    SELECT command, MAX(timestamp) as ts, runtime, cwd, status, token FROM {table}
+    WHERE token IN (SELECT token FROM reachable) AND joint IS NULL
+    "
+  );
+  if prefix.is_some() {
+    sql.push_str(
       "
-    ),
-    None => format!(
-      r"
-      SELECT command, MAX(timestamp) as ts, runtime, cwd, status, token FROM {table}
-      GROUP BY command
-      ORDER BY ts ASC
-      "
-    ),
-  };
+      AND command LIKE ?2 || '%'
+      ",
+    );
+  }
+  sql.push_str(
+    "
+    GROUP BY command
+    ORDER BY ts ASC
+    ",
+  );
+
   let Ok(mut stmt) = conn.prepare(&sql) else {
     return vec![];
   };
+
   let rows = match prefix {
-    Some(p) => stmt.query_map(rusqlite::params![p], History::row_to_entry),
-    None => stmt.query_map([], History::row_to_entry),
+    Some(p) => stmt.query_map(rusqlite::params![**branch, p], History::row_to_entry),
+    None => stmt.query_map(rusqlite::params![**branch], History::row_to_entry),
   };
 
   match rows {
     Ok(iter) => iter.filter_map(Result::ok).collect(),
     Err(_) => vec![],
+  }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CacheKey(String);
+
+impl CacheKey {
+  fn new(table: &Table, branch: &Branch) -> Self {
+    Self(format!("{table}/{branch}"))
+  }
+
+  #[cfg(test)]
+  pub(crate) fn dummy(table: &str) -> Self {
+    Self::new(&Table(table.to_string()), &Branch("main".to_string()))
+  }
+}
+
+impl Deref for CacheKey {
+  type Target = String;
+
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl Display for CacheKey {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{}", self.0)
+  }
+}
+
+/// Thin wrapper newtype over `String`
+///
+/// Used so that function signatures can cleanly differentiate between a table name and a branch name,
+/// even though both are just strings.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Table(String);
+
+impl Deref for Table {
+  type Target = String;
+
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl Display for Table {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{}", self.0)
+  }
+}
+
+impl From<&str> for Table {
+  fn from(value: &str) -> Self {
+    Self(value.to_string())
+  }
+}
+
+/// Thin wrapper newtype over `String`
+///
+/// Used so that function signatures can cleanly differentiate between a table name and a branch name,
+/// even though both are just strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Branch(String);
+
+impl Deref for Branch {
+  type Target = String;
+
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl Display for Branch {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{}", self.0)
+  }
+}
+
+impl From<&str> for Branch {
+  fn from(value: &str) -> Self {
+    Self(value.to_string())
   }
 }
 
@@ -128,7 +264,8 @@ pub(crate) struct History {
   pub virt_cursor: usize,
 
   conn: Arc<Mutex<Connection>>,
-  table: String,
+  table: Table,
+  branch: Branch,
   search_mask: Vec<HistEntry>,
   mask_stale: bool,
   no_matches: bool,
@@ -136,7 +273,7 @@ pub(crate) struct History {
 }
 
 impl History {
-  const USER_VERSION: i32 = 4;
+  const USER_VERSION: i32 = 5;
 
   fn lock(&self) -> MutexGuard<'_, Connection> {
     self
@@ -145,16 +282,24 @@ impl History {
       .unwrap_or_else(std::sync::PoisonError::into_inner)
   }
 
+  fn cache_key(&self) -> CacheKey {
+    CacheKey::new(&self.table, &self.branch)
+  }
+
   /// Wrap an already-migrated connection for read-only querying, skipping
   /// `init_db` and the background cache loader. Used for forked-child access
   /// (e.g. `hist` in a pipeline) where the inherited connection is fenced off
   /// and migrating or writing isn't possible.
-  pub(crate) fn attach(conn: Arc<Mutex<Connection>>, table: &str) -> Self {
+  pub(crate) fn attach(conn: Arc<Mutex<Connection>>, table: &str, branch: &str) -> Self {
     let max_hist = shopt!(history.max_entries);
     let max_size = (max_hist >= 0).then_some(max_hist as u32);
+    let table: Table = table.into();
+    let branch: Branch = branch.into();
+
     Self {
       conn,
-      table: table.to_string(),
+      table,
+      branch,
       pending: None,
       search_mask: vec![],
       mask_stale: true,
@@ -166,20 +311,25 @@ impl History {
     }
   }
 
-  pub(crate) fn new(conn: Arc<Mutex<Connection>>, table: &str) -> ShResult<Self> {
+  pub(crate) fn new(conn: Arc<Mutex<Connection>>, table: &str, branch: &str) -> ShResult<Self> {
     let max_hist = shopt!(history.max_entries);
+    let table: Table = table.into();
+    let branch: Branch = branch.into();
 
     Self::init_db(
       &conn
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner),
-      table,
+      &table,
     )?;
 
+    // -1 = no limit
     let max_size = (max_hist >= 0).then_some(max_hist as u32);
+
     let mut hist = Self {
       conn,
-      table: table.to_string(),
+      table,
+      branch,
       pending: None,
       search_mask: vec![],
       mask_stale: true,
@@ -189,13 +339,15 @@ impl History {
       virt_cursor: 0,
       max_size,
     };
+    let cache_key = hist.cache_key();
+
     // Ensure cache slots exist so consumers don't see a missing key
     // before the async load finishes.
     if let Ok(mut cache) = HIST_ENTRIES.write() {
-      cache.entry(hist.table.clone()).or_default();
+      cache.entry(cache_key.clone()).or_default();
     }
     if let Ok(mut cache) = SEARCH_ENTRIES.write() {
-      cache.entry(hist.table.clone()).or_default();
+      cache.entry(cache_key.clone()).or_default();
     }
 
     // Load the existing history asynchronously into both HIST_ENTRIES and
@@ -203,7 +355,8 @@ impl History {
     // concurrently and mutate the caches while we're loading; when the load
     // completes we merge by treating any commands already in the cache
     // (added by push during load) as the authoritative newer entry.
-    let table_name = hist.table.clone();
+    let table = hist.table.clone();
+    let branch = hist.branch.clone();
     std::thread::spawn(move || {
       do_something_that_opens_fds_that_we_cant_access_hack(MIN_INTERNAL_FD, || {
         let Some(conn) = db::get_db_conn() else {
@@ -213,7 +366,7 @@ impl History {
           let conn = conn
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-          query_masked(None, &conn, &table_name)
+          query_masked(None, &conn, &table, &branch)
         };
 
         let max_ts = loaded
@@ -237,14 +390,14 @@ impl History {
         };
 
         if let Ok(mut cache) = HIST_ENTRIES.write() {
-          merge(cache.entry(table_name.clone()).or_default(), loaded.clone());
+          merge(cache.entry(cache_key.clone()).or_default(), loaded.clone());
         }
         if let Ok(mut cache) = SEARCH_ENTRIES.write() {
-          merge(cache.entry(table_name.clone()).or_default(), loaded);
+          merge(cache.entry(cache_key.clone()).or_default(), loaded);
         }
         // Initialize watermark; don't overwrite if pushes during load advanced it.
         if let Ok(mut wm) = SEARCH_WATERMARKS.write() {
-          let wm_entry = wm.entry(table_name).or_insert(0);
+          let wm_entry = wm.entry(cache_key.clone()).or_insert(0);
           *wm_entry = (*wm_entry).max(max_ts);
         }
       });
@@ -254,12 +407,16 @@ impl History {
     Ok(hist)
   }
 
-  pub(crate) fn empty(table: &str) -> Self {
+  pub(crate) fn empty(table: &str, branch: &str) -> Self {
     let conn = Connection::open_in_memory().expect("Failed to open in-memory database");
-    Self::init_db(&conn, table).expect("Failed to initialize in-memory database");
+    let table: Table = table.into();
+    let branch: Branch = branch.into();
+    Self::init_db(&conn, &table).expect("Failed to initialize in-memory database");
+
     Self {
       conn: Arc::new(Mutex::new(conn)),
-      table: table.to_string(),
+      table: Table(table.to_string()),
+      branch: Branch(branch.to_string()),
       pending: None,
       search_mask: vec![],
       mask_stale: true,
@@ -271,7 +428,7 @@ impl History {
     }
   }
 
-  fn init_db(conn: &Connection, table: &str) -> rusqlite::Result<()> {
+  fn init_db(conn: &Connection, table: &Table) -> rusqlite::Result<()> {
     conn.execute_batch(&format!(
       r"
 			CREATE TABLE IF NOT EXISTS {table} (
@@ -288,15 +445,12 @@ impl History {
 		"
     ))?;
 
-    // Per-table column migrations. These are gated on whether the column
-    // actually exists (not on the DB-wide `user_version`), so they are safe to
-    // run against both a brand-new table (columns already present -> skipped)
-    // and an old one carried over from a pre-token schema.
+    // Per-table column migrations.
     Self::add_column_if_missing(conn, table, "cwd", "TEXT")?;
     Self::add_column_if_missing(conn, table, "status", "INT DEFAULT 0")?;
-    // 'token' acts as an absolute identifier since the id field actually shifts
-    // after commands are deleted.
     Self::add_column_if_missing(conn, table, "token", "TEXT")?;
+    Self::add_column_if_missing(conn, table, "parent", "TEXT")?;
+    Self::add_column_if_missing(conn, table, "joint", "TEXT")?;
 
     conn.execute_batch(&format!(
       "CREATE INDEX IF NOT EXISTS {table}_token_idx ON {table}(token);"
@@ -336,17 +490,47 @@ impl History {
       ",
     )?;
 
+    conn.execute_batch(
+      "
+      CREATE TABLE IF NOT EXISTS branches (
+        name        TEXT UNIQUE  PRIMARY KEY NOT NULL,
+        head        TEXT         NOT NULL
+      );
+      ",
+    )?;
+
+    let has_main: bool = conn.query_row(
+      "SELECT EXISTS(SELECT 1 FROM branches WHERE name = 'main')",
+      [],
+      |r| r.get(0),
+    )?;
+
+    if !has_main && **table == MAIN_HIST_TABLE_NAME {
+      conn.execute_batch(
+        "
+        UPDATE shed_history
+        SET parent = (
+          SELECT token FROM shed_history AS prev
+          WHERE prev.id < shed_history.id
+          ORDER BY prev.id DESC LIMIT 1
+        );
+
+        INSERT INTO branches (name, head)
+        SELECT 'main', token FROM shed_history ORDER BY id DESC LIMIT 1;
+        ",
+      )?;
+    }
+
     conn.execute_batch(&format!("PRAGMA user_version = {}", Self::USER_VERSION))?;
 
     Ok(())
   }
 
   /// Adds `column` to `table` only if it does not already exist, so it is safe
-  /// to run on both new and pre-existing tables. `table` is always an internal
-  /// constant (never user input), so interpolating it is safe.
+  /// to run on both new and pre-existing tables.
   fn add_column_if_missing(
     conn: &Connection,
-    table: &str,
+    table: &Table,
     column: &str,
     decl: &str,
   ) -> rusqlite::Result<()> {
@@ -360,69 +544,174 @@ impl History {
     }
     Ok(())
   }
+  fn head_entry_conn(
+    conn: &Connection,
+    table: &Table,
+    branch: &Branch,
+  ) -> ShResult<Option<HistEntry>> {
+    let sql = format!(
+      "SELECT command, timestamp, runtime, cwd, status, token FROM {table}
+      WHERE token = (SELECT head FROM branches WHERE name = ?1) LIMIT 1"
+    );
+    let res = conn.query_row(&sql, rusqlite::params![**branch], History::row_to_entry);
+
+    match res {
+      Ok(entry) => Ok(Some(entry)),
+      Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+      Err(e) => Err(e.into()),
+    }
+  }
+  fn head_conn(conn: &Connection, table: &Table, branch: &Branch) -> ShResult<Option<Uuid>> {
+    Ok(Self::head_entry_conn(conn, table, branch)?.map(|e| e.token))
+  }
+  fn head(&self) -> ShResult<Option<Uuid>> {
+    Self::head_conn(&self.lock(), &self.table, &self.branch)
+  }
+  fn advance_head(conn: &Connection, branch: &Branch, new_token: &str) -> rusqlite::Result<()> {
+    conn.execute(
+      "
+      INSERT INTO branches (name, head) VALUES (?1, ?2)
+      ON CONFLICT(name) DO UPDATE SET head = ?2
+      ",
+      rusqlite::params![**branch, new_token],
+    )?;
+    Ok(())
+  }
+  pub(crate) fn branch_exists(&self, name: &str) -> ShResult<bool> {
+    Ok(self.lock().query_row(
+      "SELECT EXISTS(SELECT 1 FROM branches WHERE name = ?1)",
+      rusqlite::params![name],
+      |r| r.get(0),
+    )?)
+  }
+  pub(crate) fn list_branches(&self) -> ShResult<Vec<String>> {
+    let conn = self.lock();
+    Ok(
+      conn
+        .prepare("SELECT name FROM branches ORDER BY name")?
+        .query_map([], |r| r.get(0))?
+        .filter_map(Result::ok)
+        .collect(),
+    )
+  }
+  pub(crate) fn create_branch(&self, name: &str) -> ShResult<()> {
+    let Some(head) = self.head()?.map(|t| t.to_string()) else {
+      return Ok(());
+    };
+
+    self
+      .lock()
+      .execute(
+        "INSERT INTO branches (name, head) VALUES (?1, ?2)",
+        rusqlite::params![name, head],
+      )
+      .map_err(|_| sherr!(InternalErr, "Branch already exists"))?;
+    Ok(())
+  }
+
+  /// Whether `target` is reachable from `from` by walking parent/joint edges.
+  fn is_reachable(conn: &Connection, table: &Table, from: &str, target: &str) -> ShResult<bool> {
+    let sql = format!(
+      r"
+      WITH RECURSIVE reachable(token) AS (
+        SELECT ?1
+        UNION
+        SELECT CASE k WHEN 0 THEN h.parent ELSE h.joint END
+        FROM {table} h
+        JOIN reachable r ON h.token = r.token
+        CROSS JOIN (SELECT 0 AS k UNION ALL SELECT 1) ks
+        WHERE (k = 0 AND h.parent IS NOT NULL)
+           OR (k = 1 AND h.joint IS NOT NULL)
+      )
+      SELECT EXISTS(SELECT 1 FROM reachable WHERE token = ?2)
+      "
+    );
+    Ok(conn.query_row(&sql, rusqlite::params![from, target], |r| r.get(0))?)
+  }
+
+  /// Merge `other` into the current branch by inserting a synthetic merge node
+  /// (`parent` = our tip, `joint` = `other`'s tip) and advancing our head to it.
+  /// Returns `false` if already up to date. The node has no command, so it is
+  /// invisible to history listings but is walked for reachability.
+  pub(crate) fn merge_branch(&self, other: &str) -> ShResult<MergeResult> {
+    let conn = self.lock();
+
+    let other_head: String = match conn.query_row(
+      "SELECT head FROM branches WHERE name = ?1",
+      rusqlite::params![other],
+      |r| r.get(0),
+    ) {
+      Ok(h) => h,
+      Err(rusqlite::Error::QueryReturnedNoRows) => {
+        return Err(sherr!(InternalErr, "no such branch: {other}"));
+      }
+      Err(e) => return Err(e.into()),
+    };
+
+    let cur_head = Self::head_conn(&conn, &self.table, &self.branch)?.map(|t| t.to_string());
+
+    if let Some(ref cur) = cur_head {
+      if Self::is_reachable(&conn, &self.table, cur, &other_head)? {
+        // up to date (we have theirs)
+        return Ok(MergeResult::UpToDate);
+      }
+
+      if Self::is_reachable(&conn, &self.table, &other_head, cur)? {
+        // fast-forward (no divergence)
+        Self::advance_head(&conn, &self.branch, &other_head)?;
+        return Ok(MergeResult::FastForward);
+      }
+    }
+
+    let token = Uuid::new_v4().to_string();
+    let ts = timestamp_secs(SystemTime::now());
+    let new_id = Self::last_id_conn(&conn, &self.table) + 1;
+    conn.execute(
+      &format!(
+        "INSERT INTO {} (id, timestamp, runtime, command, cwd, status, token, parent, joint)
+         VALUES (?1, ?2, 0, '', '', 0, ?3, ?4, ?5)",
+        self.table
+      ),
+      rusqlite::params![new_id, ts, token, cur_head, other_head],
+    )?;
+    Self::advance_head(&conn, &self.branch, &token)?;
+    Ok(MergeResult::Merged)
+  }
+
+  pub(crate) fn check_branch(&mut self) {
+    if *self.table != MAIN_HIST_TABLE_NAME {
+      // TODO: maybe add branching for ex history?
+      return;
+    }
+
+    let current = Shed::hist_branch();
+    if *self.branch != current {
+      self.branch = Branch(current);
+      self.refresh_hist_entries();
+      self.mark_mask_stale();
+    }
+  }
   pub(crate) fn push(&self, command: &str) -> ShResult<Option<Uuid>> {
-    if command.is_empty() {
+    if command
+      .chars()
+      .next()
+      .is_none_or(|c| shopt!(history.ignore_space) && c == ' ')
+    {
       return Ok(None);
     }
-    let table = &self.table;
-    let timestamp = SystemTime::now()
-      .duration_since(UNIX_EPOCH)
-      .unwrap()
-      .as_secs() as i64;
-    let cwd: Option<String> = env::current_dir().map(|p| p.to_string_lossy().into()).ok();
-    let token = Uuid::new_v4();
+    let cwd = env::current_dir()
+      .map(|p| p.to_string_lossy().into())
+      .ok()
+      .unwrap_or_default();
 
-    {
-      let conn = self.lock();
-
-      if shopt!(history.ignore_space) && command.starts_with(' ') {
-        return Ok(None);
-      }
-
-      if shopt!(history.ignore_dupes) {
-        let last: Option<String> = conn
-          .query_row(
-            &format!("SELECT command FROM {table} ORDER BY id DESC LIMIT 1"),
-            [],
-            |row| row.get(0),
-          )
-          .ok();
-        if last.as_deref() == Some(command) {
-          return Ok(None);
-        }
-      }
-      conn.execute(
-        &format!(
-          "INSERT INTO {table} (id, timestamp, runtime, command, cwd, token)
-           SELECT COALESCE(MAX(id), 0) + 1, ?1, 0, ?2, ?3, ?4 FROM {table}"
-        ),
-        rusqlite::params![timestamp, command, cwd, token.to_string()],
-      )?;
-    }
-
-    // Incremental cache update: the new entry supersedes any prior entry with
-    // the same command (matching `query_masked`'s GROUP BY semantics).
-    // Avoids the post-command SQLite re-query that dominated CPU profiles.
-    let entry = HistEntry {
-      runtime: Duration::default(),
+    self.push_entry(HistEntry {
+      runtime: Duration::ZERO,
       timestamp: SystemTime::now(),
-      command: command.into(),
-      cwd: cwd.unwrap_or_default(),
+      command: command.to_string(),
+      cwd,
       status: 0,
-      token,
-    };
-    if let Ok(mut cache) = HIST_ENTRIES.write() {
-      let table_entries = cache.entry(self.table.clone()).or_default();
-      table_entries.retain(|e| e.command != command);
-      table_entries.push(entry.clone());
-    }
-    if let Ok(mut cache) = SEARCH_ENTRIES.write() {
-      let table_entries = cache.entry(self.table.clone()).or_default();
-      table_entries.retain(|e| e.command != command);
-      table_entries.push(entry);
-    }
-    self.trim_to_max();
-    Ok(Some(token))
+      token: Uuid::new_v4(),
+    })
   }
 
   pub(crate) fn set_status(&self, token: Uuid, runtime: Option<Duration>, status: i32) {
@@ -489,14 +778,15 @@ impl History {
       return;
     }
 
+    let cache_key = self.cache_key();
     if let Ok(mut cache) = HIST_ENTRIES.write()
-      && let Some(entries) = cache.get_mut(table.as_str())
+      && let Some(entries) = cache.get_mut(&cache_key)
     {
       entries.retain(|e| !deleted.contains(e.command()));
     }
 
     if let Ok(mut cache) = SEARCH_ENTRIES.write()
-      && let Some(entries) = cache.get_mut(table.as_str())
+      && let Some(entries) = cache.get_mut(&cache_key)
     {
       entries.retain(|e| !deleted.contains(e.command()));
     }
@@ -507,7 +797,7 @@ impl History {
   }
 
   /// `last_id` against an already-held connection, for use inside a lock scope.
-  fn last_id_conn(conn: &Connection, table: &str) -> i64 {
+  fn last_id_conn(conn: &Connection, table: &Table) -> i64 {
     conn
       .query_row(
         &format!("SELECT id FROM {table} ORDER BY id DESC LIMIT 1"),
@@ -525,32 +815,154 @@ impl History {
     let entries = self.query(where_clause, params)?;
     let table = &self.table;
 
+    let table_backup = format!("{table}_backup");
+    let table_tmp = format!("{table}_tmp");
+
     let conn = self.lock();
     let tx = conn.unchecked_transaction()?;
-    // rolling backup - overwritten on each delete, restorable via `hist --restore`
+
+    // gotta un-dangle any branch nodes that depended on the deleted stuff
+    // and rebase them to any surviving nodes
+    let deleted: crate::HashSet<String> = {
+      let mut stmt = tx.prepare(&format!("SELECT token FROM {table} {where_clause}"))?;
+      stmt
+        .query_map(params, |r| r.get::<_, String>(0))?
+        .filter_map(Result::ok)
+        .collect()
+    };
+    let rows: Vec<(String, Option<String>, Option<String>)> = {
+      let mut stmt = tx.prepare(&format!("SELECT token, parent, joint FROM {table}"))?;
+      stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .filter_map(Result::ok)
+        .collect()
+    };
+    let parent_of: HashMap<String, Option<String>> = rows
+      .iter()
+      .map(|(t, p, _)| (t.clone(), p.clone()))
+      .collect();
+    let resolve = |start: &Option<String>| -> Option<String> {
+      let mut cur = start.clone();
+      while let Some(tok) = &cur {
+        if !deleted.contains(tok) {
+          break;
+        }
+        cur = parent_of.get(tok).cloned().flatten();
+      }
+      cur
+    };
+    let remaps: Vec<(String, Option<String>, Option<String>)> = rows
+      .iter()
+      .filter(|(tok, ..)| !deleted.contains(tok))
+      .filter_map(|(tok, parent, joint)| {
+        let np = resolve(parent);
+        let nj = resolve(joint);
+        (&np != parent || &nj != joint).then(|| (tok.clone(), np, nj))
+      })
+      .collect();
+    let branch_repoints: Vec<(String, Option<String>)> = {
+      let mut stmt = tx.prepare("SELECT name, head FROM branches")?;
+      let all: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .filter_map(Result::ok)
+        .collect();
+      all
+        .into_iter()
+        .filter(|(_, head)| deleted.contains(head))
+        .map(|(name, head)| (name, resolve(&Some(head))))
+        .collect()
+    };
+
+    // rolling backup
+    // overwritten on each delete, restorable via `hist --restore`
     tx.execute_batch(&format!(
-      "DROP TABLE IF EXISTS {table}_backup; \
-       CREATE TABLE {table}_backup (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT, cwd TEXT, status INT DEFAULT 0, token TEXT); \
-       INSERT INTO {table}_backup SELECT * FROM {table};"
+      "
+      DROP TABLE IF EXISTS {table_backup}; \
+      CREATE TABLE {table_backup} (
+        id INTEGER PRIMARY KEY,
+        timestamp INT,
+        runtime INT,
+        command TEXT,
+        cwd TEXT,
+        status INT DEFAULT 0,
+        token TEXT,
+        parent TEXT,
+        joint TEXT
+      ); \
+      INSERT INTO {table_backup} SELECT * FROM {table};
+      "
     ))?;
     tx.execute_batch(&format!(
-      "CREATE TABLE {table}_tmp (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT, cwd TEXT, status INT DEFAULT 0, token TEXT);"
+      "
+      CREATE TABLE {table_tmp} (
+        id INTEGER PRIMARY KEY,
+        timestamp INT,
+        runtime INT,
+        command TEXT,
+        cwd TEXT,
+        status INT DEFAULT 0,
+        token TEXT,
+        parent TEXT,
+        joint TEXT
+      );
+      "
     ))?;
     tx.execute(&format!(
-				"INSERT INTO {table}_tmp (id, timestamp, runtime, command, cwd, status, token) \
-				 SELECT ROW_NUMBER() OVER (ORDER BY id), timestamp, runtime, command, cwd, status, token FROM {table} WHERE id NOT IN (SELECT id FROM {table}
-		{where_clause}) ORDER BY id"
+      "
+      INSERT INTO {table_tmp} (
+        id,
+        timestamp,
+        runtime,
+        command,
+        cwd,
+        status,
+        token,
+        parent,
+        joint
+      ) \
+      SELECT ROW_NUMBER() OVER (ORDER BY id), timestamp, runtime, command, cwd, status, token, parent, joint
+      FROM {table} WHERE id NOT IN (SELECT id FROM {table} {where_clause}) ORDER BY id
+      "
 		), params)?;
     tx.execute_batch(&format!(
-      "DROP TABLE {table}; ALTER TABLE {table}_tmp RENAME TO {table};"
+      "DROP TABLE {table}; ALTER TABLE {table_tmp} RENAME TO {table};"
     ))?;
+
+    // Apply the pre-computed edge repairs: survivors whose parent/joint pointed
+    // into the deleted set now point at their nearest surviving ancestor.
+    for (tok, np, nj) in &remaps {
+      tx.execute(
+        &format!("UPDATE {table} SET parent = ?1, joint = ?2 WHERE token = ?3"),
+        rusqlite::params![np, nj, tok],
+      )?;
+    }
+
+    // Re-point any branch whose head was deleted to the nearest survivor, or
+    // drop it to unborn if nothing of its lineage remains.
+    for (name, new_head) in &branch_repoints {
+      match new_head {
+        Some(head) => {
+          tx.execute(
+            "UPDATE branches SET head = ?1 WHERE name = ?2",
+            rusqlite::params![head, name],
+          )?;
+        }
+        None => {
+          tx.execute(
+            "DELETE FROM branches WHERE name = ?1",
+            rusqlite::params![name],
+          )?;
+        }
+      }
+    }
+
     tx.commit()?;
 
     Ok(entries)
   }
 
   /// Deletes exactly the rows with the given ids, reusing [`Self::delete`]'s
-  /// backup + rebuild machinery. Scoping by id lets callers apply non-SQL
+  /// backup + rebuild machinery.  Scoping by id lets callers apply non-SQL
   /// filters (e.g. a `--matches` regex) in Rust and then delete precisely the
   /// resolved set, instead of handing an unfiltered/empty WHERE to `delete`
   /// (which would wipe the whole table).
@@ -571,10 +983,13 @@ impl History {
   /// Restores the history table from the rolling backup created by the last delete operation.
   pub(crate) fn restore_backup(&self) -> ShResult<i64> {
     let table = &self.table;
+    let table_backup = format!("{table}_backup");
+    let table_tmp = format!("{table}_tmp");
+
     let conn = self.lock();
     let has_backup: bool = conn.query_row(
       "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name=?1",
-      [&format!("{table}_backup")],
+      [&table_backup],
       |row| row.get(0),
     )?;
     if !has_backup {
@@ -588,11 +1003,13 @@ impl History {
     // count how many entries from backup are missing in current table
     let restored: i64 = tx.query_row(
       &format!(
-        "SELECT COUNT(*) FROM {table}_backup b \
-       WHERE NOT EXISTS ( \
-         SELECT 1 FROM {table} c \
-         WHERE c.command = b.command AND c.timestamp = b.timestamp \
-       )"
+        "
+        SELECT COUNT(*) FROM {table_backup} b \
+        WHERE NOT EXISTS ( \
+          SELECT 1 FROM {table} c \
+          WHERE c.command = b.command AND c.timestamp = b.timestamp \
+        )
+       "
       ),
       [],
       |row| row.get(0),
@@ -600,25 +1017,58 @@ impl History {
     // merge: insert deleted entries from backup that aren't in the current table
     tx.execute(
       &format!(
-        "INSERT INTO {table} (command, timestamp, runtime, cwd, status, token) \
-       SELECT b.command, b.timestamp, b.runtime, b.cwd, b.status, b.token \
-       FROM {table}_backup b \
-       WHERE NOT EXISTS ( \
-         SELECT 1 FROM {table} c \
-         WHERE c.command = b.command AND c.timestamp = b.timestamp \
-       )"
+        "
+        INSERT INTO {table} (
+          command,
+          timestamp,
+          runtime,
+          cwd,
+          status,
+          token,
+          parent,
+          joint
+        ) \
+        SELECT b.command, b.timestamp, b.runtime, b.cwd, b.status, b.token, b.parent, b.joint \
+        FROM {table_backup} b \
+        WHERE NOT EXISTS ( \
+          SELECT 1 FROM {table} c \
+          WHERE c.command = b.command AND c.timestamp = b.timestamp \
+        )
+        "
       ),
       [],
     )?;
     // rebuild with contiguous IDs in chronological order
     tx.execute_batch(&format!(
-      "CREATE TABLE {table}_tmp (id INTEGER PRIMARY KEY, timestamp INT, runtime INT, command TEXT, cwd TEXT, status INT DEFAULT 0, token TEXT); \
-       INSERT INTO {table}_tmp (id, timestamp, runtime, command, cwd, status, token) \
-       SELECT ROW_NUMBER() OVER (ORDER BY timestamp), timestamp, runtime, command, cwd, status, token \
-       FROM {table}; \
-       DROP TABLE {table}; \
-       ALTER TABLE {table}_tmp RENAME TO {table}; \
-       DROP TABLE IF EXISTS {table}_backup;"
+      "
+      CREATE TABLE {table_tmp} (
+        id INTEGER PRIMARY KEY,
+        timestamp INT,
+        runtime INT,
+        command TEXT,
+        cwd TEXT,
+        status INT DEFAULT 0,
+        token TEXT,
+        parent TEXT,
+        joint TEXT
+      ); \
+      INSERT INTO {table_tmp} (
+        id,
+        timestamp,
+        runtime,
+        command,
+        cwd,
+        status,
+        token,
+        parent,
+        joint
+      ) \
+      SELECT ROW_NUMBER() OVER (ORDER BY timestamp), timestamp, runtime, command, cwd, status, token, parent, joint \
+      FROM {table}; \
+      DROP TABLE {table}; \
+      ALTER TABLE {table_tmp} RENAME TO {table}; \
+      DROP TABLE IF EXISTS {table_backup};
+      "
     ))?;
     tx.commit()?;
     Ok(restored)
@@ -626,24 +1076,38 @@ impl History {
 
   pub(crate) fn sort_by_timestamp(&self) -> ShResult<()> {
     let table = &self.table;
+    let table_tmp = format!("{table}_tmp");
+
     let conn = self.lock();
     let tx = conn.unchecked_transaction()?;
     tx.execute_batch(&format!(
       r"
-			CREATE TABLE {table}_tmp (
+			CREATE TABLE {table_tmp} (
 				id INTEGER PRIMARY KEY,
 				timestamp INT,
 				runtime INT,
 				command TEXT,
 				cwd TEXT,
 				status INT DEFAULT 0,
-				token TEXT
+				token TEXT,
+        parent TEXT,
+        joint TEXT
 			);
-			INSERT INTO {table}_tmp (id, timestamp, runtime, command, cwd, status, token)
-			SELECT ROW_NUMBER() OVER (ORDER BY timestamp), timestamp, runtime, command, cwd, status, token
+			INSERT INTO {table_tmp} (
+        id,
+        timestamp,
+        runtime,
+        command,
+        cwd,
+        status,
+        token,
+        parent,
+        joint
+      )
+			SELECT ROW_NUMBER() OVER (ORDER BY timestamp), timestamp, runtime, command, cwd, status, token, parent, joint
 			FROM {table};
 			DROP TABLE {table};
-			ALTER TABLE {table}_tmp RENAME TO {table};
+			ALTER TABLE {table_tmp} RENAME TO {table};
 			"
     ))?;
     tx.commit()?;
@@ -682,40 +1146,108 @@ impl History {
     Ok(rows.filter_map(Result::ok).collect())
   }
 
+  /// Like [`query`](Self::query), but constrained to the current branch's reachable set.
+  ///
+  /// * `conditions` are the extra WHERE conditions (no leading `WHERE`)
+  /// * `tail` is the `ORDER BY`/`LIMIT` clause.
+  pub(crate) fn query_scoped(
+    &self,
+    conditions: &str,
+    tail: &str,
+    params: &[&dyn rusqlite::ToSql],
+  ) -> ShResult<Vec<(i64, HistEntry)>> {
+    let table = &self.table;
+    let branch_idx = params.len() + 1;
+    let where_ = if conditions.trim().is_empty() {
+      "WHERE token IN (SELECT token FROM reachable) AND joint IS NULL".to_string()
+    } else {
+      format!("WHERE token IN (SELECT token FROM reachable) AND joint IS NULL AND ({conditions})")
+    };
+    let sql = format!(
+      r"
+      WITH RECURSIVE reachable(token) AS (
+        SELECT head FROM branches WHERE name = ?{branch_idx}
+        UNION
+        SELECT CASE k WHEN 0 THEN h.parent ELSE h.joint END
+        FROM {table} h
+        JOIN reachable r ON h.token = r.token
+        CROSS JOIN (SELECT 0 AS k UNION ALL SELECT 1) ks
+        WHERE (k = 0 AND h.parent IS NOT NULL)
+           OR (k = 1 AND h.joint IS NOT NULL)
+      )
+      SELECT command, timestamp, runtime, cwd, status, token, id
+      FROM {table} {where_} {tail}
+      "
+    );
+    let branch = self.branch.to_string();
+    let mut all: Vec<&dyn rusqlite::ToSql> = params.to_vec();
+    all.push(&branch);
+
+    let conn = self.lock();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(all.as_slice(), |row| {
+      Ok((row.get(6)?, Self::row_to_entry(row)?))
+    })?;
+
+    Ok(rows.filter_map(Result::ok).collect())
+  }
+
   pub(crate) fn query_range(&self, first: i64, last: i64) -> ShResult<Vec<(i64, HistEntry)>> {
-    let where_clause = r"
-			WHERE id BETWEEN ?1 AND ?2
-			ORDER BY id ASC
-		"
-    .to_string();
-    self.query(&where_clause, rusqlite::params![first, last])
+    self.query_scoped(
+      "id BETWEEN ?1 AND ?2",
+      "ORDER BY id ASC",
+      rusqlite::params![first, last],
+    )
   }
 
   pub(crate) fn query_by_prefix(&self, prefix: &str) -> ShResult<Option<(i64, HistEntry)>> {
-    let where_clause = r"
-			WHERE command LIKE ?1 || '%'
-			ORDER BY id DESC
-			LIMIT 1
-		"
-    .to_string();
     Ok(
       self
-        .query(&where_clause, rusqlite::params![prefix])?
+        .query_scoped(
+          "command LIKE ?1 || '%'",
+          "ORDER BY id DESC LIMIT 1",
+          rusqlite::params![prefix],
+        )?
         .into_iter()
         .next(),
     )
   }
 
   #[cfg_attr(not(test), allow(dead_code))]
-  pub(crate) fn push_entry(&self, entry: HistEntry) -> ShResult<bool> {
-    Self::push_entry_conn(&self.lock(), &self.table, entry)
+  pub(crate) fn push_entry(&self, entry: HistEntry) -> ShResult<Option<Uuid>> {
+    let cached = entry.clone();
+    let res = Self::push_entry_conn(&self.lock(), &self.table, &self.branch, entry);
+    if matches!(res, Ok(Some(_))) {
+      self.cache_entry(cached);
+    }
+    self.trim_to_max();
+    res
   }
 
-  pub(crate) fn push_with(&self, conn: &Connection, entry: HistEntry) -> ShResult<bool> {
-    Self::push_entry_conn(conn, &self.table, entry)
+  fn cache_entry(&self, entry: HistEntry) {
+    let key = self.cache_key();
+    if let Ok(mut cache) = HIST_ENTRIES.write() {
+      let entries = cache.entry(key.clone()).or_default();
+      entries.retain(|e| e.command != entry.command);
+      entries.push(entry.clone());
+    }
+    if let Ok(mut cache) = SEARCH_ENTRIES.write() {
+      let entries = cache.entry(key).or_default();
+      entries.retain(|e| e.command != entry.command);
+      entries.push(entry);
+    }
   }
 
-  fn push_entry_conn(conn: &Connection, table: &str, entry: HistEntry) -> ShResult<bool> {
+  pub(crate) fn push_with(&self, conn: &Connection, entry: HistEntry) -> ShResult<Option<Uuid>> {
+    Self::push_entry_conn(conn, &self.table, &self.branch, entry)
+  }
+
+  fn push_entry_conn(
+    conn: &Connection,
+    table: &Table,
+    branch: &Branch,
+    entry: HistEntry,
+  ) -> ShResult<Option<Uuid>> {
     let HistEntry {
       runtime,
       timestamp,
@@ -724,32 +1256,45 @@ impl History {
       status,
       token,
     } = entry;
+    let token_raw = token.to_string();
+
     if command.is_empty() {
-      return Ok(false);
+      return Ok(None);
     }
     if Self::token_exists(conn, table, token) {
-      return Ok(false);
+      return Ok(None);
     }
-    if shopt!(history.ignore_dupes) {
-      let last: Option<String> = conn
-        .query_row(
-          &format!("SELECT command FROM {table} ORDER BY id DESC LIMIT 1"),
-          [],
-          |row| row.get(0),
-        )
-        .ok();
-      if last.as_deref() == Some(command.as_ref()) {
-        return Ok(false);
-      }
+    let parent = Self::head_entry_conn(conn, table, branch)?;
+    let parent_token = parent.as_ref().map(|e| e.token.to_string());
+
+    if shopt!(history.ignore_dupes) && parent.as_ref().map(|e| &e.command) == Some(&command) {
+      return Ok(None);
     }
 
-    let timestamp = timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+    let timestamp = timestamp_secs(timestamp);
     let new_id = Self::last_id_conn(conn, table) + 1;
     conn.execute(
-      &format!("INSERT INTO {table} (id, timestamp, runtime, command, cwd, status, token) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"),
-      rusqlite::params![new_id, timestamp, runtime.as_micros() as i64, command, cwd, status, token.to_string()],
+      &format!(
+        "
+        INSERT INTO {table} (id, timestamp, runtime, command, cwd, status, token, parent)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+      "
+      ),
+      rusqlite::params![
+        new_id,
+        timestamp,
+        runtime.as_micros() as i64,
+        command,
+        cwd,
+        status,
+        &token_raw,
+        parent_token
+      ],
     )?;
-    Ok(true)
+
+    Self::advance_head(conn, branch, &token_raw)?;
+
+    Ok(Some(token))
   }
 
   pub(crate) fn token_exists(conn: &Connection, table: &str, token: Uuid) -> bool {
@@ -767,12 +1312,12 @@ impl History {
       self.search_mask = vec![];
       return;
     };
-    let Some(entry_table) = entries.get(&self.table) else {
+    let Some(entry_table) = entries.get(&self.cache_key()) else {
       self.search_mask = vec![];
       return;
     };
     let Some(prefix) = prefix else {
-      self.search_mask = entry_table.clone();
+      self.search_mask.clone_from(entry_table);
       return;
     };
 
@@ -947,7 +1492,7 @@ impl History {
   /// from earlier tests in the same process, breaking single-entry-count
   /// assumptions.
   #[cfg(test)]
-  pub(crate) fn clear_global_caches_for_test(table: &str) {
+  pub(crate) fn clear_global_caches_for_test(table: &CacheKey) {
     if let Ok(mut c) = HIST_ENTRIES.write() {
       c.remove(table);
     }
@@ -964,33 +1509,42 @@ impl History {
   /// this session hasn't cached yet.
   #[cfg(test)]
   pub(crate) fn insert_raw_for_test(&self, command: &str, timestamp: i64) {
-    let table = &self.table;
     let conn = self.lock();
-    let new_id = Self::last_id_conn(&conn, table) + 1;
-    conn
-      .execute(
-        &format!(
-          "INSERT INTO {table} (id, timestamp, runtime, command, cwd, token) VALUES (?1, ?2, 0, ?3, ?4, ?5)"
-        ),
-        rusqlite::params![new_id, timestamp, command, "", Uuid::new_v4().to_string()],
-      )
-      .unwrap();
+    let new_id = Self::last_id_conn(&conn, &self.table) + 1;
+    self.insert_raw_conn(&conn, command, new_id, timestamp);
   }
 
   /// Insert a row with an explicit id — simulates another session having
   /// committed a specific PRIMARY KEY out of band.
   #[cfg(test)]
   pub(crate) fn insert_raw_with_id_for_test(&self, command: &str, id: i64, timestamp: i64) {
-    let table = &self.table;
     let conn = self.lock();
+    self.insert_raw_conn(&conn, command, id, timestamp);
+  }
+
+  /// Chain a raw row onto the current branch tip (parent = head) and advance
+  /// the head, mirroring what a real push from another session does — so the
+  /// branch-scoped loader can actually reach it.
+  #[cfg(test)]
+  fn insert_raw_conn(&self, conn: &Connection, command: &str, id: i64, timestamp: i64) {
+    let table = &self.table;
+    let token = Uuid::new_v4().to_string();
+    let parent: Option<String> = conn
+      .query_row(
+        "SELECT head FROM branches WHERE name = ?1",
+        rusqlite::params![*self.branch],
+        |r| r.get(0),
+      )
+      .ok();
     conn
       .execute(
         &format!(
-          "INSERT INTO {table} (id, timestamp, runtime, command, cwd, token) VALUES (?1, ?2, 0, ?3, ?4, ?5)"
+          "INSERT INTO {table} (id, timestamp, runtime, command, cwd, token, parent) VALUES (?1, ?2, 0, ?3, ?4, ?5, ?6)"
         ),
-        rusqlite::params![id, timestamp, command, "", Uuid::new_v4().to_string()],
+        rusqlite::params![id, timestamp, command, "", token, parent],
       )
       .unwrap();
+    Self::advance_head(conn, &self.branch, &token).unwrap();
   }
 
   #[cfg(test)]
@@ -1001,7 +1555,7 @@ impl History {
   #[cfg(test)]
   pub(crate) fn set_search_watermark_for_test(&self, ts: i64) {
     if let Ok(mut wm) = SEARCH_WATERMARKS.write() {
-      wm.insert(self.table.clone(), ts);
+      wm.insert(self.cache_key(), ts);
     }
   }
 
@@ -1020,7 +1574,7 @@ impl History {
       return None;
     }
     let entries = HIST_ENTRIES.read().ok()?;
-    let table = entries.get(&self.table)?;
+    let table = entries.get(&self.cache_key())?;
     table
       .iter()
       .rev()
@@ -1029,8 +1583,9 @@ impl History {
   }
 
   pub(crate) fn refresh_hist_entries(&self) -> usize {
-    let num_entries_before = num_entries(&self.table);
-    let entries = query_masked(None, &self.lock(), &self.table);
+    let cache_key = self.cache_key();
+    let num_entries_before = num_entries(&cache_key);
+    let entries = query_masked(None, &self.lock(), &self.table, &self.branch);
     let max_ts = entries
       .iter()
       .filter_map(|e| e.timestamp.duration_since(std::time::UNIX_EPOCH).ok())
@@ -1038,16 +1593,16 @@ impl History {
       .max()
       .unwrap_or(0);
     if let Ok(mut cache) = HIST_ENTRIES.write() {
-      cache.insert(self.table.clone(), entries.clone());
+      cache.insert(cache_key.clone(), entries.clone());
     }
     if let Ok(mut cache) = SEARCH_ENTRIES.write() {
-      cache.insert(self.table.clone(), entries);
+      cache.insert(cache_key.clone(), entries);
     }
     if let Ok(mut wm) = SEARCH_WATERMARKS.write() {
-      wm.insert(self.table.clone(), max_ts);
+      wm.insert(cache_key.clone(), max_ts);
     }
 
-    let num_entries_after = num_entries(&self.table);
+    let num_entries_after = num_entries(&cache_key);
     num_entries_after.saturating_sub(num_entries_before)
   }
 
@@ -1056,7 +1611,7 @@ impl History {
     SEARCH_ENTRIES
       .read()
       .ok()
-      .and_then(|c| c.get(&self.table).cloned())
+      .and_then(|c| c.get(&self.cache_key()).cloned())
       .unwrap_or_default()
       .iter()
       .map(|e| e.command().to_string())
@@ -1068,7 +1623,7 @@ impl History {
     HIST_ENTRIES
       .read()
       .ok()
-      .and_then(|c| c.get(&self.table).cloned())
+      .and_then(|c| c.get(&self.cache_key()).cloned())
       .unwrap_or_default()
       .iter()
       .map(|e| e.command().to_string())
@@ -1092,6 +1647,7 @@ impl History {
   }
 
   pub(crate) fn scroll(&mut self, offset: isize) -> Option<&HistEntry> {
+    self.check_branch();
     self.ensure_mask_fresh();
     self.cursor = self
       .cursor
@@ -1103,6 +1659,7 @@ impl History {
   }
 
   pub(crate) fn scroll_to(&mut self, idx: usize) -> Option<&HistEntry> {
+    self.check_branch();
     self.ensure_mask_fresh();
     self.cursor = idx.clamp(0, self.search_mask.len());
     self.virt_cursor = self.cursor;
@@ -1148,14 +1705,15 @@ impl History {
   }
 
   pub(crate) fn merge_search_entries(&mut self) {
+    let cache_key = self.cache_key();
     let search = SEARCH_ENTRIES
       .read()
       .ok()
-      .and_then(|c| c.get(&self.table).cloned());
+      .and_then(|c| c.get(&cache_key).cloned());
     if let Some(entries) = search
       && let Ok(mut hist) = HIST_ENTRIES.write()
     {
-      hist.insert(self.table.clone(), entries);
+      hist.insert(cache_key, entries);
     }
     self.mark_mask_stale();
   }
@@ -1163,13 +1721,14 @@ impl History {
   // Fetch any entries from other sessions added after the watermark and merge
   // them into SEARCH_ENTRIES. Runs synchronously since the delta is small.
   fn sync_search_entries(&self) {
+    let cache_key = self.cache_key();
     let watermark = SEARCH_WATERMARKS
       .read()
       .ok()
-      .and_then(|wm| wm.get(&self.table).copied())
+      .and_then(|wm| wm.get(&cache_key).copied())
       .unwrap_or(0);
 
-    let delta = query_since(watermark, &self.lock(), &self.table);
+    let delta = query_since(watermark, &self.lock(), &self.table, &self.branch);
     if delta.is_empty() {
       return;
     }
@@ -1182,7 +1741,7 @@ impl History {
       .unwrap_or(watermark);
 
     if let Ok(mut cache) = SEARCH_ENTRIES.write() {
-      let entries = cache.entry(self.table.clone()).or_default();
+      let entries = cache.entry(cache_key.clone()).or_default();
       for new_entry in delta {
         entries.retain(|e| e.command != new_entry.command);
         entries.push(new_entry);
@@ -1190,7 +1749,7 @@ impl History {
       entries.sort_by_key(|e| e.timestamp);
     }
     if let Ok(mut wm) = SEARCH_WATERMARKS.write() {
-      let wm_entry = wm.entry(self.table.clone()).or_insert(0);
+      let wm_entry = wm.entry(cache_key).or_insert(0);
       *wm_entry = (*wm_entry).max(new_watermark);
     }
   }
@@ -1201,7 +1760,7 @@ impl History {
     let all_entries = SEARCH_ENTRIES
       .read()
       .ok()
-      .and_then(|c| c.get(&self.table).cloned())
+      .and_then(|c| c.get(&self.cache_key()).cloned())
       .unwrap_or_default();
 
     if all_entries.is_empty() {

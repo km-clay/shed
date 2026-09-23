@@ -6,14 +6,23 @@ use std::{
   time::UNIX_EPOCH,
 };
 
+use bstr::ByteSlice;
+
 use crate::{
   HashSet,
-  builtin::opt::Opt,
+  builtin::{
+    BuiltinArgs,
+    opt::{self, Opt},
+  },
   errln,
+  eval::{
+    execute,
+    lex::{Span, Tk},
+  },
   expand::escape,
-  opt,
+  opt, outln,
   procio::{self, SinkIo},
-  readline::{self, HistEntry, History},
+  readline::{self, HistEntry, History, MAIN_HIST_TABLE_NAME, MergeResult},
   sherr,
   state::{Shed, db, paths, vars::VarStr},
   status_msg,
@@ -24,7 +33,29 @@ use crate::{
   },
 };
 
-use super::opt::OptSpec;
+use super::opt::{OptSpec, Parsed, Word};
+
+fn open_history(span: Span, ex: bool, needs_mutable: bool) -> ShResult<History> {
+  let (table, branch) = if ex {
+    ("ex_history", "main".into())
+  } else {
+    (MAIN_HIST_TABLE_NAME, Shed::hist_branch())
+  };
+  match db::get_db_conn() {
+    Some(conn) => History::new(conn, table, &branch).promote_err(span),
+    None if needs_mutable => Err(
+      sherr!(
+        ExecFail,
+        "hist: history can't be modified from a pipeline or subshell"
+      )
+      .promote(span),
+    ),
+    None => {
+      let conn = db::open_db_conn_readonly().promote_err(span)?;
+      Ok(History::attach(Arc::new(Mutex::new(conn)), table, &branch))
+    }
+  }
+}
 
 /// Helper macro to reduce repetition when adding conditions to the query. It handles the '--not' logic and parameter binding.
 struct WhereBuilder {
@@ -43,13 +74,8 @@ impl WhereBuilder {
     self.params.push(Box::new(param));
     self.idx += 1;
   }
-  fn build(self) -> (Option<String>, Vec<Box<dyn rusqlite::ToSql>>) {
-    let where_clause = if self.conditions.is_empty() {
-      None
-    } else {
-      Some(format!("WHERE {}", self.conditions.join(" AND ")))
-    };
-    (where_clause, self.params)
+  fn build(self) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
+    (self.conditions.join(" AND "), self.params)
   }
 }
 
@@ -77,7 +103,6 @@ pub(super) struct HistQuery {
   reverse: bool,
   json: bool,
   quoted: bool,
-  pull: bool,
   count: bool,
   delete: bool,
   restore: bool,
@@ -93,17 +118,16 @@ impl HistQuery {
   pub(super) fn execute(&self, hist: &History) -> ShResult<Vec<(i64, HistEntry)>> {
     let b = self.build_conditions(hist)?;
 
-    let (where_clause, params) = b.build();
-    let where_clause = where_clause.unwrap_or_default();
+    let (conditions, params) = b.build();
 
     let limit = self.limit.map(|n| format!("LIMIT {n}")).unwrap_or_default();
 
     // hardcoding DESC ordering so that limit always starts from the most recent entry
-    let query = format!("{where_clause} ORDER BY id DESC {limit}");
+    let tail = format!("ORDER BY id DESC {limit}");
 
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(AsRef::as_ref).collect();
 
-    let mut entries = hist.query(&query, &param_refs)?;
+    let mut entries = hist.query_scoped(&conditions, &tail, &param_refs)?;
 
     if let (Some(pat), not) = &self.matches {
       let re = match Shed::meta_mut(|m| m.get_regex(&pat.to_str_lossy())) {
@@ -120,6 +144,7 @@ impl HistQuery {
     }
 
     // 'self.reverse' means 'print the entries in descending order'
+    // so '!self.reverse' means to go in ascending order instead
     if !self.reverse {
       // the entries start in descending order. we reverse it
       // so that the more recent ones are at the bottom by default
@@ -309,7 +334,6 @@ impl HistQuery {
         "json" => new.json = true,
         "quoted" => new.quoted = true,
         "no-dupes" => new.no_dupes = true,
-        "pull" => new.pull = true,
         "no-numbers" => new.no_numbers = true,
         "reverse" => new.reverse = true,
         _ => {
@@ -431,6 +455,164 @@ impl HistQuery {
 
 pub(super) struct Hist;
 impl super::Builtin for Hist {
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
+    let sub = Self::sub_from_tokens(argv);
+    let parsed = opt::parse_opts_with(
+      argv,
+      &sub.opts(),
+      sub.strict_opts(),
+      sub.double_dash_operand(),
+    )
+    .promote_err(cmd_span)?;
+    execute::record_last_arg(parsed.trace.last().cloned());
+    Ok(parsed)
+  }
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    let sub = Self::sub_from_args(&args);
+    let (mut words, span, cmd_span) = args.unpack();
+    if sub.is_some() {
+      // strip the verb word before handing the rest to the subcommand
+      words.remove(0);
+    }
+    let sub = sub.unwrap_or(&HistList);
+
+    sub.execute(BuiltinArgs::new(words, span, cmd_span))
+  }
+}
+
+impl Hist {
+  fn sub_from_args(args: &BuiltinArgs) -> Option<&'static dyn super::Builtin> {
+    match args.argv().first() {
+      Some(Word::Arg(word, _)) => Self::sub_for(word.as_bytes()),
+      _ => None,
+    }
+  }
+  fn sub_from_tokens(tokens: &[Tk]) -> &'static dyn super::Builtin {
+    tokens
+      .get(1)
+      .filter(|tk| !tk.slice().starts_with_str("-"))
+      .and_then(|tk| Self::sub_for(tk.slice().as_bytes()))
+      .unwrap_or(&HistList)
+  }
+  fn sub_for(word: &[u8]) -> Option<&'static dyn super::Builtin> {
+    match word {
+      b"pull" => Some(&HistPull),
+      b"branch" => Some(&HistBranch),
+      b"checkout" | b"switch" => Some(&HistCheckout),
+      b"merge" => Some(&HistMerge),
+      _ => None,
+    }
+  }
+}
+
+pub(super) struct HistCheckout;
+impl super::Builtin for HistCheckout {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![OptSpec::new_short("branch", b'b'), opt!("orphan")]
+  }
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    let Some((name, span)) = args.arguments().next() else {
+      return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name"));
+    };
+    let name_s = name.to_string();
+    let create_branch = args.has_opt("branch");
+    let orphan = args.has_opt("orphan");
+
+    let hist = open_history(args.span(), false, true)?;
+
+    if orphan {
+      if hist.branch_exists(&name_s)? {
+        return Err(sherr!(ParseErr @ span, "branch already exists: {name}"));
+      }
+      // don't create a branch, that connects it to HEAD
+      // just switching the branch name creates an orphaned branch
+      Shed::set_hist_branch(name_s);
+      return util::with_status(0);
+    }
+
+    if !hist.branch_exists(&name_s)? {
+      if create_branch {
+        hist.create_branch(&name_s)?;
+      } else {
+        return Err(sherr!(ParseErr @ span, "branch does not exist: {name}"));
+      }
+    }
+    // readline picks up this change in interactive.rs
+    Shed::set_hist_branch(name_s);
+    status_msg!("hist: switched to branch {name}");
+
+    util::with_status(0)
+  }
+}
+
+pub(super) struct HistMerge;
+impl super::Builtin for HistMerge {
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    let Some((name, span)) = args.arguments().next() else {
+      return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name"));
+    };
+    let hist = open_history(args.span(), false, true)?;
+    let other = name.to_str_lossy();
+    if !hist.branch_exists(&other)? {
+      return Err(sherr!(ParseErr @ span, "branch does not exist: {name}"));
+    }
+    match hist.merge_branch(&other)? {
+      MergeResult::Merged => {
+        hist.refresh_hist_entries();
+        status_msg!("hist: merged {name}");
+      }
+      MergeResult::FastForward => {
+        hist.refresh_hist_entries();
+        status_msg!("hist: fast-forwarded to {name}");
+      }
+      MergeResult::UpToDate => status_msg!("hist: already up to date"),
+    }
+
+    util::with_status(0)
+  }
+}
+
+pub(super) struct HistBranch;
+impl super::Builtin for HistBranch {
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    let name = args.arguments().next();
+    if let Some((name, _)) = name {
+      // create new branch
+      let hist = open_history(args.span(), false, true)?;
+      hist.create_branch(&name.to_str_lossy())?;
+      status_msg!("hist: created branch {name}");
+    } else {
+      // no argument, list branches instead
+      let hist = open_history(args.cmd_span(), false, false)?;
+      let current = Shed::hist_branch();
+      for b in hist.list_branches()? {
+        let marker = if b == current { "* " } else { "  " };
+        outln!("{marker}{b}");
+      }
+    }
+
+    util::with_status(0)
+  }
+}
+
+pub(super) struct HistPull;
+impl super::Builtin for HistPull {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![opt!("ex")]
+  }
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    let has_ex = args.has_opt("ex");
+    let hist = open_history(args.span(), has_ex, true)?;
+
+    let pulled = hist.refresh_hist_entries();
+    status_msg!("hist: pulled {pulled} commands");
+
+    util::with_status(0)
+  }
+}
+
+pub(super) struct HistList;
+impl super::Builtin for HistList {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       OptSpec::new_short("no-numbers", b'n'),
@@ -443,7 +625,6 @@ impl super::Builtin for Hist {
       opt!("json"),
       opt!("quoted"),
       opt!("no-dupes"),
-      opt!("pull"),
       opt!("after", 1),
       opt!("lines-gt", 1),
       opt!("lines-lt", 1),
@@ -461,30 +642,13 @@ impl super::Builtin for Hist {
       opt!("import", 1),
     ]
   }
-  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     let (arg_vec, opts) = args.take_argv();
     let mut query = HistQuery::from_opts(&opts).promote_err(span)?;
-    let table = if query.ex_hist {
-      "ex_history"
-    } else {
-      "shed_history"
-    };
-    let hist = if let Some(conn) = db::get_db_conn() {
-      History::new(conn, table).promote_err(span)?
-    } else {
-      if query.delete || query.pull || query.restore || query.import.is_some() {
-        return Err(
-          sherr!(
-            ExecFail,
-            "hist: history can't be modified from a pipeline or subshell"
-          )
-          .promote(span),
-        );
-      }
-      let conn = db::open_db_conn_readonly().promote_err(span)?;
-      History::attach(Arc::new(Mutex::new(conn)), table)
-    };
+
+    let needs_write = query.delete || query.restore || query.import.is_some();
+    let hist = open_history(span, query.ex_hist, needs_write)?;
 
     for (arg, span) in arg_vec {
       let Ok(id) = arg.to_str_lossy().parse::<i64>() else {
@@ -497,13 +661,6 @@ impl super::Builtin for Hist {
     if query.restore {
       let num_restored = hist.restore_backup()?;
       errln!("hist: restored {num_restored} entries from backup.");
-
-      return util::with_status(0);
-    }
-
-    if query.pull {
-      let pulled = hist.refresh_hist_entries();
-      status_msg!("hist: pulled {pulled} commands");
 
       return util::with_status(0);
     }
@@ -523,7 +680,7 @@ impl super::Builtin for Hist {
       hist.transaction(|conn| {
         for (_, entry) in entries {
           let pushed = hist.push_with(conn, entry).promote_err(span)?;
-          count += i32::from(pushed);
+          count += i32::from(pushed.is_some());
         }
         Ok(())
       })?;
@@ -697,12 +854,6 @@ mod tests {
     assert!(q.json);
   }
 
-  #[test]
-  fn opts_pull_flag() {
-    let q = parse(&[Opt::for_test("pull", &[])]);
-    assert!(q.pull);
-  }
-
   // ─── Short flags ─────────────────────────────────────────────────────
 
   #[test]
@@ -863,7 +1014,7 @@ mod tests {
   /// Create a History with a unique per-test table name and seed it with
   /// the given entries (oldest first).
   fn hist_with(name: &str, entries: Vec<HistEntry>) -> crate::readline::History {
-    let h = crate::readline::History::empty(name);
+    let h = crate::readline::History::empty(name, &Shed::hist_branch());
     for e in entries {
       h.push_entry(e).unwrap();
     }
@@ -1204,7 +1355,7 @@ mod hist_builtin_execute_tests {
   //! dispatch, table selection, output formatting, and the restore/pull/
   //! import branches.
 
-  use crate::readline::History;
+  use crate::readline::{History, MAIN_HIST_TABLE_NAME};
   use crate::state::{Shed, db};
   use crate::tests::testutil::{TestGuard, test_input};
 
@@ -1225,7 +1376,22 @@ mod hist_builtin_execute_tests {
       .lock()
       .unwrap()
       .execute_batch("PRAGMA user_version = 0");
-    History::new(conn, table).expect("history init")
+    Shed::set_hist_branch("main".to_string());
+    History::new(conn, table, &Shed::hist_branch()).expect("history init")
+  }
+
+  /// Like [`fresh_history`], but also drops the shared `branches` table so each
+  /// branch test starts from an unborn `main`. Returns a `main`-bound handle.
+  fn fresh_branched() -> History {
+    let conn = db::get_db_conn().expect("test db conn");
+    {
+      let c = conn.lock().unwrap();
+      let _ = c.execute_batch("DROP TABLE IF EXISTS shed_history");
+      let _ = c.execute_batch("DROP TABLE IF EXISTS branches");
+      let _ = c.execute_batch("PRAGMA user_version = 0");
+    }
+    Shed::set_hist_branch("main".to_string());
+    History::new(conn, MAIN_HIST_TABLE_NAME, "main").expect("history init")
   }
 
   // ─── default listing / filtering ───────────────────────────────────
@@ -1233,7 +1399,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_lists_pushed_entries() {
     let g = TestGuard::new();
-    let h = fresh_history("shed_history");
+    let h = fresh_history(MAIN_HIST_TABLE_NAME);
     h.push(": alpha").unwrap();
     h.push(": beta").unwrap();
     test_input("hist").unwrap();
@@ -1246,7 +1412,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_n_flag_omits_ids() {
     let g = TestGuard::new();
-    let h = fresh_history("shed_history");
+    let h = fresh_history(MAIN_HIST_TABLE_NAME);
     h.push(": only-entry").unwrap();
     // With -n, lines should NOT start with the id\t prefix.
     test_input("hist -n").unwrap();
@@ -1259,7 +1425,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_count_outputs_entry_count() {
     let g = TestGuard::new();
-    let h = fresh_history("shed_history");
+    let h = fresh_history(MAIN_HIST_TABLE_NAME);
     h.push(": a").unwrap();
     h.push(": b").unwrap();
     h.push(": c").unwrap();
@@ -1271,7 +1437,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_json_outputs_json_object() {
     let g = TestGuard::new();
-    let h = fresh_history("shed_history");
+    let h = fresh_history(MAIN_HIST_TABLE_NAME);
     h.push(": json-entry").unwrap();
     test_input("hist --json").unwrap();
     let out = g.read_output();
@@ -1285,7 +1451,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_ex_uses_ex_history_table() {
     let g = TestGuard::new();
-    let normal = fresh_history("shed_history");
+    let normal = fresh_history(MAIN_HIST_TABLE_NAME);
     let ex = fresh_history("ex_history");
     normal.push(": normal-entry").unwrap();
     ex.push(": ex-entry").unwrap();
@@ -1300,7 +1466,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_delete_by_id_removes_entry() {
     let g = TestGuard::new();
-    let h = fresh_history("shed_history");
+    let h = fresh_history(MAIN_HIST_TABLE_NAME);
     h.push(": kept").unwrap();
     h.push(": doomed").unwrap();
     // Delete the second entry by id.
@@ -1320,7 +1486,7 @@ mod hist_builtin_execute_tests {
     // only to the displayed list — wiping the ENTIRE table. It must now delete
     // exactly the regex-matched rows.
     let g = TestGuard::new();
-    let h = fresh_history("shed_history");
+    let h = fresh_history(MAIN_HIST_TABLE_NAME);
     h.push(": cargo build").unwrap();
     h.push(": cargo test").unwrap();
     h.push(": git status").unwrap();
@@ -1347,7 +1513,7 @@ mod hist_builtin_execute_tests {
     // A regex that matches nothing must delete nothing (must NOT fall through
     // to an empty WHERE and wipe the table).
     let g = TestGuard::new();
-    let h = fresh_history("shed_history");
+    let h = fresh_history(MAIN_HIST_TABLE_NAME);
     h.push(": alpha").unwrap();
     h.push(": beta").unwrap();
     test_input("hist --delete --matches 'zzz-no-match'").unwrap();
@@ -1376,12 +1542,14 @@ mod hist_builtin_execute_tests {
     }
 
     // First table bumps user_version to USER_VERSION.
-    let first = History::new(conn.clone(), "shed_history").expect("init first table");
+    let first = History::new(conn.clone(), MAIN_HIST_TABLE_NAME, &Shed::hist_branch())
+      .expect("init first table");
     first.push(": first-table-entry").unwrap();
 
     // Second table on the same connection, user_version now == USER_VERSION.
     // Before the fix its CREATE TABLE was skipped, so this INSERT would fail.
-    let second = History::new(conn.clone(), "ex_history").expect("init second table");
+    let second =
+      History::new(conn.clone(), "ex_history", &Shed::hist_branch()).expect("init second table");
     second
       .push(": second-table-entry")
       .expect("second table must exist and be writable");
@@ -1398,7 +1566,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_restore_brings_back_deleted_entries() {
     let g = TestGuard::new();
-    let h = fresh_history("shed_history");
+    let h = fresh_history(MAIN_HIST_TABLE_NAME);
     h.push(": one").unwrap();
     h.push(": two").unwrap();
     // Delete both — creates the backup table.
@@ -1417,7 +1585,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_restore_with_no_backup_errors() {
     let _g = TestGuard::new();
-    let _h = fresh_history("shed_history");
+    let _h = fresh_history(MAIN_HIST_TABLE_NAME);
     // No prior --delete → no backup table → restore fails.
     test_input("hist --restore").ok();
     assert_ne!(Shed::get_status(), 0);
@@ -1428,8 +1596,8 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_pull_returns_ok() {
     let _g = TestGuard::new();
-    let _h = fresh_history("shed_history");
-    test_input("hist --pull").unwrap();
+    let _h = fresh_history(MAIN_HIST_TABLE_NAME);
+    test_input("hist pull").unwrap();
     assert_eq!(Shed::get_status(), 0);
   }
 
@@ -1438,7 +1606,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_import_adds_entries_from_bash_format_file() {
     let g = TestGuard::new();
-    let _h = fresh_history("shed_history");
+    let _h = fresh_history(MAIN_HIST_TABLE_NAME);
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join(".bash_history");
     std::fs::write(
@@ -1453,5 +1621,275 @@ mod hist_builtin_execute_tests {
     let out = g.read_output();
     assert!(out.contains(": imported-one"), "got: {out:?}");
     assert!(out.contains(": imported-two"), "got: {out:?}");
+  }
+
+  // ─── branch / checkout subcommands ─────────────────────────────────
+
+  #[test]
+  fn hist_branch_creates_and_lists() {
+    let g = TestGuard::new();
+    let h = fresh_branched();
+    h.push(": on-main").unwrap();
+
+    test_input("hist branch feat").unwrap();
+    test_input("hist branch").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("feat"), "new branch not listed: {out:?}");
+    // still on main after `branch` (create doesn't switch), marked current
+    assert!(out.contains("* main"), "current branch not marked: {out:?}");
+  }
+
+  #[test]
+  fn hist_checkout_switches_session_branch() {
+    let _g = TestGuard::new();
+    let h = fresh_branched();
+    h.push(": x").unwrap();
+
+    test_input("hist branch feat").unwrap();
+    test_input("hist checkout feat").unwrap();
+    assert_eq!(Shed::hist_branch(), "feat");
+    assert_eq!(Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn hist_checkout_nonexistent_errors_and_stays_put() {
+    let _g = TestGuard::new();
+    let h = fresh_branched();
+    h.push(": x").unwrap();
+
+    test_input("hist checkout nope").ok();
+    assert_ne!(Shed::get_status(), 0);
+    assert_eq!(
+      Shed::hist_branch(),
+      "main",
+      "checkout should not switch on error"
+    );
+  }
+
+  #[test]
+  fn hist_list_is_scoped_to_current_branch() {
+    let g = TestGuard::new();
+    let main_h = fresh_branched();
+    main_h.push(": shared").unwrap();
+
+    // fork feat from here (feat shares the pre-fork history)
+    test_input("hist branch feat").unwrap();
+
+    // push a feat-only entry on a feat-bound handle (test_input doesn't record)
+    let conn = db::get_db_conn().unwrap();
+    let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
+    feat_h.push(": feat-only").unwrap();
+
+    // on feat: reaches shared history AND its own entry
+    test_input("hist checkout feat").unwrap();
+    g.read_output(); // drain the "switched to branch" message
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.contains(": shared"),
+      "feat lost pre-fork history: {out:?}"
+    );
+    assert!(
+      out.contains(": feat-only"),
+      "feat missing its own entry: {out:?}"
+    );
+
+    // back on main: sees shared, NOT feat's divergent entry
+    test_input("hist checkout main").unwrap();
+    g.read_output();
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(out.contains(": shared"), "main lost its history: {out:?}");
+    assert!(
+      !out.contains(": feat-only"),
+      "main leaked feat's entry: {out:?}"
+    );
+  }
+
+  #[test]
+  fn hist_merge_brings_in_other_branch_and_hides_node() {
+    let g = TestGuard::new();
+    let main_h = fresh_branched();
+    main_h.push(": on-main").unwrap();
+
+    test_input("hist branch feat").unwrap();
+    g.read_output();
+
+    // feat-only work on a feat-bound handle
+    let conn = db::get_db_conn().unwrap();
+    let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
+    feat_h.push(": feat-work").unwrap();
+
+    // before merge: main doesn't reach feat's work
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(
+      !out.contains(": feat-work"),
+      "feat work leaked pre-merge: {out:?}"
+    );
+
+    // merge feat into main
+    test_input("hist merge feat").unwrap();
+    g.read_output();
+
+    // after merge: main reaches both its own and feat's history
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(out.contains(": on-main"), "lost main history: {out:?}");
+    assert!(
+      out.contains(": feat-work"),
+      "merge didn't bring in feat: {out:?}"
+    );
+
+    // the synthetic merge node must be invisible: count is 2, not 3
+    test_input("hist --count").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.trim_end().ends_with('2'),
+      "merge node leaked into listing: {out:?}"
+    );
+  }
+
+  #[test]
+  fn hist_delete_preserves_branch_topology() {
+    // main: a ← b ← c   feat: a ← b ← feat-x   (ids interleave: a,b,feat-x,c)
+    // Deleting shared `b` must stitch each lineage to `a` — NOT re-chain by id,
+    // which would wrongly make main's `c` point at feat's `feat-x`.
+    let g = TestGuard::new();
+    let main_h = fresh_branched();
+    main_h.push(": a").unwrap();
+    main_h.push(": b").unwrap();
+
+    test_input("hist branch feat").unwrap();
+    g.read_output();
+
+    let conn = db::get_db_conn().unwrap();
+    let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
+    feat_h.push(": feat-x").unwrap(); // id after b, on feat
+
+    main_h.push(": c").unwrap(); // id after feat-x, on main
+
+    // delete the shared middle entry
+    test_input("hist --delete --contains ': b'").unwrap();
+    g.read_output();
+
+    // main keeps a, c — must NOT have leaked feat-x via an id-order re-chain
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.contains(": a") && out.contains(": c"),
+      "main lost its history: {out:?}"
+    );
+    assert!(!out.contains(": b"), "deleted entry survived: {out:?}");
+    assert!(
+      !out.contains(": feat-x"),
+      "main leaked feat's entry after delete: {out:?}"
+    );
+
+    // feat keeps a, feat-x (its chain stitched around b), and doesn't gain c
+    test_input("hist checkout feat").unwrap();
+    g.read_output();
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.contains(": a") && out.contains(": feat-x"),
+      "feat lost its history: {out:?}"
+    );
+    assert!(!out.contains(": b"), "feat kept deleted entry: {out:?}");
+    assert!(!out.contains(": c"), "feat leaked main's entry: {out:?}");
+  }
+
+  #[test]
+  fn hist_merge_divergent_creates_hidden_node() {
+    // main and feat both advance past the fork, so neither tip is an ancestor
+    // of the other → a real merge node (not a fast-forward).
+    let g = TestGuard::new();
+    let main_h = fresh_branched();
+    main_h.push(": base").unwrap();
+
+    test_input("hist branch feat").unwrap();
+    g.read_output();
+
+    let conn = db::get_db_conn().unwrap();
+    let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
+    feat_h.push(": feat-x").unwrap();
+
+    // main diverges with a commit feat lacks
+    main_h.push(": main-y").unwrap();
+
+    test_input("hist merge feat").unwrap();
+    g.read_output();
+
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(out.contains(": base"), "lost shared base: {out:?}");
+    // a fast-forward would have discarded main's own commit; a real merge keeps it
+    assert!(
+      out.contains(": main-y"),
+      "merge dropped main's commit (wrongly fast-forwarded?): {out:?}"
+    );
+    assert!(
+      out.contains(": feat-x"),
+      "merge didn't bring in feat: {out:?}"
+    );
+
+    // three real commits; the synthetic merge node stays hidden
+    test_input("hist --count").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.trim_end().ends_with('3'),
+      "merge node leaked or history wrong: {out:?}"
+    );
+  }
+
+  #[test]
+  fn hist_checkout_b_creates_and_switches() {
+    let g = TestGuard::new();
+    let h = fresh_branched();
+    h.push(": x").unwrap();
+
+    test_input("hist checkout -b feat").unwrap();
+    g.read_output();
+    assert_eq!(Shed::hist_branch(), "feat");
+    assert_eq!(Shed::get_status(), 0);
+
+    // the branch now exists and we're on it
+    test_input("hist branch").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("* feat"), "not on the created branch: {out:?}");
+  }
+
+  #[test]
+  fn hist_checkout_orphan_starts_disconnected() {
+    let g = TestGuard::new();
+    let main_h = fresh_branched();
+    main_h.push(": on-main").unwrap();
+
+    test_input("hist checkout --orphan void").unwrap();
+    g.read_output();
+    assert_eq!(Shed::hist_branch(), "void");
+
+    // orphan is empty and disconnected until its first push
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(
+      !out.contains(": on-main"),
+      "orphan reached main's history: {out:?}"
+    );
+
+    let conn = db::get_db_conn().unwrap();
+    let void_h = History::new(conn, MAIN_HIST_TABLE_NAME, "void").unwrap();
+    void_h.push(": fresh-start").unwrap();
+
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.contains(": fresh-start"),
+      "orphan didn't record its own commit: {out:?}"
+    );
+    assert!(
+      !out.contains(": on-main"),
+      "orphan leaked main's history: {out:?}"
+    );
   }
 }

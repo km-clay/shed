@@ -7,11 +7,13 @@ use crate::{
   eval::{
     execute::{self, Dispatcher},
     lex::{Span, Tk},
-    parse::NdRule,
-    parse::ast::{Ast, NodeId},
+    parse::{
+      NdRule,
+      ast::{Ast, NodeId},
+    },
   },
   match_loop,
-  readline::{HistEntry, History},
+  readline::{HistEntry, History, MAIN_HIST_TABLE_NAME},
   sherr,
   state::{self, Shed, db, meta::MetaTab, vars::VarStr},
   try_var,
@@ -173,7 +175,7 @@ impl super::Builtin for FixCmd {
     let conn = db::get_db_conn()
       .ok_or_else(|| sherr!(InternalErr, "database not available"))
       .promote_err(span)?;
-    let hist = History::new(conn, "shed_history").promote_err(span)?;
+    let hist = History::new(conn, MAIN_HIST_TABLE_NAME, &Shed::hist_branch()).promote_err(span)?;
     match opts.mode {
       FixMode::List => {
         fc_list(&hist, opts).promote_err(span)?;
@@ -594,18 +596,13 @@ mod tests {
     // Importantly: -r AFTER -- should NOT have set the reverse flag.
     assert!(!opts.reverse);
   }
-}
 
-#[cfg(test)]
-mod fc_edit_tests {
-  use super::*;
   use crate::readline::History;
   use crate::state::db;
   use crate::state::{
     Shed,
     vars::{VarFlags, VarKind},
   };
-  use crate::tests::testutil::TestGuard;
   use std::os::unix::fs::PermissionsExt;
   use std::path::{Path, PathBuf};
   use tempfile::TempDir;
@@ -622,14 +619,14 @@ mod fc_edit_tests {
       .lock()
       .unwrap()
       .execute_batch("PRAGMA user_version = 0");
-    History::new(conn, "shed_history").expect("history init")
+    History::new(conn, MAIN_HIST_TABLE_NAME, &Shed::hist_branch()).expect("history init")
   }
 
   /// New View over the same DB without dropping data. For asserting on
   /// what's in history after `fc_edit` consumed the previous handle.
   fn hist_view() -> History {
     let conn = db::get_db_conn().unwrap();
-    History::new(conn, "shed_history").unwrap()
+    History::new(conn, MAIN_HIST_TABLE_NAME, &Shed::hist_branch()).unwrap()
   }
 
   fn unset_editor_vars() {
@@ -856,29 +853,9 @@ mod fc_edit_tests {
     let cmds: Vec<&str> = entries.iter().map(|(_, e)| e.command.as_str()).collect();
     assert_eq!(cmds, vec![": b", ": c", ": d"]);
   }
-}
 
-#[cfg(test)]
-mod fc_run_builtin_tests {
-  //! Tests for the `fc` builtin's `run_builtin` routing — verifies it
-  //! dispatches to `fc_list` / `fc_reexec` / `fc_edit` based on opts.
-
-  use crate::readline::History;
-  use crate::state::{self, Shed};
-  use crate::tests::testutil::{TestGuard, test_input};
-
-  fn fresh_history() -> History {
-    let conn = state::db::get_db_conn().expect("test db");
-    let _ = conn
-      .lock()
-      .unwrap()
-      .execute_batch("DROP TABLE IF EXISTS shed_history");
-    let _ = conn
-      .lock()
-      .unwrap()
-      .execute_batch("PRAGMA user_version = 0");
-    History::new(conn, "shed_history").expect("history init")
-  }
+  use crate::state;
+  use crate::tests::testutil::test_input;
 
   // ─── opts.list path → fc_list ────────────────────────────────────
 
@@ -927,31 +904,6 @@ mod fc_run_builtin_tests {
     });
     test_input("fc").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
-  }
-}
-
-#[cfg(test)]
-mod fc_reexec_tests {
-  use crate::readline::History;
-  use crate::state;
-  use crate::tests::testutil::{TestGuard, test_input};
-
-  fn fresh_history() -> History {
-    let conn = state::db::get_db_conn().expect("test db");
-    let _ = conn
-      .lock()
-      .unwrap()
-      .execute_batch("DROP TABLE IF EXISTS shed_history");
-    let _ = conn
-      .lock()
-      .unwrap()
-      .execute_batch("PRAGMA user_version = 0");
-    History::new(conn, "shed_history").expect("history init")
-  }
-
-  fn hist_view() -> History {
-    let conn = state::db::get_db_conn().unwrap();
-    History::new(conn, "shed_history").unwrap()
   }
 
   // ─── `fc -s` re-executes the previous command ──────────────────

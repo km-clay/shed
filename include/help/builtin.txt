@@ -1103,10 +1103,14 @@ HELP                                             *builtin-help* *help*
 HIST                                             *builtin-hist* *hist*
 
   `hist [options] [id ...]`
+  `hist pull [--ex]`
+  `hist branch [{name}]`
+  `hist checkout [-b] [--orphan] {branch}`     (alias: `switch`)
+  `hist merge {branch}`
 
   Query and manage shell history. History is stored in a SQLite
-  database and supports rich filtering. With no arguments or IDs,
-  prints the full history oldest-first.
+  database and supports rich filtering and git-style branching. With
+  no subcommand, prints the current branch's history oldest-first.
 
   Filter Options ~
 
@@ -1149,8 +1153,28 @@ HIST                                             *builtin-hist* *hist*
     `--restore`         restore previously deleted entries
     `--import {source}` import history from another shell (see below)
     `--ex`              operate on ex-mode history instead of shell command history
-    `--pull`            reload the in-memory history cache from the database,
-                        picking up entries written by other shell sessions
+
+  History Branches ~
+
+  History is organized into branches, like git. Each session is on a
+  current branch (default `main`), and listings, search, and `!` history
+  expansion are all scoped to it. Branching applies to shell command
+  history; ex-mode history is not branched.
+
+    `hist pull`             reload the in-memory cache from the database,
+                            picking up entries written by other sessions.
+                            `--ex` pulls ex-mode history instead.
+    `hist branch`           list branches; the current one is marked `*`
+    `hist branch {name}`    create branch {name} at the current position
+                            without switching to it
+    `hist checkout {name}`  switch to branch {name} (alias: `switch`)
+      `-b {name}`           create {name} if it doesn't exist, then switch
+      `--orphan {name}`     switch to a new empty branch disconnected from
+                            existing history; its first command becomes a
+                            fresh root
+    `hist merge {name}`     merge {name} into the current branch. Fast-forwards
+                            when the current branch hasn't diverged, otherwise
+                            records a merge uniting both histories.
 
   Providing numeric arguments restricts results to those specific IDs:
 
@@ -1187,6 +1211,11 @@ HIST                                             *builtin-hist* *hist*
       `hist --import ~/old_history`             import from explicit path
       `hist --quoted --no-dupes -n`             unique commands, shell-quoted
       `hist --quoted -n | scry -q`              fuzzy-pick a past command
+      `hist branch experiment`                  create a branch at the current point
+      `hist checkout -b experiment`             create it and switch in one step
+      `hist checkout --orphan scratch`          start a fresh, disconnected history
+      `hist merge experiment`                   fold a branch back into the current one
+      `hist pull`                               sync history from other sessions
 
   See also: |builtin-scry|
 

@@ -74,7 +74,7 @@ pub(super) use complete::{
 pub(super) use editcmd::Direction;
 pub(super) use editmode::ModeReport;
 pub(super) use histimport::import_history;
-pub(super) use history::{HistEntry, History};
+pub(super) use history::{HistEntry, History, MAIN_HIST_TABLE_NAME, MergeResult};
 pub(super) use linebuf::{Hint, Lines, Pos};
 
 #[cfg(test)]
@@ -100,8 +100,8 @@ impl SimpleEditor {
   pub(crate) fn new(history_table: Option<&str>) -> Self {
     let history = history_table.map(|name| {
       db::get_db_conn()
-        .and_then(|conn| History::new(conn, name).ok())
-        .unwrap_or(History::empty(name))
+        .and_then(|conn| History::new(conn, name, &Shed::hist_branch()).ok())
+        .unwrap_or(History::empty(name, &Shed::hist_branch()))
     });
     Self {
       history,
@@ -572,17 +572,17 @@ impl ShedLine {
 
     let history = if with_hist {
       if let Some(conn) = db::get_db_conn() {
-        History::new(conn, "shed_history")?
+        History::new(conn, MAIN_HIST_TABLE_NAME, &Shed::hist_branch())?
       } else {
-        History::empty("shed_history")
+        History::empty(MAIN_HIST_TABLE_NAME, &Shed::hist_branch())
       }
     } else {
-      History::empty("shed_history")
+      History::empty(MAIN_HIST_TABLE_NAME, &Shed::hist_branch())
     };
     let ex_history = if let Some(conn) = db::get_db_conn() {
-      History::new(conn, "ex_history")?
+      History::new(conn, "ex_history", "main")?
     } else {
-      History::empty("ex_history")
+      History::empty("ex_history", "main")
     };
     let mode = if shopt!(set.vi) {
       Box::new(ViInsert::new()) as Box<dyn EditMode>

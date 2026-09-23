@@ -572,6 +572,8 @@ fn handle_readline_event(
       log::info!("Command executed in {command_run_time:.2?}");
       let runtime = Shed::meta_mut(MetaTab::stop_timer);
 
+      readline.history_mut().check_branch();
+
       let autocmd_start = Instant::now();
 
       autocmd!(PostCmd);
