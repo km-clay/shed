@@ -1,12 +1,15 @@
 use std::{
   cmp::Ordering,
   convert::Into,
+  fs::OpenOptions,
   path::PathBuf,
+  str::FromStr,
   sync::{Arc, Mutex},
-  time::UNIX_EPOCH,
+  time::{Duration, UNIX_EPOCH},
 };
 
 use bstr::ByteSlice;
+use serde_json::{Map, Value};
 
 use crate::{
   HashSet,
@@ -21,14 +24,18 @@ use crate::{
   },
   expand::escape,
   opt, outln,
-  procio::{self, SinkIo},
-  readline::{self, HistEntry, History, MAIN_HIST_TABLE_NAME, MergeResult},
+  procio::{self, OsSink, Sink, SinkIo},
+  readline::{
+    self, Branch, HistDump, HistEntry, History, MAIN_HIST_TABLE_NAME, MergeResult, ReflogEntry,
+    Table,
+  },
   sherr,
   state::{Shed, db, paths, vars::VarStr},
   status_msg,
   util::{
     self,
     error::{ShResult, ShResultExt},
+    random::Uuid,
     strops::TimeReader,
   },
 };
@@ -55,6 +62,37 @@ fn open_history(span: Span, ex: bool, needs_mutable: bool) -> ShResult<History> 
       Ok(History::attach(Arc::new(Mutex::new(conn)), table, &branch))
     }
   }
+}
+
+fn entry_obj(e: &HistEntry) -> Value {
+  let HistEntry {
+    runtime,
+    timestamp,
+    command,
+    cwd,
+    status,
+    token,
+  } = e;
+  let mut map = Map::new();
+  map.insert(
+    "runtime".into(),
+    Value::Number((runtime.as_micros() as i64).into()),
+  );
+  map.insert(
+    "timestamp".into(),
+    Value::Number(
+      timestamp
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .into(),
+    ),
+  );
+  map.insert("command".into(), Value::String(command.clone()));
+  map.insert("cwd".into(), Value::String(cwd.clone()));
+  map.insert("status".into(), Value::Number(i64::from(*status).into()));
+  map.insert("token".into(), Value::String(token.to_string()));
+  Value::Object(map)
 }
 
 /// Helper macro to reduce repetition when adding conditions to the query. It handles the '--not' logic and parameter binding.
@@ -106,7 +144,6 @@ pub(super) struct HistQuery {
   count: bool,
   delete: bool,
   restore: bool,
-  import: Option<VarStr>,
   ex_hist: bool,
 }
 
@@ -302,27 +339,6 @@ impl HistQuery {
             new.lines_lt = (Some(count), negated);
           }
         }
-        "import" => {
-          let arg = opt.value()?;
-          let Some(home) = paths::get_home() else {
-            return Err(sherr!(
-              ParseErr,
-              "Cannot use {opt} without a valid home directory"
-            ));
-          };
-          let path = match arg {
-            "bash" => home.join(".bash_history"),
-            "zsh" => home.join(".zsh_history"),
-            "fish" => {
-              let data_dir = paths::data_dir()
-                .unwrap_or_else(|| PathBuf::from(format!("{}/.local/share", home.display())));
-              data_dir.join("fish").join("fish_history")
-            }
-            _ => PathBuf::from(arg),
-          };
-
-          new.import = Some(path.to_string_lossy().into());
-        }
         "not" => {
           negated = !negated;
           continue;
@@ -407,36 +423,6 @@ impl HistQuery {
     f: &mut impl std::io::Write,
   ) -> std::io::Result<()> {
     use serde_json::Value;
-    let entry_obj = |e: &HistEntry| {
-      let HistEntry {
-        runtime,
-        timestamp,
-        command,
-        cwd,
-        status,
-        token,
-      } = e;
-      let mut map = serde_json::Map::new();
-      map.insert(
-        "runtime".into(),
-        Value::Number((runtime.as_micros() as i64).into()),
-      );
-      map.insert(
-        "timestamp".into(),
-        Value::Number(
-          timestamp
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            .into(),
-        ),
-      );
-      map.insert("command".into(), Value::String(command.clone()));
-      map.insert("cwd".into(), Value::String(cwd.clone()));
-      map.insert("status".into(), Value::Number(i64::from(*status).into()));
-      map.insert("token".into(), Value::String(token.to_string()));
-      Value::Object(map)
-    };
 
     let json = if self.no_numbers {
       Value::Array(entries.iter().map(|(_, e)| entry_obj(e)).collect())
@@ -500,8 +486,258 @@ impl Hist {
       b"branch" => Some(&HistBranch),
       b"checkout" | b"switch" => Some(&HistCheckout),
       b"merge" => Some(&HistMerge),
+      b"export" => Some(&HistExport),
+      b"import" => Some(&HistImport),
       _ => None,
     }
+  }
+}
+
+pub(super) struct HistImport;
+impl super::Builtin for HistImport {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![OptSpec::new_short("force", b'f')]
+  }
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    let source: Arc<dyn Sink> = if let Some((path, span)) = args.arguments().next() {
+      let resolved = Self::resolve_source(&path.to_str_lossy(), span)?;
+      let file = OpenOptions::new()
+        .read(true)
+        .open(&resolved)
+        .map_err(|e| sherr!(ExecFail @ span, "failed to open {}: {e}", resolved.display()))?;
+
+      Arc::new(OsSink::new(file.into()))
+    } else {
+      let stdin = procio::stdin_sink().promote_err(args.cmd_span())?;
+      if stdin.isatty() {
+        return Err(sherr!(ExecFail @ args.cmd_span(), "no input file given"));
+      }
+      stdin
+    };
+
+    let input: VarStr = procio::drain_sink(&*source)?.into();
+
+    if Self::is_shed_dump(&input.to_str_lossy()) {
+      Self::import_shed(&args, &input)
+    } else {
+      Self::import_other(&args, &input)
+    }
+  }
+}
+
+impl HistImport {
+  fn resolve_source(arg: &str, span: Span) -> ShResult<PathBuf> {
+    if !matches!(arg, "bash" | "zsh" | "fish") {
+      return Ok(PathBuf::from(arg));
+    }
+    let Some(home) = paths::get_home() else {
+      return Err(
+        sherr!(ExecFail @ span, "cannot resolve '{arg}' history without a home directory"),
+      );
+    };
+    Ok(match arg {
+      "bash" => home.join(".bash_history"),
+      "zsh" => home.join(".zsh_history"),
+      "fish" => paths::data_dir()
+        .unwrap_or_else(|| PathBuf::from(format!("{}/.local/share", home.display())))
+        .join("fish")
+        .join("fish_history"),
+      _ => unreachable!(),
+    })
+  }
+
+  fn is_shed_dump(input: &str) -> bool {
+    serde_json::from_str::<Value>(input)
+      .ok()
+      .and_then(|v| v.get("entries").map(Value::is_array))
+      .unwrap_or(false)
+  }
+
+  fn import_shed(args: &BuiltinArgs, input: &VarStr) -> ShResult<()> {
+    let span = args.cmd_span();
+    let root: Value = serde_json::from_str(&input.to_str_lossy())
+      .map_err(|e| sherr!(ExecFail @ span, "malformed backup: {e}"))?;
+
+    let arr = |key: &str| -> ShResult<Vec<Value>> {
+      match root.get(key) {
+        Some(Value::Array(a)) => Ok(a.clone()),
+        None => Ok(vec![]),
+        Some(_) => Err(sherr!(ExecFail @ span, "malformed backup: '{key}' is not an array")),
+      }
+    };
+    let str_of =
+      |o: &Map<String, Value>, k: &str| o.get(k).and_then(Value::as_str).map(str::to_string);
+    let int_of = |o: &Map<String, Value>, k: &str| o.get(k).and_then(Value::as_i64).unwrap_or(0);
+
+    let mut entries = Vec::new();
+    for v in arr("entries")? {
+      let Value::Object(o) = v else {
+        return Err(sherr!(ExecFail @ span, "malformed backup: entry is not an object"));
+      };
+      let Some(token) = str_of(&o, "token") else {
+        return Err(sherr!(ExecFail @ span, "malformed backup: entry is missing a token"));
+      };
+      let token = Uuid::from_str(&token)
+        .map_err(|_| sherr!(ExecFail @ span, "malformed backup: bad token {token}"))?;
+
+      #[rustfmt::skip]
+      let ent = HistEntry {
+        command  :str_of(&o, "command").unwrap_or_default(),
+        cwd      :str_of(&o, "cwd"    ).unwrap_or_default(),
+        status   :int_of(&o, "status" ) as i32,
+        timestamp:UNIX_EPOCH + Duration::from_secs(int_of(&o, "timestamp").max(0) as u64),
+        runtime  :Duration::from_micros(int_of(&o, "runtime").max(0) as u64),
+        token,
+      };
+
+      entries.push((ent, str_of(&o, "parent"), str_of(&o, "joint")));
+    }
+
+    let mut branches = Vec::new();
+    for v in arr("branches")? {
+      let Value::Object(o) = v else { continue };
+
+      let Some(name) = str_of(&o, "name") else {
+        return Err(sherr!(ExecFail @ span, "malformed backup: branch is missing a name"));
+      };
+
+      branches.push((name, str_of(&o, "head")));
+    }
+
+    let mut reflog = Vec::new();
+    for v in arr("reflog")? {
+      let Value::Object(o) = v else { continue };
+
+      #[rustfmt::skip]
+      let ent = ReflogEntry {
+        old_head : str_of(&o, "old_head"),
+        new_head : str_of(&o, "new_head"),
+        op       : str_of(&o, "op"      ).unwrap_or_default(),
+        table    : Table::from(MAIN_HIST_TABLE_NAME),
+        branch   : Branch::from(str_of(&o, "branch").unwrap_or_default().as_str()),
+        timestamp: UNIX_EPOCH + Duration::from_secs(int_of(&o, "timestamp").max(0) as u64),
+      };
+
+      reflog.push(ent);
+    }
+
+    let count = entries.len();
+    let hist = open_history(span, false, true)?;
+    let dump = HistDump {
+      entries,
+      branches,
+      reflog,
+    };
+
+    hist
+      .restore_dump(&dump, args.has_opt("force"))
+      .promote_err(span)?;
+    hist.refresh_hist_entries();
+
+    status_msg!("hist: restored {count} entries");
+    util::with_status(0)
+  }
+  fn import_other(args: &BuiltinArgs, input: &VarStr) -> ShResult<()> {
+    let span = args.cmd_span();
+    let hist = open_history(span, false, true)?;
+
+    let entries: Vec<(i64, HistEntry)> = readline::deserialize_history(&input.to_str_lossy())
+      .into_iter()
+      .enumerate()
+      .map(|(i, e)| ((i as u64).cast_signed(), e))
+      .collect();
+
+    let mut count = 0;
+    hist.transaction(|conn| {
+      for (_, entry) in entries {
+        let pushed = hist.push_with(conn, entry).promote_err(span)?;
+        count += i32::from(pushed.is_some());
+      }
+      Ok(())
+    })?;
+
+    errln!("hist: imported {count} entries.");
+
+    hist.sort_by_timestamp()?;
+    util::with_status(0)
+  }
+}
+
+pub(super) struct HistExport;
+impl super::Builtin for HistExport {
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    let hist = open_history(args.span(), false, false)?;
+    let HistDump {
+      entries,
+      branches,
+      reflog,
+    } = hist.dump_all()?;
+
+    let mut map = Map::new();
+
+    let mut json_entries = vec![];
+    for entry in entries {
+      let (ent, parent, joint) = entry;
+      let Value::Object(mut ent_json) = entry_obj(&ent) else {
+        unreachable!()
+      };
+
+      ent_json.insert("parent".into(), Value::from(parent));
+      ent_json.insert("joint".into(), Value::from(joint));
+
+      json_entries.push(Value::Object(ent_json));
+    }
+    map.insert("entries".into(), Value::Array(json_entries));
+
+    let mut json_branches = vec![];
+    for branch in branches {
+      let (name, head) = branch;
+      let mut branch_map = Map::new();
+
+      branch_map.insert("name".into(), Value::String(name));
+      branch_map.insert("head".into(), Value::from(head));
+      json_branches.push(Value::Object(branch_map));
+    }
+    map.insert("branches".into(), Value::Array(json_branches));
+
+    let mut json_reflog = vec![];
+    for ent in reflog {
+      let ReflogEntry {
+        table,
+        branch,
+        old_head,
+        new_head,
+        op,
+        timestamp,
+      } = ent;
+      let ts = timestamp
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+      let mut map = Map::new();
+
+      map.insert("table".into(), Value::String((*table).clone()));
+      map.insert("branch".into(), Value::String((*branch).clone()));
+      map.insert("old_head".into(), Value::from(old_head));
+      map.insert("new_head".into(), Value::from(new_head));
+      map.insert("op".into(), Value::String(op));
+      map.insert("timestamp".into(), Value::from(ts));
+
+      json_reflog.push(Value::Object(map));
+    }
+    map.insert("reflog".into(), Value::Array(json_reflog));
+
+    map.insert("version".into(), Value::from(1));
+
+    let raw = match serde_json::to_string_pretty(&map) {
+      Ok(r) => r,
+      Err(e) => {
+        return Err(sherr!(ExecFail @ args.span(), "Failed to serialize history to JSON: {e}"));
+      }
+    };
+
+    outln!("{raw}");
+
+    util::with_status(0)
   }
 }
 
@@ -657,7 +893,6 @@ impl super::Builtin for HistList {
       opt!("with-token", 1),
       opt!("in-dir", 1),
       opt!("limit", 1),
-      opt!("import", 1),
     ]
   }
   fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
@@ -665,7 +900,7 @@ impl super::Builtin for HistList {
     let (arg_vec, opts) = args.take_argv();
     let mut query = HistQuery::from_opts(&opts).promote_err(span)?;
 
-    let needs_write = query.delete || query.restore || query.import.is_some();
+    let needs_write = query.delete || query.restore;
     let hist = open_history(span, query.ex_hist, needs_write)?;
 
     for (arg, span) in arg_vec {
@@ -680,32 +915,6 @@ impl super::Builtin for HistList {
       let num_restored = hist.restore_backup()?;
       errln!("hist: restored {num_restored} entries from backup.");
 
-      return util::with_status(0);
-    }
-
-    if let Some(ref path) = query.import {
-      let entries: Vec<(i64, HistEntry)> = readline::import_history(path)
-        .promote_err(span)?
-        .into_iter()
-        .enumerate()
-        .map(|(i, e)| ((i as u64).cast_signed(), e))
-        .collect();
-
-      let mut out = SinkIo(procio::stdout_sink()?);
-      query.format_entries(&entries, &mut out).ok();
-      let mut count = 0;
-
-      hist.transaction(|conn| {
-        for (_, entry) in entries {
-          let pushed = hist.push_with(conn, entry).promote_err(span)?;
-          count += i32::from(pushed.is_some());
-        }
-        Ok(())
-      })?;
-
-      errln!("hist: imported {count} entries.");
-
-      hist.sort_by_timestamp()?;
       return util::with_status(0);
     }
 
@@ -919,36 +1128,6 @@ mod tests {
       Opt::for_test("contains", &["x"]),
     ]);
     assert_eq!(q.contains, (Some("x".into()), false));
-  }
-
-  // ─── --import path resolution ────────────────────────────────────────
-
-  fn set_shed_home(path: &str) {
-    use crate::state::vars::{VarFlags, VarKind};
-    Shed::vars_mut(|v| v.set_var("HOME", VarKind::Str(path.into()), VarFlags::EXPORT)).unwrap();
-  }
-
-  #[test]
-  fn opts_import_bash_resolves_to_home_bash_history() {
-    let _g = TestGuard::new();
-    set_shed_home("/tmp/some_home");
-    let q = parse(&[Opt::for_test("import", &["bash"])]);
-    assert_eq!(q.import, Some("/tmp/some_home/.bash_history".into()));
-  }
-
-  #[test]
-  fn opts_import_zsh_resolves_to_home_zsh_history() {
-    let _g = TestGuard::new();
-    set_shed_home("/tmp/some_home");
-    let q = parse(&[Opt::for_test("import", &["zsh"])]);
-    assert_eq!(q.import, Some("/tmp/some_home/.zsh_history".into()));
-  }
-
-  #[test]
-  fn opts_import_arbitrary_path_passed_through() {
-    let _g = TestGuard::new();
-    let q = parse(&[Opt::for_test("import", &["/etc/some.history"])]);
-    assert_eq!(q.import, Some("/etc/some.history".into()));
   }
 
   // ─── Unknown / error handling ────────────────────────────────────────
@@ -1632,13 +1811,108 @@ mod hist_builtin_execute_tests {
       "#1700000000\n: imported-one\n#1700000001\n: imported-two\n",
     )
     .unwrap();
-    test_input(format!("hist --import {}", path.display())).unwrap();
+    test_input(format!("hist import {}", path.display())).unwrap();
     g.read_output(); // drain "imported N" + entries dump
     // Verify the entries are queryable via a follow-up list.
     test_input("hist").unwrap();
     let out = g.read_output();
     assert!(out.contains(": imported-one"), "got: {out:?}");
     assert!(out.contains(": imported-two"), "got: {out:?}");
+  }
+
+  #[test]
+  fn hist_export_import_round_trips_dag_and_branches() {
+    let g = TestGuard::new();
+    let main_h = fresh_branched();
+    main_h.push(": on-main").unwrap();
+
+    test_input("hist branch feat").unwrap();
+    g.read_output();
+    let conn = db::get_db_conn().unwrap();
+    let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
+    feat_h.push(": feat-work").unwrap();
+    test_input("hist merge feat").unwrap();
+    g.read_output();
+
+    test_input("hist export").unwrap();
+    let dump = g.read_output();
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("backup.json");
+    std::fs::write(&path, &dump).unwrap();
+
+    // wipe everything, then restore from the dump
+    fresh_branched();
+    test_input(format!("hist import {}", path.display())).unwrap();
+    g.read_output();
+
+    // entries reachable from the restored main head, merge node still hidden
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(out.contains(": on-main"), "lost main history: {out:?}");
+    assert!(
+      out.contains(": feat-work"),
+      "lost merged feat history: {out:?}"
+    );
+
+    test_input("hist --count").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.trim_end().ends_with('2'),
+      "merge node leaked after restore: {out:?}"
+    );
+
+    // branch pointers came back
+    test_input("hist branch").unwrap();
+    let out = g.read_output();
+    assert!(out.contains("* main"), "current branch missing: {out:?}");
+    assert!(
+      out.contains("feat"),
+      "feat branch pointer not restored: {out:?}"
+    );
+
+    // feat's own lineage is intact and reachable from its restored head
+    test_input("hist checkout feat").unwrap();
+    g.read_output();
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.contains(": feat-work"),
+      "feat head not restored: {out:?}"
+    );
+    assert!(out.contains(": on-main"), "feat lost its ancestry: {out:?}");
+  }
+
+  #[test]
+  fn hist_import_refuses_nonempty_without_force() {
+    let g = TestGuard::new();
+    let h = fresh_branched();
+    h.push(": original").unwrap();
+
+    test_input("hist export").unwrap();
+    let dump = g.read_output();
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("backup.json");
+    std::fs::write(&path, &dump).unwrap();
+
+    // table is non-empty: bare import must refuse
+    test_input(format!("hist import {}", path.display())).ok();
+    assert_ne!(
+      Shed::get_status(),
+      0,
+      "import into non-empty history should error"
+    );
+    g.read_output();
+
+    // --force wipes and restores
+    test_input(format!("hist import --force {}", path.display())).unwrap();
+    g.read_output();
+    test_input("hist").unwrap();
+    let out = g.read_output();
+    assert!(
+      out.contains(": original"),
+      "force import lost entries: {out:?}"
+    );
   }
 
   // ─── branch / checkout subcommands ─────────────────────────────────

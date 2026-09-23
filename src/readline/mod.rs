@@ -73,8 +73,10 @@ pub(super) use complete::{
 };
 pub(super) use editcmd::Direction;
 pub(super) use editmode::ModeReport;
-pub(super) use histimport::import_history;
-pub(super) use history::{HistEntry, History, MAIN_HIST_TABLE_NAME, MergeResult};
+pub(super) use histimport::deserialize_history;
+pub(super) use history::{
+  Branch, HistDump, HistEntry, History, MAIN_HIST_TABLE_NAME, MergeResult, ReflogEntry, Table,
+};
 pub(super) use linebuf::{Hint, Lines, Pos};
 
 #[cfg(test)]

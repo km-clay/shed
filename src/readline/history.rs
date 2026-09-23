@@ -207,7 +207,7 @@ impl Display for CacheKey {
 /// Used so that function signatures can cleanly differentiate between a table name and a branch name,
 /// even though both are just strings.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct Table(String);
+pub(crate) struct Table(String);
 
 impl Deref for Table {
   type Target = String;
@@ -234,7 +234,7 @@ impl From<&str> for Table {
 /// Used so that function signatures can cleanly differentiate between a table name and a branch name,
 /// even though both are just strings.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Branch(String);
+pub(crate) struct Branch(String);
 
 impl Deref for Branch {
   type Target = String;
@@ -254,6 +254,22 @@ impl From<&str> for Branch {
   fn from(value: &str) -> Self {
     Self(value.to_string())
   }
+}
+
+type Parent = Option<String>;
+type Joint = Option<String>;
+pub(crate) struct ReflogEntry {
+  pub table: Table,
+  pub branch: Branch,
+  pub old_head: Option<String>,
+  pub new_head: Option<String>,
+  pub op: String,
+  pub timestamp: SystemTime,
+}
+pub(crate) struct HistDump {
+  pub entries: Vec<(HistEntry, Parent, Joint)>,
+  pub branches: Vec<(String, Parent)>,
+  pub reflog: Vec<ReflogEntry>,
 }
 
 #[derive(Debug)]
@@ -565,6 +581,142 @@ impl History {
     conn.execute_batch(&format!("PRAGMA user_version = {}", Self::USER_VERSION))?;
 
     Ok(())
+  }
+  pub(crate) fn dump_all(&self) -> ShResult<HistDump> {
+    let conn = self.lock();
+    let table = &self.table;
+
+    // get entries
+    let mut ent_stmt = conn.prepare(&format!(
+      "
+      SELECT command, timestamp, runtime, cwd, status, token, parent, joint
+      FROM {table}
+      ORDER BY id ASC
+      "
+    ))?;
+    let entries = ent_stmt
+      .query_map([], |r| {
+        let ent = Self::row_to_entry(r)?;
+        let parent = r.get::<_, Option<String>>(6)?;
+        let joint = r.get::<_, Option<String>>(7)?;
+        Ok((ent, parent, joint))
+      })?
+      .collect::<Result<Vec<_>, _>>()?;
+
+    let mut branch_stmt = conn.prepare(
+      "
+      SELECT name, head
+      FROM branches
+      WHERE table_name = ?1 ORDER BY name
+      ",
+    )?;
+    let branches = branch_stmt
+      .query_map(rusqlite::params![**table], |r| {
+        let name = r.get::<_, String>(0)?;
+        let head = r.get::<_, Option<String>>(1)?;
+        Ok((name, head))
+      })?
+      .collect::<Result<Vec<_>, _>>()?;
+
+    let mut reflog_stmt = conn.prepare(
+      "
+      SELECT branch, old_head, new_head, op, timestamp
+      FROM reflog
+      WHERE table_name = ?1
+      ORDER BY id ASC
+      ",
+    )?;
+    let reflog = reflog_stmt
+      .query_map(rusqlite::params![**table], |r| {
+        let branch = r.get::<_, String>(0)?;
+        let old_head = r.get::<_, Option<String>>(1)?;
+        let new_head = r.get::<_, Option<String>>(2)?;
+        let op = r.get::<_, String>(3)?;
+        let timestamp = r.get::<_, i64>(4)?;
+        Ok(ReflogEntry {
+          table: table.clone(),
+          branch: Branch(branch),
+          old_head,
+          new_head,
+          op,
+          timestamp: UNIX_EPOCH + Duration::from_secs(timestamp as u64),
+        })
+      })?
+      .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(HistDump {
+      entries,
+      branches,
+      reflog,
+    })
+  }
+  pub(crate) fn restore_dump(&self, dump: &HistDump, force: bool) -> ShResult<()> {
+    let table = self.table.clone();
+    self.transaction(|conn| {
+      let count: i64 =
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?;
+      if count > 0 && !force {
+        return Err(sherr!(
+          InternalErr,
+          "history is not empty; use --force to overwrite"
+        ));
+      }
+      if force {
+        conn.execute(&format!("DELETE FROM {table}"), [])?;
+        conn.execute(
+          "DELETE FROM branches WHERE table_name = ?1",
+          rusqlite::params![*table],
+        )?;
+        conn.execute(
+          "DELETE FROM reflog WHERE table_name = ?1",
+          rusqlite::params![*table],
+        )?;
+      }
+
+      for (ent, parent, joint) in &dump.entries {
+        conn.execute(
+          &format!(
+            "INSERT INTO {table} (command, timestamp, runtime, cwd, status, token, parent, joint)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+          ),
+          rusqlite::params![
+            ent.command,
+            timestamp_secs(ent.timestamp),
+            ent.runtime.as_micros() as i64,
+            ent.cwd,
+            ent.status,
+            ent.token.to_string(),
+            parent,
+            joint,
+          ],
+        )?;
+      }
+
+      for (name, head) in &dump.branches {
+        conn.execute(
+          "INSERT INTO branches (table_name, name, head) VALUES (?1, ?2, ?3)
+           ON CONFLICT(table_name, name) DO UPDATE SET head = excluded.head",
+          rusqlite::params![*table, name, head],
+        )?;
+      }
+
+      for r in &dump.reflog {
+        conn.execute(
+          "INSERT INTO reflog (table_name, branch, old_head, new_head, op, timestamp)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+          rusqlite::params![
+            *table,
+            *r.branch,
+            r.old_head,
+            r.new_head,
+            r.op,
+            timestamp_secs(r.timestamp)
+          ],
+        )?;
+      }
+
+      Ok(())
+    })
   }
   fn try_repair_timeline(conn: &Connection, table: &Table) -> rusqlite::Result<()> {
     // attempt to repair fragmented timelines

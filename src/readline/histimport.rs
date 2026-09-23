@@ -1,12 +1,6 @@
-use std::{
-  path::Path,
-  time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use regex::Regex;
-use serde_json::Value;
-
-use crate::{procio::bytes_to_string, util::random};
 
 use super::{
   history::HistEntry,
@@ -14,107 +8,10 @@ use super::{
   util::{error::ShResult, strops},
 };
 
-pub(crate) fn import_history<P: AsRef<Path>>(path: P) -> ShResult<Vec<HistEntry>> {
-  let path = path.as_ref();
-  let content = std::fs::read(path)
-    .map(bytes_to_string)
-    .map_err(|e| sherr!(ParseErr, "Failed to read history file: {e}"))?;
-
-  if let Ok(val) = serde_json::from_str::<Value>(&content) {
-    return import_json(&val);
-  }
-
-  let filename = path
-    .file_name()
-    .and_then(|n| n.to_str())
-    .ok_or_else(|| sherr!(ParseErr, "Invalid history file name"))?;
-
-  // Known filenames try the matching importer first, then fall back through
-  // the chain if the file's content doesn't actually carry that format's
-  // markers. Bash is the catch-all (any text is a valid bash history).
-  match filename {
-    ".bash_history" => Ok(try_import_bash(&content)),
-    ".zsh_history" => Ok(try_import_zsh(&content).unwrap_or_else(|_| try_import_bash(&content))),
-    "fish_history" => Ok(try_import_fish(&content).unwrap_or_else(|_| try_import_bash(&content))),
-    _ => Ok(
-      try_import_zsh(&content)
-        .or_else(|_| try_import_fish(&content))
-        .unwrap_or_else(|_| try_import_bash(&content)),
-    ),
-  }
-}
-
-fn import_json(content: &Value) -> ShResult<Vec<HistEntry>> {
-  let obj = content
-    .as_object()
-    .ok_or_else(|| sherr!(ParseErr, "JSON history is not an object"))?;
-  let mut entries: Vec<(usize, HistEntry)> = vec![];
-
-  for (key, val) in obj {
-    let val_obj = val
-      .as_object()
-      .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' is not an object"))?;
-
-    let command = val_obj
-      .get("command")
-      .and_then(|v| v.as_str())
-      .ok_or_else(|| {
-        sherr!(
-          ParseErr,
-          "JSON history entry '{key}' missing 'command' string"
-        )
-      })?;
-    let cwd = val_obj
-      .get("cwd")
-      .and_then(|v| v.as_str())
-      .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' missing 'cwd' string"))?;
-    let runtime = val_obj
-      .get("runtime")
-      .and_then(serde_json::Value::as_u64)
-      .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' missing 'runtime' u64"))?;
-    let status = val_obj
-      .get("status")
-      .and_then(serde_json::Value::as_i64)
-      .ok_or_else(|| sherr!(ParseErr, "JSON history entry '{key}' missing 'status' i64"))?;
-    let timestamp = val_obj
-      .get("timestamp")
-      .and_then(serde_json::Value::as_u64)
-      .ok_or_else(|| {
-        sherr!(
-          ParseErr,
-          "JSON history entry '{key}' missing 'timestamp' u64"
-        )
-      })?;
-    let token = val_obj
-      .get("token")
-      .and_then(|v| v.as_str())
-      .and_then(|v| v.parse::<random::Uuid>().ok())
-      .ok_or_else(|| {
-        sherr!(
-          ParseErr,
-          "JSON history entry '{key}' missing 'token' string"
-        )
-      })?;
-
-    let id = key
-      .parse::<usize>()
-      .map_err(|_| sherr!(ParseErr, "JSON history entry key '{key}' is not a valid id"))?;
-
-    let entry = HistEntry {
-      command: command.into(),
-      cwd: cwd.into(),
-      runtime: Duration::from_micros(runtime),
-      status: status as i32,
-      timestamp: UNIX_EPOCH + Duration::from_secs(timestamp),
-      token,
-    };
-
-    entries.push((id, entry));
-  }
-
-  entries.sort_by_key(|(id, _)| *id);
-
-  Ok(entries.into_iter().map(|(_, entry)| entry).collect())
+pub(crate) fn deserialize_history(content: &str) -> Vec<HistEntry> {
+  try_import_zsh(content)
+    .or_else(|_| try_import_fish(content))
+    .unwrap_or_else(|_| try_import_bash(content))
 }
 
 fn try_import_bash(content: &str) -> Vec<HistEntry> {
@@ -273,17 +170,6 @@ fn try_import_fish(content: &str) -> ShResult<Vec<HistEntry>> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::io::Write;
-
-  /// Write `content` to a tempfile with a chosen file name; returns
-  /// (`TempDir` guard, full path).
-  fn write_hist_file(name: &str, content: &str) -> (tempfile::TempDir, std::path::PathBuf) {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join(name);
-    let mut f = std::fs::File::create(&path).unwrap();
-    f.write_all(content.as_bytes()).unwrap();
-    (dir, path)
-  }
 
   fn secs_since_epoch(ts: SystemTime) -> u64 {
     ts.duration_since(UNIX_EPOCH).unwrap().as_secs()
@@ -476,75 +362,28 @@ mod tests {
     assert_eq!(iter.next(), Some("should_not_be_joined"));
   }
 
-  // ===================== import_history dispatch =====================
+  // ===================== deserialize_history =====================
 
   #[test]
-  fn dispatch_by_bash_history_filename() {
-    let (_dir, path) = write_hist_file(".bash_history", "echo bash_entry\n");
-    let entries = import_history(path).unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].command, "echo bash_entry");
-  }
-
-  #[test]
-  fn dispatch_by_zsh_history_filename() {
-    let (_dir, path) = write_hist_file(".zsh_history", ": 1700000500:0;echo zsh_entry\n");
-    let entries = import_history(path).unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].command, "echo zsh_entry");
-  }
-
-  #[test]
-  fn dispatch_by_fish_history_filename() {
-    let (_dir, path) = write_hist_file(
-      "fish_history",
-      "- cmd: echo fish_entry\n  when: 1700000600\n",
-    );
-    let entries = import_history(path).unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].command, "echo fish_entry");
-  }
-
-  #[test]
-  fn dispatch_unknown_filename_tries_zsh_then_fish_then_bash() {
-    // Unknown filenames try zsh, then fish, then bash. zsh and fish
-    // refuse content without their format markers, so plain-text input
-    // falls through to bash.
-    let (_dir, path) = write_hist_file("random_name", "echo fallback\n");
-    let entries = import_history(path).unwrap();
+  fn deserialize_plain_text_falls_through_to_bash() {
+    let entries = deserialize_history("echo fallback\n");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].command, "echo fallback");
   }
 
   #[test]
-  fn dispatch_unknown_filename_with_zsh_markers_uses_zsh() {
-    // Content with zsh extended-history markers should be detected and
-    // parsed as zsh, not as bash, even with an unknown filename.
-    let (_dir, path) = write_hist_file("random_name", ": 1700000000:0;echo from_zsh\n");
-    let entries = import_history(path).unwrap();
+  fn deserialize_detects_zsh_markers() {
+    let entries = deserialize_history(": 1700000000:0;echo from_zsh\n");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].command, "echo from_zsh");
     assert_eq!(secs_since_epoch(entries[0].timestamp), 1_700_000_000);
   }
 
   #[test]
-  fn dispatch_unknown_filename_with_fish_markers_uses_fish() {
-    let (_dir, path) =
-      write_hist_file("random_name", "- cmd: echo from_fish\n  when: 1700000000\n");
-    let entries = import_history(path).unwrap();
+  fn deserialize_detects_fish_markers() {
+    let entries = deserialize_history("- cmd: echo from_fish\n  when: 1700000000\n");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].command, "echo from_fish");
-  }
-
-  #[test]
-  fn zsh_filename_with_bash_content_falls_back_to_bash() {
-    // If the user names a file `.zsh_history` but it actually contains
-    // plain bash-style history (no extended markers), we should still
-    // import it correctly via the bash fallback.
-    let (_dir, path) = write_hist_file(".zsh_history", "echo no_markers\n");
-    let entries = import_history(path).unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].command, "echo no_markers");
   }
 
   #[test]
@@ -555,11 +394,5 @@ mod tests {
   #[test]
   fn try_import_fish_errors_without_markers() {
     assert!(try_import_fish("echo just_bash\n").is_err());
-  }
-
-  #[test]
-  fn missing_file_errors() {
-    let path = std::path::PathBuf::from("/path/that/definitely/does/not/exist/zzz");
-    assert!(import_history(path).is_err());
   }
 }
