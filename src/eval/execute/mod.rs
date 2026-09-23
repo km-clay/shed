@@ -217,7 +217,7 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
     .map_or_else(|| "<shed -c>".into(), VarStr::from);
 
   Shed::vars_mut(|v| {
-    v.set_param(ShellParam::ShellName, &name.to_str_lossy()); // $0
+    v.set_param(ShellParam::ShellName, name.clone()); // $0
     let scope = v.cur_scope_mut();
     scope.sh_argv_mut().clear();
     // bpush_arg (vs raw push_back) runs update_arg_params, keeping

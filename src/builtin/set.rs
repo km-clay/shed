@@ -251,6 +251,7 @@ pub(crate) fn build_set_call(readable: bool) -> String {
 pub(crate) enum Role {
   Set(SetFlags),
   Invocation,
+  InvocationArg,
   Unknown,
 }
 
@@ -368,6 +369,10 @@ where
       match classify(ch) {
         Role::Set(f) => flags |= f,
         Role::Invocation => {
+          // a bare invocation flag: doesn't consume the rest of the cluster
+          on_invocation(ch, None, words, span)?;
+        }
+        Role::InvocationArg => {
           // getopt rule: leftover cluster chars are this option's argument.
           let attached: String = cluster.by_ref().collect();
           let attached = (!attached.is_empty()).then(|| VarStr::from(attached));

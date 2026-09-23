@@ -51,6 +51,8 @@ pub(super) struct ShedArgs {
   pub(super) version: bool,
   /// Start the shell in interactive mode (`-i`)
   pub(super) interactive: bool,
+  /// Force an interactive prompt, regardless of command input (`-I`)
+  pub(super) force_prompt: bool,
   /// Read input from stdin (`-s`)
   pub(super) stdin: bool,
   /// Start the shell as a login shell (sources .`shed_profile`)
@@ -130,6 +132,10 @@ where
     'i' => cfg.interactive = true,
     'l' => cfg.login_shell = true,
     'w' => cfg.welcome = true,
+    'I' => {
+      cfg.interactive = true;
+      cfg.force_prompt = true;
+    }
     _ => unreachable!("classify only routes c/s/i/l/w to invocation"),
   }
   Ok(())
@@ -164,6 +170,10 @@ where
       cfg.command = Some(val);
     }
     "--interactive" => cfg.interactive = true,
+    "--force-prompt" => {
+      cfg.force_prompt = true;
+      cfg.interactive = true;
+    }
     "--login" | "--login-shell" => cfg.login_shell = true,
     "--welcome" => cfg.welcome = true,
     "--no-rc" => cfg.no_rc = true,
@@ -215,7 +225,8 @@ fn parse_args() -> ShResult<ShedArgs> {
       let outcome = scan_options(
         &mut words,
         |ch| match ch {
-          'c' | 's' | 'i' | 'l' | 'w' => Role::Invocation,
+          'c' => Role::InvocationArg,
+          's' | 'i' | 'l' | 'w' | 'I' => Role::Invocation,
           other => SetFlags::try_from(other).map_or(Role::Unknown, Role::Set),
         },
         |ch, attached, rest, span| apply_invocation_flag(ch, attached, rest, span, &mut cfg),

@@ -788,14 +788,14 @@ impl ScopeStack {
     self.try_get_param(param).unwrap_or_default()
   }
   /// Set a shell parameter
-  pub(crate) fn set_param(&mut self, param: ShellParam, val: &str) {
+  pub(crate) fn set_param(&mut self, param: ShellParam, val: VarStr) {
     match param {
       ShellParam::ShPid | ShellParam::LastJob | ShellParam::ShellName => {
-        self.global_params.insert(param, val.into());
+        self.global_params.insert(param, val);
       }
       ShellParam::Pos(_) | ShellParam::AllArgs | ShellParam::AllArgsStr | ShellParam::ArgCount => {
         let scope = self.sh_argv_scope_mut();
-        scope.set_param(param, &val.into());
+        scope.set_param(param, &val);
       }
     }
   }

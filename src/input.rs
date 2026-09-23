@@ -3,7 +3,11 @@
 //! The functions contained within handle both interactive and non-interactive contexts.
 //! This includes the `-c <COMMAND>` flag, script path arguments, commands from stdin, and interactive mode.
 
-use std::{path::Path, sync::atomic::Ordering};
+use std::{
+  os::unix::ffi::OsStrExt,
+  path::{Path, PathBuf},
+  sync::atomic::Ordering,
+};
 
 use crate::{
   errln,
@@ -11,10 +15,47 @@ use crate::{
   expand::alias,
   interactive, lifecycle, procio, sherr,
   signal::QUIT_CODE,
-  state::{self, Shed, paths},
+  state::{self, Shed, paths, vars::VarStr},
   status_msg,
   util::error::ShResult,
 };
+
+pub(crate) enum Input {
+  DashC(String),
+  Script(String, PathBuf),
+  Stdin(String),
+}
+
+impl Input {
+  fn collect(args: &mut lifecycle::ShedArgs) -> ShResult<Option<Self>> {
+    let input = if let Some(cmd) = &args.command {
+      // -c command
+      Self::DashC(cmd.clone())
+    } else if args.stdin {
+      // -s, read stdin
+      Self::Stdin(procio::bytes_to_string(procio::read_input()?))
+    } else if !args.script_args.is_empty() {
+      // script path argument
+      let path = PathBuf::from(args.script_args.remove(0));
+      let content = read_script(&path)?;
+
+      Self::Script(content, path)
+    } else if !procio::stdin_is_tty() {
+      // piped input
+      Self::Stdin(procio::bytes_to_string(procio::read_input()?))
+    } else {
+      // nothing
+      return Ok(None);
+    };
+    Ok(Some(input))
+  }
+  fn into_content(self) -> String {
+    match self {
+      Input::Script(content, _) => content,
+      Input::DashC(cmd) | Input::Stdin(cmd) => cmd,
+    }
+  }
+}
 
 /// Dispatch input handling based on the given [`lifecycle::ShedArgs`]
 ///
@@ -23,64 +64,40 @@ pub(crate) fn dispatch_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
   if args.edit_script {
     // in this arm, we interpret the input we are given as a sequence of keys
     // for the line editor to consume and execute
-    let Some(input) = collect_input(&mut args)? else {
+    let Some(input) = Input::collect(&mut args)? else {
       // no input provided, just run interactively
       status_msg!("warning: --script was passed but no input was given");
-      return interactive::shed_interactive(&args, None);
+      return interactive::shed_interactive(args, None, None);
     };
 
-    let keys = alias::expand_keymap(&input);
-    interactive::shed_interactive(&args, Some(keys))
+    let keys = alias::expand_keymap(&input.into_content());
+    interactive::shed_interactive(args, Some(keys), None)
   } else {
     execute_input(args)
   }
 }
 
 fn execute_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
-  if let Some(cmd) = args.command {
-    // -c command
-    execute::exec_dash_c(&cmd, args.script_args)
-  } else if args.stdin {
-    // -s, read stdin
-    read_commands(args.script_args)
-  } else if !args.script_args.is_empty() {
-    // script path argument
-    let path = args.script_args.remove(0);
-    run_script(path, args.script_args)
-  } else if !procio::stdin_is_tty() {
-    // piped input
-    read_commands(args.script_args)
-  } else {
-    // nothing, start the repl
-    interactive::shed_interactive(&args, None)
+  let input = Input::collect(&mut args)?;
+  match input {
+    Some(input) => {
+      if args.interactive {
+        interactive::shed_interactive(args, None, Some(input))
+      } else {
+        let script_args = std::mem::take(&mut args.script_args);
+        match input {
+          Input::Stdin(cmd) => exec_stdin(cmd, script_args),
+          Input::DashC(cmd) => execute::exec_dash_c(&cmd, script_args),
+          Input::Script(content, path) => run_script(content, path, script_args),
+        }
+      }
+    }
+    None => interactive::shed_interactive(args, None, None),
   }
 }
 
-fn collect_input(args: &mut lifecycle::ShedArgs) -> ShResult<Option<String>> {
-  let input = if let Some(cmd) = &args.command {
-    // -c command
-    cmd.clone()
-  } else if args.stdin {
-    // -s, read stdin
-    procio::bytes_to_string(procio::read_input()?)
-  } else if !args.script_args.is_empty() {
-    // script path argument
-    std::fs::read_to_string(args.script_args.remove(0))?
-  } else if !procio::stdin_is_tty() {
-    // piped input
-    procio::bytes_to_string(procio::read_input()?)
-  } else {
-    // nothing
-    return Ok(None);
-  };
-  Ok(Some(input))
-}
-
 /// Read and execute commands from stdin
-pub(crate) fn read_commands(args: Vec<String>) -> ShResult<()> {
-  let bytes = procio::read_input()?;
-  let commands = procio::bytes_to_string(bytes);
-
+pub(crate) fn exec_stdin(commands: String, args: Vec<String>) -> ShResult<()> {
   Shed::vars_mut(|v| {
     let scope = v.cur_scope_mut();
     let zero = scope.sh_argv().front().cloned().unwrap_or_default();
@@ -99,10 +116,7 @@ pub(crate) fn read_commands(args: Vec<String>) -> ShResult<()> {
   res
 }
 
-/// Read and execute the script at a given path
-///
-/// Fails if `shed` is not able to open or read the file.
-pub(crate) fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult<()> {
+pub(crate) fn read_script<P: AsRef<Path>>(path: P) -> ShResult<String> {
   let path = path.as_ref();
   let source_path = paths::display_path(path);
 
@@ -129,12 +143,24 @@ pub(crate) fn run_script<P: AsRef<Path>>(path: P, args: Vec<String>) -> ShResult
     return Err(sherr!(CleanExit(1), "failed to read input file"));
   };
 
-  let path_str = path.to_string_lossy().to_string();
+  Ok(input)
+}
+
+/// Read and execute the script at a given path
+///
+/// Fails if `shed` is not able to open or read the file.
+pub(crate) fn run_script<P: AsRef<Path>>(
+  input: String,
+  path: P,
+  args: Vec<String>,
+) -> ShResult<()> {
+  let path_str: VarStr = path.as_ref().as_os_str().as_bytes().into();
+
   Shed::vars_mut(|v| {
-    v.set_param(state::vars::ShellParam::ShellName, &path_str); // $0
+    v.set_param(state::vars::ShellParam::ShellName, path_str.clone()); // $0
     let scope = v.cur_scope_mut();
     scope.sh_argv_mut().clear();
-    scope.bpush_arg(path_str.into());
+    scope.bpush_arg(path_str);
     for arg in args {
       scope.bpush_arg(arg.into());
     }
@@ -164,6 +190,7 @@ mod dispatch_input_tests {
       script_args,
       version: false,
       interactive: false,
+      force_prompt: false,
       stdin,
       login_shell: false,
       welcome: false,

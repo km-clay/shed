@@ -24,6 +24,7 @@ use crate::{
   autocmd, errln,
   eval::execute,
   exec_term,
+  input::{self, Input},
   keys::{KeyEvent, KeyMapMatch},
   lifecycle, outln,
   readline::{Prompt, ReadlineEvent, ShedLine},
@@ -220,13 +221,32 @@ fn interactive_setup(args: &lifecycle::ShedArgs) -> ShResult<TermGuard> {
 
 /// Run the main interactive loop of the shell.
 pub(super) fn shed_interactive(
-  args: &lifecycle::ShedArgs,
+  mut args: lifecycle::ShedArgs,
   script_keys: Option<Vec<KeyEvent>>,
+  pre_commands: Option<Input>,
 ) -> ShResult<()> {
-  let _raw_mode = interactive_setup(args)?;
+  let _raw_mode = interactive_setup(&args)?;
   cmd::try_hash();
   Shed::meta_mut(|m| m.set_interactive_shell(true));
   let _ = PARENT_PROCESS_ID.set(getppid());
+
+  if let Some(input) = pre_commands {
+    let script_args = std::mem::take(&mut args.script_args);
+    let res = match input {
+      Input::DashC(cmd) => execute::exec_dash_c(&cmd, script_args),
+      Input::Stdin(cmd) => input::exec_stdin(cmd, script_args),
+      Input::Script(content, path_buf) => input::run_script(content, path_buf, script_args),
+    };
+
+    if args.force_prompt {
+      if let Err(e) = res {
+        e.print_error();
+      }
+      // fallthrough to prompt
+    } else {
+      return res;
+    }
+  }
 
   let mut readline = match ShedLine::new(Prompt::new()) {
     Ok(rl) => rl,

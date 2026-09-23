@@ -1127,7 +1127,7 @@ impl JobTab {
     }
 
     if let Some(pid) = last_pid {
-      Shed::vars_mut(|v| v.set_param(ShellParam::LastJob, &pid.to_string()));
+      Shed::vars_mut(|v| v.set_param(ShellParam::LastJob, varstr!("{pid}")));
     }
 
     tab_pos

@@ -35,7 +35,7 @@ macro_rules! __test_setup_files {
 macro_rules! __test_setup_params {
   ([$($value:literal),* $(,)?]) => {
     $crate::state::Shed::vars_mut(|v| {
-      v.set_param($crate::state::vars::ShellParam::ShellName, "test_input");
+      v.set_param($crate::state::vars::ShellParam::ShellName, "test_input".into());
       let scope = v.cur_scope_mut();
       scope.sh_argv_mut().clear();
       scope.bpush_arg("test_input".into()); // $0
@@ -88,7 +88,7 @@ mod shell_intro_2_1 {
   use crate::{
     assert_output,
     eval::execute::exec_dash_c,
-    input,
+    input, procio,
     state::{
       Shed,
       vars::{VarFlags, VarKind},
@@ -102,7 +102,8 @@ mod shell_intro_2_1 {
     let g = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "echo hello world; echo $1 $2").unwrap();
-    input::run_script(file.path(), vec!["world".into(), "hello".into()]).unwrap();
+    let input = input::read_script(file.path()).unwrap();
+    input::run_script(input, file.path(), vec!["world".into(), "hello".into()]).unwrap();
     assert_output!(g, "hello world\nworld hello\n");
   }
 
@@ -118,7 +119,8 @@ mod shell_intro_2_1 {
   fn test_stdin_commands() {
     let mut g = TestGuard::new();
     g.feed_stdin(b"echo hello world; echo $1 $2\n");
-    input::read_commands(vec!["world".into(), "hello".into()]).unwrap();
+    let input = procio::bytes_to_string(procio::read_input().unwrap());
+    input::exec_stdin(input, vec!["world".into(), "hello".into()]).unwrap();
     assert_output!(g, "hello world\nworld hello\n");
   }
 
@@ -252,7 +254,8 @@ mod shell_intro_2_1 {
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "echo $0").unwrap();
     let path = file.path().to_path_buf();
-    input::run_script(&path, vec![]).unwrap();
+    let input = input::read_script(&path).unwrap();
+    input::run_script(input, &path, vec![]).unwrap();
     assert_output!(g, "{}\n", path.display());
   }
 
@@ -261,7 +264,8 @@ mod shell_intro_2_1 {
     let g = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "echo $#").unwrap();
-    input::run_script(file.path(), vec!["a".into(), "b".into(), "c".into()]).unwrap();
+    let input = input::read_script(file.path()).unwrap();
+    input::run_script(input, file.path(), vec!["a".into(), "b".into(), "c".into()]).unwrap();
     assert_output!(g, "3\n");
   }
 
@@ -270,7 +274,8 @@ mod shell_intro_2_1 {
     let g = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "for x in \"$@\"; do echo $x; done").unwrap();
-    input::run_script(file.path(), vec!["a b".into(), "c".into()]).unwrap();
+    let input = input::read_script(file.path()).unwrap();
+    input::run_script(input, file.path(), vec!["a b".into(), "c".into()]).unwrap();
     assert_output!(g, "a b\nc\n");
   }
 
@@ -279,7 +284,9 @@ mod shell_intro_2_1 {
     let g = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "echo $#:$1:$2:$3").unwrap();
+    let input = input::read_script(file.path()).unwrap();
     input::run_script(
+      input,
       file.path(),
       vec!["first".into(), String::new(), "third".into()],
     )
@@ -292,7 +299,8 @@ mod shell_intro_2_1 {
     let g = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "echo $1").unwrap();
-    input::run_script(file.path(), vec!["$HOME".into()]).unwrap();
+    let input = input::read_script(file.path()).unwrap();
+    input::run_script(input, file.path(), vec!["$HOME".into()]).unwrap();
     assert_output!(g, "$HOME\n");
   }
 
@@ -301,7 +309,8 @@ mod shell_intro_2_1 {
     let g = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "shift; echo $1 $#").unwrap();
-    input::run_script(file.path(), vec!["a".into(), "b".into(), "c".into()]).unwrap();
+    let input = input::read_script(file.path()).unwrap();
+    input::run_script(input, file.path(), vec!["a".into(), "b".into(), "c".into()]).unwrap();
     assert_output!(g, "b 2\n");
   }
 
