@@ -574,9 +574,27 @@ impl super::Builtin for HistMerge {
 
 pub(super) struct HistBranch;
 impl super::Builtin for HistBranch {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::new_short("delete", b'd'),
+      OptSpec::new_short("force-delete", b'D'),
+    ]
+  }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    let force_delete = args.has_opt("force-delete");
+    let delete = force_delete || args.has_opt("delete");
     let name = args.arguments().next();
-    if let Some((name, _)) = name {
+
+    if delete {
+      let Some((name, span)) = name else {
+        return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name"));
+      };
+      let hist = open_history(args.span(), false, true)?;
+      hist
+        .delete_branch(&name.to_str_lossy(), force_delete)
+        .promote_err(span)?;
+      status_msg!("hist: deleted branch {name}");
+    } else if let Some((name, _)) = name {
       // create new branch
       let hist = open_history(args.span(), false, true)?;
       hist.create_branch(&name.to_str_lossy())?;
@@ -2003,6 +2021,147 @@ mod hist_builtin_execute_tests {
       t3_parent,
       Some("t2".to_string()),
       "t3 should re-chain onto t2"
+    );
+  }
+
+  #[test]
+  fn hist_branch_delete_merged_unmerged_and_current() {
+    let g = TestGuard::new();
+    let main_h = fresh_branched();
+    main_h.push(": base").unwrap();
+
+    // a fully-merged branch (forks from base, never advances) → safe to -d
+    test_input("hist branch merged").unwrap();
+    g.read_output();
+    test_input("hist branch -d merged").unwrap();
+    g.read_output();
+    assert_eq!(
+      Shed::get_status(),
+      0,
+      "deleting a merged branch should succeed"
+    );
+    test_input("hist branch").unwrap();
+    assert!(
+      !g.read_output().contains("merged"),
+      "branch not actually deleted"
+    );
+
+    // an unmerged branch (has a commit main lacks) → -d refuses, -D forces
+    test_input("hist branch feat").unwrap();
+    g.read_output();
+    let conn = db::get_db_conn().unwrap();
+    let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
+    feat_h.push(": feat-only").unwrap();
+
+    test_input("hist branch -d feat").ok();
+    assert_ne!(Shed::get_status(), 0, "unmerged -d should be refused");
+    test_input("hist branch").unwrap();
+    assert!(
+      g.read_output().contains("feat"),
+      "refused delete removed it anyway"
+    );
+
+    test_input("hist branch -D feat").unwrap();
+    g.read_output();
+    assert_eq!(
+      Shed::get_status(),
+      0,
+      "-D should force-delete an unmerged branch"
+    );
+    test_input("hist branch").unwrap();
+    assert!(
+      !g.read_output().contains("feat"),
+      "-D did not delete the branch"
+    );
+
+    // can't delete the branch you're on
+    test_input("hist branch -d main").ok();
+    assert_ne!(
+      Shed::get_status(),
+      0,
+      "deleting the current branch should be refused"
+    );
+  }
+
+  #[test]
+  fn delete_branch_nonexistent_errors() {
+    let _g = TestGuard::new();
+    let h = fresh_branched();
+    h.push(": x").unwrap();
+    assert!(
+      h.delete_branch("ghost", false).is_err(),
+      "deleting a nonexistent branch should error"
+    );
+  }
+
+  #[test]
+  fn delete_branch_keeps_entries_removes_pointer() {
+    let _g = TestGuard::new();
+    let main_h = fresh_branched();
+    main_h.push(": base").unwrap();
+    main_h.create_branch("feat").unwrap();
+
+    let conn = db::get_db_conn().unwrap();
+    let feat_h = History::new(conn.clone(), MAIN_HIST_TABLE_NAME, "feat").unwrap();
+    feat_h.push(": feat-only").unwrap();
+
+    // force-delete the unmerged branch
+    main_h.delete_branch("feat", true).unwrap();
+
+    assert!(
+      !main_h.branch_exists("feat").unwrap(),
+      "the branch pointer should be gone"
+    );
+    // the entry itself survives (unreachable, but not deleted)
+    let count: i64 = conn
+      .lock()
+      .unwrap()
+      .query_row(
+        "SELECT COUNT(*) FROM shed_history WHERE command = ': feat-only'",
+        [],
+        |r| r.get(0),
+      )
+      .unwrap();
+    assert_eq!(
+      count, 1,
+      "delete should keep entries, only drop the pointer"
+    );
+  }
+
+  #[test]
+  fn delete_branch_logs_reflog_with_recoverable_head() {
+    let _g = TestGuard::new();
+    let main_h = fresh_branched();
+    let base = main_h.push(": base").unwrap().unwrap();
+    main_h.create_branch("temp").unwrap(); // temp.head == base (merged: never advanced)
+
+    main_h.delete_branch("temp", false).unwrap();
+
+    let conn = db::get_db_conn().unwrap();
+    let (branch, op, old_head, new_head, tbl): (
+      String,
+      String,
+      Option<String>,
+      Option<String>,
+      String,
+    ) = conn
+      .lock()
+      .unwrap()
+      .query_row(
+        "SELECT branch, op, old_head, new_head, table_name FROM reflog
+           WHERE op = 'delete' ORDER BY id DESC LIMIT 1",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+      )
+      .unwrap();
+    assert_eq!(branch, "temp");
+    assert_eq!(op, "delete");
+    assert_eq!(tbl, "shed_history");
+    assert_eq!(new_head, None, "a delete has no new head");
+    assert_eq!(
+      old_head,
+      Some(base.to_string()),
+      "reflog should record the deleted branch's head for recovery"
     );
   }
 }

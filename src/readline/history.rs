@@ -732,6 +732,48 @@ impl History {
     Ok(())
   }
 
+  /// Delete a branch pointer.
+  ///
+  /// Refuses to delete the current branch, or an unmerged branch if `force` is false.
+  pub(crate) fn delete_branch(&self, name: &str, force: bool) -> ShResult<()> {
+    if self.branch.as_str() == name {
+      return Err(sherr!(
+        InternalErr,
+        "cannot delete the current branch '{name}'"
+      ));
+    }
+    let conn = self.lock();
+
+    let target_head: String = match conn.query_row(
+      "SELECT head FROM branches WHERE table_name = ?1 AND name = ?2",
+      rusqlite::params![*self.table, name],
+      |r| r.get(0),
+    ) {
+      Ok(h) => h,
+      Err(rusqlite::Error::QueryReturnedNoRows) => {
+        return Err(sherr!(InternalErr, "no such branch: {name}"));
+      }
+      Err(e) => return Err(e.into()),
+    };
+
+    if !force {
+      // "fully merged" = the branch's tip is reachable from the current branch.
+      let merged = match Self::head_conn(&conn, &self.table, &self.branch)? {
+        Some(cur) => Self::is_reachable(&conn, &self.table, &cur.to_string(), &target_head)?,
+        None => false, // an unborn current branch can't have merged anything
+      };
+      if !merged {
+        return Err(sherr!(
+          InternalErr,
+          "branch '{name}' is not fully merged; use -D to force delete"
+        ));
+      }
+    }
+
+    Self::set_head(&conn, &self.table, &Branch::from(name), None, "delete")?;
+    Ok(())
+  }
+
   /// Whether `target` is reachable from `from` by walking parent/joint edges.
   fn is_reachable(conn: &Connection, table: &Table, from: &str, target: &str) -> ShResult<bool> {
     let sql = format!(
