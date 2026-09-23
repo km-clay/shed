@@ -1892,4 +1892,117 @@ mod hist_builtin_execute_tests {
       "orphan leaked main's history: {out:?}"
     );
   }
+
+  #[test]
+  fn ex_and_shed_history_dont_collide() {
+    // Regression: shed_history and ex_history both used branch `main`, sharing
+    // one `branches` row, so an ex push clobbered shed's head and the next shed
+    // push became a fresh root. Now `branches` is keyed by (table_name, name).
+    let _g = TestGuard::new();
+    let conn = db::get_db_conn().unwrap();
+    {
+      let c = conn.lock().unwrap();
+      let _ = c.execute_batch("DROP TABLE IF EXISTS shed_history");
+      let _ = c.execute_batch("DROP TABLE IF EXISTS ex_history");
+      let _ = c.execute_batch("DROP TABLE IF EXISTS branches");
+      let _ = c.execute_batch("DROP TABLE IF EXISTS reflog");
+      let _ = c.execute_batch("PRAGMA user_version = 0");
+    }
+    Shed::set_hist_branch("main".to_string());
+    let shed = History::new(conn.clone(), MAIN_HIST_TABLE_NAME, "main").unwrap();
+    let ex = History::new(conn.clone(), "ex_history", "main").unwrap();
+
+    let a = shed.push(": shed-a").unwrap().unwrap();
+    ex.push(": ex-x").unwrap(); // used to clobber shed's shared 'main' head
+    shed.push(": shed-b").unwrap();
+
+    // shed-b must chain onto shed-a, not root itself off a dangling ex head
+    let parent: Option<String> = conn
+      .lock()
+      .unwrap()
+      .query_row(
+        "SELECT parent FROM shed_history WHERE command = ': shed-b'",
+        [],
+        |r| r.get(0),
+      )
+      .unwrap();
+    assert_eq!(
+      parent,
+      Some(a.to_string()),
+      "ex push severed shed's chain (branch collision): parent={parent:?}"
+    );
+  }
+
+  #[test]
+  fn init_db_repairs_fragmented_linear_history() {
+    // A linear timeline with more than one NULL-parent root is the signature of
+    // the release bug; init_db should re-chain it by id order on next open.
+    let _g = TestGuard::new();
+    let conn = db::get_db_conn().unwrap();
+    {
+      let c = conn.lock().unwrap();
+      let _ = c.execute_batch("DROP TABLE IF EXISTS shed_history");
+      let _ = c.execute_batch("DROP TABLE IF EXISTS branches");
+      let _ = c.execute_batch("DROP TABLE IF EXISTS reflog");
+      let _ = c.execute_batch("PRAGMA user_version = 0");
+    }
+    Shed::set_hist_branch("main".to_string());
+
+    // create the schema (empty), then plant a fragmented chain: t3 is a spurious
+    // root, orphaning t1/t2 from the head at t5.
+    History::new(conn.clone(), MAIN_HIST_TABLE_NAME, "main").unwrap();
+    {
+      let c = conn.lock().unwrap();
+      for (id, tok, parent) in [
+        (1, "t1", None),
+        (2, "t2", Some("t1")),
+        (3, "t3", None),
+        (4, "t4", Some("t3")),
+        (5, "t5", Some("t4")),
+      ] {
+        c.execute(
+          "INSERT INTO shed_history (id, timestamp, runtime, command, cwd, status, token, parent)
+           VALUES (?1, ?1, 0, ?2, '', 0, ?3, ?4)",
+          rusqlite::params![id, format!("cmd{id}"), tok, parent],
+        )
+        .unwrap();
+      }
+      c.execute(
+        "INSERT INTO branches (table_name, name, head) VALUES ('shed_history','main','t5')
+         ON CONFLICT(table_name,name) DO UPDATE SET head='t5'",
+        [],
+      )
+      .unwrap();
+    }
+
+    // re-opening triggers the repair
+    let _h = History::new(conn.clone(), MAIN_HIST_TABLE_NAME, "main").unwrap();
+
+    let roots: i64 = conn
+      .lock()
+      .unwrap()
+      .query_row(
+        "SELECT COUNT(*) FROM shed_history WHERE parent IS NULL",
+        [],
+        |r| r.get(0),
+      )
+      .unwrap();
+    assert_eq!(roots, 1, "repair should collapse to a single root");
+
+    // t3 (formerly a spurious root) now chains onto t2 → t1/t2 reconnected
+    let t3_parent: Option<String> = conn
+      .lock()
+      .unwrap()
+      .query_row(
+        "SELECT parent FROM shed_history WHERE token='t3'",
+        [],
+        |r| r.get(0),
+      )
+      .unwrap();
+    assert_eq!(
+      t3_parent,
+      Some("t2".to_string()),
+      "t3 should re-chain onto t2"
+    );
+  }
 }

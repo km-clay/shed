@@ -94,7 +94,7 @@ fn query_since(since_ts: i64, conn: &Connection, table: &Table, branch: &Branch)
   let sql = format!(
     r"
     WITH RECURSIVE reachable(token) AS (
-      SELECT head FROM branches WHERE name = ?1
+      SELECT head FROM branches WHERE table_name = '{table}' AND name = ?1
       UNION
       SELECT CASE k WHEN 0 THEN h.parent ELSE h.joint END
       FROM {table} h
@@ -132,7 +132,7 @@ fn query_masked(
     sql,
     r"
     WITH RECURSIVE reachable(token) AS (
-      SELECT head FROM branches WHERE name = ?1
+      SELECT head FROM branches WHERE table_name = '{table}' AND name = ?1
       UNION
       SELECT CASE k WHEN 0 THEN h.parent ELSE h.joint END
       FROM {table} h
@@ -491,16 +491,55 @@ impl History {
     )?;
 
     conn.execute_batch(
+      "CREATE TABLE IF NOT EXISTS branches (
+        table_name TEXT NOT NULL DEFAULT 'shed_history',
+        name       TEXT NOT NULL,
+        head       TEXT NOT NULL,
+        PRIMARY KEY (table_name, name)
+      );",
+    )?;
+
+    // migration hack because of a bug with ex history and main history having overlapping branch names
+    let has_table_name: bool = conn
+      .query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('branches') WHERE name = 'table_name'",
+        [],
+        |r| r.get::<_, i64>(0),
+      )
+      .map(|n| n > 0)?;
+
+    if !has_table_name {
+      conn.execute_batch(
+        "CREATE TABLE branches_new (
+          table_name TEXT NOT NULL DEFAULT 'shed_history',
+          name       TEXT NOT NULL,
+          head       TEXT NOT NULL,
+          PRIMARY KEY (table_name, name)
+        );
+        INSERT INTO branches_new (table_name, name, head)
+          SELECT 'shed_history', name, head FROM branches;
+        DROP TABLE branches;
+        ALTER TABLE branches_new RENAME TO branches;",
+      )?;
+    }
+
+    conn.execute_batch(
       "
-      CREATE TABLE IF NOT EXISTS branches (
-        name        TEXT UNIQUE  PRIMARY KEY NOT NULL,
-        head        TEXT         NOT NULL
+      CREATE TABLE IF NOT EXISTS reflog (
+        id         INTEGER PRIMARY KEY,
+        branch     TEXT    NOT NULL,
+        table_name TEXT    NOT NULL,
+        old_head   TEXT,
+        new_head   TEXT,
+        op         TEXT    NOT NULL,
+        timestamp  INTEGER NOT NULL
       );
+      CREATE INDEX IF NOT EXISTS reflog_branch_idx ON reflog(branch, id)
       ",
     )?;
 
     let has_main: bool = conn.query_row(
-      "SELECT EXISTS(SELECT 1 FROM branches WHERE name = 'main')",
+      "SELECT EXISTS(SELECT 1 FROM branches WHERE table_name = 'shed_history' AND name = 'main')",
       [],
       |r| r.get(0),
     )?;
@@ -515,13 +554,59 @@ impl History {
           ORDER BY prev.id DESC LIMIT 1
         );
 
-        INSERT INTO branches (name, head)
-        SELECT 'main', token FROM shed_history ORDER BY id DESC LIMIT 1;
+        INSERT INTO branches (table_name, name, head)
+        SELECT 'shed_history', 'main', token FROM shed_history ORDER BY id DESC LIMIT 1;
         ",
       )?;
     }
 
+    Self::try_repair_timeline(conn, table)?;
+
     conn.execute_batch(&format!("PRAGMA user_version = {}", Self::USER_VERSION))?;
+
+    Ok(())
+  }
+  fn try_repair_timeline(conn: &Connection, table: &Table) -> rusqlite::Result<()> {
+    // attempt to repair fragmented timelines
+    let roots: i64 = conn.query_row(
+      &format!("SELECT COUNT(*) FROM {table} WHERE parent IS NULL"),
+      [],
+      |r| r.get(0),
+    )?;
+    let joints: i64 = conn.query_row(
+      &format!("SELECT COUNT(*) FROM {table} WHERE joint IS NOT NULL"),
+      [],
+      |r| r.get(0),
+    )?;
+    let branch_count: i64 = conn.query_row(
+      "SELECT COUNT(*) FROM branches WHERE table_name = ?1",
+      rusqlite::params![**table],
+      |r| r.get(0),
+    )?;
+
+    // roots > 1 means there are multiple disconnected timelines
+    // joints == 0 means there are no merges
+    // if both of these are true, and there's only 1 or 0 branches, the timeline is broken.
+    // we'll now attempt to stitch those entries back together
+
+    if roots > 1 && joints == 0 && branch_count <= 1 {
+      conn.execute_batch(&format!(
+        "UPDATE {table} SET parent = (
+           SELECT token FROM {table} AS prev
+           WHERE prev.id < {table}.id ORDER BY prev.id DESC LIMIT 1
+         );"
+      ))?;
+      let newest: String = conn.query_row(
+        &format!("SELECT token FROM {table} ORDER BY id DESC LIMIT 1"),
+        [],
+        |r| r.get(0),
+      )?;
+      conn.execute(
+        "INSERT INTO branches (table_name, name, head) VALUES (?1, 'main', ?2)
+         ON CONFLICT(table_name, name) DO UPDATE SET head = ?2",
+        rusqlite::params![**table, newest],
+      )?;
+    }
 
     Ok(())
   }
@@ -551,9 +636,13 @@ impl History {
   ) -> ShResult<Option<HistEntry>> {
     let sql = format!(
       "SELECT command, timestamp, runtime, cwd, status, token FROM {table}
-      WHERE token = (SELECT head FROM branches WHERE name = ?1) LIMIT 1"
+      WHERE token = (SELECT head FROM branches WHERE table_name = ?1 AND name = ?2) LIMIT 1"
     );
-    let res = conn.query_row(&sql, rusqlite::params![**branch], History::row_to_entry);
+    let res = conn.query_row(
+      &sql,
+      rusqlite::params![**table, **branch],
+      History::row_to_entry,
+    );
 
     match res {
       Ok(entry) => Ok(Some(entry)),
@@ -567,20 +656,54 @@ impl History {
   fn head(&self) -> ShResult<Option<Uuid>> {
     Self::head_conn(&self.lock(), &self.table, &self.branch)
   }
-  fn advance_head(conn: &Connection, branch: &Branch, new_token: &str) -> rusqlite::Result<()> {
+  fn set_head(
+    conn: &Connection,
+    table: &Table,
+    branch: &Branch,
+    new_head: Option<&str>,
+    op: &str,
+  ) -> ShResult<()> {
+    let old_head_q = conn.query_row(
+      "SELECT head FROM branches WHERE table_name = ?1 AND name = ?2",
+      rusqlite::params![**table, **branch],
+      |r| r.get(0),
+    );
+    let old_head: Option<String> = match old_head_q {
+      Ok(h) => Some(h),
+      Err(rusqlite::Error::QueryReturnedNoRows) => None,
+      Err(e) => return Err(e.into()),
+    };
+
+    let timestamp = timestamp_secs(SystemTime::now());
     conn.execute(
       "
-      INSERT INTO branches (name, head) VALUES (?1, ?2)
-      ON CONFLICT(name) DO UPDATE SET head = ?2
+      INSERT INTO reflog (table_name, branch, old_head, new_head, op, timestamp)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
       ",
-      rusqlite::params![**branch, new_token],
+      rusqlite::params![**table, **branch, old_head, new_head, op, timestamp],
     )?;
+    match new_head {
+      Some(h) => conn.execute(
+        "
+        INSERT INTO branches (table_name, name, head) VALUES (?1, ?2, ?3)
+        ON CONFLICT(table_name, name) DO UPDATE SET head = ?3
+        ",
+        rusqlite::params![**table, **branch, h],
+      )?,
+      None => conn.execute(
+        "
+        DELETE FROM branches WHERE table_name = ?1 AND name = ?2
+        ",
+        rusqlite::params![**table, **branch],
+      )?,
+    };
+
     Ok(())
   }
   pub(crate) fn branch_exists(&self, name: &str) -> ShResult<bool> {
     Ok(self.lock().query_row(
-      "SELECT EXISTS(SELECT 1 FROM branches WHERE name = ?1)",
-      rusqlite::params![name],
+      "SELECT EXISTS(SELECT 1 FROM branches WHERE table_name = ?1 AND name = ?2)",
+      rusqlite::params![*self.table, name],
       |r| r.get(0),
     )?)
   }
@@ -588,8 +711,8 @@ impl History {
     let conn = self.lock();
     Ok(
       conn
-        .prepare("SELECT name FROM branches ORDER BY name")?
-        .query_map([], |r| r.get(0))?
+        .prepare("SELECT name FROM branches WHERE table_name = ?1 ORDER BY name")?
+        .query_map(rusqlite::params![*self.table], |r| r.get(0))?
         .filter_map(Result::ok)
         .collect(),
     )
@@ -602,8 +725,8 @@ impl History {
     self
       .lock()
       .execute(
-        "INSERT INTO branches (name, head) VALUES (?1, ?2)",
-        rusqlite::params![name, head],
+        "INSERT INTO branches (table_name, name, head) VALUES (?1, ?2, ?3)",
+        rusqlite::params![*self.table, name, head],
       )
       .map_err(|_| sherr!(InternalErr, "Branch already exists"))?;
     Ok(())
@@ -637,8 +760,8 @@ impl History {
     let conn = self.lock();
 
     let other_head: String = match conn.query_row(
-      "SELECT head FROM branches WHERE name = ?1",
-      rusqlite::params![other],
+      "SELECT head FROM branches WHERE table_name = ?1 AND name = ?2",
+      rusqlite::params![*self.table, other],
       |r| r.get(0),
     ) {
       Ok(h) => h,
@@ -658,7 +781,13 @@ impl History {
 
       if Self::is_reachable(&conn, &self.table, &other_head, cur)? {
         // fast-forward (no divergence)
-        Self::advance_head(&conn, &self.branch, &other_head)?;
+        Self::set_head(
+          &conn,
+          &self.table,
+          &self.branch,
+          Some(&other_head),
+          "fast-forward",
+        )?;
         return Ok(MergeResult::FastForward);
       }
     }
@@ -674,7 +803,7 @@ impl History {
       ),
       rusqlite::params![new_id, ts, token, cur_head, other_head],
     )?;
-    Self::advance_head(&conn, &self.branch, &token)?;
+    Self::set_head(&conn, &self.table, &self.branch, Some(&token), "merge")?;
     Ok(MergeResult::Merged)
   }
 
@@ -861,9 +990,9 @@ impl History {
       })
       .collect();
     let branch_repoints: Vec<(String, Option<String>)> = {
-      let mut stmt = tx.prepare("SELECT name, head FROM branches")?;
+      let mut stmt = tx.prepare("SELECT name, head FROM branches WHERE table_name = ?1")?;
       let all: Vec<(String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .query_map(rusqlite::params![**table], |r| Ok((r.get(0)?, r.get(1)?)))?
         .filter_map(Result::ok)
         .collect();
       all
@@ -943,14 +1072,14 @@ impl History {
       match new_head {
         Some(head) => {
           tx.execute(
-            "UPDATE branches SET head = ?1 WHERE name = ?2",
-            rusqlite::params![head, name],
+            "UPDATE branches SET head = ?1 WHERE table_name = ?2 AND name = ?3",
+            rusqlite::params![head, **table, name],
           )?;
         }
         None => {
           tx.execute(
-            "DELETE FROM branches WHERE name = ?1",
-            rusqlite::params![name],
+            "DELETE FROM branches WHERE table_name = ?1 AND name = ?2",
+            rusqlite::params![**table, name],
           )?;
         }
       }
@@ -1166,7 +1295,7 @@ impl History {
     let sql = format!(
       r"
       WITH RECURSIVE reachable(token) AS (
-        SELECT head FROM branches WHERE name = ?{branch_idx}
+        SELECT head FROM branches WHERE table_name = '{table}' AND name = ?{branch_idx}
         UNION
         SELECT CASE k WHEN 0 THEN h.parent ELSE h.joint END
         FROM {table} h
@@ -1292,7 +1421,7 @@ impl History {
       ],
     )?;
 
-    Self::advance_head(conn, branch, &token_raw)?;
+    Self::set_head(conn, table, branch, Some(&token_raw), "push")?;
 
     Ok(Some(token))
   }
@@ -1531,8 +1660,8 @@ impl History {
     let token = Uuid::new_v4().to_string();
     let parent: Option<String> = conn
       .query_row(
-        "SELECT head FROM branches WHERE name = ?1",
-        rusqlite::params![*self.branch],
+        "SELECT head FROM branches WHERE table_name = ?1 AND name = ?2",
+        rusqlite::params![*self.table, *self.branch],
         |r| r.get(0),
       )
       .ok();
@@ -1544,7 +1673,7 @@ impl History {
         rusqlite::params![id, timestamp, command, "", token, parent],
       )
       .unwrap();
-    Self::advance_head(conn, &self.branch, &token).unwrap();
+    Self::set_head(conn, &self.table, &self.branch, Some(&token), "push").unwrap();
   }
 
   #[cfg(test)]
