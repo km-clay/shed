@@ -9,6 +9,8 @@ use std::{
 };
 
 use crate::{
+  builtin::BuiltinRouter,
+  eval::lex::{Span, Tk},
   expand::escape,
   opt, outln, procio,
   readline::{self, Candidate, FuzzyBuilder},
@@ -19,7 +21,7 @@ use crate::{
   var,
 };
 
-use super::opt::OptSpec;
+use super::opt::{OptSpec, Parsed};
 
 pub(super) struct Cd;
 impl super::Builtin for Cd {
@@ -140,55 +142,52 @@ enum SortKind {
   Path,
 }
 
-/// The `zd` builtin. Uses directory history to jump to partial matches, instead of requiring an absolute path.
 pub(super) struct Zd;
-impl super::Builtin for Zd {
-  fn opts(&self) -> Vec<OptSpec> {
-    vec![
-      opt!("recursive" | b'r'),
-      opt!("depth" | b'd', 1),
-      opt!("print" | b'p'),
-      opt!("json"),
-      opt!("quoted"),
-      opt!("reverse"),
-      opt!("sort"),
-    ]
+impl super::BuiltinRouter for Zd {
+  fn default_sub() -> &'static dyn super::Builtin {
+    &ZdJump
   }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let first = args.arguments().next().map(|(s, _)| s).cloned();
-    let first = first.as_ref().map(|s| s.to_str_lossy());
-    match first.as_deref() {
-      // check subcommands
-      Some("add") => Self::add(&args),
-      Some("remove") => Self::remove(&args),
-      Some("clean") => Self::clean(),
-      Some("list") => Self::list(&args),
 
-      // normal case, querying for a directory
-      _ => Self::query(&args),
+  fn sub_for(word: &[u8]) -> Option<&'static dyn super::Builtin> {
+    match word {
+      b"add" => Some(&ZdAdd),
+      b"remove" => Some(&ZdRemove),
+      b"clean" => Some(&ZdClean),
+      b"list" => Some(&ZdList),
+      _ => None,
     }
   }
 }
 
-impl Zd {
-  /// zd add [-r] [dirs...] - add directories
-  fn add(args: &super::BuiltinArgs) -> ShResult<()> {
-    let depth = match args.options().find_map(|o| match o.key() {
-      "depth" => o.value().ok(),
-      _ => None,
-    }) {
-      Some(n) => match n.parse::<usize>() {
+impl super::Builtin for Zd {
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+    self.route_parse(cmd_span, argv, no_split)
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    self.dispatch_sub(args)
+  }
+}
+
+/// zd add [-r] <dirs...> - add directories to database
+struct ZdAdd;
+impl super::Builtin for ZdAdd {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![opt!("recursive" | b'r'), opt!("depth" | b'd', 1)]
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let depth = match args.opt_value("depth") {
+      Some(n) => match n.to_str_lossy().parse::<usize>() {
         Ok(n) => Some(n),
         Err(_) => return Err(sherr!(ParseErr @ args.span(), "invalid depth: {n}")),
       },
       None => None,
     };
+
     // a depth cap only makes sense recursively, so it implies -r.
-    let recursive = depth.is_some() || args.options().any(|o| o.key() == "recursive");
+    let recursive = depth.is_some() || args.has_opt("recursive");
 
     let mut dirs: Vec<PathBuf> = args
       .arguments()
-      .skip(1) // the "add" subcommand itself
       .map(|(a, _)| PathBuf::from(a.clone()))
       .collect();
     if dirs.is_empty()
@@ -229,15 +228,18 @@ impl Zd {
     conn.execute_batch("COMMIT").ok();
     util::with_status(0)
   }
+}
 
-  /// zd add [-r] <dirs...> - remove directories
-  fn remove(args: &super::BuiltinArgs) -> ShResult<()> {
-    let recursive = args.options().any(|o| o.key() == "recursive");
-    let targets: Vec<String> = args
-      .arguments()
-      .skip(1) // the "remove" subcommand itself
-      .map(|(a, _)| a.to_string())
-      .collect();
+/// zd remove [-r] <dirs...> - remove directories
+struct ZdRemove;
+impl super::Builtin for ZdRemove {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![opt!("recursive" | b'r')]
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
+    let recursive = args.has_opt("recursive");
+    let targets: Vec<String> = args.arguments().map(|(a, _)| a.to_string()).collect();
+
     if targets.is_empty() {
       return Err(sherr!(ExecFail @ args.span(), "remove requires a directory"));
     }
@@ -248,10 +250,12 @@ impl Zd {
     let Ok(conn) = conn.try_lock() else {
       return util::with_status(0);
     };
+
     let mut removed = 0;
     for target in &targets {
       let canon = std::fs::canonicalize(target)
         .map_or_else(|_| target.clone(), |c| c.to_string_lossy().into_owned());
+
       removed += if recursive {
         conn
           .execute(
@@ -270,8 +274,61 @@ impl Zd {
     }
     util::with_status(i32::from(removed == 0))
   }
+}
 
-  fn list(args: &super::BuiltinArgs) -> ShResult<()> {
+struct ZdClean;
+impl super::Builtin for ZdClean {
+  fn execute(&self, _args: super::BuiltinArgs) -> ShResult<()> {
+    let Some(conn) = db::get_db_conn() else {
+      return util::with_status(0);
+    };
+    let Ok(conn) = conn.try_lock() else {
+      return util::with_status(0);
+    };
+
+    let dead: Vec<String> = {
+      let Ok(mut stmt) = conn.prepare("SELECT path FROM dir_history") else {
+        return util::with_status(0);
+      };
+      let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else {
+        return util::with_status(0);
+      };
+      rows.flatten().filter(|p| !Path::new(p).is_dir()).collect()
+    };
+
+    let mut removed = 0;
+    for path in &dead {
+      removed += conn
+        .execute(
+          "DELETE FROM dir_history WHERE path = ?1",
+          rusqlite::params![path],
+        )
+        .unwrap_or(0);
+    }
+
+    outln!(
+      "zd: pruned {removed} dead {}",
+      if removed == 1 {
+        "directory"
+      } else {
+        "directories"
+      }
+    );
+    util::with_status(0)
+  }
+}
+
+struct ZdList;
+impl super::Builtin for ZdList {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      opt!("json"),
+      opt!("quoted"),
+      opt!("reverse" | b'r'),
+      opt!("sort", 1),
+    ]
+  }
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut quoted = false;
     let mut json = false;
 
@@ -284,7 +341,7 @@ impl Zd {
       match opt.key() {
         // 'reverse' and 'recursive' both share the '-r' shorthand,
         // it means different things on different subcommands.
-        "reverse" | "recursive" => sort.reverse = true,
+        "reverse" => sort.reverse = true,
         "json" => json = true,
         "quoted" => quoted = true,
 
@@ -299,12 +356,11 @@ impl Zd {
       }
     }
     if json && quoted {
-      return Err(sherr!(ParseErr @ args.span(), "--json and --quoted are mutually exclusive"));
+      return Err(sherr!(ParseErr @ args.cmd_span(), "--json and --quoted are mutually exclusive"));
     }
 
     let query = args
       .arguments()
-      .skip(1)
       .map(|(a, _)| a.to_str_lossy())
       .collect::<String>();
 
@@ -344,7 +400,9 @@ impl Zd {
 
     util::with_status(0)
   }
+}
 
+impl ZdList {
   fn fmt_entries(rows: &[DirStat]) -> String {
     // no format specified, use tab-separated values
     let mut entries = vec![];
@@ -434,45 +492,15 @@ impl Zd {
 
     output
   }
+}
 
-  /// `zd clean` - prune entries whose directory no longer exists.
-  fn clean() -> ShResult<()> {
-    let Some(conn) = db::get_db_conn() else {
-      return util::with_status(0);
-    };
-    let Ok(conn) = conn.try_lock() else {
-      return util::with_status(0);
-    };
-    let dead: Vec<String> = {
-      let Ok(mut stmt) = conn.prepare("SELECT path FROM dir_history") else {
-        return util::with_status(0);
-      };
-      let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else {
-        return util::with_status(0);
-      };
-      rows.flatten().filter(|p| !Path::new(p).is_dir()).collect()
-    };
-    let mut removed = 0;
-    for path in &dead {
-      removed += conn
-        .execute(
-          "DELETE FROM dir_history WHERE path = ?1",
-          rusqlite::params![path],
-        )
-        .unwrap_or(0);
-    }
-    outln!(
-      "zd: pruned {removed} dead {}",
-      if removed == 1 {
-        "directory"
-      } else {
-        "directories"
-      }
-    );
-    util::with_status(0)
+/// `zd <dir>` - uses directory history to jump to partial matches, instead of requiring an absolute path
+struct ZdJump;
+impl super::Builtin for ZdJump {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![opt!("print" | b'p')]
   }
-
-  fn query(args: &super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     // every positional is concatenated into one subsequence query, so
     // `zd pro fern` still finds `~/projects/fern`.
     let query = args

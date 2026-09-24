@@ -8,20 +8,13 @@ use std::{
   time::{Duration, UNIX_EPOCH},
 };
 
-use bstr::ByteSlice;
 use serde_json::{Map, Value};
 
 use crate::{
   HashSet,
-  builtin::{
-    BuiltinArgs,
-    opt::{self, Opt},
-  },
+  builtin::{BuiltinArgs, BuiltinRouter, opt::Opt},
   errln,
-  eval::{
-    execute,
-    lex::{Span, Tk},
-  },
+  eval::lex::{Span, Tk},
   expand::escape,
   opt, outln,
   procio::{self, OsSink, Sink, SinkIo},
@@ -40,7 +33,7 @@ use crate::{
   },
 };
 
-use super::opt::{OptSpec, Parsed, Word};
+use super::opt::{OptSpec, Parsed};
 
 fn open_history(span: Span, ex: bool, needs_mutable: bool) -> ShResult<History> {
   let (table, branch) = if ex {
@@ -440,45 +433,9 @@ impl HistQuery {
 }
 
 pub(super) struct Hist;
-impl super::Builtin for Hist {
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
-    let sub = Self::sub_from_tokens(argv);
-    let parsed = opt::parse_opts_with(
-      argv,
-      &sub.opts(),
-      sub.strict_opts(),
-      sub.double_dash_operand(),
-    )
-    .promote_err(cmd_span)?;
-    execute::record_last_arg(parsed.trace.last().cloned());
-    Ok(parsed)
-  }
-  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let sub = Self::sub_from_args(&args);
-    let (mut words, span, cmd_span) = args.unpack();
-    if sub.is_some() {
-      // strip the verb word before handing the rest to the subcommand
-      words.remove(0);
-    }
-    let sub = sub.unwrap_or(&HistList);
-
-    sub.execute(BuiltinArgs::new(words, span, cmd_span))
-  }
-}
-
-impl Hist {
-  fn sub_from_args(args: &BuiltinArgs) -> Option<&'static dyn super::Builtin> {
-    match args.argv().first() {
-      Some(Word::Arg(word, _)) => Self::sub_for(word.as_bytes()),
-      _ => None,
-    }
-  }
-  fn sub_from_tokens(tokens: &[Tk]) -> &'static dyn super::Builtin {
-    tokens
-      .get(1)
-      .filter(|tk| !tk.slice().starts_with_str("-"))
-      .and_then(|tk| Self::sub_for(tk.slice().as_bytes()))
-      .unwrap_or(&HistList)
+impl super::BuiltinRouter for Hist {
+  fn default_sub() -> &'static dyn super::Builtin {
+    &HistList
   }
   fn sub_for(word: &[u8]) -> Option<&'static dyn super::Builtin> {
     match word {
@@ -492,8 +449,16 @@ impl Hist {
     }
   }
 }
+impl super::Builtin for Hist {
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+    self.route_parse(cmd_span, argv, no_split)
+  }
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    self.dispatch_sub(args)
+  }
+}
 
-pub(super) struct HistImport;
+struct HistImport;
 impl super::Builtin for HistImport {
   fn opts(&self) -> Vec<OptSpec> {
     vec![OptSpec::new_short("force", b'f')]
@@ -663,7 +628,7 @@ impl HistImport {
   }
 }
 
-pub(super) struct HistExport;
+struct HistExport;
 impl super::Builtin for HistExport {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let hist = open_history(args.span(), false, false)?;
@@ -741,7 +706,7 @@ impl super::Builtin for HistExport {
   }
 }
 
-pub(super) struct HistCheckout;
+struct HistCheckout;
 impl super::Builtin for HistCheckout {
   fn opts(&self) -> Vec<OptSpec> {
     vec![OptSpec::new_short("branch", b'b'), opt!("orphan")]
@@ -781,7 +746,7 @@ impl super::Builtin for HistCheckout {
   }
 }
 
-pub(super) struct HistMerge;
+struct HistMerge;
 impl super::Builtin for HistMerge {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let Some((name, span)) = args.arguments().next() else {
@@ -808,7 +773,7 @@ impl super::Builtin for HistMerge {
   }
 }
 
-pub(super) struct HistBranch;
+struct HistBranch;
 impl super::Builtin for HistBranch {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
@@ -849,7 +814,7 @@ impl super::Builtin for HistBranch {
   }
 }
 
-pub(super) struct HistPull;
+struct HistPull;
 impl super::Builtin for HistPull {
   fn opts(&self) -> Vec<OptSpec> {
     vec![opt!("ex")]
@@ -865,7 +830,7 @@ impl super::Builtin for HistPull {
   }
 }
 
-pub(super) struct HistList;
+struct HistList;
 impl super::Builtin for HistList {
   fn opts(&self) -> Vec<OptSpec> {
     vec![

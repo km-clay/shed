@@ -5,6 +5,7 @@
 //! the [`Builtin`] trait. The builtins are registered in the [`BUILTIN_TABLE`] static variable, which
 //! is used to look up builtins by name.
 
+use bstr::ByteSlice;
 use nix::{sys::signal::Signal, unistd::Pid};
 use std::{
   fs,
@@ -12,6 +13,7 @@ use std::{
 };
 
 use crate::{
+  builtin::opt::Word,
   defer, errln,
   eval::{
     execute::{self, AssignBehavior, Dispatcher},
@@ -474,6 +476,56 @@ pub(super) trait Builtin: Sync {
 
     self.execute(builtin_args)
   }
+}
+
+/// A trait implemented by builtins with subcommands.
+///
+/// This allows subcommands to be first class in the sense that they get their own option parsing and dispatch,
+/// rather than being lumped into a single `Builtin` implementation with a big match statement.
+///
+/// Structs implementing this trait should also implement Builtin, and delegate like this:
+/// [`Builtin::get_argv_and_opts`] -> [`BuiltinRouter::route_parse`]
+/// [`Builtin::execute`] -> [`BuiltinRouter::dispatch_sub`]
+pub(crate) trait BuiltinRouter {
+  fn sub_from_args(args: &BuiltinArgs) -> Option<&'static dyn Builtin> {
+    match args.argv().first() {
+      Some(Word::Arg(word, _)) => Self::sub_for(word.as_bytes()),
+      _ => None,
+    }
+  }
+  fn sub_from_tokens(tokens: &[Tk]) -> Option<&'static dyn Builtin> {
+    tokens
+      .get(1)
+      .filter(|tk| !tk.slice().starts_with_str("-"))
+      .and_then(|tk| Self::sub_for(tk.slice().as_bytes()))
+  }
+  fn route_parse(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
+    let sub = Self::sub_from_tokens(argv).unwrap_or_else(Self::default_sub);
+    let parsed = opt::parse_opts_with(
+      argv,
+      &sub.opts(),
+      sub.strict_opts(),
+      sub.double_dash_operand(),
+    )
+    .promote_err(cmd_span)?;
+    execute::record_last_arg(parsed.trace.last().cloned());
+    Ok(parsed)
+  }
+  fn dispatch_sub(&self, args: BuiltinArgs) -> ShResult<()> {
+    let sub = Self::sub_from_args(&args);
+    let (mut words, span, cmd_span) = args.unpack();
+    if sub.is_some() {
+      // strip the verb word before handing the rest to the subcommand
+      words.remove(0);
+    }
+    let sub = sub.unwrap_or_else(Self::default_sub);
+
+    sub.execute(BuiltinArgs::new(words, span, cmd_span))
+  }
+  /// The default subcommand to run if no subcommand is specified.
+  fn default_sub() -> &'static dyn Builtin;
+  /// Lookup a subcommand by name. Returns `None` if the subcommand does not exist.
+  fn sub_for(word: &[u8]) -> Option<&'static dyn Builtin>;
 }
 
 // The easy ones
