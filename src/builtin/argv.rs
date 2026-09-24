@@ -71,6 +71,11 @@ impl BuiltinArgs {
       })
       .map(VarStr::from)
   }
+  pub(crate) fn opt_span(&self, key: &str) -> Option<Span> {
+    self
+      .options()
+      .find_map(|o| (o.key() == key).then(|| o.span()))
+  }
   pub(crate) fn no_arguments(&self) -> bool {
     self
       .argv

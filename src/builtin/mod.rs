@@ -68,6 +68,7 @@ mod jobctl;
 mod keymap;
 mod msg;
 mod opt;
+mod poll;
 mod printf;
 mod pwd;
 mod quote;
@@ -159,6 +160,7 @@ register_builtins! {
   b"local"    => varcmds::Local,
   b"msg"      => msg::Msg,
   b"nextd"    => dirjump::NextD,
+  b"poll"     => poll::Poll,
   b"pop"      => arrops::Pop,
   b"popd"     => dirstack::PopDir,
   b"prevd"    => dirjump::PrevD,
@@ -739,14 +741,17 @@ impl Builtin for Thru {
         let n = match reader.read(&mut buf[..cap]) {
           Ok(0) => break,
           Ok(n) => n,
-          Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-            signal::check_signals()?;
-            continue;
-          }
-          Err(e) => {
-            errln!("thru: {path}: error reading input: {e}");
-            break;
-          }
+          Err(e) => match e.kind() {
+            io::ErrorKind::WouldBlock => break,
+            io::ErrorKind::Interrupted => {
+              signal::check_signals()?;
+              continue;
+            }
+            _ => {
+              errln!("thru: {path}: error reading input: {e}");
+              break;
+            }
+          },
         };
 
         let chunk = &buf[..n];

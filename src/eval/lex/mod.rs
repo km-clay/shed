@@ -190,6 +190,13 @@ impl Span {
     self.end = self.end.max(other.end);
     Some(self)
   }
+  /// Applies a function to this Span's range, returning the result.
+  ///
+  /// Used mainly to target specific parts of a span's range, if the start and length are known.
+  pub(crate) fn sub_span<F: FnOnce(usize, usize) -> (usize, usize)>(self, f: F) -> Self {
+    let (start, end) = f(self.start, self.end);
+    Span::new(start, end, self.source)
+  }
   pub(crate) fn at(mut self, pos: Pos) -> Self {
     self.pos = Some(pos);
     self

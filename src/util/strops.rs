@@ -821,6 +821,9 @@ impl<'a> TimeReader<'a> {
 
     Ok(tks)
   }
+  /// Parse a duration like "1m 30s" or something
+  ///
+  /// Returns the duration as microseconds if it succeeds
   pub(crate) fn parse_dur(s: &str) -> ShResult<i64> {
     let mut tks = Self::tokenize(s)?.into_iter().peekable();
     let mut total: i64 = 0;
@@ -830,7 +833,10 @@ impl<'a> TimeReader<'a> {
       match tk {
         TimeTk::Num(n) => {
           let Some(TimeTk::Word(unit)) = tks.next() else {
-            return Err(sherr!(ParseErr, "expected a unit after '{n}'"));
+            return Err(
+              sherr!(ParseErr, "expected a unit after '{n}'")
+                .with_note("e.g. '10s', '100ms', '1m 30s', etc".into()),
+            );
           };
           let Some(per) = Self::unit_micros(&unit) else {
             return Err(sherr!(ParseErr, "unknown unit '{unit}'"));

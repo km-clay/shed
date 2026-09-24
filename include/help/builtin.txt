@@ -43,6 +43,7 @@ The following builtins are available:
   `local`       declare variables local to a function       |builtin-local|
   `msg`         post a message to the status bar            |builtin-msg|
   `nextd`       go forward in the directory history         |builtin-nextd|
+  `poll`        wait for readiness on file descriptors      |builtin-poll|
   `popd`        pop the directory stack                     |builtin-popd|
   `prevd`       go back in the directory history            |builtin-prevd|
   `printf`      formatted output                            |builtin-printf|
@@ -1462,6 +1463,120 @@ NEXTD                                            *builtin-nextd* *nextd*
       `nextd`             move forward one directory
       `nextd 3`           move forward three directories
       `nextd -l`          list the forward history
+
+==============================================================================
+POLL                                             *builtin-poll* *poll*
+
+  `poll {fd}[:{events}] ... [-o {var}] [-t {timeout}]`
+  `poll -i {array} [-o {var}] [-t {timeout}]`
+
+  Wait until one or more file descriptors are ready for I/O, then report
+  which fds fired and why. `poll` is a single, one-shot wait: it blocks
+  once, records the result, and returns. The loop belongs to the script;
+  `poll` is meant to be used as a loop condition, not to loop internally.
+
+  This is the multiplexing primitive for the socket builtins: with it, a
+  single-threaded script can service many connections at once instead of
+  blocking on one at a time. See |listen|(builtin-listen), |accept|(builtin-accept), and
+  |sock|(builtin-sock).
+
+  Descriptors:
+
+  Each {fd} is a descriptor open in the current shell; from `exec`,
+  |sock|(builtin-sock), |listen|(builtin-listen), |accept|(builtin-accept),
+  or a redirection. A descriptor that is not open is a usage error, not a
+  silent skip.
+
+  Requested events ~                                       *poll-events*
+
+  The events to wait for follow the fd after a `:`, separated by commas or
+  whitespace. A bare {fd} with no `:{events}` defaults to `in`.
+
+  `in`     data is available to read
+  `out`    writing will not block
+  `pri`    an exceptional/priority condition (e.g. TCP out-of-band data)
+
+  Only these three are requestable. `hup`, `err`, and `nval` (below) are
+  always reported and cannot be asked for.
+  Examples: `5:in,out`, `${conn}:in,pri`, etc
+
+  Input array form ~
+
+  `-i {array}`       take the watch set from an associative array instead
+                     of positional arguments. `--events` is a synonym.
+                     Keys are descriptors, values are event sets in the
+                     same `in out pri` vocabulary:
+
+                         `declare -A watch`
+                         `watch[$conn]="in"`
+                         `watch[$srv]="in out pri"`
+                         `poll -i watch`
+
+  The values can be comma or space separated. The positional form and `-i`
+  are alternatives; `-i` replaces the positional watch set rather than adding to it.
+
+  Result ~                                                 *poll-revents*
+
+  `poll` writes an associative array mapping each ready descriptor to the
+  space-separated set of conditions that fired. Only descriptors that
+  fired appear; on timeout the array is emptied.
+
+  `-o {var}`         name the result array. `--revents` is a synonym.
+                     Defaults to `$SHED_REVENTS`.
+
+  Result conditions are a superset of the requestable ones:
+
+  `in` `out` `pri`   the requested condition is ready
+  `hup`              the peer hung up (the other end closed)
+  `err`              an error condition on the descriptor
+  `nval`             the descriptor is not valid
+
+  The fds that received events can be iterated over using the associative
+  array key expansion: `${!SHED_REVENTS[@]}`. For example:
+  `while poll 5:in,out 6:in 7:in; do`
+  `  for key in ${!SHED_REVENTS[@]}; do`
+  `    revents="${SHED_REVENTS[$key]}"`
+  `    case "$revents" in`
+  `      *hup*) ... handle POLLHUP ... ;;`
+  `      *in*)  ... handle POLLIN  ... ;;`
+  `      *out*) ... handle POLLOUT ... ;;`
+  `    esac`
+  `  done`
+  `done`
+
+  `hup`, `err`, and `nval` are reported even when not requested, so a loop
+  can reap dead descriptors instead of spinning on them. Note `in` and
+  `hup` commonly appear together: a descriptor with pending data whose
+  peer has also closed reports `in hup`; drain the data, then reap.
+
+  Timeout ~
+
+  `-t {timeout}`     how long to wait. A duration with an explicit unit
+                     (`5s`, `1000ms`, `1m 30s`); `--timeout` is a synonym.
+                     `-t 0` returns immediately (a non-blocking poll). With
+                     no `-t`, `poll` blocks indefinitely.
+
+  Exit status:
+
+  `0`   at least one descriptor is ready
+  `1`   nothing fired before the wait ended: the timeout elapsed, or a
+        usage/runtime error occurred (an unopened fd, an invalid event).
+        Errors are also reported to standard error.
+
+  Ready and not-ready are distinguished by status (`0` vs `1`), so `poll`
+  composes as a loop condition: `while poll ...; do ...; done` runs the
+  body on each wakeup and exits when the wait ends.
+
+  Examples:
+
+      `poll 6:in -t 5s`                    wait up to 5s for fd 6 to read
+      `poll 3:in 4:in ${w}:out`            several fds, mixed conditions
+      `poll ${conn}:in,out`                readable or writable
+      `poll -i watch -o ready -t 1s`       array in, array out
+      `while poll -i conns -o hits -t 0`   drive an event loop; body
+      `  do handle_ready hits; done`       services whatever fired
+
+  See also: |builtin-sock|, |builtin-listen|, |builtin-accept|.
 
 ==============================================================================
 POPD                                             *builtin-popd* *popd*
