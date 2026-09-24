@@ -1,44 +1,53 @@
 split() {
-	[ "$#" -ge 1 ] || raise "Usage: split <%1> [<%2>] " 'pattern' 'string'
-	local pat parts part
+  local USAGE=("Usage: split <%1> [<%2>] " 'pattern' 'string')
+	[ "$#" -ge 1 ] || raise "${USAGE[@]}"
+
+	local pat="$1" parts part input line
 
   while getopts ":0" opt; do
     case "$opt" in
       0) pat=$'\0' ;;
-      *) raise "Usage: split <%1> [<%2>] " 'pattern' 'string' ;;
+      *) raise "${USAGE[@]}";;
     esac
   done
+
   if [ -z "$pat" ]; then
-    pat="$1"
+    raise "${USAGE[@]}"
+  fi
+
+  if [ -n "$2" ]; then
+    input="$2"
+
+    while true; do
+      part="${input%%"${pat}"*}"
+      push parts "$part"
+
+      [ "$part" = "$input" ] && break
+
+      input="${input#*"${pat}"}"
+    done
+
+    quote "${parts[@]}"
+    return 0
   fi
 
   if ! [ -t 0 ]; then
-    while IFS= read -r parts || [ -n "$parts" ]; do
-      # strip all trailing delimiters
-      while [ "$parts" != "${parts%"${pat}"}" ]; do parts="${parts%"${pat}"}"; done
+    while IFS= read -r line || [ -n "$line" ]; do
+      parts=()
 
-      parts="${parts}${pat}" # attaches a delimiter to the end
+      while true; do
+        part="${line%%"${pat}"*}"
+        push parts "$part"
 
-      while [ -n "$parts" ]; do
-        part="${parts%%"${pat}"*}"
-        parts="${parts#*"${pat}"}"
-        quote "$part"
+        [ "$part" = "$line" ] && break
+
+        line="${line#*"${pat}"}"
       done
-    done
-  elif [ -z "$2" ]; then
-    return
-  else
-    parts="$2"
-    # strip all trailing delimiters
-    while [ "$parts" != "${parts%"${pat}"}" ]; do parts="${parts%"${pat}"}"; done
 
-    parts="${parts}${pat}" # attaches a delimiter to the end
-
-    while [ -n "$parts" ]; do
-      part="${parts%%"${pat}"*}"
-      parts="${parts#*"${pat}"}"
-      quote "$part"
+      if (( "${#parts[@]}" )); then
+        quote "${parts[@]}"
+      fi
     done
+    return 0
   fi
-
 }
