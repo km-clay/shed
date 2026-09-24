@@ -57,6 +57,40 @@ Quoted Stream Adapters ~                                  *quoted-streams*
 
   See |builtin-quote| and |builtin-unquote| for encoding details.
 
+Nested records ~                                         *nested-streams*
+
+  A quoted stream is not limited to one layer. Because
+  |quote|(builtin-quote) is reversible and its output is itself just a
+  string, a whole quoted record can be embedded as a single field of
+  another record; |unquote|(builtin-unquote) peels exactly one layer, so
+  the two compose. A field may hold a sub-table, whose fields may hold
+  further sub-tables, to any depth. The nesting can be heterogeneous — a
+  scalar field beside a field that is an entire sub-record:
+
+      `hobbies=("reading" "rock climbing")`
+      `person=("alice" "$(quote "${hobbies[@]}")")`
+
+      `quote "${person[@]}"`
+          alice 'reading '\''rock climbing'\'''
+      `quote "${person[@]}" | unquote`
+          alice
+          reading 'rock climbing'       # field 2 is a sub-table
+
+  One `$(quote ...)` nests a level; one |unquote|(builtin-unquote)
+  unwinds it. This is the mechanism Tcl lists and Lisp S-expressions use.
+
+  Caveats ~
+
+    - depth is schema, not self-describing: the bytes carry no type or
+      depth tags, so a consumer must know how many times to unquote each
+      field. An unknown shape cannot be parsed generically the way a
+      bracketed format like JSON can.
+    - escaping compounds per level (`'` becomes `'\''`, re-escaped again
+      at each layer), so encoded size grows geometrically with depth.
+    - a multi-record sub-table's newlines live inside a single outer
+      field, so outer-stream lines no longer align with inner records —
+      unquote the field before processing it.
+
 Named streams ~                                          *named-streams*
 
   |qname|(function-qname) builds a named stream by prepending a header
