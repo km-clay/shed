@@ -200,6 +200,7 @@ pub(crate) trait ShResultExt {
   fn try_blame(self, span: Span) -> Self;
   /// If the value is `Err()`, attach a span to it
   fn promote_err(self, span: Span) -> Self;
+  fn with_code(self, code: i32) -> Self;
 }
 
 impl<T> ShResultExt for Result<T, ShErr> {
@@ -209,6 +210,9 @@ impl<T> ShResultExt for Result<T, ShErr> {
   }
   fn promote_err(self, span: Span) -> Self {
     self.map_err(|e| e.promote(span))
+  }
+  fn with_code(self, code: i32) -> Self {
+    self.map_err(|e| e.with_code(code))
   }
 }
 
@@ -360,12 +364,15 @@ impl ariadne::Cache<SourceId> for SpanCache {
 }
 
 /// The shell's main error type.
+///
+/// Used basically everywhere, for everything.
 #[derive(Debug)]
 pub(crate) struct ShErr {
   kind: ShErrKind,
   src_span: Option<StrongSpan>,
   labels: Vec<LabelBuilder>,
   notes: Vec<VarStr>,
+  code: Option<i32>,
 
   /// If we propagate through a redirect boundary, we take ownership of
   /// the RedirGuard(s) so that redirections stay alive until the error
@@ -379,6 +386,7 @@ impl ShErr {
     Self {
       kind,
       src_span: Some(span.upgrade()),
+      code: None,
       labels: vec![],
       notes: vec![],
       io_guards: vec![],
@@ -388,10 +396,18 @@ impl ShErr {
     Self {
       kind,
       src_span: None,
+      code: None,
       labels: vec![],
       notes: vec![msg],
       io_guards: vec![],
     }
+  }
+  pub(crate) fn with_code(mut self, code: i32) -> Self {
+    self.code = Some(code);
+    self
+  }
+  pub(crate) fn code(&self) -> Option<i32> {
+    self.code.or_else(|| self.kind().code())
   }
   pub(crate) fn loop_break(code: i32) -> Self {
     Self::simple(
@@ -725,6 +741,15 @@ impl ShErrKind {
   }
   pub(crate) fn is_warning(&self) -> bool {
     matches!(self, Self::DeprecationWarning)
+  }
+  pub(crate) fn code(&self) -> Option<i32> {
+    match self {
+      Self::Custom(_, code)
+      | Self::FuncReturn(code)
+      | Self::CleanExit(code)
+      | Self::Raised(_, code) => Some(*code),
+      _ => None,
+    }
   }
 }
 

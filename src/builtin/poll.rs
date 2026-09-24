@@ -1,15 +1,12 @@
 use std::{
   fmt::Display,
-  os::fd::{AsRawFd, BorrowedFd, RawFd},
+  os::fd::{AsRawFd, RawFd},
   sync::Arc,
   time::Duration,
 };
 
 use bstr::ByteSlice;
-use nix::{
-  errno::Errno,
-  poll::{PollFd, PollFlags, PollTimeout, poll},
-};
+use nix::libc;
 
 use crate::{
   eval::lex::Span,
@@ -30,8 +27,8 @@ use crate::{
 
 use super::opt::OptSpec;
 
-type PollEntries = (Vec<PollFd<'static>>, Vec<(RawFd, Arc<dyn Sink>)>);
-type PollEntry = (PollFd<'static>, (RawFd, Arc<dyn Sink>));
+type PollEntries = (Vec<libc::pollfd>, Vec<(RawFd, Arc<dyn Sink>)>);
+type PollEntry = (libc::pollfd, (RawFd, Arc<dyn Sink>));
 
 pub(super) struct Poll;
 impl super::Builtin for Poll {
@@ -44,9 +41,9 @@ impl super::Builtin for Poll {
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let (mut pfds, meta) = if let Some(events) = args.opt_value("events") {
-      Self::parse_events(events, &args)?
+      Self::parse_events(events, &args).with_code(2)?
     } else {
-      Self::parse_args(&args)?
+      Self::parse_args(&args).with_code(2)?
     };
 
     let revents = args
@@ -54,71 +51,94 @@ impl super::Builtin for Poll {
       .unwrap_or_else(|| VarStr::from("SHED_REVENTS"));
     let mut revents_arr: Vec<(VarStr, VarStr)> = vec![];
 
-    let timeout = match args.opt_value("timeout") {
-      None => PollTimeout::NONE,
+    let timeout: i32 = match args.opt_value("timeout") {
+      None => -1,
       Some(t) => {
         if t.trim() == b"0" {
-          PollTimeout::ZERO
+          0
         } else {
           let span = args.opt_span("timeout").unwrap();
-          let micros = strops::TimeReader::parse_dur(&t.to_str_lossy()).promote_err(span)?;
-          PollTimeout::try_from(Duration::from_micros(micros.cast_unsigned()))
-            .unwrap_or(PollTimeout::MAX)
+          let micros = strops::TimeReader::parse_dur(&t.to_str_lossy())
+            .promote_err(span)
+            .with_code(2)?;
+          let millis = Duration::from_micros(micros.cast_unsigned()).as_millis();
+          // now we gotta do some weird casting stuff
+          // to clamp overflows
+          match millis {
+            0 => 1,
+            _ => millis.min(i32::MAX as u128) as i32,
+          }
         }
       }
     };
 
     let n = loop {
-      match poll(&mut pfds, timeout) {
-        Ok(n) => break n,
-        Err(Errno::EINTR) => signal::check_signals()?,
-        Err(e) => return Err(sherr!(ExecFail @ args.cmd_span(), "poll failed: {e}")),
+      let r = unsafe { libc::poll(pfds.as_mut_ptr(), pfds.len() as libc::nfds_t, timeout) };
+      if r >= 0 {
+        // fds are ready, or we timed out
+        break r;
+      }
+      // error
+      let e = std::io::Error::last_os_error();
+      if let Some(libc::EINTR) = e.raw_os_error() {
+        signal::check_signals()?;
+      } else {
+        return Err(sherr!(ExecFail @ args.cmd_span(), "poll failed: {e}").with_code(2));
       }
     };
 
     for (pfd, (logical, _)) in pfds.iter().zip(&meta) {
-      if let Some(re) = Self::fmt_revents(pfd) {
+      if let Some(re) = Self::fmt_revents(pfd.revents) {
         revents_arr.push((varstr!("{logical}"), re));
       }
     }
 
-    Shed::vars_mut(|v| v.update_var(&revents.to_str_lossy(), VarKind::AssocArr(revents_arr)))?;
+    Shed::vars_mut(|v| v.update_var(&revents.to_str_lossy(), VarKind::AssocArr(revents_arr)))
+      .with_code(2)?;
 
     util::with_status(i32::from(n == 0))
   }
 }
 
 impl Poll {
-  fn resolve(logical: RawFd, flags: PollFlags, span: Span) -> ShResult<PollEntry> {
+  fn resolve(logical: RawFd, events: libc::c_short, span: Span) -> ShResult<PollEntry> {
     let sink = Shed::sinks(|s| s.get(logical))
       .ok_or_else(|| sherr!(ExecFail @ span, "fd {logical} is not open"))?;
     let raw = sink
       .as_os_fd()
       .map_err(|e| sherr!(ExecFail @ span, "fd {logical} is not pollable: {e}"))?
       .as_raw_fd();
-    let pfd = PollFd::new(unsafe { BorrowedFd::borrow_raw(raw) }, flags);
+    let pfd = libc::pollfd {
+      fd: raw,
+      events,
+      revents: 0,
+    };
+
     Ok((pfd, (logical, sink)))
   }
-  fn fmt_revents(pfd: &PollFd) -> Option<VarStr> {
-    let re = pfd.revents()?;
-
+  fn fmt_revents(re: libc::c_short) -> Option<VarStr> {
     let mut flags = vec![];
-    if re.contains(PollFlags::POLLIN) {
+
+    if re & libc::POLLIN != 0 {
       flags.push("in");
     }
-    if re.contains(PollFlags::POLLOUT) {
+    if re & libc::POLLOUT != 0 {
       flags.push("out");
     }
-    if re.contains(PollFlags::POLLPRI) {
+    if re & libc::POLLPRI != 0 {
       flags.push("pri");
     }
-    if re.contains(PollFlags::POLLERR) {
+    if re & libc::POLLERR != 0 {
       flags.push("err");
     }
-    if re.contains(PollFlags::POLLHUP) {
+    if re & libc::POLLHUP != 0 {
       flags.push("hup");
     }
-    if re.contains(PollFlags::POLLNVAL) {
+    #[cfg(linux_like)]
+    if re & libc::POLLRDHUP != 0 {
+      flags.push("rdhup");
+    }
+    if re & libc::POLLNVAL != 0 {
       flags.push("nval");
     }
 
@@ -128,16 +148,24 @@ impl Poll {
       Some(flags.join(" ").into())
     }
   }
-  fn parse_flags(spec: &[u8], span: Span, ctx: &dyn Display) -> ShResult<PollFlags> {
-    let mut flags = PollFlags::empty();
+  fn parse_flags(spec: &[u8], span: Span, ctx: &dyn Display) -> ShResult<libc::c_short> {
+    let mut flags: libc::c_short = 0;
     for tok in spec
       .split(|&c| c == b',' || c.is_ascii_whitespace())
       .filter(|s| !s.is_empty())
     {
       flags |= match tok {
-        b"in" => PollFlags::POLLIN,
-        b"out" => PollFlags::POLLOUT,
-        b"pri" => PollFlags::POLLPRI,
+        b"in" => libc::POLLIN,
+        b"out" => libc::POLLOUT,
+        b"pri" => libc::POLLPRI,
+        #[cfg(linux_like)]
+        b"rdhup" => libc::POLLRDHUP,
+        #[cfg(not(linux_like))]
+        b"rdhup" => {
+          return Err(
+            sherr!(ExecFail @ span, "event flag `rdhup` is not supported on this platform"),
+          );
+        }
         _ => {
           return Err(sherr!(ExecFail @ span,
             "invalid event flag `{}` in {ctx}", tok.to_str_lossy()));
@@ -145,8 +173,8 @@ impl Poll {
       };
     }
 
-    if flags.is_empty() {
-      flags |= PollFlags::POLLIN;
+    if flags == 0 {
+      flags |= libc::POLLIN;
     }
 
     Ok(flags)
@@ -295,7 +323,11 @@ mod tests {
   fn poll_nonopen_fd_errors() {
     let _g = TestGuard::new();
     test_input("poll 91:in -t 0").ok();
-    assert_ne!(Shed::get_status(), 0, "polling an unopened fd should error");
+    assert_eq!(
+      Shed::get_status(),
+      2,
+      "polling an unopened fd should be a usage error"
+    );
   }
 
   #[test]
@@ -305,7 +337,11 @@ mod tests {
     install(6, r);
 
     test_input("poll 6:bogus -t 0").ok();
-    assert_ne!(Shed::get_status(), 0, "invalid event flag should error");
+    assert_eq!(
+      Shed::get_status(),
+      2,
+      "invalid event flag should be a usage error"
+    );
 
     drop(w);
   }

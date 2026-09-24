@@ -429,16 +429,12 @@ pub(super) trait Builtin: Sync {
           let status = match e.kind() {
             ShErrKind::Custom(_, code) | ShErrKind::CleanExit(code) => *code,
             ShErrKind::Interrupt => signal::signal_status(Signal::SIGINT),
-            _ => 1,
+            _ => e.code().unwrap_or(1),
           };
           Shed::set_status(status);
           Err(e.with_context(tree[context].iter()))
         } else {
-          let status = if let ShErrKind::Custom(_, code) = e.kind() {
-            *code
-          } else {
-            1
-          };
+          let status = e.code().unwrap_or(1);
 
           e.with_context(tree[context].iter()).print_error();
           util::with_status(status)

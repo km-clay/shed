@@ -1559,13 +1559,14 @@ POLL                                             *builtin-poll* *poll*
   Exit status:
 
   `0`   at least one descriptor is ready
-  `1`   nothing fired before the wait ended: the timeout elapsed, or a
-        usage/runtime error occurred (an unopened fd, an invalid event).
-        Errors are also reported to standard error.
+  `1`   timeout: nothing was ready before the wait ended
+  `2`   a usage or runtime error (an unopened fd, an invalid event, a
+        failed `poll` call); also reported to standard error
 
-  Ready and not-ready are distinguished by status (`0` vs `1`), so `poll`
-  composes as a loop condition: `while poll ...; do ...; done` runs the
-  body on each wakeup and exits when the wait ends.
+  Ready, timeout, and error are distinct statuses, so `poll` composes as a
+  loop condition: `while poll ...; do ...; done` runs the body on each
+  wakeup, exits cleanly on a `1` timeout, and lets a `2` be told apart
+  from a normal end.
 
   Examples:
 
