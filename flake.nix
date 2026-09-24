@@ -113,11 +113,9 @@
         rustToolchain
         pkgs.pkgsCross.musl64.stdenv.cc  # musl linker for the cross build
         pkgs.sqlite
-        pkgs.strace
         pkgs.gdb
         pkgs.hyperfine
-        pkgs.perf
-        pkgs.nixfmt-rfc-style
+        pkgs.nixfmt
         pkgs.nil
       ];
 
