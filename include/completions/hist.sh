@@ -5,6 +5,8 @@ _hist_subcommands() {
     [checkout]='switch to a history branch'
     [switch]='switch to a history branch'
     [merge]='merge another branch into the current one'
+    [export]='dump the entire history as JSON for backup'
+    [import]='restore a backup dump, or import another shell'\''s history'
   )
   compadd -A c
 }
@@ -47,7 +49,6 @@ _hist_query_flags() {
     [with-token]='entries with a specific uuid'
     [in-dir]='entries executed in a specific directory'
     [limit]='limits the number of entries to output'
-    [import]='import history entries from another shell'
   )
   case $1 in
     --*)
@@ -91,7 +92,29 @@ _hist_comp() {
       _hist_branches
     ;;
     branch)
-      # `branch {name}` creates a new name; nothing to complete
+      case "$cur" in
+        -*)
+          local -A bshort=( [d]='delete a branch (must be fully merged)' [D]='force-delete a branch even if unmerged' )
+          compadd -P '-' -A bshort
+          return
+        ;;
+      esac
+      # when deleting, complete existing branch names; a new name is free-form
+      local w
+      for w in "${COMP_WORDS[@]}"; do
+        case "$w" in
+          -d|-D) _hist_branches; return ;;
+        esac
+      done
+    ;;
+    export)
+      # takes no arguments
+    ;;
+    import)
+      case "$cur" in
+        # a bare argument falls back to file completion (backup or history file)
+        -*) compadd -P '-' f; compadd -P '--' force ;;
+      esac
     ;;
     pull)
       case "$cur" in

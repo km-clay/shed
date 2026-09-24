@@ -79,6 +79,7 @@ fn print_usage() {
      \x1b[1m-c/--command\x1b[0m <COMMAND>  evaluate COMMAND and exit\n  \
      \x1b[1m-s\x1b[0m                      read commands from stdin\n  \
      \x1b[1m-i/--interactive\x1b[0m        force interactive mode\n  \
+     \x1b[1m-I\x1b[0m                      run any input, then drop to an interactive prompt\n  \
      \x1b[1m-l/--login\x1b[0m              run as a login shell\n  \
      \x1b[1m-w\x1b[0m                      print the welcome message\n  \
      \x1b[1m-o\x1b[0m NAME / +o NAME       enable/disable a `set` option (e.g. -o errexit)\n  \

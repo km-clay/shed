@@ -1104,9 +1104,11 @@ HIST                                             *builtin-hist* *hist*
 
   `hist [options] [id ...]`
   `hist pull [--ex]`
-  `hist branch [{name}]`
+  `hist branch [-d|-D] [{name}]`
   `hist checkout [-b] [--orphan] {branch}`     (alias: `switch`)
   `hist merge {branch}`
+  `hist export`
+  `hist import [-f] [{source}]`
 
   Query and manage shell history. History is stored in a SQLite
   database and supports rich filtering and git-style branching. With
@@ -1151,7 +1153,6 @@ HIST                                             *builtin-hist* *hist*
 
     `--delete`          delete matching entries
     `--restore`         restore previously deleted entries
-    `--import {source}` import history from another shell (see below)
     `--ex`              operate on ex-mode history instead of shell command history
 
   History Branches ~
@@ -1167,14 +1168,23 @@ HIST                                             *builtin-hist* *hist*
     `hist branch`           list branches; the current one is marked `*`
     `hist branch {name}`    create branch {name} at the current position
                             without switching to it
+    `hist branch -d {name}` delete branch {name}. Refuses if {name} has
+                            entries not reachable from the current branch;
+                            `-D` force-deletes even when unmerged. Only the
+                            branch pointer is removed, the entries are kept.
     `hist checkout {name}`  switch to branch {name} (alias: `switch`)
       `-b {name}`           create {name} if it doesn't exist, then switch
       `--orphan {name}`     switch to a new empty branch disconnected from
-                            existing history; its first command becomes a
+                            existing history; its first entry becomes a
                             fresh root
     `hist merge {name}`     merge {name} into the current branch. Fast-forwards
                             when the current branch hasn't diverged, otherwise
                             records a merge uniting both histories.
+    `hist export`           write the entire history state (all branches, the
+                            commit graph, and branch pointers) to stdout as
+                            a JSON document for backup (see below)
+    `hist import [{file}]`  restore a `hist export` dump, or import another
+                            shell's history (see below)
 
   Providing numeric arguments restricts results to those specific IDs:
 
@@ -1183,19 +1193,35 @@ HIST                                             *builtin-hist* *hist*
   Dates accept natural language: "yesterday", "2 hours ago", "last
   monday", ISO 8601, etc. Durations: "5s", "2 minutes", "1 hour".
 
-  Importing History ~
+  Export and Import ~
 
-  `--import {source}` imports history from another shell's history file.
-  {source} can be a shell name or an explicit file path:
+  `hist export` serializes the entire history — every branch, the full
+  commit graph (parent and merge links), and branch pointers — as a JSON
+  document on stdout. Redirect it to a file for a complete backup:
 
-    `bash`    ~/.bash_history   (plain text or with HISTTIMEFORMAT timestamps)
-    `zsh`     ~/.zsh_history    (plain text or extended format)
-    `fish`    ~/.local/share/fish/fish_history
-    any path  treated as a file to auto-detect and import
+      `hist export > history.json`
 
-  The format is detected automatically from the file contents. After import,
-  entries are sorted by timestamp so imported history interleaves correctly
-  with existing entries.
+  `hist import [{file}]` reads from {file}, or from stdin when {file} is
+  omitted, and detects the format automatically:
+
+    A `hist export` dump is restored structurally: branches, commit graph,
+    and pointers are recreated exactly, preserving each entry's token.
+    Import refuses to run against a non-empty history unless `-f`/`--force`
+    is given, which replaces the existing history entirely.
+
+    Any other input is treated as another shell's history file: its
+    commands are appended to the current branch and sorted by timestamp so
+    they interleave correctly with existing entries. For this case {file}
+    may be a shell name instead of a path, resolving to that shell's
+    default history file:
+
+      `bash`    ~/.bash_history   (plain text or with HISTTIMEFORMAT timestamps)
+      `zsh`     ~/.zsh_history    (plain text or extended format)
+      `fish`    ~/.local/share/fish/fish_history
+      any path  a file to auto-detect and import
+
+    To import a file literally named `bash`, `zsh`, or `fish`, prefix it
+    with `./` so it is read as a path rather than a shell name.
 
   Examples:
 
@@ -1206,15 +1232,19 @@ HIST                                             *builtin-hist* *hist*
       `hist --delete --contains foo`            delete entries containing "foo"
       `hist --not --with-status 0`              failed commands
       `hist --in-dir . --after "1 hour ago"`    recent commands in current dir
-      `hist --import bash`                      import from ~/.bash_history
-      `hist --import zsh`                       import from ~/.zsh_history
-      `hist --import ~/old_history`             import from explicit path
+      `hist import bash`                        import from ~/.bash_history
+      `hist import zsh`                         import from ~/.zsh_history
+      `hist import ~/old_history`               import from explicit path
       `hist --quoted --no-dupes -n`             unique commands, shell-quoted
       `hist --quoted -n | scry -q`              fuzzy-pick a past command
       `hist branch experiment`                  create a branch at the current point
+      `hist branch -d experiment`               delete a merged branch
       `hist checkout -b experiment`             create it and switch in one step
       `hist checkout --orphan scratch`          start a fresh, disconnected history
       `hist merge experiment`                   fold a branch back into the current one
+      `hist export > backup.json`               back up all branches to a file
+      `hist import backup.json`                 restore a backup into empty history
+      `hist import -f backup.json`              restore, replacing existing history
       `hist pull`                               sync history from other sessions
 
   See also: |builtin-scry|
@@ -1521,12 +1551,14 @@ PRINTF                                           *builtin-printf* *printf*
     `%q`          shell-quoted output suitable for re-input
     `%r`          repeat the argument string (shed extension). The field
                   width is the repeat count, not a pad width; see below
+    `%h`          human-readable byte count (shed extension). Argument is a
+                  number of bytes, printed with IEC units, e.g. `15.1 MiB`
     `%(FORMAT)T`  date/time formatted via `strftime` codes. Argument is
                   seconds since the Unix epoch; `-1` means current time,
                   `-2` means shell start time
     `%%`          literal `%`
 
-  `%r` is a `shed` extension; `bash` and `POSIX` do not provide it.
+  `%r` and `%h` are `shed` extensions; `bash` and `POSIX` do not provide them.
 
   Flags ~
 
