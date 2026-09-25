@@ -1495,10 +1495,14 @@ POLL                                             *builtin-poll* *poll*
   `in`     data is available to read
   `out`    writing will not block
   `pri`    an exceptional/priority condition (e.g. TCP out-of-band data)
+  `rdhup`  the peer closed or shut down the write half of the connection,
+           i.e. reading has reached end-of-file (Linux/Android only)
 
-  Only these three are requestable. `hup`, `err`, and `nval` (below) are
-  always reported and cannot be asked for.
-  Examples: `5:in,out`, `${conn}:in,pri`, etc
+  `in`, `out`, and `pri` are portable and requestable. `rdhup` is also
+  requestable, but only on Linux/Android. Unlike the others, `rdhup` is
+  reported only when explicitly requested. `hup`, `err`, and `nval`
+  (below) are always reported and cannot be asked for.
+  Examples: `5:in,out`, `${conn}:in,pri`, `${conn}:in,rdhup`
 
   Input array form ~
 
@@ -1527,7 +1531,9 @@ POLL                                             *builtin-poll* *poll*
   Result conditions are a superset of the requestable ones:
 
   `in` `out` `pri`   the requested condition is ready
-  `hup`              the peer hung up (the other end closed)
+  `rdhup`            the peer half-closed / read reached EOF (reported only
+                     if requested; Linux/Android only)
+  `hup`              the peer hung up (the connection is fully closed)
   `err`              an error condition on the descriptor
   `nval`             the descriptor is not valid
 
@@ -1548,6 +1554,29 @@ POLL                                             *builtin-poll* *poll*
   can reap dead descriptors instead of spinning on them. Note `in` and
   `hup` commonly appear together: a descriptor with pending data whose
   peer has also closed reports `in hup`; drain the data, then reap.
+
+  Reaping half-closed stream sockets ~                      *poll-rdhup*
+  {(Linux and Android only)}
+
+  A stream socket at read-EOF stays readable forever; `poll {fd}:in`
+  keeps reporting `in`, and a `while poll {fd}:in` loop that never reaps
+  will spin at 100% CPU. This happens when the peer shuts down its write
+  half (`shutdown(SHUT_WR)`) but keeps the connection open for a reply:
+  reading is at EOF, yet there is no full `hup` (that only arrives on a
+  complete close). Request `rdhup` to catch this cleanly:
+
+      `while poll "$conn":in,rdhup -t 5s; do`
+      `  case "${SHED_REVENTS[$conn]}" in`
+      `    *rdhup*|*hup*) reap "$conn" ;;   # peer done sending / gone`
+      `    *in*)          serve "$conn" ;;  # real data`
+      `  esac`
+      `done`
+
+  `rdhup` says the peer is done sending (you may still write a reply before
+  reaping); `hup` says the connection is fully torn down. Because "rdhup"
+  contains "hup", a plain `*hup*` glob matches both. Order `*rdhup*`
+  first when you need to tell them apart. As an alternative to requesting
+  `rdhup`, treat a zero-byte read as EOF and reap there.
 
   Timeout ~
 
