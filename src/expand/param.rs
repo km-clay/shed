@@ -282,7 +282,7 @@ fn perform_param_expansion_inner(
     }
 
     if let Ok(param) = var_spec.parse::<ShellParam>() {
-      let len = Shed::vars(|v| v.try_get_param(param)).map_or(0, |val| val.len());
+      let len = Shed::vars(|v| v.try_get_param(param)).map_or(0, |val| val.chars().count());
       return Ok(len.to_string().into());
     }
     let parsed = VarName::parse(var_spec, allow_side_effects)?;
@@ -302,16 +302,16 @@ fn perform_param_expansion_inner(
         }
         _ => {
           let val = Shed::vars(|v| v.index_var(parsed.name(), idx))?;
-          return Ok(val.len().to_string().into());
+          return Ok(val.chars().count().to_string().into());
         }
       }
     }
     let var = Shed::vars(|v| v.get_var_meta(var_spec));
     return Ok(
       match var.kind() {
-        VarKind::Magic(func) => func().unwrap_or_default().len(),
-        VarKind::Str(v) => v.as_bytes().len(),
-        VarKind::Int(i) => varstr!("{i}").len(),
+        VarKind::Magic(func) => func().unwrap_or_default().chars().count(),
+        VarKind::Str(v) => v.chars().count(),
+        VarKind::Int(i) => varstr!("{i}").chars().count(),
         VarKind::Arr(items) => items.len(),
         VarKind::AssocArr(items) => items.len(),
         VarKind::Unset => 0,
