@@ -23,7 +23,7 @@ use std::{
   fs::{File, OpenOptions},
   io::{self, Cursor, IsTerminal, Read, Seek, Write},
   ops::Deref,
-  os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
+  os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
   path::Path,
   sync::{
     Arc, Condvar, Mutex, OnceLock,
@@ -1523,8 +1523,9 @@ impl Sinks {
       }
       let sink_fd = sink.as_os_fd()?;
 
-      // call into_raw_fd() here to get the fd out of OwnedFd so it doesn't close on drop
-      let _ = unsafe { unistd::dup2_raw(sink_fd, *target_fd)? }.into_raw_fd();
+      if unsafe { libc::dup2(sink_fd.as_raw_fd(), *target_fd) } == -1 {
+        return Err(io::Error::last_os_error());
+      }
     }
     Ok(())
   }
