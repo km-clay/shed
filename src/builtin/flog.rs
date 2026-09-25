@@ -44,8 +44,7 @@ impl super::Builtin for Flog {
 
     for opt in opts {
       if opt.key() == "prefix" {
-        let prefix = opt.value()?;
-        prefix_fmt = prefix.into();
+        prefix_fmt = opt.value()?;
       }
     }
 

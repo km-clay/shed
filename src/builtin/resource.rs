@@ -41,31 +41,31 @@ impl RLimits {
       match o.key() {
         "fds" => {
           let arg = o.value()?;
-          fds = Some(arg.parse::<u64>().map_err(|_| {
+          fds = Some(arg.parse::<u64>().ok_or_else(|| {
             sherr!(ParseErr @ o.span(), "invalid argument for -n: {arg}",).with_code(2)
           })?);
         }
         "procs" => {
           let arg = o.value()?;
-          procs = Some(arg.parse::<u64>().map_err(|_| {
+          procs = Some(arg.parse::<u64>().ok_or_else(|| {
             sherr!(ParseErr @ o.span(), "invalid argument for -u: {arg}",).with_code(2)
           })?);
         }
         "stack" => {
           let arg = o.value()?;
-          stack = Some(arg.parse::<u64>().map_err(|_| {
+          stack = Some(arg.parse::<u64>().ok_or_else(|| {
             sherr!(ParseErr @ o.span(), "invalid argument for -s: {arg}",).with_code(2)
           })?);
         }
         "core" => {
           let arg = o.value()?;
-          core = Some(arg.parse::<u64>().map_err(|_| {
+          core = Some(arg.parse::<u64>().ok_or_else(|| {
             sherr!(ParseErr @ o.span(), "invalid argument for -c: {arg}",).with_code(2)
           })?);
         }
         "vmem" => {
           let arg = o.value()?;
-          vmem = Some(arg.parse::<u64>().map_err(|_| {
+          vmem = Some(arg.parse::<u64>().ok_or_else(|| {
             sherr!(ParseErr @ o.span(), "invalid argument for -v: {arg}",).with_code(2)
           })?);
         }

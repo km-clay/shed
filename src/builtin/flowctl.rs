@@ -190,7 +190,7 @@ impl super::Builtin for Raise {
       match opt.key() {
         "code" => {
           let c = opt.value()?;
-          let Ok(code_arg) = c.parse::<i32>() else {
+          let Some(code_arg) = c.parse::<i32>() else {
             return Err(sherr!(
               SyntaxErr @ opt.span(),
               "Invalid exit code: expected a number, got '{code}'",
@@ -200,12 +200,10 @@ impl super::Builtin for Raise {
           code = code_arg;
         }
         "kind" => {
-          let k = opt.value()?;
-          kind = Some(k.into());
+          kind = Some(opt.value()?);
         }
         "note" => {
-          let n = opt.value()?;
-          notes.push(n.into());
+          notes.push(opt.value()?);
         }
         _ => {
           return Err(sherr!(

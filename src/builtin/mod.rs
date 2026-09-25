@@ -7,10 +7,7 @@
 
 use bstr::ByteSlice;
 use nix::{sys::signal::Signal, unistd::Pid};
-use std::{
-  fs,
-  io::{self, Read},
-};
+use std::io::{self, Read};
 
 use crate::{
   builtin::opt::Word,
@@ -24,7 +21,7 @@ use crate::{
     },
   },
   expand::{arithmetic, escape},
-  lifecycle, opt, outln,
+  lifecycle, outln,
   procio::{self, RedirSet, SinkIo, Sinks},
   sherr, shopt, signal,
   state::{
@@ -85,6 +82,7 @@ mod source;
 mod stash;
 mod stat;
 mod test; // [[ ]] thing
+mod thru;
 mod times;
 mod trap;
 mod varcmds;
@@ -186,7 +184,7 @@ register_builtins! {
   b"stash"    => stash   ::StashBuiltin,
   b"stat"     => stat    ::Stat,
   b"test"     => test    ::Test,
-  b"thru"     => self    ::Thru,
+  b"thru"     => thru    ::Thru,
   b"times"    => times   ::Times,
   b"trap"     => trap    ::Trap,
   b"true"     => self    ::True,
@@ -619,158 +617,6 @@ impl Builtin for Yes {
     }
     // unreachable! this builtin can only be exited with
     // explicit interruption, or a broken pipe.
-  }
-}
-
-/// A source of bytes for the `thru` builtin, which can be either a file or stdin.
-enum ThruSource {
-  File(fs::File),
-  Stdin,
-}
-impl std::io::Read for ThruSource {
-  /// Read bytes from the source into the provided buffer, returning the number of bytes read.
-  fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-    match self {
-      ThruSource::File(f) => f.read(buf),
-      ThruSource::Stdin => {
-        let stdin = procio::stdin_sink().map_err(|_| procio::ebadf())?;
-        SinkIo(stdin).read(buf)
-      }
-    }
-  }
-}
-
-/// Identity function that reads from stdin or files and writes to stdout, optionally teeing to a file and counting bytes.
-///
-/// Basically `cat` + `tee`, with no fork involved. Useful for keeping pipelines in-process if speed matters in a script.
-struct Thru;
-impl Builtin for Thru {
-  fn strict_opts(&self) -> bool {
-    true
-  }
-  fn opts(&self) -> Vec<OptSpec> {
-    vec![
-      opt!("count" | b'c'),
-      opt!("append" | b'a'),
-      opt!("report-eof" | b'E'),
-      opt!("tee" | b't', 1),
-      opt!("limit" | b'L', 1),
-    ]
-  }
-  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let mut count = false;
-    let mut append = false;
-    let mut report_eof = false;
-    let mut tee: Option<VarStr> = None;
-    let mut limit = None;
-
-    for opt in args.options() {
-      match opt.key() {
-        "append" => append = true,
-        "count" => count = true,
-        "tee" => tee = Some(opt.value()?.into()),
-        "report-eof" => report_eof = true,
-        "limit" => {
-          let arg = opt.value()?;
-          let Ok(parsed) = arg.parse::<usize>() else {
-            return Err(sherr!(InvalidOpt @ opt.span(), "invalid limit: {arg}"));
-          };
-          limit = Some(parsed);
-        }
-        _ => {}
-      }
-    }
-
-    let mut tee_file = tee
-      .map(|dest| {
-        let file = if append {
-          std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&dest)
-        } else {
-          std::fs::File::create(&dest)
-        };
-        file.inspect_err(|e| {
-          errln!("thru: failed to open {dest} for writing: {e}");
-        })
-      })
-      .transpose()
-      .ok()
-      .flatten();
-
-    let mut sources: Vec<Option<VarStr>> = args
-      .arguments()
-      .map(|(a, _)| (a.to_str_lossy() != "-").then(|| a.clone()))
-      .collect();
-    if sources.is_empty() {
-      // no source operands → read stdin
-      sources.push(None);
-    }
-
-    let mut byte_count = 0;
-
-    for src in sources {
-      if limit == Some(0) {
-        break;
-      }
-
-      let mut reader = match &src {
-        Some(path) => match fs::File::open(path) {
-          Ok(f) => ThruSource::File(f),
-          Err(e) => {
-            errln!("thru: {path}: {e}");
-            continue;
-          }
-        },
-        None => ThruSource::Stdin,
-      };
-      let path = src.unwrap_or_else(|| "stdin".into());
-
-      let mut buf = [0u8; 16384];
-      loop {
-        let cap = limit.map_or(buf.len(), |r| r.min(buf.len()));
-        if cap == 0 {
-          break;
-        }
-
-        let n = match reader.read(&mut buf[..cap]) {
-          Ok(0) => break,
-          Ok(n) => n,
-          Err(e) => match e.kind() {
-            io::ErrorKind::WouldBlock => break,
-            io::ErrorKind::Interrupted => {
-              signal::check_signals()?;
-              continue;
-            }
-            _ => {
-              errln!("thru: {path}: error reading input: {e}");
-              break;
-            }
-          },
-        };
-
-        let chunk = &buf[..n];
-        procio::out_bytes(chunk);
-
-        if let Some(t) = tee_file.as_mut() {
-          use std::io::Write;
-          t.write_all(chunk).ok();
-        }
-
-        byte_count += n;
-        if let Some(l) = limit.as_mut() {
-          *l -= n;
-        }
-      }
-    }
-
-    if count {
-      errln!("thru: {byte_count} bytes");
-    }
-
-    let status = i32::from(report_eof && byte_count == 0);
-    util::with_status(status)
   }
 }
 

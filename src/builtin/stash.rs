@@ -50,7 +50,7 @@ impl StashOpts {
           });
         }
         "delete" => {
-          new.to_delete.push(opt.value()?.into());
+          new.to_delete.push(opt.value()?);
         }
         "list" => new.list = true,
         "stack" => new.only_stack = true,

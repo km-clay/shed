@@ -634,6 +634,26 @@ impl From<RedirSpec> for RedirSet {
 pub(crate) trait Sink: Send + Sync {
   fn read(&self, buf: &mut [u8]) -> io::Result<usize>;
   fn write(&self, buf: &[u8]) -> io::Result<usize>;
+  fn write_all(&self, buf: &[u8]) -> io::Result<usize> {
+    let mut total_written = 0;
+    while total_written < buf.len() {
+      match self.write(&buf[total_written..]) {
+        Ok(0) => {
+          return Err(io::Error::new(
+            io::ErrorKind::WriteZero,
+            "failed to write whole buffer",
+          ));
+        }
+        Ok(n) => total_written += n,
+        Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {
+          signal::check_signals()
+            .map_err(|e| io::Error::new(io::ErrorKind::Interrupted, e.to_string()))?;
+        }
+        Err(e) => return Err(e),
+      }
+    }
+    Ok(total_written)
+  }
   fn flush(&self) -> io::Result<()>;
   fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>>;
   fn kind(&self) -> SinkKind;

@@ -111,35 +111,31 @@ impl Vice {
       match opt.key() {
         "cut" => {
           let arg = opt.value()?;
-          let cmd = ViceCmd::parse_cut(arg);
-          prog.cmds.push(cmd);
+          prog.cmds.push(ViceCmd::parse_cut(&arg.to_str_lossy()));
         }
         "sep" => {
-          let arg = opt.value()?;
-          prog.sep = Some(alias::expand_keymap(arg));
+          prog.sep = Some(alias::expand_keymap(&opt.value()?.to_str_lossy()));
         }
         "move" => {
           let arg = opt.value()?;
-          let cmd = ViceCmd::parse_move(arg);
-          prog.cmds.push(cmd);
+          prog.cmds.push(ViceCmd::parse_move(&arg.to_str_lossy()));
         }
         "repeat" => {
-          let arg = opt.value()?;
-          prog.cmds.push(ViceCmd::parse_repeat(arg)?);
+          prog
+            .cmds
+            .push(ViceCmd::parse_repeat(&opt.value()?.to_str_lossy())?);
         }
         "delim" => {
-          let arg = opt.value()?;
-          prog.delim = arg.into();
+          prog.delim = opt.value()?;
         }
         "quoted" => prog.flags |= ViceFlags::QUOTED,
         "in-place" => prog.flags |= ViceFlags::INPLACE,
         "lines" => prog.flags |= ViceFlags::LINES,
         "keep-mode" => prog.flags |= ViceFlags::KEEP_MODE,
         "backup-ext" => {
-          let arg = opt.value()?;
-          prog.backup_ext = Some(arg.into());
+          prog.backup_ext = Some(opt.value()?);
         }
-        "backup" if prog.backup_ext.is_none() && prog.backup_ext.is_none() => {
+        "backup" if prog.backup_ext.is_none() => {
           prog.backup_ext = Some(".bak".into());
         }
         _ => {}

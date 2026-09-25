@@ -93,6 +93,7 @@ trait ArrOp {
         "count" => {
           let c = opt.value()?;
           count = c
+            .to_str_lossy()
             .parse::<usize>()
             .map_err(|_| sherr!(ParseErr @ opt.span(), "invalid count: {c}"))?;
         }
@@ -126,9 +127,11 @@ trait ArrOp {
     if let Some(var) = var {
       if popped.len() == 1 {
         let val = popped.pop_back().unwrap();
-        Shed::vars_mut(|v| v.set_var(var, VarKind::Str(val), VarFlags::empty()))?;
+        Shed::vars_mut(|v| v.set_var(&var.to_str_lossy(), VarKind::Str(val), VarFlags::empty()))?;
       } else {
-        Shed::vars_mut(|v| v.set_var(var, VarKind::arr(popped), VarFlags::empty()))?;
+        Shed::vars_mut(|v| {
+          v.set_var(&var.to_str_lossy(), VarKind::arr(popped), VarFlags::empty())
+        })?;
       }
     } else {
       for val in popped {
@@ -241,6 +244,7 @@ impl super::Builtin for Rotate {
         "count" => {
           let c = opt.value()?;
           count = c
+            .to_str_lossy()
             .parse::<usize>()
             .map_err(|_| sherr!(ParseErr @ opt.span(), "invalid count: {c}"))?;
         }

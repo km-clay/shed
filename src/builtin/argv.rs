@@ -63,13 +63,10 @@ impl BuiltinArgs {
   }
   /// Get the value of an option with the given key, if it exists.
   pub(crate) fn opt_value(&self, key: &str) -> Option<VarStr> {
-    self
-      .options()
-      .find_map(|o| {
-        let opt_key = o.key();
-        (opt_key == key).then(|| o.value().ok()).flatten()
-      })
-      .map(VarStr::from)
+    self.options().find_map(|o| {
+      let opt_key = o.key();
+      (opt_key == key).then(|| o.value().ok()).flatten()
+    })
   }
   pub(crate) fn opt_span(&self, key: &str) -> Option<Span> {
     self

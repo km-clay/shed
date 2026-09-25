@@ -612,7 +612,7 @@ fn local_to_utc(ndt: NaiveDateTime) -> ShResult<DateTime<Utc>> {
 
 #[derive(Clone)]
 enum TimeTk {
-  Num(i64),
+  Num(f64),
   Word(VarStr),
 }
 
@@ -684,17 +684,16 @@ impl<'a> TimeReader<'a> {
     })
   }
 
-  fn read_offset(&mut self, n: i64) -> ShResult<()> {
+  fn read_offset(&mut self, n: f64) -> ShResult<()> {
     let Some(TimeTk::Word(unit)) = self.next_tk() else {
       return Err(sherr!(ParseErr, "expected a unit after '{n}'"));
     };
     let Some(per) = Self::unit_micros(&unit) else {
       return Err(sherr!(ParseErr, "unknown unit '{unit}'"));
     };
-    let add = n
-      .checked_mul(per)
-      .ok_or_else(|| sherr!(ParseErr, "time expression too large"))?;
-    self.offset = Some(self.offset.unwrap_or(0).saturating_add(add));
+    let scaled = Self::scale_f64(n, per)?;
+
+    self.offset = Some(self.offset.unwrap_or(0).saturating_add(scaled));
     Ok(())
   }
 
@@ -717,7 +716,7 @@ impl<'a> TimeReader<'a> {
       return Err(sherr!(ParseErr, "expected a day after '{word}'"));
     };
     let year = match self.peek_tk() {
-      Some(TimeTk::Num(y)) if *y >= 1000 => {
+      Some(TimeTk::Num(y)) if *y >= 1000.0 => {
         let y = *y as i32;
         self.pos += 1;
         y
@@ -802,6 +801,10 @@ impl<'a> TimeReader<'a> {
         Some(c) if c.is_ascii_digit() => {
           let start = cur.pos();
           cur.bump_while(|c| c.is_ascii_digit());
+          if cur.peek_byte() == Some(b'.') {
+            cur.bump();
+            cur.bump_while(|c| c.is_ascii_digit());
+          }
 
           let n = s[start..cur.pos()]
             .parse()
@@ -820,6 +823,13 @@ impl<'a> TimeReader<'a> {
     }
 
     Ok(tks)
+  }
+  fn scale_f64(n: f64, per: i64) -> ShResult<i64> {
+    let scaled = n * per as f64;
+    if !scaled.is_finite() || scaled.abs() >= i64::MAX as f64 {
+      return Err(sherr!(ParseErr, "time expression too large"));
+    }
+    Ok(scaled.round() as i64)
   }
   /// Parse a duration like "1m 30s" or something
   ///
@@ -841,11 +851,9 @@ impl<'a> TimeReader<'a> {
           let Some(per) = Self::unit_micros(&unit) else {
             return Err(sherr!(ParseErr, "unknown unit '{unit}'"));
           };
-          let add = n
-            .checked_mul(per)
-            .ok_or_else(|| sherr!(ParseErr, "duration too large"))?;
+          let scaled = Self::scale_f64(n, per)?;
           total = total
-            .checked_add(add)
+            .checked_add(scaled)
             .ok_or_else(|| sherr!(ParseErr, "duration too large"))?;
           saw_any = true;
         }

@@ -3,6 +3,7 @@
 //! `complete` - bash-style completion spec registration
 //! `compadd` - zsh-style completion candidate addition
 
+use bstr::ByteSlice;
 use itertools::{EitherOrBoth, Itertools};
 
 use crate::{
@@ -294,21 +295,27 @@ pub(super) fn get_comp_opts<'a>(opts: impl Iterator<Item = &'a Opt>) -> ShResult
 
   for opt in opts {
     match opt.key() {
-      "function" => comp_opts.func = Some(opt.value()?.into()),
+      "function" => comp_opts.func = Some(opt.value()?),
       "wordlist" => {
-        comp_opts.wordlist = Some(opt.value()?.split_whitespace().map(VarStr::from).collect());
+        comp_opts.wordlist = Some(
+          opt
+            .value()?
+            .split(u8::is_ascii_whitespace)
+            .map(VarStr::from)
+            .collect(),
+        );
       }
-      "action" => comp_opts.action = Some(opt.value()?.into()),
-      "option" => match opt.value()? {
-        "default" => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
-        "dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
-        "space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
-        "filenames" => comp_opts.opt_flags |= CompOptFlags::FILENAMES,
-        "nospace" => comp_opts.opt_flags &= !CompOptFlags::SPACE,
+      "action" => comp_opts.action = Some(opt.value()?),
+      "option" => match &*opt.value()? {
+        b"default" => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
+        b"dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
+        b"space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
+        b"filenames" => comp_opts.opt_flags |= CompOptFlags::FILENAMES,
+        b"nospace" => comp_opts.opt_flags &= !CompOptFlags::SPACE,
         opt_flag => {
           return Err(sherr!(
             InvalidOpt @ opt.span(),
-            "complete: invalid option: {opt_flag}"
+            "complete: invalid option: {}", opt_flag.to_str_lossy()
           ));
         }
       },

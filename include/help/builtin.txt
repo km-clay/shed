@@ -1580,10 +1580,11 @@ POLL                                             *builtin-poll* *poll*
 
   Timeout ~
 
-  `-t {timeout}`     how long to wait. A duration with an explicit unit
-                     (`5s`, `1000ms`, `1m 30s`); `--timeout` is a synonym.
-                     `-t 0` returns immediately (a non-blocking poll). With
-                     no `-t`, `poll` blocks indefinitely.
+  `-t {timeout}`     how long to wait. A duration with an explicit unit,
+                     fractional allowed (`5s`, `500ms`, `0.5s`, `1m 30s`);
+                     `--timeout` is a synonym. `-t 0` returns immediately (a
+                     non-blocking poll). With no `-t`, `poll` blocks
+                     indefinitely.
 
   Exit status:
 
@@ -1929,7 +1930,7 @@ UNQUOTE                                          *builtin-unquote* *unquote*
 READ                                             *builtin-read* *read*
 
   `read [-r] [-s] [-q] [-p {prompt}] [-d {delim}] [-a {array}]`
-  `     [-n {count}] [-N {count}] [-t {seconds}] [name ...]`
+  `     [-n {count}] [-N {count}] [-t {duration}] [name ...]`
 
   Read one line from standard input. The line is split by `$IFS` and
   assigned to {name}s in order. If there are more words than names,
@@ -1948,7 +1949,11 @@ READ                                             *builtin-read* *read*
   `-N {count}`       read exactly {count} bytes verbatim, ignoring the
                      delimiter, `$IFS`, and escapes. Byte-exact; use this
                      for binary. See "Byte counts" below.
-  `-t {seconds}`     timeout after {seconds} of inactivity
+  `-t {duration}`    timeout after {duration} of inactivity. A bare number
+                     is seconds (`-t 5`, `-t 0.5`); a unit suffix or a
+                     compound duration also works (`-t 500ms`, `-t 1m30s`).
+                     `-t 0` polls instead: exit 0 only if input is ready
+                     now, consuming nothing.
 
   Quoted mode ~
 
@@ -2992,18 +2997,20 @@ STAT                                             *builtin-stat* *stat*
 ==============================================================================
 THRU                                             *builtin-thru* *thru*
 
-  `thru [-c] [-t {dest}] [-a] [-L {bytes}] [-E] [{file}...]`
+  `thru [-c] [-a] [-E] [-t {dest}] [-S {n}] [-T {n}] [-F {byte}] [-U {byte}]`
+  `     [{file} ...]`
 
-  Pass input to standard output unchanged: a fork-free `cat`. With one or
-  more {file} arguments it reads each in order; with none it reads standard
-  input. A {file} of `-` also means standard input. Intended for three main
-  use cases:
+  Pass input to standard output unchanged: a fork-free `cat`, with a few
+  control-flow extras. With one or more {file} arguments it reads each in
+  order; with none it reads standard input. A {file} of `-` also means standard
+  input. Intended for these main use cases:
 
     - Reading file(s) without forking an external `cat`: `thru config.toml`.
     - Capturing stdin into a variable without spawning an external process:
       `var=$(thru)` instead of `var=$(cat)`.
-    - Acting as a no-op stage in a pipeline that can optionally tee, count,
-      or limit the byte stream without disturbing the data flow.
+    - Counting raw byte throughput using `-c`
+    - Controlling exact byte flow: `-S`/`-T` slice by position, `-F`/`-U`
+      slice by delimiter, and `-t` mirrors to a file or descriptor.
 
   With no flags, `thru` is the identity function for byte streams: every
   byte read is written to stdout unchanged.
@@ -3027,20 +3034,44 @@ THRU                                             *builtin-thru* *thru*
                   that passed through to standard error. Does not affect
                   the pass-through output.
 
-    `-L {bytes}`, `--limit {bytes}`
+    `-S {bytes}`, `--skip {bytes}`
+                  Discard the first {bytes} bytes of input before passing
+                  anything through. The bytes are read and dropped, not
+                  emitted. Combined with `-T` this carves an exact
+                  slice `[skip, skip+take)` out of any stream.
+
+    `-T {bytes}`, `--take {bytes}`
                   Pass through at most {bytes} bytes of input, then stop;
                   any further input is left unread. The cut is byte-exact
                   and binary-safe: it is not adjusted to a character
-                  boundary, so a multi-byte character straddling the limit
+                  boundary, so a multi-byte character straddling the end
                   is split. Combine with `seek` to read a byte range out of
-                  a file descriptor.
+                  a file descriptor, or with `-S` to slice any stream.
+
+    `-F {byte}`, `--from {byte}`
+                  Discard input up to and including the first {byte}, then
+                  begin passing through. {byte} must be exactly one byte
+                  (`$'\0'`, `:`, ...) and is itself consumed, never emitted.
+                  The marker that opens a slice. Exits non-zero if {byte} is
+                  never seen before end of input.
+
+    `-U {byte}`, `--until {byte}`
+                  Stop once the next {byte} is seen, passing through
+                  everything before it; the {byte} is consumed but not
+                  emitted. {byte} must be exactly one byte. The marker that
+                  closes a slice. Exits non-zero if {byte} is never seen
+                  before end of input, which is what terminates a record
+                  loop: `while thru -U $'\0'; do ...; done`.
 
     `-E`, `--report-eof`
                   Exit non-zero when no bytes were passed through, so a
-                  loop stops at end of input the way `read` does:
-                  `while thru -L {n} -E <&{fd}; do ...; done`. Without this
-                  flag `thru` always exits 0 (like `cat` on an empty file).
+                  count loop stops at end of input the way `read` does:
+                  `while thru -T {n} -E <&{fd}; do ...; done`. Without this
+                  flag `thru` always exits 0 on empty input (like `cat`).
                   A read error that moved no bytes also exits non-zero.
+                  Marker loops (`-U`/`-F`) need no `-E`: a missing delimiter
+                  already exits non-zero, and `-E` would wrongly stop them
+                  on a legitimately empty record (two adjacent delimiters).
 
   Behavior notes ~
 
@@ -3051,8 +3082,16 @@ THRU                                             *builtin-thru* *thru*
     unavailable mid-stream (full disk, removed mount, etc.).
 
     When `-t` and `-c` are both given, the count reflects the bytes that
-    were actually emitted (after `-L` truncation, if any). All side
+    were actually emitted (after `-T` truncation, if any). All side
     effects observe the same final byte count.
+
+    `-F` and `-U` each consume their delimiter without emitting it, so
+    `thru -F A -U B` yields exactly the bytes between the first `A` and the
+    next `B`. A marker whose delimiter is never found exits non-zero even if
+    bytes were emitted; that is how a marker loop ends, and why such loops
+    take no `-E`. Either marker forces byte-at-a-time reads, so that `thru`
+    can stop precisely at the delimiter without over-reading the stream;
+    prefer `-S`/`-T` when a fixed offset or count will do.
 
   Examples ~
 
@@ -3080,9 +3119,21 @@ THRU                                             *builtin-thru* *thru*
                                 append-mode tee, useful for accumulating
                                 output across multiple runs
 
-      `huge_producer | thru -L 4096 | inspect`
+      `huge_producer | thru -T 4096 | inspect`
                                 cap the stream at 4 KB, useful for
                                 sampling unbounded producers
+
+      `printf '%s' "$var" | thru -S 10 -T 20`
+                                byte-slice a value: drop 10 bytes, then
+                                emit the next 20
+
+      `thru -F $'\0' -U $'\0' < record.bin`
+                                emit the bytes between the first two NUL
+                                markers
+
+      `while thru -U $'\0'; do echo; done < records.bin`
+                                turn NUL-delimited records into lines,
+                                one `thru` per record
 
       `producer | thru -c | consumer`
                                 report total bytes through this stage on
@@ -3465,7 +3516,7 @@ YES                                              *builtin-yes* *yes*
                                 print `y` five times: `head` closes the pipe
                                 after its fifth line and `yes` stops
 
-      `yes | thru -L 4096`
+      `yes | thru -T 4096`
                                 feed an unbounded `y` stream into a stage
                                 that caps it at 4 KB
 

@@ -645,6 +645,10 @@ impl VarStr {
     String::from_utf8_lossy(&self.0)
   }
 
+  pub(crate) fn parse<T: FromStr>(&self) -> Option<T> {
+    self.to_str()?.parse::<T>().ok()
+  }
+
   pub(crate) fn to_cstring(&self) -> Option<CString> {
     CString::new(self.as_bytes()).ok()
   }

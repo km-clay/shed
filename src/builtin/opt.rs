@@ -55,9 +55,9 @@ impl Opt {
   pub(crate) fn key(&self) -> &str {
     self.key.to_str().unwrap_or_default()
   }
-  pub(crate) fn value(&self) -> ShResult<&str> {
+  pub(crate) fn value(&self) -> ShResult<VarStr> {
     if self.args.len() == 1 {
-      Ok(self.args[0].0.to_str().unwrap_or_default())
+      Ok(self.args[0].0.clone())
     } else {
       Err(sherr!(ParseErr @ self.span(), "option '{self}' requires an argument").with_code(2))
     }

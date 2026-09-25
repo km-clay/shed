@@ -1,6 +1,7 @@
 use std::{io, time::Duration};
 
 use bitflags::bitflags;
+use bstr::ByteSlice;
 use nix::poll::PollTimeout;
 
 use crate::{
@@ -18,7 +19,7 @@ use crate::{
   util::{
     self,
     error::{ShErrKind, ShResult, ShResultExt},
-    ui,
+    strops, ui,
   },
   varstr,
 };
@@ -73,14 +74,14 @@ impl super::Builtin for Read {
           let n = opt.value()?;
           let bytes = n
             .parse::<usize>()
-            .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
+            .ok_or_else(|| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
           max_bytes = Some(bytes);
         }
         "raw-chars" => {
           let n = opt.value()?;
           let bytes = n
             .parse::<usize>()
-            .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
+            .ok_or_else(|| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
           max_bytes = Some(bytes);
           flags |= ReadFlags::RAW;
         }
@@ -96,13 +97,23 @@ impl super::Builtin for Read {
         }
         "timeout" => {
           let t = opt.value()?;
-          let seconds = t.parse::<f64>().map_err(|_| {
-            sherr!(ExecFail @ opt.span(), "invalid timeout value '{t}'").with_code(2)
-          })?;
-          let dur = Duration::try_from_secs_f64(seconds).map_err(|_| {
-            sherr!(ExecFail @ opt.span(), "invalid timeout value '{t}'").with_code(2)
-          })?;
-          timeout = Some(dur.as_millis().min(i32::MAX as u128) as i32);
+          let millis: i32 = if t.trim() == b"0" {
+            0
+          } else if let Ok(secs) = t.trim().to_str_lossy().parse::<f64>() {
+            Duration::try_from_secs_f64(secs)
+              .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid timeout '{t}'").with_code(2))?
+              .as_millis()
+              .clamp(1, i32::MAX as u128) as i32
+          } else {
+            let span = opt.span();
+            let micros = strops::TimeReader::parse_dur(&t.to_str_lossy())
+              .promote_err(span)
+              .with_code(2)?;
+            Duration::from_micros(micros.cast_unsigned())
+              .as_millis()
+              .clamp(1, i32::MAX as u128) as i32
+          };
+          timeout = Some(millis);
         }
         "quoted" => flags |= ReadFlags::QUOTED | ReadFlags::NO_ESCAPE,
         "no-escape" => flags |= ReadFlags::NO_ESCAPE,
@@ -689,20 +700,26 @@ impl super::Builtin for ReadKey {
     let vim_seq = key.as_vim_seq();
 
     if let Some(wl) = whitelist {
-      let allowed = alias::expand_keymap(wl);
+      let allowed = alias::expand_keymap(&wl.to_str_lossy());
       if !allowed.contains(&key) {
         return util::with_status(1);
       }
     }
     if let Some(bl) = blacklist {
-      let disallowed = alias::expand_keymap(bl);
+      let disallowed = alias::expand_keymap(&bl.to_str_lossy());
       if disallowed.contains(&key) {
         return util::with_status(1);
       }
     }
 
     if let Some(var) = var_name {
-      Shed::vars_mut(|v| v.set_var(var, VarKind::string(vim_seq), VarFlags::empty()))?;
+      Shed::vars_mut(|v| {
+        v.set_var(
+          &var.to_str_lossy(),
+          VarKind::string(vim_seq),
+          VarFlags::empty(),
+        )
+      })?;
     } else {
       out!("{vim_seq}");
     }

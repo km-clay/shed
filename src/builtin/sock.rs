@@ -285,7 +285,7 @@ impl SockOpts {
       match opt.key() {
         "unix" => {
           let arg = opt.value()?;
-          let addr = match arg.strip_prefix('@') {
+          let addr = match arg.strip_prefix(b"@") {
             Some(name) => UnixAddr::Abstract(name.into()),
             None => UnixAddr::Path(PathBuf::from(arg)),
           };
@@ -293,16 +293,16 @@ impl SockOpts {
         }
         "tcp" => {
           let arg = opt.value()?;
-          let host = if let Ok(ip) = arg.parse::<std::net::IpAddr>() {
+          let host = if let Some(ip) = arg.parse::<std::net::IpAddr>() {
             TcpHost::IpAddr(ip)
           } else {
-            TcpHost::Hostname(arg.into())
+            TcpHost::Hostname(arg)
           };
           tcp_addr = Some(host);
         }
         "port" => {
           let arg = opt.value()?;
-          let Ok(port) = arg.parse::<u16>() else {
+          let Some(port) = arg.parse::<u16>() else {
             return Err(sherr!(ExecFail, "Invalid port number '{arg}'").with_code(2));
           };
 

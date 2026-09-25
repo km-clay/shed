@@ -285,7 +285,7 @@ impl HistQuery {
   pub(super) fn from_opts(opts: &[Opt]) -> ShResult<Self> {
     let mut new = Self::new();
     let mut negated = false; // '--not' flag flips this for one argument
-    let value = |opt: &Opt| -> Option<VarStr> { opt.value().ok().map(VarStr::from) };
+    let value = |opt: &Opt| -> Option<VarStr> { opt.value().ok() };
 
     for opt in opts {
       match opt.key() {
@@ -301,14 +301,20 @@ impl HistQuery {
         "with-status" => {
           let arg = opt.value()?;
           match arg.parse::<i32>() {
-            Ok(s) => new.with_status = (Some(s), negated),
-            Err(e) => return Err(sherr!(ParseErr, "Invalid status code for {opt}: {e}")),
+            Some(s) => new.with_status = (Some(s), negated),
+            None => {
+              return Err(sherr!(
+                ParseErr,
+                "Invalid status code for {opt}: {}",
+                arg.to_str_lossy()
+              ));
+            }
           }
         }
         "in-dir" => {
           // using canonicalize here allows args like "." to work
           let arg = opt.value()?;
-          let dir = std::fs::canonicalize(arg)
+          let dir = std::fs::canonicalize(&arg)
             .unwrap_or(arg.into())
             .to_string_lossy()
             .into();
@@ -322,9 +328,10 @@ impl HistQuery {
         opt_key @ ("lines-gt" | "lines-lt") => {
           let is_gt = opt_key == "lines-gt";
           let arg = opt.value()?;
-          let count = match arg.parse::<u64>() {
-            Ok(c) => c,
-            Err(e) => return Err(sherr!(ParseErr, "Invalid number for {opt}: {e}").with_code(2)),
+          let Some(count) = arg.parse::<u64>() else {
+            return Err(
+              sherr!(ParseErr, "Invalid number for {opt}: {}", arg.to_str_lossy()).with_code(2),
+            );
           };
           if is_gt {
             new.lines_gt = (Some(count), negated);

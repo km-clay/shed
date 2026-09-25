@@ -428,7 +428,7 @@ impl super::Builtin for Kill {
         "list" => list_sig = true,
         "signal" => {
           let sig_name = opt.value()?;
-          signal = Some(parse_kill_sig(sig_name).promote_err(args.cmd_span())?);
+          signal = Some(parse_kill_sig(&sig_name.to_str_lossy()).promote_err(args.cmd_span())?);
         }
         _ => {}
       }

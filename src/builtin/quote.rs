@@ -41,7 +41,7 @@ impl super::Builtin for Quote {
     for opt in args.options() {
       if opt.key() == "var" {
         let var = opt.value()?;
-        if let Some(quoted) = quote_var(var) {
+        if let Some(quoted) = quote_var(&var.to_str_lossy()) {
           parts.push(quoted);
         }
       }
@@ -119,10 +119,10 @@ impl super::Builtin for Unquote {
     for opt in opts {
       match opt.key() {
         "array" => {
-          target = Some(UnquoteTarget::Array(opt.value()?.into()));
+          target = Some(UnquoteTarget::Array(opt.value()?));
         }
         "var" => {
-          target = Some(UnquoteTarget::Var(opt.value()?.into()));
+          target = Some(UnquoteTarget::Var(opt.value()?));
         }
         "sep" => {
           let val = opt.value()?;

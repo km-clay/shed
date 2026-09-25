@@ -80,7 +80,7 @@ impl super::Builtin for Forget {
           let Ok(var) = opt.value() else {
             return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{}'", opt).with_code(2));
           };
-          spec.exclude(var);
+          spec.exclude(&var.to_str_lossy());
         }
         _ => return Err(sherr!(ParseErr @ opt.span(), "unrecognized option '{}'", opt).with_code(2)),
       }

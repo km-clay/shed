@@ -752,7 +752,7 @@ impl super::Builtin for Stat {
     for opt in opts {
       match opt.key() {
         "format" => {
-          format = Some(opt.value()?.into());
+          format = Some(opt.value()?);
         }
         "dereference" => deref = true,
         "file-system" => fs_stat = true,

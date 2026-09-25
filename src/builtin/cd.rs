@@ -8,6 +8,8 @@ use std::{
   time::{SystemTime, UNIX_EPOCH},
 };
 
+use bstr::ByteSlice;
+
 use crate::{
   builtin::BuiltinRouter,
   eval::lex::{Span, Tk},
@@ -345,12 +347,14 @@ impl super::Builtin for ZdList {
         "json" => json = true,
         "quoted" => quoted = true,
 
-        "sort" => match opt.value()? {
-          "frecency" => sort.kind = SortKind::Frecency,
-          "visits" => sort.kind = SortKind::Visits,
-          "recent" => sort.kind = SortKind::Recent,
-          "path" => sort.kind = SortKind::Path,
-          val => return Err(sherr!(ParseErr @ opt.span(), "invalid sort kind: {val}")),
+        "sort" => match &*opt.value()? {
+          b"frecency" => sort.kind = SortKind::Frecency,
+          b"visits" => sort.kind = SortKind::Visits,
+          b"recent" => sort.kind = SortKind::Recent,
+          b"path" => sort.kind = SortKind::Path,
+          val => {
+            return Err(sherr!(ParseErr @ opt.span(), "invalid sort kind: {}", val.to_str_lossy()));
+          }
         },
         _ => return Err(sherr!(ParseErr @ opt.span(), "invalid option: {opt}").with_code(2)),
       }
