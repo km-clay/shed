@@ -39,6 +39,7 @@ The following builtins are available:
   `jobs`        list background jobs                        |builtin-jobs|
   `keymap`      define custom key bindings                  |builtin-keymap|
   `kill`        send signals to processes                   |builtin-kill|
+  `len`         print byte, character, or display length    |builtin-len|
   `listen`      create a listening socket on a descriptor   |builtin-listen|
   `local`       declare variables local to a function       |builtin-local|
   `msg`         post a message to the status bar            |builtin-msg|
@@ -80,7 +81,6 @@ The following builtins are available:
   `unset`       remove variables or functions               |builtin-unset|
   `vice`        slice and edit text with vim motions        |builtin-vice|
   `wait`        wait for background jobs to finish          |builtin-wait|
-  `width`       print the display width of a string         |builtin-width|
   `yes`         print lines of 'y' or a string endlessly    |builtin-yes|
   `zd`          jump to a directory from history            |builtin-zd|
 
@@ -3276,31 +3276,36 @@ WAIT                                             *builtin-wait* *wait*
   Wait for background jobs to finish. See |jobs-wait| for details.
 
 ==============================================================================
-WIDTH                                            *builtin-width* *width*
+LEN                                              *builtin-len* *len*
 
-  `width [{string} ...]`
-  `cmd | width`
+  `len [-c | -b | -w] [{string} ...]`
+  `cmd | len`
 
-  Print the display width of a string in terminal columns. This counts
-  rendered cells, not bytes or code points: wide characters (CJK, many
-  emoji) count as two columns and zero-width characters (combining
-  marks) count as none.
+  Print the length of a string. By default the length is counted in
+  characters (Unicode scalar values); `-b` counts raw bytes and `-w`
+  counts the display width in terminal columns. For `-w`, wide
+  characters (CJK, many emoji) count as two columns and zero-width
+  characters (combining marks) count as none.
+
+  More than one measure can be requested at once. When several are
+  given, each is printed on its own line prefixed with its name
+  (`bytes:`, `chars:`, `width:`); a single measure is printed alone.
 
   With arguments, the joined arguments are measured. With no arguments,
-  the string is read from stdin. The result is printed as a single
-  number followed by a newline.
+  the string is read from stdin.
 
-  Useful for laying out aligned output by hand. |qtable|(function-qtable)
-  uses it internally to size its columns.
+  Options:
+
+  `-c`, `--chars`    count characters (the default)
+  `-b`, `--bytes`    count raw bytes
+  `-w`, `--width`    count display width in terminal columns
 
   Examples:
 
-      `width hello`              outputs:  `5`
-      `width 日本語`             outputs:  `6`  (three wide characters)
-      `printf 'café' | width`    outputs:  `4`  (combining mark is
-                                                 zero-width)
-
-  See also: |function-qtable|
+      `len hello`               outputs:  `5`
+      `len -b café`             outputs:  `5`  (é is two bytes)
+      `len -w 日本語`           outputs:  `6`  (three two-wide characters)
+      `printf 'café' | len`     outputs:  `4`
 
 ==============================================================================
 VICE                                             *builtin-vice* *vice*

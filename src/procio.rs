@@ -2189,7 +2189,7 @@ pub(crate) mod tests {
   fn persist_drops_closesink_from_table() {
     use std::sync::Arc;
 
-    use super::{CloseSink, OsSink, Sink, Sinks};
+    use super::{CloseSink, OsSink, Sinks};
     use crate::state::Shed;
 
     let _g = TestGuard::new();

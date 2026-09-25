@@ -66,6 +66,7 @@ mod hist;
 mod intro;
 mod jobctl;
 mod keymap;
+mod len;
 mod msg;
 mod opt;
 mod poll;
@@ -88,7 +89,6 @@ mod times;
 mod trap;
 mod varcmds;
 mod vice;
-mod width;
 
 pub(crate) use argv::{BuiltinArgs, join_raw_args};
 pub(crate) use help::HELP_PAGE_INSTALL_DIR;
@@ -113,94 +113,94 @@ macro_rules! register_builtins {
 // these have to be in alphabetical order, because of the way lookup_builtin() works
 // if the list is unsorted, that is a compile error thanks to the const evaluation above
 register_builtins! {
-  b"."        => source::Source,
-  b":"        => Colon,
-  b"["        => test::Test,
-  b"[["       => test::Test,
-  b"about"    => About,
-  b"accept"   => sock::Accept,
-  b"alias"    => alias::Alias,
-  b"autocmd"  => autocmd::AutoCmdBuiltin,
+  b"."        => source  ::Source,
+  b":"        => self    ::Colon,
+  b"["        => test    ::Test,
+  b"[["       => test    ::Test,
+  b"about"    => self    ::About,
+  b"accept"   => sock    ::Accept,
+  b"alias"    => alias   ::Alias,
+  b"autocmd"  => autocmd ::AutoCmdBuiltin,
   b"autoload" => autoload::Autoload,
-  b"bg"       => jobctl::Bg,
-  b"break"    => flowctl::Break,
-  b"builtin"  => BuiltinBuiltin,
-  b"cd"       => cd::Cd,
-  b"command"  => CommandBuiltin,
+  b"bg"       => jobctl  ::Bg,
+  b"break"    => flowctl ::Break,
+  b"builtin"  => self    ::BuiltinBuiltin,
+  b"cd"       => cd      ::Cd,
+  b"command"  => self    ::CommandBuiltin,
   b"compadd"  => complete::Compadd,
   b"compgen"  => complete::CompGen,
   b"complete" => complete::Complete,
-  b"continue" => flowctl::Continue,
-  b"declare"  => varcmds::Declare,
+  b"continue" => flowctl ::Continue,
+  b"declare"  => varcmds ::Declare,
   b"dirs"     => dirstack::Dirs,
-  b"disown"   => jobctl::Disown,
-  b"echo"     => echo::Echo,
+  b"disown"   => jobctl  ::Disown,
+  b"echo"     => echo    ::Echo,
   b"eval"     => evaluate::Eval,
-  b"excmd"    => alias::ExCmd,
-  b"exec"     => exec::Exec,
-  b"exit"     => flowctl::Exit,
-  b"export"   => varcmds::Export,
-  b"false"    => False,
-  b"fc"       => fixcmd::FixCmd,
-  b"fg"       => jobctl::Fg,
-  b"flog"     => flog::Flog,
-  b"forget"   => forget::Forget,
-  b"fpop"     => arrops::FrontPop,
-  b"fpush"    => arrops::FrontPush,
-  b"genrc"    => genrc::GenRc,
-  b"getopts"  => getopts::GetOpts,
-  b"hash"     => hash::Hash,
-  b"help"     => help::Help,
-  b"hist"     => hist::Hist,
-  b"jobs"     => jobctl::Jobs,
-  b"keymap"   => keymap::KeyMapBuiltin,
-  b"kill"     => jobctl::Kill,
-  b"let"      => Let,
-  b"listen"   => sock::Listen,
-  b"local"    => varcmds::Local,
-  b"msg"      => msg::Msg,
-  b"nextd"    => dirjump::NextD,
-  b"poll"     => poll::Poll,
-  b"pop"      => arrops::Pop,
+  b"excmd"    => alias   ::ExCmd,
+  b"exec"     => exec    ::Exec,
+  b"exit"     => flowctl ::Exit,
+  b"export"   => varcmds ::Export,
+  b"false"    => self    ::False,
+  b"fc"       => fixcmd  ::FixCmd,
+  b"fg"       => jobctl  ::Fg,
+  b"flog"     => flog    ::Flog,
+  b"forget"   => forget  ::Forget,
+  b"fpop"     => arrops  ::FrontPop,
+  b"fpush"    => arrops  ::FrontPush,
+  b"genrc"    => genrc   ::GenRc,
+  b"getopts"  => getopts ::GetOpts,
+  b"hash"     => hash    ::Hash,
+  b"help"     => help    ::Help,
+  b"hist"     => hist    ::Hist,
+  b"jobs"     => jobctl  ::Jobs,
+  b"keymap"   => keymap  ::KeyMapBuiltin,
+  b"kill"     => jobctl  ::Kill,
+  b"len"      => len     ::Len,
+  b"let"      => self    ::Let,
+  b"listen"   => sock    ::Listen,
+  b"local"    => varcmds ::Local,
+  b"msg"      => msg     ::Msg,
+  b"nextd"    => dirjump ::NextD,
+  b"poll"     => poll    ::Poll,
+  b"pop"      => arrops  ::Pop,
   b"popd"     => dirstack::PopDir,
-  b"prevd"    => dirjump::PrevD,
-  b"printf"   => printf::Printf,
-  b"push"     => arrops::Push,
+  b"prevd"    => dirjump ::PrevD,
+  b"printf"   => printf  ::Printf,
+  b"push"     => arrops  ::Push,
   b"pushd"    => dirstack::PushDir,
-  b"pwd"      => pwd::Pwd,
-  b"quote"    => quote::Quote,
-  b"raise"    => flowctl::Raise,
-  b"read"     => read::Read,
-  b"readkey"  => read::ReadKey,
-  b"readonly" => varcmds::Readonly,
-  b"return"   => flowctl::Return,
-  b"rotate"   => arrops::Rotate,
-  b"scry"     => scry::Scry,
-  b"seek"     => seek::Seek,
-  b"set"      => set::Set,
-  b"shift"    => shift::Shift,
-  b"shopt"    => shopt::Shopt,
-  b"sock"     => sock::Sock,
-  b"source"   => source::Source,
-  b"stash"    => stash::StashBuiltin,
-  b"stat"     => stat::Stat,
-  b"test"     => test::Test,
-  b"thru"     => Thru,
-  b"times"    => times::Times,
-  b"trap"     => trap::Trap,
-  b"true"     => True,
-  b"type"     => intro::Type,
-  b"typeset"  => varcmds::Declare,
+  b"pwd"      => pwd     ::Pwd,
+  b"quote"    => quote   ::Quote,
+  b"raise"    => flowctl ::Raise,
+  b"read"     => read    ::Read,
+  b"readkey"  => read    ::ReadKey,
+  b"readonly" => varcmds ::Readonly,
+  b"return"   => flowctl ::Return,
+  b"rotate"   => arrops  ::Rotate,
+  b"scry"     => scry    ::Scry,
+  b"seek"     => seek    ::Seek,
+  b"set"      => set     ::Set,
+  b"shift"    => shift   ::Shift,
+  b"shopt"    => shopt   ::Shopt,
+  b"sock"     => sock    ::Sock,
+  b"source"   => source  ::Source,
+  b"stash"    => stash   ::StashBuiltin,
+  b"stat"     => stat    ::Stat,
+  b"test"     => test    ::Test,
+  b"thru"     => self    ::Thru,
+  b"times"    => times   ::Times,
+  b"trap"     => trap    ::Trap,
+  b"true"     => self    ::True,
+  b"type"     => intro   ::Type,
+  b"typeset"  => varcmds ::Declare,
   b"ulimit"   => resource::ULimit,
   b"umask"    => resource::UMask,
-  b"unalias"  => alias::Unalias,
-  b"unquote"  => quote::Unquote,
-  b"unset"    => varcmds::Unset,
-  b"vice"     => vice::Vice,
-  b"wait"     => jobctl::Wait,
-  b"width"    => width::Width,
-  b"yes"      => Yes,
-  b"zd"       => cd::Zd,
+  b"unalias"  => alias   ::Unalias,
+  b"unquote"  => quote   ::Unquote,
+  b"unset"    => varcmds ::Unset,
+  b"vice"     => vice    ::Vice,
+  b"wait"     => jobctl  ::Wait,
+  b"yes"      => self    ::Yes,
+  b"zd"       => cd      ::Zd,
 }
 
 /// Lookup a name in the builtin table via binary search
@@ -282,8 +282,8 @@ pub(super) trait Builtin: Sync {
     Ok(parsed)
   }
 
-  fn get_input_str(&self, args: &mut BuiltinArgs) -> Option<String> {
-    self.get_input(args).map(procio::bytes_to_string)
+  fn get_input_str(&self, args: &mut BuiltinArgs) -> Option<VarStr> {
+    self.get_input(args).map(VarStr::from)
   }
 
   /// Default input getter
@@ -599,9 +599,9 @@ impl Builtin for Yes {
       Some(i) => i,
       None => {
         if args.no_arguments() {
-          String::from("y")
+          VarStr::from("y")
         } else {
-          argv::join_raw_arg_iter(args.arguments()).0.to_string()
+          argv::join_raw_arg_iter(args.arguments()).0
         }
       }
     };
