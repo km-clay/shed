@@ -1755,7 +1755,19 @@ impl RedirGuard {
   ///
   /// Used by contexts like the `exec` builtin
   pub(crate) fn persist(mut self) {
-    self.saved.take();
+    if let Some(saved) = self.saved.take() {
+      Shed::sinks(|sinks| {
+        for (fd, _) in &saved {
+          if sinks
+            .table
+            .get(fd)
+            .is_some_and(|s| s.kind() == SinkKind::Close)
+          {
+            sinks.table.remove(fd);
+          }
+        }
+      });
+    }
     std::mem::drop(self);
   }
 
@@ -2168,6 +2180,35 @@ pub(crate) mod tests {
     pipeline_multi         : "echo foo bar baz | cut -d ' ' -f 2 | sed 's/a/A/'" => "bAr\n", needs "cut", "sed";
     rube_goldberg_pipeline : "{ echo foo; echo bar } | if cat; then :; else echo failed; fi | (read line && echo $line | sed 's/foo/baz/'; sed 's/bar/buzz/')" => "baz\nbuzz\n", needs "sed", "cat";
     pipe_and_stderr        : "echo on stderr >&2 |& cat" => "on stderr\n", needs "cat";
+  }
+
+  // Regression: a persisted close (`exec N>&-`) must not leave a `CloseSink`
+  // in the global table. Left behind, `commit_redirects` re-runs `close(N)` on
+  // every fork, which corrupts fd N once a pipe reuses that number.
+  #[test]
+  fn persist_drops_closesink_from_table() {
+    use std::sync::Arc;
+
+    use super::{CloseSink, OsSink, Sink, Sinks};
+    use crate::state::Shed;
+
+    let _g = TestGuard::new();
+    let fd = 7;
+
+    // install a real sink at `fd`, like `accept` or `exec N<file` would
+    let file = std::fs::File::open("/dev/null").unwrap();
+    Shed::sinks(|s| s.clobber(fd, Arc::new(OsSink::new(file.into()))));
+
+    // close it and make it permanent, like `exec 7>&-`
+    Sinks::apply_sink(Arc::new(CloseSink), fd)
+      .unwrap()
+      .persist();
+
+    let kind = Shed::sinks(|s| s.table.get(&fd).map(|sink| sink.kind()));
+    assert_eq!(
+      kind, None,
+      "persisted close left a re-closing CloseSink at fd {fd}",
+    );
   }
 
   #[test]
