@@ -5,7 +5,10 @@ use crate::{
   errln, opt,
   procio::{self, OsSink, Sink},
   sherr, signal,
-  state::vars::VarStr,
+  state::{
+    Shed,
+    vars::{VarKind, VarStr},
+  },
   util::{self, error::ShResult},
 };
 
@@ -14,6 +17,7 @@ struct ThruOpts {
   append: bool,
   report_eof: bool,
   tee: Option<VarStr>,
+  var: Option<VarStr>,
   take: Option<usize>,
   skip: Option<usize>,
   from: Option<u8>,
@@ -28,17 +32,19 @@ impl super::Builtin for Thru {
   fn strict_opts(&self) -> bool {
     true
   }
+  #[rustfmt::skip]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("count" | b'c'),
-      opt!("append" | b'a'),
-      opt!("report-eof" | b'E'),
-      opt!("tee" | b't', 1),
-      opt!("limit" | b'L', 1),
-      opt!("take" | b'T', 1),
-      opt!("skip" | b'S', 1),
-      opt!("from" | b'F', 1),
-      opt!("until" | b'U', 1),
+      opt!("count"      | b'c'   ),
+      opt!("append"     | b'a'   ),
+      opt!("report-eof" | b'E'   ),
+      opt!("tee"        | b't', 1),
+      opt!("limit"      | b'L', 1),
+      opt!("take"       | b'T', 1),
+      opt!("skip"       | b'S', 1),
+      opt!("from"       | b'F', 1),
+      opt!("until"      | b'U', 1),
+      opt!("var"        | b'v', 1),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
@@ -50,6 +56,7 @@ impl super::Builtin for Thru {
       count,
       append,
       report_eof,
+      var,
       tee,
       skip,
       mut take,
@@ -87,6 +94,9 @@ impl super::Builtin for Thru {
 
     let mut byte_count = 0;
     let mut skip = skip.unwrap_or(0);
+    let mut var_sink = var
+      .is_some()
+      .then(|| Vec::with_capacity(take.unwrap_or(0).min(1 << 20)));
 
     'sources: for src in sources {
       if take == Some(0) {
@@ -165,7 +175,11 @@ impl super::Builtin for Thru {
           emit = &emit[..emit.len().min(l)];
         }
 
-        procio::out_bytes(emit);
+        if let Some(var_sink) = var_sink.as_mut() {
+          var_sink.extend_from_slice(emit);
+        } else {
+          procio::out_bytes(emit);
+        }
 
         if let Some(t) = tee_file.as_mut() {
           t.write_all(emit).ok();
@@ -176,6 +190,13 @@ impl super::Builtin for Thru {
           *l -= emit.len();
         }
       }
+    }
+
+    if let Some(sink) = var_sink
+      && let Some(name) = var
+    {
+      let sink = VarStr::from(sink);
+      Shed::vars_mut(|v| v.update_var(&name.to_str_lossy(), VarKind::string(sink)))?;
     }
 
     if count {
@@ -195,6 +216,7 @@ impl Thru {
     let append = args.has_opt("append");
     let report_eof = args.has_opt("report-eof");
     let tee = args.opt_value("tee");
+    let var = args.opt_value("var");
     let take = args
       .opt_value("take")
       .or_else(|| args.opt_value("limit"))
@@ -241,6 +263,7 @@ impl Thru {
       append,
       report_eof,
       tee,
+      var,
       take,
       skip,
       from,
