@@ -303,7 +303,7 @@ impl SockOpts {
         "port" => {
           let arg = opt.value()?;
           let Ok(port) = arg.parse::<u16>() else {
-            return Err(sherr!(ExecFail, "Invalid port number '{arg}'"));
+            return Err(sherr!(ExecFail, "Invalid port number '{arg}'").with_code(2));
           };
 
           tcp_port = Some(port);
@@ -314,7 +314,7 @@ impl SockOpts {
         }
         "oneshot" => oneshot = true,
 
-        _ => return Err(sherr!(ExecFail @ opt.span(), "Unexpected option '{opt}'")),
+        _ => return Err(sherr!(ExecFail @ opt.span(), "Unexpected option '{opt}'").with_code(2)),
       }
     }
 
@@ -392,7 +392,9 @@ impl super::Builtin for Accept {
           let arg = opt.value()?;
           var = Some(arg.to_var_str());
         }
-        _ => return Err(sherr!(ExecFail @ args.cmd_span(), "Unexpected option '{opt}'")),
+        _ => {
+          return Err(sherr!(ExecFail @ args.cmd_span(), "Unexpected option '{opt}'").with_code(2));
+        }
       }
     }
 

@@ -59,7 +59,7 @@ impl Opt {
     if self.args.len() == 1 {
       Ok(self.args[0].0.to_str().unwrap_or_default())
     } else {
-      Err(sherr!(ParseErr @ self.span(), "option '{self}' requires an argument"))
+      Err(sherr!(ParseErr @ self.span(), "option '{self}' requires an argument").with_code(2))
     }
   }
 }
@@ -246,7 +246,9 @@ fn parse_opts_inner(
             args,
           }));
         }
-        None if strict => return Err(sherr!(ParseErr @ span, "Unknown option '{word}'")),
+        None if strict => {
+          return Err(sherr!(ParseErr @ span, "Unknown option '{word}'").with_code(2));
+        }
         None => words.push(Word::Arg(word, span)),
       }
     } else if let Some(cluster) = word.to_str_lossy().strip_prefix('-') {
@@ -273,7 +275,7 @@ fn parse_opts_inner(
           .bytes()
           .find(|ch| !specs.iter().any(|s| s.is_short_match(*ch)))
           .unwrap();
-        return Err(sherr!(ParseErr @ span, "Unknown option '-{}'", unknown as char));
+        return Err(sherr!(ParseErr @ span, "Unknown option '-{}'", unknown as char).with_code(2));
       } else {
         words.push(Word::Arg(word, span));
       }

@@ -324,7 +324,7 @@ impl HistQuery {
           let arg = opt.value()?;
           let count = match arg.parse::<u64>() {
             Ok(c) => c,
-            Err(e) => return Err(sherr!(ParseErr, "Invalid number for {opt}: {e}")),
+            Err(e) => return Err(sherr!(ParseErr, "Invalid number for {opt}: {e}").with_code(2)),
           };
           if is_gt {
             new.lines_gt = (Some(count), negated);
@@ -346,7 +346,7 @@ impl HistQuery {
         "no-numbers" => new.no_numbers = true,
         "reverse" => new.reverse = true,
         _ => {
-          return Err(sherr!(ParseErr, "Unknown option for history: {opt}"));
+          return Err(sherr!(ParseErr, "Unknown option for history: {opt}").with_code(2));
         }
       }
       negated = false; // reset polarity after each option
@@ -713,7 +713,7 @@ impl super::Builtin for HistCheckout {
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let Some((name, span)) = args.arguments().next() else {
-      return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name"));
+      return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name").with_code(2));
     };
     let name_s = name.to_string();
     let create_branch = args.has_opt("branch");
@@ -750,7 +750,7 @@ struct HistMerge;
 impl super::Builtin for HistMerge {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let Some((name, span)) = args.arguments().next() else {
-      return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name"));
+      return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name").with_code(2));
     };
     let hist = open_history(args.span(), false, true)?;
     let other = name.to_str_lossy();
@@ -788,7 +788,7 @@ impl super::Builtin for HistBranch {
 
     if delete {
       let Some((name, span)) = name else {
-        return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name"));
+        return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name").with_code(2));
       };
       let hist = open_history(args.span(), false, true)?;
       hist
@@ -870,8 +870,7 @@ impl super::Builtin for HistList {
 
     for (arg, span) in arg_vec {
       let Ok(id) = arg.to_str_lossy().parse::<i64>() else {
-        Shed::set_status(2);
-        return Err(sherr!(ParseErr @ span, "Invalid command ID: {arg}"));
+        return Err(sherr!(ParseErr @ span, "Invalid command ID: {arg}").with_code(2));
       };
       query.specific_ids.push(id);
     }

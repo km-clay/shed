@@ -462,10 +462,7 @@ impl super::Builtin for Test {
     // operand as the conjunction operator.
     if arg_vec.len() == 3 && arg_vec[1].0.to_str_lossy().parse::<BinaryOp>().is_ok() {
       return match eval_leaf(&arg_vec, extended).map_err(|e| e.try_blame(span)) {
-        Err(e) => {
-          Shed::set_status(2);
-          Err(e)
-        }
+        Err(e) => Err(e.with_code(2)),
         Ok(res) => util::with_status(i32::from(!res)),
       };
     }
@@ -475,10 +472,7 @@ impl super::Builtin for Test {
       .map_err(|e| e.try_blame(span));
 
     match result {
-      Err(e) => {
-        Shed::set_status(2);
-        Err(e)
-      }
+      Err(e) => Err(e.with_code(2)),
       Ok(res) => util::with_status(i32::from(!res)),
     }
   }

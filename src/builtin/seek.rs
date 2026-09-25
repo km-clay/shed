@@ -25,13 +25,15 @@ impl super::Builtin for Seek {
         "cursor-rel" => cursor_rel = true,
         "end-rel" => end_rel = true,
         _ => {
-          return Err(sherr!(ExecFail @ opt.span(), "lseek: Unexpected flag '{opt}'",));
+          return Err(
+            sherr!(ExecFail @ opt.span(), "lseek: Unexpected flag '{opt}'",).with_code(2),
+          );
         }
       }
     }
 
     let Some((fd, fd_span)) = arg_iter.next() else {
-      return Err(sherr!(ExecFail @ span, "lseek: Missing required argument 'fd'",));
+      return Err(sherr!(ExecFail @ span, "lseek: Missing required argument 'fd'",).with_code(2));
     };
     let Ok(fd) = fd.to_str_lossy().parse::<u32>() else {
       return Err(

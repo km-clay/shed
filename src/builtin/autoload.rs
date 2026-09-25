@@ -36,7 +36,7 @@ impl super::Builtin for Autoload {
         "path" => path = true,
         "now" => now = true,
         "comp" => comp = true,
-        _ => return Err(sherr!(ParseErr @ opt.span(), "unknown option {opt}")),
+        _ => return Err(sherr!(ParseErr @ opt.span(), "unknown option {opt}").with_code(2)),
       }
     }
 

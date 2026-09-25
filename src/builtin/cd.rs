@@ -43,7 +43,7 @@ impl super::Builtin for Cd {
       match opt.key() {
         "physical" => resolve_syms = true,
         "logical" => resolve_syms = false,
-        _ => return Err(sherr!(ParseErr @ opt.span(), "Invalid option: {opt}")),
+        _ => return Err(sherr!(ParseErr @ opt.span(), "Invalid option: {opt}").with_code(2)),
       }
     }
 
@@ -241,7 +241,7 @@ impl super::Builtin for ZdRemove {
     let targets: Vec<String> = args.arguments().map(|(a, _)| a.to_string()).collect();
 
     if targets.is_empty() {
-      return Err(sherr!(ExecFail @ args.span(), "remove requires a directory"));
+      return Err(sherr!(ExecFail @ args.span(), "remove requires a directory").with_code(2));
     }
 
     let Some(conn) = db::get_db_conn() else {
@@ -352,11 +352,14 @@ impl super::Builtin for ZdList {
           "path" => sort.kind = SortKind::Path,
           val => return Err(sherr!(ParseErr @ opt.span(), "invalid sort kind: {val}")),
         },
-        _ => return Err(sherr!(ParseErr @ opt.span(), "invalid option: {opt}")),
+        _ => return Err(sherr!(ParseErr @ opt.span(), "invalid option: {opt}").with_code(2)),
       }
     }
     if json && quoted {
-      return Err(sherr!(ParseErr @ args.cmd_span(), "--json and --quoted are mutually exclusive"));
+      return Err(
+        sherr!(ParseErr @ args.cmd_span(), "--json and --quoted are mutually exclusive")
+          .with_code(2),
+      );
     }
 
     let query = args

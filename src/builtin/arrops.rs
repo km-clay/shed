@@ -54,7 +54,7 @@ trait ArrOp {
   fn push(&self, args: BuiltinArgs) -> ShResult<()> {
     let end = self.direction();
     if args.no_arguments() {
-      return Err(sherr!(ParseErr @ args.span(), "missing array name"));
+      return Err(sherr!(ParseErr @ args.span(), "missing array name").with_code(2));
     }
     let mut arguments = args.arguments();
     let name = arguments.next().unwrap().0;
@@ -99,13 +99,13 @@ trait ArrOp {
         "variable" => var = opt.value().ok(),
         "reverse" => { /* no-op */ }
         _ => {
-          return Err(sherr!(ParseErr @ opt.span(), "invalid option: '{opt}'"));
+          return Err(sherr!(ParseErr @ opt.span(), "invalid option: '{opt}'").with_code(2));
         }
       }
     }
 
     if args.no_arguments() {
-      return Err(sherr!(ParseErr @ args.span(), "missing array name"));
+      return Err(sherr!(ParseErr @ args.span(), "missing array name").with_code(2));
     }
 
     for (arg, _) in args.arguments() {
@@ -245,7 +245,7 @@ impl super::Builtin for Rotate {
             .map_err(|_| sherr!(ParseErr @ opt.span(), "invalid count: {c}"))?;
         }
         _ => {
-          return Err(sherr!(ParseErr @ args.span(), "invalid option: '{opt}'"));
+          return Err(sherr!(ParseErr @ args.span(), "invalid option: '{opt}'").with_code(2));
         }
       }
     }

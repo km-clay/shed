@@ -96,17 +96,18 @@ impl super::Builtin for Read {
         }
         "timeout" => {
           let t = opt.value()?;
-          let seconds = t
-            .parse::<f64>()
-            .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid timeout value '{t}'"))?;
-          let dur = Duration::try_from_secs_f64(seconds)
-            .map_err(|_| sherr!(ExecFail @ opt.span(), "invalid timeout value '{t}'"))?;
+          let seconds = t.parse::<f64>().map_err(|_| {
+            sherr!(ExecFail @ opt.span(), "invalid timeout value '{t}'").with_code(2)
+          })?;
+          let dur = Duration::try_from_secs_f64(seconds).map_err(|_| {
+            sherr!(ExecFail @ opt.span(), "invalid timeout value '{t}'").with_code(2)
+          })?;
           timeout = Some(dur.as_millis().min(i32::MAX as u128) as i32);
         }
         "quoted" => flags |= ReadFlags::QUOTED | ReadFlags::NO_ESCAPE,
         "no-escape" => flags |= ReadFlags::NO_ESCAPE,
         "no-echo" => flags |= ReadFlags::NO_ECHO,
-        _ => return Err(sherr!(ExecFail @ opt.span(), "unexpected flag '{opt}'")),
+        _ => return Err(sherr!(ExecFail @ opt.span(), "unexpected flag '{opt}'").with_code(2)),
       }
     }
 
@@ -660,7 +661,9 @@ impl super::Builtin for ReadKey {
           blacklist = Some(opt.value()?);
         }
         _ => {
-          return Err(sherr!(ExecFail @ opt.span(), "readkey: Unexpected flag '{opt}'"));
+          return Err(
+            sherr!(ExecFail @ opt.span(), "readkey: Unexpected flag '{opt}'").with_code(2),
+          );
         }
       }
     }

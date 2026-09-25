@@ -456,7 +456,7 @@ impl super::Builtin for Kill {
     }
 
     if args.no_arguments() {
-      return Err(sherr!(SyntaxErr @ args.span(), "usage: kill [-signal] pid ..."));
+      return Err(sherr!(SyntaxErr @ args.span(), "usage: kill [-signal] pid ...").with_code(2));
     }
 
     let sig = signal.unwrap_or(KillSig::Real(Signal::SIGTERM));

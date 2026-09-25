@@ -28,12 +28,12 @@ impl super::Builtin for Pwd {
         "logical" => logical = true,
         "physical" => logical = false,
         "trunc" => truncate = true,
-        _ => return Err(sherr!(ParseErr @ opt.span(), "Invalid option: {opt}")),
+        _ => return Err(sherr!(ParseErr @ opt.span(), "Invalid option: {opt}").with_code(2)),
       }
     }
 
     if !args.no_arguments() {
-      return Err(sherr!(ParseErr @ args.span(), "pwd: too many arguments"));
+      return Err(sherr!(ParseErr @ args.span(), "pwd: too many arguments").with_code(2));
     }
 
     let dir: Option<VarStr> = if logical {

@@ -109,7 +109,7 @@ impl TryFrom<char> for SetFlags {
       'u' => Ok(Self::NO_UNSET),
       'v' => Ok(Self::VERBOSE),
       'x' => Ok(Self::XTRACE),
-      _ => Err(sherr!(ParseErr, "invalid option: {}", value,)),
+      _ => Err(sherr!(ParseErr, "invalid option: {}", value,).with_code(2)),
     }
   }
 }
@@ -134,7 +134,7 @@ impl FromStr for SetFlags {
       "nolog" => Ok(Self::NO_LOG),
       "verbose" => Ok(Self::VERBOSE),
       "xtrace" => Ok(Self::XTRACE),
-      _ => Err(sherr!(ParseErr, "invalid option: {}", s,)),
+      _ => Err(sherr!(ParseErr, "invalid option: {}", s,).with_code(2)),
     }
   }
 }
@@ -380,7 +380,7 @@ where
           break; // an arg-taking option ends the cluster
         }
         Role::Unknown if strict => {
-          return Err(sherr!(ParseErr @ span, "invalid option: -{ch}"));
+          return Err(sherr!(ParseErr @ span, "invalid option: -{ch}").with_code(2));
         }
         Role::Unknown => break,
       }
@@ -444,7 +444,7 @@ impl super::Builtin for Set {
     let outcome = scan_options(
       &mut it,
       |ch| SetFlags::try_from(ch).map_or(Role::Unknown, Role::Set),
-      |ch, _, _, span| Err(sherr!(ParseErr @ span, "invalid option: -{ch}")),
+      |ch, _, _, span| Err(sherr!(ParseErr @ span, "invalid option: -{ch}").with_code(2)),
       true,
     )?;
 

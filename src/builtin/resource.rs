@@ -41,46 +41,36 @@ impl RLimits {
       match o.key() {
         "fds" => {
           let arg = o.value()?;
-          fds = Some(
-            arg
-              .parse::<u64>()
-              .map_err(|_| sherr!(ParseErr @ o.span(), "invalid argument for -n: {arg}",))?,
-          );
+          fds = Some(arg.parse::<u64>().map_err(|_| {
+            sherr!(ParseErr @ o.span(), "invalid argument for -n: {arg}",).with_code(2)
+          })?);
         }
         "procs" => {
           let arg = o.value()?;
-          procs = Some(
-            arg
-              .parse::<u64>()
-              .map_err(|_| sherr!(ParseErr @ o.span(), "invalid argument for -u: {arg}",))?,
-          );
+          procs = Some(arg.parse::<u64>().map_err(|_| {
+            sherr!(ParseErr @ o.span(), "invalid argument for -u: {arg}",).with_code(2)
+          })?);
         }
         "stack" => {
           let arg = o.value()?;
-          stack = Some(
-            arg
-              .parse::<u64>()
-              .map_err(|_| sherr!(ParseErr @ o.span(), "invalid argument for -s: {arg}",))?,
-          );
+          stack = Some(arg.parse::<u64>().map_err(|_| {
+            sherr!(ParseErr @ o.span(), "invalid argument for -s: {arg}",).with_code(2)
+          })?);
         }
         "core" => {
           let arg = o.value()?;
-          core = Some(
-            arg
-              .parse::<u64>()
-              .map_err(|_| sherr!(ParseErr @ o.span(), "invalid argument for -c: {arg}",))?,
-          );
+          core = Some(arg.parse::<u64>().map_err(|_| {
+            sherr!(ParseErr @ o.span(), "invalid argument for -c: {arg}",).with_code(2)
+          })?);
         }
         "vmem" => {
           let arg = o.value()?;
-          vmem = Some(
-            arg
-              .parse::<u64>()
-              .map_err(|_| sherr!(ParseErr @ o.span(), "invalid argument for -v: {arg}",))?,
-          );
+          vmem = Some(arg.parse::<u64>().map_err(|_| {
+            sherr!(ParseErr @ o.span(), "invalid argument for -v: {arg}",).with_code(2)
+          })?);
         }
         _ => {
-          return Err(sherr!(ParseErr @ o.span(), "invalid option: {o}"));
+          return Err(sherr!(ParseErr @ o.span(), "invalid option: {o}").with_code(2));
         }
       }
     }
@@ -328,7 +318,7 @@ impl super::Builtin for UMask {
         // need to use the mode_t type alias
         // since the int size varies between Linux/MacOS
         let mode = Mode::from_bits(mode_raw as stat::mode_t)
-          .ok_or_else(|| sherr!(ParseErr @ span, "invalid umask value: {raw}"))?;
+          .ok_or_else(|| sherr!(ParseErr @ span, "invalid umask value: {raw}").with_code(2))?;
         change_umask(mode.bits());
       } else {
         // Symbolic mode: umask u=rwx,g=rx,o=

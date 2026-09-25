@@ -746,7 +746,7 @@ impl super::Builtin for Stat {
     let (arg_vec, opts) = args.take_argv();
 
     if arg_vec.is_empty() {
-      return Err(sherr!(ExecFail @ args.cmd_span(), "stat: Missing file operand"));
+      return Err(sherr!(ExecFail @ args.cmd_span(), "stat: Missing file operand").with_code(2));
     }
 
     for opt in opts {

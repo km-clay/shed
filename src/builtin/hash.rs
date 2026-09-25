@@ -25,7 +25,9 @@ impl super::Builtin for Hash {
         "refresh" => refresh = true,
         _ => {
           return Err(
-            sherr!(ParseErr @ opt.span(), "Invalid hash option: {opt}").promote(args.span()),
+            sherr!(ParseErr @ opt.span(), "Invalid hash option: {opt}")
+              .promote(args.span())
+              .with_code(2),
           );
         }
       }

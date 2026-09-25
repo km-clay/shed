@@ -28,13 +28,19 @@ impl StashOpts {
 
           // length of 'args' is enforced by the opt spec
           let Some(name) = args.next() else {
-            return Err(sherr!(ParseErr @ opt.span(), "missing name argument for '{opt}'"));
+            return Err(
+              sherr!(ParseErr @ opt.span(), "missing name argument for '{opt}'").with_code(2),
+            );
           };
           let Some(buffer) = args.next() else {
-            return Err(sherr!(ParseErr @ opt.span(), "missing buffer argument for '{opt}'"));
+            return Err(
+              sherr!(ParseErr @ opt.span(), "missing buffer argument for '{opt}'").with_code(2),
+            );
           };
           let Some(cursor) = args.next() else {
-            return Err(sherr!(ParseErr @ opt.span(), "missing cursor argument for '{opt}'"));
+            return Err(
+              sherr!(ParseErr @ opt.span(), "missing cursor argument for '{opt}'").with_code(2),
+            );
           };
 
           new.to_save.push(StashedCmd {
@@ -49,7 +55,7 @@ impl StashOpts {
         "list" => new.list = true,
         "stack" => new.only_stack = true,
         "named" => new.only_named = true,
-        _ => return Err(sherr!(ParseErr, "unexpected option {opt} in stash")),
+        _ => return Err(sherr!(ParseErr, "unexpected option {opt} in stash").with_code(2)),
       }
     }
 

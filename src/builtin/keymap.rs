@@ -37,7 +37,9 @@ impl super::Builtin for KeyMapBuiltin {
           remove = Some(opt.value()?.to_string());
         }
         _ => {
-          return Err(sherr!(ExecFail @ opt.span(), "Invalid option for keymap: '{opt}'"));
+          return Err(
+            sherr!(ExecFail @ opt.span(), "Invalid option for keymap: '{opt}'").with_code(2),
+          );
         }
       }
     }

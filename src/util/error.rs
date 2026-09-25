@@ -744,10 +744,7 @@ impl ShErrKind {
   }
   pub(crate) fn code(&self) -> Option<i32> {
     match self {
-      Self::Custom(_, code)
-      | Self::FuncReturn(code)
-      | Self::CleanExit(code)
-      | Self::Raised(_, code) => Some(*code),
+      Self::Custom(_, code) | Self::CleanExit(code) | Self::Raised(_, code) => Some(*code),
       _ => None,
     }
   }

@@ -29,7 +29,7 @@ impl super::Builtin for Msg {
         "status" => status = true,
         "broadcast" => broadcast = true,
         _ => {
-          return Err(sherr!(ExecFail, "msg: Unexpected flag '{opt}'",));
+          return Err(sherr!(ExecFail, "msg: Unexpected flag '{opt}'",).with_code(2));
         }
       }
     }

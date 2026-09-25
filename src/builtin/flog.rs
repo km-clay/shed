@@ -26,7 +26,7 @@ impl super::Builtin for Flog {
     let (arg_vec, opts) = args.take_argv();
 
     let Some((first, span)) = arg_vec.first() else {
-      return Err(sherr!(ExecFail, "Usage: flog <LEVEL> <MESSAGE>"));
+      return Err(sherr!(ExecFail, "Usage: flog <LEVEL> <MESSAGE>").with_code(2));
     };
     let level = first.to_ascii_uppercase();
     let Some(level) = log::Level::from_str(&String::from_utf8_lossy(&level)).ok() else {
