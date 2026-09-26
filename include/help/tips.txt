@@ -19,7 +19,7 @@ A tour of various features that are unique to `shed`.
   entries and appends them to the right. The operation is reversible:
   scroll back the other way to peel concatenated entries off again.
 
-  So you can assemble `cd proj && make && ./run` out of three separate
+  So you can assemble ```cd proj && make && ./run``` out of three separate
   history commands without retyping any of them, or manually re-scrolling
   to each one individually when re-executing.
 
@@ -168,7 +168,7 @@ A tour of various features that are unique to `shed`.
   |rotate|(builtin-rotate)           Rotate the array left or right by a given amount.
 
   The `pop` commands both print the popped element to stdout. This allows for
-  popping and then using elements, like `foo=$(pop arr)`. (Note that builtin command
+  popping and then using elements, like ```foo=$(pop arr)```. (Note that builtin command
   subs do not fork in shed, so this is a persistent mutation of `arr`).
 
 ==============================================================================
@@ -191,8 +191,8 @@ A tour of various features that are unique to `shed`.
   can also be saved using the |stash|(builtin-stash) builtin, if you want to define them in your `rc` file.
 
   This can be used to create code snippets when combined with |keymap|(builtin-keymap):
-  `stash --save "if_stmt" $'if :; then\n\t:\nfi' 0`
-  `keymap -n '<leader>if' '<CMD>stash insert if_stmt<CR>/:'`
+  ```stash --save "if_stmt" $'if :; then\n\t:\nfi' 0```
+  ```keymap -n '<leader>if' '<CMD>stash insert if_stmt<CR>/:'```
 
   The two commands above define a stash entry called `if_stmt` which contains an empty
   `if...then...fi` statement, and a keymap which inserts it and then searches for the first
@@ -222,7 +222,7 @@ A tour of various features that are unique to `shed`.
   they fail to find a match. In the context of vice, a failed search `immediately aborts the program`.
   In the case of `--lines`, it aborts for the current line, emits any already-cut fields and
   skips to the next line. This can be used to create conditional logic in your programs.
-  For instance: `vice --lines -m '/foo' -c 'A -> Line Matches'`
+  For instance: ```vice --lines -m '/foo' -c 'A -> Line Matches'```
 
   This only executes `-c 'A -> Line Matches'` on lines where the `/foo` search found 'foo'.
 

@@ -106,10 +106,10 @@ ALIAS                                            *builtin-alias* *alias*
 
   Examples:
 
-      `alias`                           list all aliases
-      `alias ll='ls -la'`               define an alias
-      `alias ll`                        print: ll='ls -la'
-      `alias g='git' gs='git status'`   define multiple
+      ```alias```                           list all aliases
+      ```alias ll='ls -la'```               define an alias
+      ```alias ll```                        print: ll='ls -la'
+      ```alias g='git' gs='git status'```   define multiple
 
 ==============================================================================
 UNALIAS                                          *builtin-unalias* *unalias*
@@ -123,8 +123,8 @@ UNALIAS                                          *builtin-unalias* *unalias*
 
   Examples:
 
-      `unalias ll`               remove the ll alias
-      `unalias g gs`             remove multiple aliases
+      ```unalias ll```               remove the ll alias
+      ```unalias g gs```             remove multiple aliases
 
 ==============================================================================
 EXCMD                                            *builtin-excmd* *excmd*
@@ -151,13 +151,13 @@ EXCMD                                            *builtin-excmd* *excmd*
 
   Examples:
 
-      `excmd`                     list all ex command aliases
-      `excmd sort='%!sort'`        define ex command `sort`
-      `excmd sort`                print: sort='!sort'
+      ```excmd```                     list all ex command aliases
+      ```excmd sort='%!sort'```        define ex command `sort`
+      ```excmd sort```                print: sort='!sort'
 
   With `sort` defined as above, in ex mode:
 
-      `:sort`          → `:%!sort`     filter the whole buffer through sort
+      ```:sort```          → `:%!sort`     filter the whole buffer through sort
 
   See also: |ex| |builtin-alias|
 
@@ -181,7 +181,7 @@ ARROPS                                           *builtin-arrops* *arrops*
       left to right.
 
       Examples:
-          `push myarr a b c`     append a, b, c to the back
+          ```push myarr a b c```     append a, b, c to the back
 
   FPUSH                                          *builtin-fpush* *fpush*
 
@@ -192,7 +192,7 @@ ARROPS                                           *builtin-arrops* *arrops*
       at index 0.
 
       Example:
-          `fpush arr a b`    given arr=[c], result is [b, a, c]
+          ```fpush arr a b```    given arr=[c], result is [b, a, c]
 
   POP                                            *builtin-pop* *pop*
 
@@ -205,21 +205,21 @@ ARROPS                                           *builtin-arrops* *arrops*
       Sets exit status 1 if the array is empty or does not exist.
 
       Examples:
-          `pop myarr`            print and remove last element
-          `pop -c 2 myarr`       remove and print last 2 elements
-          `pop -v x myarr`       store last element in $x
+          ```pop myarr```            print and remove last element
+          ```pop -c 2 myarr```       remove and print last 2 elements
+          ```pop -v x myarr```       store last element in $x
 
   FPOP                                           *builtin-fpop* *fpop*
 
   `fpop [-c {n}] [-v {var}] {array}`
 
       Remove and print the first element of {array}. Equivalent to
-      `pop` but operates on the front of the array.
+      ```pop``` but operates on the front of the array.
 
       Examples:
-          `fpop myarr`           print and remove first element
-          `fpop -c 2 myarr`      remove and print first 2 elements
-          `fpop -v x myarr`      store first element in $x
+          ```fpop myarr```           print and remove first element
+          ```fpop -c 2 myarr```      remove and print first 2 elements
+          ```fpop -v x myarr```      store first element in $x
 
   ROTATE                                         *builtin-rotate* *rotate*
 
@@ -230,9 +230,9 @@ ARROPS                                           *builtin-arrops* *arrops*
       clamped, making a full rotation a no-op.
 
       Examples:
-          `rotate arr`           [a,b,c,d] -> [b,c,d,a]
-          `rotate -c 2 arr`      [a,b,c,d] -> [c,d,a,b]
-          `rotate -r arr`        [a,b,c,d] -> [d,a,b,c]
+          ```rotate arr```           [a,b,c,d] -> [b,c,d,a]
+          ```rotate -c 2 arr```      [a,b,c,d] -> [c,d,a,b]
+          ```rotate -r arr```        [a,b,c,d] -> [d,a,b,c]
 
 ==============================================================================
 AUTOCMD                                          *builtin-autocmd* *autocmd*
@@ -254,8 +254,8 @@ AUTOCMD                                          *builtin-autocmd* *autocmd*
     events. With a single {event} and no {command}, prints only
     the autocmds registered for that event:
 
-        `autocmd`              list every registered autocmd
-        `autocmd post-cmd`     list autocmds for the post-cmd event
+        ```autocmd```              list every registered autocmd
+        ```autocmd post-cmd```     list autocmds for the post-cmd event
 
   Available events:
 
@@ -281,11 +281,11 @@ AUTOCMD                                          *builtin-autocmd* *autocmd*
 
   Examples:
 
-      `autocmd post-cmd 'echo done'`
-      `autocmd post-change-dir 'ls'`
-      `autocmd -c post-cmd`           clear all post-cmd handlers
-      `autocmd`                       list all registered autocmds
-      `autocmd post-cmd`              list autocmds for post-cmd
+      ```autocmd post-cmd 'echo done'```
+      ```autocmd post-change-dir 'ls'```
+      ```autocmd -c post-cmd```           clear all post-cmd handlers
+      ```autocmd```                       list all registered autocmds
+      ```autocmd post-cmd```              list autocmds for post-cmd
 
   For special variables available inside autocmd handlers, see |autocmd|.
 
@@ -316,7 +316,7 @@ AUTOLOAD                                         *builtin-autoload* *autoload*
 
   `-c`     operate on completions rather than functions. A completion
   `--comp` file's stem is a command name; names resolve against
-           `SHED_COMPLETE_PATH`, and the file is sourced the first time that
+           ```SHED_COMPLETE_PATH```, and the file is sourced the first time that
            command is completed. See |builtin-complete|.
 
   A registered but not-yet-loaded function is also forced to load by
@@ -324,11 +324,11 @@ AUTOLOAD                                         *builtin-autoload* *autoload*
 
   Examples:
 
-      `autoload greet`               load greet on first call
-      `autoload -p ~/.shed/func`     register every function in a directory
-      `autoload -n version`          load version now, do not defer
-      `autoload -c deploy`           lazily load deploy's completion
-      `autoload -c -p ~/.shed/comp`  register a directory of completions
+      ```autoload greet```               load greet on first call
+      ```autoload -p ~/.shed/func```     register every function in a directory
+      ```autoload -n version```          load version now, do not defer
+      ```autoload -c deploy```           lazily load deploy's completion
+      ```autoload -c -p ~/.shed/comp```  register a directory of completions
 
   See also: |autoloading|, |builtin-complete|, |builtin-declare|
 
@@ -356,8 +356,8 @@ BUILTIN                                          *builtin-builtin* *builtin-cmd*
 
   Examples:
 
-      `cd() { builtin cd "$@" && ls; }`   wrap cd without recursing
-      `builtin echo hello`                bypass any user-defined echo
+      ```cd() { builtin cd "$@" && ls; }```   wrap cd without recursing
+      ```builtin echo hello```                bypass any user-defined echo
 
 ==============================================================================
 CD                                               *builtin-cd* *cd*
@@ -386,10 +386,10 @@ CD                                               *builtin-cd* *cd*
 
   Examples:
 
-      `cd`                  go to $HOME
-      `cd /tmp`             absolute path
-      `cd -`                return to previous directory
-      `cd -P ~/link`        resolve symlink before changing
+      ```cd```                  go to $HOME
+      ```cd /tmp```             absolute path
+      ```cd -```                return to previous directory
+      ```cd -P ~/link```        resolve symlink before changing
 
 ==============================================================================
 COMMAND                                          *builtin-command* *command*
@@ -434,12 +434,12 @@ COMMAND                                          *builtin-command* *command*
 
   Examples:
 
-      `command ls`               run external ls, bypassing functions
-      `command -p cat foo`       run cat from the system default $PATH
-      `command -v git`           print the absolute pathname of git
-      `command -v ll`            print: alias ll='ls -la'
-      `command -V if`            print: if is a shell keyword
-      `command -- -p`            treat -p as the command name, not a flag
+      ```command ls```               run external ls, bypassing functions
+      ```command -p cat foo```       run cat from the system default $PATH
+      ```command -v git```           print the absolute pathname of git
+      ```command -v ll```            print: alias ll='ls -la'
+      ```command -V if```            print: if is a shell keyword
+      ```command -- -p```            treat -p as the command name, not a flag
 
 ==============================================================================
 COMPLETE                                         *builtin-complete* *complete*
@@ -483,11 +483,11 @@ COMPLETE                                         *builtin-complete* *complete*
 
   Examples:
 
-      `complete -W 'start stop restart' myservice`
-      `complete -F _git_complete git`
-      `complete -f -d cp`
-      `complete -p git`           print git's registered spec
-      `complete -r git`           remove git's spec
+      ```complete -W 'start stop restart' myservice```
+      ```complete -F _git_complete git```
+      ```complete -f -d cp```
+      ```complete -p git```           print git's registered spec
+      ```complete -r git```           remove git's spec
 
   When `-F` is used, the following variables are set before the function
   is called and should be read (not modified) by the function:
@@ -545,27 +545,27 @@ COMPADD                                          *builtin-compadd* *compadd*
 
   Examples:
 
-      `compadd alpha beta gamma`
+      ```compadd alpha beta gamma```
                   three plain candidates with no descriptions
 
-      `local -a words=(start stop restart)`
-      `compadd -a words`
+      ```local -a words=(start stop restart)```
+      ```compadd -a words```
                   candidates from an indexed array
 
-      `local -a words=(a b c) descs=(first second third)`
-      `compadd -a words -d descs`
+      ```local -a words=(a b c) descs=(first second third)```
+      ```compadd -a words -d descs```
                   parallel arrays, first/second/third describe a/b/c
 
-      `compadd -D 'git branch' main dev feature`
+      ```compadd -D 'git branch' main dev feature```
                   all three candidates share the description "git branch"
 
-      `local -A modes=([n]=normal [i]=insert [v]=visual)`
-      `compadd -A modes`
+      ```local -A modes=([n]=normal [i]=insert [v]=visual)```
+      ```compadd -A modes```
                   candidates n/i/v with their respective descriptions,
                   in insertion order
 
-      `local -A modes=([n]=normal [i]=insert)`
-      `compadd -P "-" -A modes`
+      ```local -A modes=([n]=normal [i]=insert)```
+      ```compadd -P "-" -A modes```
                   produces -n and -i with descriptions preserved
                   (typical pattern for completing short flags with
                   human-readable hints)
@@ -588,12 +588,12 @@ COMPGEN                                          *builtin-compgen* *compgen*
 
   Examples:
 
-      `compgen -W 'foo bar baz'`        print all three words
-      `compgen -W 'foo bar baz' b`      print only: bar baz
-      `compgen -f /tmp/`                list files under /tmp/
-      `compgen -v HOME`                 list variables starting with HOME
-      `compgen -F _my_func`             run function and print results
-      `compgen -o default`              fall back to default completion
+      ```compgen -W 'foo bar baz'```        print all three words
+      ```compgen -W 'foo bar baz' b```      print only: bar baz
+      ```compgen -f /tmp/```                list files under /tmp/
+      ```compgen -v HOME```                 list variables starting with HOME
+      ```compgen -F _my_func```             run function and print results
+      ```compgen -o default```              fall back to default completion
 
 ==============================================================================
 DECLARE                                          *builtin-declare* *declare*
@@ -639,7 +639,7 @@ DECLARE                                          *builtin-declare* *declare*
   Introspection flags ~
 
     `-p`    print all variables (or only the named ones) as
-            `declare`-syntax assignments. Suitable for re-execution.
+            ```declare```-syntax assignments. Suitable for re-execution.
     `-f`    print all functions (or only the named ones) including
             their bodies, as parseable function definitions.
     `-F`    print only the function names (or only the named ones),
@@ -659,15 +659,15 @@ DECLARE                                          *builtin-declare* *declare*
 
   Examples:
 
-      `declare`                       list all variables in scope
-      `declare x=10`                  string variable
-      `declare -i n=5+3`              integer, evaluates to 8
-      `declare -a arr=(a b c)`        indexed array
-      `declare -A m=([k1]=v1 [k2]=v2)` associative array
-      `declare -rx PATH`              mark existing var read-only and exported
-      `declare -p PATH`               print PATH as a declare statement
-      `declare -F`                    list all defined function names
-      `declare -f my_func`            print the body of my_func
+      ```declare```                       list all variables in scope
+      ```declare x=10```                  string variable
+      ```declare -i n=5+3```              integer, evaluates to 8
+      ```declare -a arr=(a b c)```        indexed array
+      ```declare -A m=([k1]=v1 [k2]=v2)``` associative array
+      ```declare -rx PATH```              mark existing var read-only and exported
+      ```declare -p PATH```               print PATH as a declare statement
+      ```declare -F```                    list all defined function names
+      ```declare -f my_func```            print the body of my_func
 
   See also: |builtin-local|, |builtin-export|, |builtin-readonly|,
   |builtin-unset|.
@@ -699,10 +699,10 @@ DIRS                                             *builtin-dirs* *dirs*
 
   Examples:
 
-      `dirs`              list the full directory stack
-      `dirs -v`           list with numeric indices
-      `dirs +0`           print only the current directory
-      `dirs -c`           clear the stack
+      ```dirs```              list the full directory stack
+      ```dirs -v```           list with numeric indices
+      ```dirs +0```           print only the current directory
+      ```dirs -c```           clear the stack
 
 ==============================================================================
 ECHO                                             *builtin-echo* *echo*
@@ -734,9 +734,9 @@ ECHO                                             *builtin-echo* *echo*
 
   Examples:
 
-      `echo hello world`
-      `echo -n no newline`
-      `echo -e 'line1\nline2'`
+      ```echo hello world```
+      ```echo -n no newline```
+      ```echo -e 'line1\nline2'```
 
 ==============================================================================
 EVAL                                             *builtin-eval* *eval*
@@ -751,9 +751,9 @@ EVAL                                             *builtin-eval* *eval*
 
   Examples:
 
-      `eval echo hello`
-      `eval 'x=42; echo $x'`
-      `cmd='echo evaluated'; eval $cmd`
+      ```eval echo hello```
+      ```eval 'x=42; echo $x'```
+      ```cmd='echo evaluated'; eval $cmd```
 
 ==============================================================================
 EXEC                                             *builtin-exec* *exec*
@@ -770,8 +770,8 @@ EXEC                                             *builtin-exec* *exec*
 
   Examples:
 
-      `exec /bin/sh`
-      `exec myprogram arg1`
+      ```exec /bin/sh```
+      ```exec myprogram arg1```
 
 ==============================================================================
 EXIT                                             *builtin-exit* *exit*
@@ -784,9 +784,9 @@ EXIT                                             *builtin-exit* *exit*
 
   Examples:
 
-      `exit`        exit with current status
-      `exit 0`      exit successfully
-      `exit 1`      exit with failure
+      ```exit```        exit with current status
+      ```exit 0```      exit successfully
+      ```exit 1```      exit with failure
 
 ==============================================================================
 EXPORT                                           *builtin-export* *export*
@@ -809,11 +809,11 @@ EXPORT                                           *builtin-export* *export*
 
   Examples:
 
-      `export`                  list exported variables
-      `export PATH`             export an existing variable
-      `export EDITOR=nvim`      set and export
-      `export A=1 B=2`          multiple in one call
-      `export -n EDITOR`        stop exporting EDITOR (keep its value)
+      ```export```                  list exported variables
+      ```export PATH```             export an existing variable
+      ```export EDITOR=nvim```      set and export
+      ```export A=1 B=2```          multiple in one call
+      ```export -n EDITOR```        stop exporting EDITOR (keep its value)
 
 ==============================================================================
 FALSE                                            *builtin-false* *false*
@@ -857,11 +857,11 @@ FC                                               *builtin-fc* *fc*
 
   Examples:
 
-      `fc -l`                   list last 16 commands
-      `fc -l 1 10`              list entries 1-10
-      `fc -s echo`              re-exec last command starting with "echo"
-      `fc -s cat=dog`           re-exec with cat -> dog substitution
-      `fc -e vim`               edit last command in vim
+      ```fc -l```                   list last 16 commands
+      ```fc -l 1 10```              list entries 1-10
+      ```fc -s echo```              re-exec last command starting with "echo"
+      ```fc -s cat=dog```           re-exec with cat -> dog substitution
+      ```fc -e vim```               edit last command in vim
 
 ==============================================================================
 FLOG                       *builtin-flog* *flog* *FLOG_FMT* *flog-fmt*
@@ -902,7 +902,7 @@ FLOG                       *builtin-flog* *flog* *FLOG_FMT* *flog-fmt*
   are invisible by default and enabled on demand.
   The hierarchy is as follows:
 
-        `none` > `error` > `warn` > `info` > `debug` > `trace`.
+        ```none``` > `error` > `warn` > `info` > `debug` > `trace`.
 
   A `FLOG_LEVEL` value of `none` suppresses all log messages.
 
@@ -914,12 +914,12 @@ FLOG                       *builtin-flog* *flog* *FLOG_FMT* *flog-fmt*
 
   Examples:
 
-      `flog info "starting up"`
-      `flog -p '[%H:%M:%S {level}]' warn "disk usage high"`
-      `flog -p '[{level} {source}:{line}]' error "unexpected value"`
-      `FLOG_LEVEL=debug flog debug "entering loop"`
-      `FLOG_FMT='[%H:%M:%S {level}]' flog info "started"`
-      `export FLOG_FMT='[{level} {source}:{line}]'  # in .shedrc`
+      ```flog info "starting up"```
+      ```flog -p '[%H:%M:%S {level}]' warn "disk usage high"```
+      ```flog -p '[{level} {source}:{line}]' error "unexpected value"```
+      ```FLOG_LEVEL=debug flog debug "entering loop"```
+      ```FLOG_FMT='[%H:%M:%S {level}]' flog info "started"```
+      ```export FLOG_FMT='[{level} {source}:{line}]'  # in .shedrc```
 
 ==============================================================================
 FORGET                                           *builtin-forget* *forget*
@@ -964,13 +964,13 @@ FORGET                                           *builtin-forget* *forget*
 
   Examples:
 
-      `forget`                       reset the whole shell to launch state
-      `forget -af`                   drop aliases and functions
-      `forget --except -f`           forget everything but functions
-      `forget -x PS1`                reset all but the `PS1` variable
-      `dump=$(genrc --vars)`         stash variables, wipe them, restore
-      `forget -x dump; eval "$dump"`
-      `forget; source ~/.shedrc`     reload configuration from scratch
+      ```forget```                       reset the whole shell to launch state
+      ```forget -af```                   drop aliases and functions
+      ```forget --except -f```           forget everything but functions
+      ```forget -x PS1```                reset all but the `PS1` variable
+      ```dump=$(genrc --vars)```         stash variables, wipe them, restore
+      ```forget -x dump; eval "$dump"```
+      ```forget; source ~/.shedrc```     reload configuration from scratch
 
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*
@@ -1025,12 +1025,12 @@ GENRC                                            *builtin-genrc* *genrc*
 
   Examples:
 
-      `genrc > ~/.shedrc.new`             snapshot current config
-      `genrc --default > ~/.shedrc`       reset to factory defaults
-      `genrc -Ak`                         pull just autocmds and keymaps
-      `genrc -fa > ~/.shed_funcs.sh`      export functions and aliases
-      `genrc -s --no-comments`            bare shopt dump, sourceable
-      `genrc -v --no-comments`            dump user variables as declares
+      ```genrc > ~/.shedrc.new```             snapshot current config
+      ```genrc --default > ~/.shedrc```       reset to factory defaults
+      ```genrc -Ak```                         pull just autocmds and keymaps
+      ```genrc -fa > ~/.shed_funcs.sh```      export functions and aliases
+      ```genrc -s --no-comments```            bare shopt dump, sourceable
+      ```genrc -v --no-comments```            dump user variables as declares
 
 ==============================================================================
 GETOPTS                                          *builtin-getopts* *getopts*
@@ -1051,13 +1051,13 @@ GETOPTS                                          *builtin-getopts* *getopts*
 
   Examples:
 
-      `while getopts 'ab:c' opt; do`
-      `  case $opt in`
-      `    a) echo "got -a" ;;`
-      `    b) echo "got -b $OPTARG" ;;`
-      `    c) echo "got -c" ;;`
-      `  esac`
-      `done`
+      ```while getopts 'ab:c' opt; do
+        case $opt in
+          a) echo "got -a" ;;
+          b) echo "got -b $OPTARG" ;;
+          c) echo "got -c" ;;
+        esac
+      done```
 
 ==============================================================================
 HASH                                             *builtin-hash* *hash*
@@ -1076,10 +1076,10 @@ HASH                                             *builtin-hash* *hash*
 
   Examples:
 
-      `hash`             list cached paths
-      `hash git nvim`    cache specific commands
-      `hash -r`          clear the cache
-      `hash --refresh`   rebuild from $PATH
+      ```hash```             list cached paths
+      ```hash git nvim```    cache specific commands
+      ```hash -r```          clear the cache
+      ```hash --refresh```   rebuild from $PATH
 
 ==============================================================================
 HELP                                             *builtin-help* *help*
@@ -1095,10 +1095,10 @@ HELP                                             *builtin-help* *help*
 
   Examples:
 
-      `help`             open the help index
-      `help --list-tags` list all searchable tags
-      `help echo`        help for the echo builtin
-      `help param`       parameter expansion reference
+      ```help```             open the help index
+      ```help --list-tags``` list all searchable tags
+      ```help echo```        help for the echo builtin
+      ```help param```       parameter expansion reference
 
 ==============================================================================
 HIST                                             *builtin-hist* *hist*
@@ -1134,9 +1134,9 @@ HIST                                             *builtin-hist* *hist*
 
   Any filter option can be negated by placing `--not` immediately before it:
 
-      `hist --not --with-status 0`     commands that exited non-zero
-      `hist --not --contains git`      commands not containing "git"
-      `hist --not --in-dir .`          commands run outside current directory
+      ```hist --not --with-status 0```     commands that exited non-zero
+      ```hist --not --contains git```      commands not containing "git"
+      ```hist --not --in-dir .```          commands run outside current directory
 
   Output Options ~
 
@@ -1189,7 +1189,7 @@ HIST                                             *builtin-hist* *hist*
 
   Providing numeric arguments restricts results to those specific IDs:
 
-      `hist 42 43`    print entries with IDs 42 and 43
+      ```hist 42 43```    print entries with IDs 42 and 43
 
   Dates accept natural language: "yesterday", "2 hours ago", "last
   monday", ISO 8601, etc. Durations: "5s", "2 minutes", "1 hour".
@@ -1200,7 +1200,7 @@ HIST                                             *builtin-hist* *hist*
   commit graph (parent and merge links), and branch pointers — as a JSON
   document on stdout. Redirect it to a file for a complete backup:
 
-      `hist export > history.json`
+      ```hist export > history.json```
 
   `hist import [{file}]` reads from {file}, or from stdin when {file} is
   omitted, and detects the format automatically:
@@ -1226,27 +1226,27 @@ HIST                                             *builtin-hist* *hist*
 
   Examples:
 
-      `hist`                                    full history
-      `hist --contains git`                     entries containing "git"
-      `hist --after "yesterday"`                entries since yesterday
-      `hist --limit 20 -n`                      last 20 commands, no IDs
-      `hist --delete --contains foo`            delete entries containing "foo"
-      `hist --not --with-status 0`              failed commands
-      `hist --in-dir . --after "1 hour ago"`    recent commands in current dir
-      `hist import bash`                        import from ~/.bash_history
-      `hist import zsh`                         import from ~/.zsh_history
-      `hist import ~/old_history`               import from explicit path
-      `hist --quoted --no-dupes -n`             unique commands, shell-quoted
-      `hist --quoted -n | scry -q`              fuzzy-pick a past command
-      `hist branch experiment`                  create a branch at the current point
-      `hist branch -d experiment`               delete a merged branch
-      `hist checkout -b experiment`             create it and switch in one step
-      `hist checkout --orphan scratch`          start a fresh, disconnected history
-      `hist merge experiment`                   fold a branch back into the current one
-      `hist export > backup.json`               back up all branches to a file
-      `hist import backup.json`                 restore a backup into empty history
-      `hist import -f backup.json`              restore, replacing existing history
-      `hist pull`                               sync history from other sessions
+      ```hist```                                    full history
+      ```hist --contains git```                     entries containing "git"
+      ```hist --after "yesterday"```                entries since yesterday
+      ```hist --limit 20 -n```                      last 20 commands, no IDs
+      ```hist --delete --contains foo```            delete entries containing "foo"
+      ```hist --not --with-status 0```              failed commands
+      ```hist --in-dir . --after "1 hour ago"```    recent commands in current dir
+      ```hist import bash```                        import from ~/.bash_history
+      ```hist import zsh```                         import from ~/.zsh_history
+      ```hist import ~/old_history```               import from explicit path
+      ```hist --quoted --no-dupes -n```             unique commands, shell-quoted
+      ```hist --quoted -n | scry -q```              fuzzy-pick a past command
+      ```hist branch experiment```                  create a branch at the current point
+      ```hist branch -d experiment```               delete a merged branch
+      ```hist checkout -b experiment```             create it and switch in one step
+      ```hist checkout --orphan scratch```          start a fresh, disconnected history
+      ```hist merge experiment```                   fold a branch back into the current one
+      ```hist export > backup.json```               back up all branches to a file
+      ```hist import backup.json```                 restore a backup into empty history
+      ```hist import -f backup.json```              restore, replacing existing history
+      ```hist pull```                               sync history from other sessions
 
   See also: |builtin-scry|
 
@@ -1287,9 +1287,9 @@ KEYMAP                                           *builtin-keymap* *keymap*
     only the keymaps active in those modes. Useful for inspecting
     what's currently bound:
 
-        `keymap`              list every registered keymap
-        `keymap -i`           list only insert-mode keymaps
-        `keymap -n -v`        list normal and visual keymaps
+        ```keymap```              list every registered keymap
+        ```keymap -i```           list only insert-mode keymaps
+        ```keymap -n -v```        list normal and visual keymaps
 
   Key sequences use the same notation as the line editor. Special keys
   can be written as `<cr>`, `<esc>`, `<tab>`, `<space>`, etc.
@@ -1301,18 +1301,18 @@ KEYMAP                                           *builtin-keymap* *keymap*
     is optional. An {action} that opens an empty prompt (a bare `/` or
     `:` with nothing after it) is left open for you to type into instead.
 
-        `keymap -n ',h' '/hello'`      jump to the next "hello" (auto-run)
-        `keymap -n '<leader>/' '/'`    open a search prompt to type into
+        ```keymap -n ',h' '/hello'```      jump to the next "hello" (auto-run)
+        ```keymap -n '<leader>/' '/'```    open a search prompt to type into
 
   Examples:
 
-      `keymap -i 'jk' '<esc>'`        map jk -> escape in insert mode
-      `keymap -n 'gs' ':source ~/.shed_profile<cr>'`
+      ```keymap -i 'jk' '<esc>'```        map jk -> escape in insert mode
+      ```keymap -n 'gs' ':source ~/.shed_profile<cr>'```
                                       source ~/.shed_profile with gs
-      `keymap -i --remove 'jk'`       remove the jk binding
-      `keymap`                        list all keymaps
-      `keymap -i`                     list insert-mode keymaps
-      `keymap -n '!' '<CMD>r!hist --quoted -n | scry -q -n'`
+      ```keymap -i --remove 'jk'```       remove the jk binding
+      ```keymap```                        list all keymaps
+      ```keymap -i```                     list insert-mode keymaps
+      ```keymap -n '!' '<CMD>r!hist --quoted -n | scry -q -n'```
                                       fuzzy-pick a past command and insert it
                                       at the cursor (see |builtin-scry|)
 
@@ -1349,12 +1349,12 @@ KILL                                             *builtin-kill* *kill*
 
   Examples:
 
-      `kill 1234`              SIGTERM to PID 1234
-      `kill -9 1234`           SIGKILL to PID 1234
-      `kill -s HUP 1234`       SIGHUP to PID 1234
-      `kill %1`                SIGTERM to job 1
-      `kill -l`                list all signals
-      `kill -l 130`            print: INT
+      ```kill 1234```              SIGTERM to PID 1234
+      ```kill -9 1234```           SIGKILL to PID 1234
+      ```kill -s HUP 1234```       SIGHUP to PID 1234
+      ```kill %1```                SIGTERM to job 1
+      ```kill -l```                list all signals
+      ```kill -l 130```            print: INT
 
 ==============================================================================
 LET                                              *builtin-let* *let*
@@ -1371,9 +1371,9 @@ LET                                              *builtin-let* *let*
 
   Examples:
 
-      `let x=2+3`              x is 5
-      `let "y = 4 * (1 + 2)"`  y is 12
-      `let a=1 b=a+1`          a is 1, b is 2
+      ```let x=2+3```              x is 5
+      ```let "y = 4 * (1 + 2)"```  y is 12
+      ```let a=1 b=a+1```          a is 1, b is 2
 
 ==============================================================================
 LOCAL                                            *builtin-local* *local*
@@ -1399,9 +1399,9 @@ LOCAL                                            *builtin-local* *local*
 
   Examples:
 
-      `local x=10`
-      `local a b c`
-      `local`           list scope variables
+      ```local x=10```
+      ```local a b c```
+      ```local```           list scope variables
 
 ==============================================================================
 MSG                                              *builtin-msg* *msg*
@@ -1433,10 +1433,10 @@ MSG                                              *builtin-msg* *msg*
 
   Examples:
 
-      `msg "build complete"`
-      `msg --system "low disk space"`
-      `msg -b "rebuild finished"`
-      `msg -sb "deploy started"`
+      ```msg "build complete"```
+      ```msg --system "low disk space"```
+      ```msg -b "rebuild finished"```
+      ```msg -sb "deploy started"```
 
 ==============================================================================
 NEXTD                                            *builtin-nextd* *nextd*
@@ -1460,9 +1460,9 @@ NEXTD                                            *builtin-nextd* *nextd*
 
   Examples:
 
-      `nextd`             move forward one directory
-      `nextd 3`           move forward three directories
-      `nextd -l`          list the forward history
+      ```nextd```             move forward one directory
+      ```nextd 3```           move forward three directories
+      ```nextd -l```          list the forward history
 
 ==============================================================================
 POLL                                             *builtin-poll* *poll*
@@ -1506,15 +1506,14 @@ POLL                                             *builtin-poll* *poll*
 
   Input array form ~
 
-  `-i {array}`       take the watch set from an associative array instead
-                     of positional arguments. `--events` is a synonym.
-                     Keys are descriptors, values are event sets in the
-                     same `in out pri` vocabulary:
-
-                         `declare -A watch`
-                         `watch[$conn]="in"`
-                         `watch[$srv]="in out pri"`
-                         `poll -i watch`
+  `-i {array}`        take the watch set from an associative array instead
+                    of positional arguments. `--events` is a synonym.
+                    Keys are descriptors, values are event sets in the
+                    same `in out pri` vocabulary:
+                    ```declare -A watch
+                    watch[$conn]="in"
+                    watch[$srv]="in out pri"
+                    poll -i watch```
 
   The values can be comma or space separated. The positional form and `-i`
   are alternatives; `-i` replaces the positional watch set rather than adding to it.
@@ -1539,16 +1538,17 @@ POLL                                             *builtin-poll* *poll*
 
   The fds that received events can be iterated over using the associative
   array key expansion: `${!SHED_REVENTS[@]}`. For example:
-  `while poll 5:in,out 6:in 7:in; do`
-  `  for key in ${!SHED_REVENTS[@]}; do`
-  `    revents="${SHED_REVENTS[$key]}"`
-  `    case "$revents" in`
-  `      *hup*) ... handle POLLHUP ... ;;`
-  `      *in*)  ... handle POLLIN  ... ;;`
-  `      *out*) ... handle POLLOUT ... ;;`
-  `    esac`
-  `  done`
-  `done`
+
+  ```while poll 5:in,out 6:in 7:in; do
+    for key in ${!SHED_REVENTS[@]}; do
+      revents="${SHED_REVENTS[$key]}"
+      case "$revents" in
+        *hup*) ... handle POLLHUP ... ;;
+        *in*)  ... handle POLLIN  ... ;;
+        *out*) ... handle POLLOUT ... ;;
+      esac
+    done
+  done```
 
   `hup`, `err`, and `nval` are reported even when not requested, so a loop
   can reap dead descriptors instead of spinning on them. Note `in` and
@@ -1565,12 +1565,12 @@ POLL                                             *builtin-poll* *poll*
   reading is at EOF, yet there is no full `hup` (that only arrives on a
   complete close). Request `rdhup` to catch this cleanly:
 
-      `while poll "$conn":in,rdhup -t 5s; do`
-      `  case "${SHED_REVENTS[$conn]}" in`
-      `    *rdhup*|*hup*) reap "$conn" ;;   # peer done sending / gone`
-      `    *in*)          serve "$conn" ;;  # real data`
-      `  esac`
-      `done`
+  ```while poll "$conn":in,rdhup -t 5s; do
+    case "${SHED_REVENTS[$conn]}" in
+      *rdhup*|*hup*) reap "$conn" ;;   # peer done sending / gone
+      *in*)          serve "$conn" ;;  # real data
+    esac
+  done```
 
   `rdhup` says the peer is done sending (you may still write a reply before
   reaping); `hup` says the connection is fully torn down. Because "rdhup"
@@ -1600,12 +1600,12 @@ POLL                                             *builtin-poll* *poll*
 
   Examples:
 
-      `poll 6:in -t 5s`                    wait up to 5s for fd 6 to read
-      `poll 3:in 4:in ${w}:out`            several fds, mixed conditions
-      `poll ${conn}:in,out`                readable or writable
-      `poll -i watch -o ready -t 1s`       array in, array out
-      `while poll -i conns -o hits -t 0`   drive an event loop; body
-      `  do handle_ready hits; done`       services whatever fired
+      ```poll 6:in -t 5s```                    wait up to 5s for fd 6 to read
+      ```poll 3:in 4:in ${w}:out```            several fds, mixed conditions
+      ```poll ${conn}:in,out```                readable or writable
+      ```poll -i watch -o ready -t 1s```       array in, array out
+      ```while poll -i conns -o hits -t 0```   drive an event loop; body
+      ```  do handle_ready hits; done```       services whatever fired
 
   See also: |builtin-sock|, |builtin-listen|, |builtin-accept|.
 
@@ -1619,7 +1619,7 @@ POPD                                             *builtin-popd* *popd*
 
   `-n`    do not change the current directory (stack only)
   `+N`    remove the entry at index N from the top (0-based).
-          `+0` is equivalent to plain `popd`.
+          ```+0``` is equivalent to plain `popd`.
   `-N`    remove the entry at index N from the bottom.
 
   When using `+N` (N > 0) or `-N`, no directory change occurs.
@@ -1628,9 +1628,9 @@ POPD                                             *builtin-popd* *popd*
 
   Examples:
 
-      `popd`          pop top and cd to new top
-      `popd -n`       remove top without cd
-      `popd +1`       remove second stored entry, no cd
+      ```popd```          pop top and cd to new top
+      ```popd -n```       remove top without cd
+      ```popd +1```       remove second stored entry, no cd
 
 ==============================================================================
 PREVD                                            *builtin-prevd* *prevd*
@@ -1653,9 +1653,9 @@ PREVD                                            *builtin-prevd* *prevd*
 
   Examples:
 
-      `prevd`             move back one directory
-      `prevd 2`           move back two directories
-      `prevd -l`          list the backward history
+      ```prevd```             move back one directory
+      ```prevd 2```           move back two directories
+      ```prevd -l```          list the backward history
 
 ==============================================================================
 PRINTF                                           *builtin-printf* *printf*
@@ -1756,45 +1756,45 @@ PRINTF                                           *builtin-printf* *printf*
 
   Examples ~
 
-      `printf 'hello %s\n' world`
+      ```printf 'hello %s\n' world```
                                 outputs: `hello world`
 
-      `printf '%s: %d\n' alice 1 bob 2 carol 3`
+      ```printf '%s: %d\n' alice 1 bob 2 carol 3```
                                 format restarts twice, outputs three lines
 
-      `printf '[%5d] [%-5d] [%05d]\n' 42 42 42`
+      ```printf '[%5d] [%-5d] [%05d]\n' 42 42 42```
                                 outputs: `[   42] [42   ] [00042]`
 
-      `printf '%.3f\n' 3.14159`
+      ```printf '%.3f\n' 3.14159```
                                 outputs: `3.142`
 
-      `printf '%.3s\n' hello`
+      ```printf '%.3s\n' hello```
                                 outputs: `hel`
 
-      `printf '%5r\n' =`
+      ```printf '%5r\n' =```
                                 outputs: `=====`
 
-      `printf '╭%*r╮\n' 4 '─'`
+      ```printf '╭%*r╮\n' 4 '─'```
                                 outputs: `╭────╮` (count from the argument;
                                 handy for drawing rules and separators)
 
-      `printf '%+d\n' 42`
+      ```printf '%+d\n' 42```
                                 outputs: `+42`
 
-      `printf '%#x\n' 255`
+      ```printf '%#x\n' 255```
                                 outputs: `0xff`
 
-      `printf '%q\n' 'hello world'`
+      ```printf '%q\n' 'hello world'```
                                 outputs: `'hello world'` (round-trippable
                                 through the shell parser)
 
-      `printf '%(%Y-%m-%d)T\n' -1`
+      ```printf '%(%Y-%m-%d)T\n' -1```
                                 outputs the current date
 
-      `printf '%(%H:%M:%S)T\n' -2`
+      ```printf '%(%H:%M:%S)T\n' -2```
                                 outputs the shell start time
 
-      `printf '%*d\n' 8 42`
+      ```printf '%*d\n' 8 42```
                                 width read from argument (width 8)
 
   See also: |builtin-echo|, |builtin-quote|
@@ -1816,9 +1816,9 @@ PUSHD                                            *builtin-pushd* *pushd*
 
   Examples:
 
-      `pushd /tmp`          push /tmp and cd to it
-      `pushd -n ~/src`      push without changing directory
-      `pushd +1`            rotate stack and cd to next entry
+      ```pushd /tmp```          push /tmp and cd to it
+      ```pushd -n ~/src```      push without changing directory
+      ```pushd +1```            rotate stack and cd to next entry
 
 ==============================================================================
 PWD                                              *builtin-pwd* *pwd*
@@ -1850,13 +1850,13 @@ QUOTE                                            *builtin-quote* *quote*
   treated as a single value and encoded as one shell-quoted string.
   This is useful for round-tripping output from another command:
 
-      `produce_data | quote | filter | unquote`
+      ```produce_data | quote | filter | unquote```
 
   When called with arguments instead, each argument is encoded
   independently and the results are joined by spaces. This is the
   natural form for emitting structured data from shell functions:
 
-      `quote "${args[@]}"`
+      ```quote "${args[@]}"```
 
   All forms are bash-compatible, so the encoded output round-trips
   losslessly through any byte-clean pipe. Paired with |unquote|, this
@@ -1866,15 +1866,15 @@ QUOTE                                            *builtin-quote* *quote*
 
   Examples:
 
-      `quote hello world`           outputs:  `hello world`
-      `quote "hello world"`         outputs:  `'hello world'`
-      `quote $'foo\nbar'`           outputs:  `$'foo\nbar'`
-      `quote "${arr[@]}"`           encode each array element
+      ```quote hello world```           outputs:  `hello world`
+      ```quote "hello world"```         outputs:  `'hello world'`
+      ```quote $'foo\nbar'```           outputs:  `$'foo\nbar'`
+      ```quote "${arr[@]}"```           encode each array element
 
-      `echo "raw text" | quote`     encode stdin as one quoted string
-      `quote "$(produce)" | filter | unquote`
-      `result=$(quote "${args[@]}")`
-      `eval "args=($result)"`       decode preserving structure
+      ```echo "raw text" | quote```     encode stdin as one quoted string
+      ```quote "$(produce)" | filter | unquote```
+      ```result=$(quote "${args[@]}")```
+      ```eval "args=($result)"```       decode preserving structure
 
   See also: |unquote|(builtin-unquote)
 
@@ -1903,7 +1903,7 @@ UNQUOTE                                          *builtin-unquote* *unquote*
     `-0`                            shorthand for `-s $'\0'`: separate
                                     fields with NUL bytes. Designed to
                                     pair with `xargs -0`, `sort -z`,
-                                    `grep -z`, and other tools that
+                                    ```grep -z```, and other tools that
                                     consume NUL-separated input.
 
   The `-0` flag is the recommended way to bridge shed pipelines into
@@ -1914,15 +1914,15 @@ UNQUOTE                                          *builtin-unquote* *unquote*
 
   Examples:
 
-      `quote $'foo\nbar' | unquote`             round-trip; prints `foo`, `bar`
-      `quote "${arr[@]}" | unquote -a out`      restore an array into $out
-      `quote "$msg" | unquote -v decoded`       decode into a scalar
-      `split : "$PATH" | unquote -a paths`      split `PATH`, preserving structure
+      ```quote $'foo\nbar' | unquote```             round-trip; prints `foo`, `bar`
+      ```quote "${arr[@]}" | unquote -a out```      restore an array into $out
+      ```quote "$msg" | unquote -v decoded```       decode into a scalar
+      ```split : "$PATH" | unquote -a paths```      split `PATH`, preserving structure
                                               even if some paths have spaces
 
-      `split : "$PATH" | unquote -0 | xargs -0 -I {} echo {}`
-      `split , "$csv"   | unquote -s ','`       emit comma-joined values
-      `produce | unquote -s ''`                 concatenate fields with no delimiter
+      ```split : "$PATH" | unquote -0 | xargs -0 -I {} echo {}```
+      ```split , "$csv"   | unquote -s ','```       emit comma-joined values
+      ```produce | unquote -s ''```                 concatenate fields with no delimiter
 
   See also: |quote|(builtin-quote), |builtin-read| (for the `-q` flag)
 
@@ -1999,14 +1999,14 @@ READ                                             *builtin-read* *read*
 
     To step through input one raw byte at a time:
 
-        `while IFS= read -N 1 byte; do ...; done`
+        ```while IFS= read -N 1 byte; do ...; done```
 
   Examples:
 
-    `read name`
-    `read first rest`
-    `read -p "Enter value: " x`
-    `read -s password`
+    ```read name```
+    ```read first rest```
+    ```read -p "Enter value: " x```
+    ```read -s password```
 
     `while read -q field; do                  iterate safely over
          echo "got: $field"                   shell-quoted input
@@ -2035,10 +2035,10 @@ READONLY                                         *builtin-readonly* *readonly*
 
   Examples:
 
-      `readonly PI=3.14159`
-      `readonly MYVAR`
-      `readonly`              list read-only variables
-      `readonly -p`           same, portable form
+      ```readonly PI=3.14159```
+      ```readonly MYVAR```
+      ```readonly```              list read-only variables
+      ```readonly -p```           same, portable form
 
 ==============================================================================
 READKEY                                         *builtin-readkey* *readkey*
@@ -2064,9 +2064,9 @@ READKEY                                         *builtin-readkey* *readkey*
 
   Examples:
 
-      `readkey -v key`                 read a key into $key
-      `readkey -v ch -w 'yn'`          accept only y or n
-      `readkey -w '<esc><cr>'`         accept only Escape or Enter
+      ```readkey -v key```                 read a key into $key
+      ```readkey -v ch -w 'yn'```          accept only y or n
+      ```readkey -w '<esc><cr>'```         accept only Escape or Enter
 
 ==============================================================================
 RETURN                                           *builtin-return* *return*
@@ -2080,8 +2080,8 @@ RETURN                                           *builtin-return* *return*
 
   Examples:
 
-      `f() { return 0; }`
-      `f() { [[ $x ]] || return 1; echo "ok"; }`
+      ```f() { return 0; }```
+      ```f() { [[ $x ]] || return 1; echo "ok"; }```
 
 ==============================================================================
 BREAK                                            *builtin-break* *break*
@@ -2096,9 +2096,9 @@ BREAK                                            *builtin-break* *break*
 
   Examples:
 
-      `while true; do break; done`
-      `for i in 1 2 3; do break; done`
-      `for i in 1 2; do for j in a b; do break 2; done; done  # exits both loops`
+      ```while true; do break; done```
+      ```for i in 1 2 3; do break; done```
+      ```for i in 1 2; do for j in a b; do break 2; done; done  # exits both loops```
 
 ==============================================================================
 CONTINUE                                         *builtin-continue* *continue*
@@ -2114,8 +2114,8 @@ CONTINUE                                         *builtin-continue* *continue*
 
   Examples:
 
-      `for i in 1 2 3; do [[ $i == 2 ]] && continue; echo $i; done`
-      `for i in 1 2; do for j in a b; do continue 2; done; done  # resumes outer loop`
+      ```for i in 1 2 3; do [[ $i == 2 ]] && continue; echo $i; done```
+      ```for i in 1 2; do for j in a b; do continue 2; done; done  # resumes outer loop```
 
 ==============================================================================
 RAISE                                            *builtin-raise* *raise*
@@ -2156,38 +2156,38 @@ RAISE                                            *builtin-raise* *raise*
 
     Examples (color shown as bracketed style):
 
-      `raise "expected '%1', got '%2'" int string`
-                      `----      ----  --- ------`
-                       `int` and `string` are different colors
+      ```raise "expected '%1', got '%2'" int string```
+                      ```----      ----  --- ------```
+                       ```int``` and `string` are different colors
 
-      `raise "removing '%1', '%1', and '%1'" main dev prod`
-                      `----  ----      ----`
-                       `main`, `dev`, and `prod` all share a color
+      ```raise "removing '%1', '%1', and '%1'" main dev prod```
+                      ```----  ----      ----```
+                       ```main```, `dev`, and `prod` all share a color
 
   Examples:
 
-      `logout() {`
-      `  if [[ "$0" == -* ]]; then`
-      `    exit 0`
-      `  else`
-      `    raise -c 2 "the current session is not a login shell"`
-      `  fi`
-      `}`
+      ```logout() {
+        if [[ "$0" == -* ]]; then
+          exit 0
+        else
+          raise -c 2 "the current session is not a login shell"
+        fi
+      }```
 
-      `safe_cd() {`
-      `  [[ -d "$1" ]] || raise --code 2 "not a directory: $1"`
-      `  builtin cd "$1"`
-      `}`
+      ```safe_cd() {
+        [[ -d "$1" ]] || raise --code 2 "not a directory: $1"
+        builtin cd "$1"
+      }```
 
-      `validate_port() {`
-      `  local port="$1"`
-      `  [ -i "$port" ] || raise "expected port, found '%1'" "$port"` (see |test-numeric|)
-      `  if (( port < 1024 || port > 65535 )); then`
-      `    raise -k "bad port" \\`
-      `          -n "must be in range 1024..65535" \\`
-      `          "port '%1' is out of range" "$port"`
-      `  fi`
-      `}`
+      ```validate_port() {
+        local port="$1"
+        [ -i "$port" ] || raise "expected port, found '%1'" "$port"  # see |test-numeric|
+        if (( port < 1024 || port > 65535 )); then
+          raise -k "bad port" \
+                -n "must be in range 1024..65535" \
+                "port '%1' is out of range" "$port"
+        fi
+      }```
 
   See also: |try|(script-try), |return|(builtin-return)
 
@@ -2256,17 +2256,17 @@ SCRY                                             *builtin-scry* *scry*
 
   Examples:
 
-      `ls | scry`                          pick a file name
-      `hist --quoted -n | scry -q`         pick a past command, decoded
-      `find . -type d -print0 | scry -0`   pick a directory, NUL-safe
-      `scry ./src/**/*.rs`                 pick files from a directory
+      ```ls | scry```                          pick a file name
+      ```hist --quoted -n | scry -q```         pick a past command, decoded
+      ```find . -type d -print0 | scry -0```   pick a directory, NUL-safe
+      ```scry ./src/**/*.rs```                 pick files from a directory
                                            using a glob pattern
-      `find . -type f | scry -l -s x`      stream matching paths in input
+      ```find . -type f | scry -l -s x```      stream matching paths in input
                                            order as they are found
-      `scry -l -S -s x ./src/*.rs`         list matching files ranked
+      ```scry -l -S -s x ./src/*.rs```         list matching files ranked
                                            best-first (buffered)
-      `SCRY_DEFAULT_CMD='find . -type f'`  bare `scry` picks from the
-      `scry`                               command's output when nothing
+      ```SCRY_DEFAULT_CMD='find . -type f'```  bare `scry` picks from the
+      ```scry```                               command's output when nothing
                                            is piped in
 
   See also: |quoted-streams|, |builtin-hist|
@@ -2288,9 +2288,9 @@ SEEK                                             *builtin-seek* *seek*
 
   Examples:
 
-      `seek 3 0`         seek fd 3 to the beginning
-      `seek -c 3 16`     advance fd 3 by 16 bytes
-      `seek -e 3 -1`     seek to 1 byte before the end of fd 3
+      ```seek 3 0```         seek fd 3 to the beginning
+      ```seek -c 3 16```     advance fd 3 by 16 bytes
+      ```seek -e 3 -1```     seek to 1 byte before the end of fd 3
 
 ==============================================================================
 SET                                              *builtin-set* *set*
@@ -2334,13 +2334,13 @@ SET                                              *builtin-set* *set*
 
   Examples:
 
-      `set -e`              exit on error
-      `set -x`              enable command tracing
-      `set -o noclobber`    protect files from `>`
-      `set +x`              disable tracing
-      `set -`               reset all options to defaults
-      `set -- a b c`        set $1=a $2=b $3=c
-      `set -o`              print all options as set/unset commands
+      ```set -e```              exit on error
+      ```set -x```              enable command tracing
+      ```set -o noclobber```    protect files from `>`
+      ```set +x```              disable tracing
+      ```set -```               reset all options to defaults
+      ```set -- a b c```        set $1=a $2=b $3=c
+      ```set -o```              print all options as set/unset commands
 
 ==============================================================================
 STASH                                            *builtin-stash* *stash*
@@ -2363,8 +2363,8 @@ STASH                                            *builtin-stash* *stash*
       Save {buffer} as a named stash. {cursor} is an optional
       cursor position as a flat index or `row:col` format.
 
-          `stash --save commit 'git commit -m ""' 16`
-          `stash --save forloop 'for i in ; do\n\ndone' 9`
+          ```stash --save commit 'git commit -m ""' 16```
+          ```stash --save forloop 'for i in ; do\n\ndone' 9```
 
       If {name} already exists, it is overwritten.
 
@@ -2392,8 +2392,8 @@ SHIFT                                            *builtin-shift* *shift*
 
   Examples:
 
-      `shift`       remove $1, shift remaining down
-      `shift 2`     remove $1 and $2
+      ```shift```       remove $1, shift remaining down
+      ```shift 2```     remove $1 and $2
 
 ==============================================================================
 SHOPT                                            *builtin-shopt* *shopt*
@@ -2521,12 +2521,12 @@ SHOPT                                            *builtin-shopt* *shopt*
 
   Examples:
 
-      `shopt`                                    list all options
-      `shopt core`                               list core options
-      `shopt core.dotglob`                       print current value
-      `shopt core.dotglob=true`                  enable dotglob
-      `shopt history.max_entries=5000`           set max history
-      `shopt highlight.valid_command="bold green"`  customize colors
+      ```shopt```                                    list all options
+      ```shopt core```                               list core options
+      ```shopt core.dotglob```                       print current value
+      ```shopt core.dotglob=true```                  enable dotglob
+      ```shopt history.max_entries=5000```           set max history
+      ```shopt highlight.valid_command="bold green"```  customize colors
 
 ==============================================================================
 SOCK                                             *builtin-sock* *sock*
@@ -2592,17 +2592,17 @@ SOCK                                             *builtin-sock* *sock*
 
   Examples:
 
-      `sock -U /run/docker.sock 3`      connect, bind to fd 3
-      `printf 'GET / HTTP/1.0\r\n\r\n' >&3`
-      `cat <&3`                         read the response
-      `exec 3>&-`                       close the connection
+      ```sock -U /run/docker.sock 3```      connect, bind to fd 3
+      ```printf 'GET / HTTP/1.0\r\n\r\n' >&3```
+      ```cat <&3```                         read the response
+      ```exec 3>&-```                       close the connection
 
-      `sock -t example.com -p 80 4`     connect over TCP
-      `sock -U @shed.sock 5`            connect to an abstract socket
+      ```sock -t example.com -p 80 4```     connect over TCP
+      ```sock -U @shed.sock 5```            connect to an abstract socket
 
-      `sock -U "$SHED_SOCK" --oneshot 'query::cwd'`
+      ```sock -U "$SHED_SOCK" --oneshot 'query::cwd'```
                                         one request, reply on stdout
-      `printf 'query::cwd' | sock -U "$SHED_SOCK" --oneshot`
+      ```printf 'query::cwd' | sock -U "$SHED_SOCK" --oneshot```
                                         same, message read from stdin
 
   Exit status:
@@ -2676,7 +2676,7 @@ LISTEN                                           *builtin-listen* *listen*
       exists, not a socket ........... error (the file is never removed)
       exists, socket, still served ... error ("already in use")
       exists, socket, no listener .... remove the stale socket and bind
-      `noclobber` set ................ error on any existing path
+      ```noclobber``` set ................ error on any existing path
 
   Whether a socket is live or stale is decided by probing it with a
   connection: a live listener answers, a dead one is refused. A file that
@@ -2684,9 +2684,9 @@ LISTEN                                           *builtin-listen* *listen*
 
   Examples:
 
-      `listen -U /run/app.sock 5`        listen on a Unix socket, using fd 5
-      `listen -t -p 8080 -v lfd`         listen on TCP :8080, store fd in $lfd
-      `listen -U @app.sock 6`            abstract-namespace socket, using fd 6
+      ```listen -U /run/app.sock 5```        listen on a Unix socket, using fd 5
+      ```listen -t -p 8080 -v lfd```         listen on TCP :8080, store fd in $lfd
+      ```listen -U @app.sock 6```            abstract-namespace socket, using fd 6
 
   Exit status:
 
@@ -2719,10 +2719,10 @@ ACCEPT                                           *builtin-accept* *accept*
       Selected by a numeric argument that is less than 10, `-v {var}`, or no further
       argument. The accepted connection is installed as an ordinary
       descriptor in the current shell; read it with `<&fd`, write it with
-      `>&fd`, close it with `exec fd>&-`, exactly like a |sock|(builtin-sock)
+      ```>&fd```, close it with `exec fd>&-`, exactly like a |sock|(builtin-sock)
       connection. One client is handled at a time, in-process. With no
       argument and no `-v`, the file descriptor number is stored in
-      `$SHED_ACCEPT`.
+      ```$SHED_ACCEPT```.
 
   Serve mode:
 
@@ -2747,21 +2747,21 @@ ACCEPT                                           *builtin-accept* *accept*
 
       Bind mode — handle one request in-process:
 
-          `listen -U /run/app.sock -v lfd`
-          `accept "$lfd" 4`              block, put the connection on fd 4
-          `read request <&4`
-          `printf 'ok\n' >&4`
-          `exec 4>&-`
+          ```listen -U /run/app.sock -v lfd```
+          ```accept "$lfd" 4```              block, put the connection on fd 4
+          ```read request <&4```
+          ```printf 'ok\n' >&4```
+          ```exec 4>&-```
 
       Serve mode — fork-per-connection echo server:
 
-          `listen -U /run/echo.sock -v lfd`
-          `while true; do accept "$lfd" cat; done`
+          ```listen -U /run/echo.sock -v lfd```
+          ```while true; do accept "$lfd" cat; done```
 
       Serve mode — a shell function as a network service:
 
-          `handle() { read q; printf 'you said: %s\n' "$q"; }`
-          `while true; do accept "$lfd" handle; done`
+          ```handle() { read q; printf 'you said: %s\n' "$q"; }```
+          ```while true; do accept "$lfd" handle; done```
 
   Exit status:
 
@@ -2801,9 +2801,9 @@ SOURCE                                           *builtin-source* *source*
 
   Examples:
 
-      `source ~/.shed_profile`
-      `. ./lib.sh`
-      `. ./deploy.sh --env prod`   `$1` is --env, `$2` is prod
+      ```source ~/.shed_profile```
+      ```. ./lib.sh```
+      ```. ./deploy.sh --env prod```   `$1` is --env, `$2` is prod
 
 ==============================================================================
 STAT                                             *builtin-stat* *stat*
@@ -2898,15 +2898,15 @@ STAT                                             *builtin-stat* *stat*
 
   Examples ~
 
-      `stat -c '%n %s %A' file.txt`
+      ```stat -c '%n %s %A' file.txt```
                                 name, size, and symbolic permissions
 
-      `stat -c '%U:%G' file.txt`
+      ```stat -c '%U:%G' file.txt```
                                 owner and group names
 
-      `stat -t file.txt`          terse single-line summary
+      ```stat -t file.txt```          terse single-line summary
 
-      `stat -f -c '%T %a/%b' .`
+      ```stat -f -c '%T %a/%b' .```
                                 filesystem type and free/total blocks
 
   See also: |builtin-printf|
@@ -2949,7 +2949,7 @@ STAT                                             *builtin-stat* *stat*
   Unary numeric operators ~                            *test-numeric*
 
     `-i {s}`    string parses as a decimal integer (signed, within
-                `i64` range). Rejects hex (`0x...`), octal, and floats
+                ```i64``` range). Rejects hex (`0x...`), octal, and floats
                 like `42.0`.
     `-F {s}`    string parses as a finite floating-point number
                 (decimal or scientific notation).
@@ -2987,12 +2987,12 @@ STAT                                             *builtin-stat* *stat*
 
   Examples:
 
-      `[[ -f /etc/passwd ]]`
-      `[[ $x -gt 10 && $x -lt 20 ]]`
-      `[[ $name =~ ^[A-Z] ]]`
-      `[[ -z $reply ]] && echo "empty"`
-      `[[ -i $port ]] || raise "port must be an integer"`
-      `[[ -F $ratio && -F $threshold ]] || raise "expected numeric inputs"`
+      ```[[ -f /etc/passwd ]]```
+      ```[[ $x -gt 10 && $x -lt 20 ]]```
+      ```[[ $name =~ ^[A-Z] ]]```
+      ```[[ -z $reply ]] && echo "empty"```
+      ```[[ -i $port ]] || raise "port must be an integer"```
+      ```[[ -F $ratio && -F $threshold ]] || raise "expected numeric inputs"```
 
 ==============================================================================
 THRU                                             *builtin-thru* *thru*
@@ -3007,7 +3007,7 @@ THRU                                             *builtin-thru* *thru*
 
     - Reading file(s) without forking an external `cat`: `thru config.toml`.
     - Capturing input into a variable byte-exactly, without a subshell:
-      `thru -v var` instead of `var=$(cat)` (no trailing-newline stripping,
+      ```thru -v var``` instead of `var=$(cat)` (no trailing-newline stripping,
       and NUL bytes survive).
     - Counting raw byte throughput using `-c`
     - Controlling exact byte flow: `-S`/`-T` slice by position, `-F`/`-U`
@@ -3023,7 +3023,7 @@ THRU                                             *builtin-thru* *thru*
                   stdout. {dest} can be a regular file path or any
                   filesystem path that the operating system maps to an
                   open file descriptor (`/dev/stderr`, `/dev/stdout`,
-                  `/dev/fd/N`). By default the destination file is
+                  ```/dev/fd/N```). By default the destination file is
                   truncated if it exists.
 
     `-a`, `--append`
@@ -3104,47 +3104,47 @@ THRU                                             *builtin-thru* *thru*
 
   Examples ~
 
-      `thru config.toml`
+      ```thru config.toml```
                                 print a file without forking an external
-                                `cat`
+                                ```cat```
 
-      `stamp=$(thru ~/.local/share/shed/last_run)`
+      ```stamp=$(thru ~/.local/share/shed/last_run)```
                                 read a file into a variable
 
-      `thru -v var`
+      ```thru -v var```
                                 slurp stdin into `$var` byte-exact — no
                                 subshell, no trailing-newline stripping
 
-      `producer | thru -t /dev/stderr | consumer`
+      ```producer | thru -t /dev/stderr | consumer```
                                 live-debug a pipeline: stream continues
                                 to `consumer` while a copy is mirrored
                                 to the terminal via stderr
 
-      `producer | thru -t /tmp/snapshot.sqr | consumer`
+      ```producer | thru -t /tmp/snapshot.sqr | consumer```
                                 capture a single run's data to a file for
                                 later inspection
 
-      `producer | thru -t log.txt -a | consumer`
+      ```producer | thru -t log.txt -a | consumer```
                                 append-mode tee, useful for accumulating
                                 output across multiple runs
 
-      `huge_producer | thru -T 4096 | inspect`
+      ```huge_producer | thru -T 4096 | inspect```
                                 cap the stream at 4 KB, useful for
                                 sampling unbounded producers
 
-      `printf '%s' "$var" | thru -S 10 -T 20`
+      ```printf '%s' "$var" | thru -S 10 -T 20```
                                 byte-slice a value: drop 10 bytes, then
                                 emit the next 20
 
-      `thru -F $'\0' -U $'\0' < record.bin`
+      ```thru -F $'\0' -U $'\0' < record.bin```
                                 emit the bytes between the first two NUL
                                 markers
 
-      `while thru -U $'\0'; do echo; done < records.bin`
+      ```while thru -U $'\0'; do echo; done < records.bin```
                                 turn NUL-delimited records into lines,
                                 one `thru` per record
 
-      `producer | thru -c | consumer`
+      ```producer | thru -c | consumer```
                                 report total bytes through this stage on
                                 stderr at end of run
 
@@ -3189,12 +3189,12 @@ TRAP                                             *builtin-trap* *trap*
 
   Examples:
 
-      `trap 'echo bye' EXIT`
-      `trap 'cleanup' INT TERM`
-      `trap - INT`              restore default SIGINT
-      `trap '' HUP`             ignore SIGHUP
-      `trap -p INT`             print the trap registered for SIGINT
-      `trap -l`                 list available signal names
+      ```trap 'echo bye' EXIT```
+      ```trap 'cleanup' INT TERM```
+      ```trap - INT```              restore default SIGINT
+      ```trap '' HUP```             ignore SIGHUP
+      ```trap -p INT```             print the trap registered for SIGINT
+      ```trap -l```                 list available signal names
 
 ==============================================================================
 TIMES                                            *builtin-times* *times*
@@ -3227,8 +3227,8 @@ UNSET                                            *builtin-unset* *unset*
 
   Examples:
 
-      `unset TMPVAR`
-      `unset A B C`
+      ```unset TMPVAR```
+      ```unset A B C```
 
 ==============================================================================
 TYPE                                             *builtin-type* *type*
@@ -3249,24 +3249,24 @@ TYPE                                             *builtin-type* *type*
   Options ~
 
     `-s`    Short output: print just the kind (`alias`, `function`, `builtin`,
-            `keyword`, `external`, `string`, …) instead of the prose and
+            ```keyword```, `external`, `string`, …) instead of the prose and
             source locations. Autoloaded functions print `name (origin) ->
             path`. A shed extension that also classifies variables.
     `-t`    Terse, POSIX form: print just one of `alias`, `keyword`,
-            `function`, `builtin`, or `file` and nothing else. Unlike `-s`,
+            ```function```, `builtin`, or `file` and nothing else. Unlike `-s`,
             it does not classify variables — a name that is only a variable
             (or unknown) prints nothing and returns non-zero. Ideal for
-            `[ "$(type -t deploy)" = function ]`.
+            ```[ "$(type -t deploy)" = function ]```.
 
   Examples:
 
-      `type echo`       echo is a shell builtin
-      `type ls`         ls is /usr/bin/ls
-      `type if`         if is a shell keyword
-      `type ll`         ll is an alias for 'ls -la' ...
-      `type -s ll`      alias
-      `type -t echo`    builtin
-      `type -t ls`      file
+      ```type echo```       echo is a shell builtin
+      ```type ls```         ls is /usr/bin/ls
+      ```type if```         if is a shell keyword
+      ```type ll```         ll is an alias for 'ls -la' ...
+      ```type -s ll```      alias
+      ```type -t echo```    builtin
+      ```type -t ls```      file
 
 ==============================================================================
 TYPESET                                          *builtin-typeset* *typeset*
@@ -3295,8 +3295,8 @@ ULIMIT                                           *builtin-ulimit* *ulimit*
 
   Examples:
 
-      `ulimit -n 4096`      raise file descriptor limit
-      `ulimit -c 0`         disable core dumps
+      ```ulimit -n 4096```      raise file descriptor limit
+      ```ulimit -c 0```         disable core dumps
 
 ==============================================================================
 UMASK                                            *builtin-umask* *umask*
@@ -3314,19 +3314,19 @@ UMASK                                            *builtin-umask* *umask*
 
     Octal (e.g. `022`)   set the mask directly
     Symbolic             modify the mask using `chmod`-style notation:
-                         `u`, `g`, `o`, `a` as who;
-                         `r`, `w`, `x` as permissions;
-                         `=`, `+`, `-` as operators.
+                         ```u```, `g`, `o`, `a` as who;
+                         ```r```, `w`, `x` as permissions;
+                         ```=```, `+`, `-` as operators.
                          Multiple clauses separated by `,`.
 
   Examples:
 
-      `umask`              print current mask (e.g. 0022)
-      `umask -S`           print symbolically (e.g. u=rwx,g=rx,o=rx)
-      `umask 077`          no permissions for group or other
-      `umask u=rwx,g=rx,o=rx`   set symbolically
-      `umask a+r`          allow read for all (clear read mask bit)
-      `umask g-w`          deny write for group (set write mask bit)
+      ```umask```              print current mask (e.g. 0022)
+      ```umask -S```           print symbolically (e.g. u=rwx,g=rx,o=rx)
+      ```umask 077```          no permissions for group or other
+      ```umask u=rwx,g=rx,o=rx```   set symbolically
+      ```umask a+r```          allow read for all (clear read mask bit)
+      ```umask g-w```          deny write for group (set write mask bit)
 
 ==============================================================================
 WAIT                                             *builtin-wait* *wait*
@@ -3362,10 +3362,10 @@ LEN                                              *builtin-len* *len*
 
   Examples:
 
-      `len hello`               outputs:  `5`
-      `len -b café`             outputs:  `5`  (é is two bytes)
-      `len -w 日本語`           outputs:  `6`  (three two-wide characters)
-      `printf 'café' | len`     outputs:  `4`
+      ```len hello```               outputs:  `5`
+      ```len -b café```             outputs:  `5`  (é is two bytes)
+      ```len -w 日本語```           outputs:  `6`  (three two-wide characters)
+      ```printf 'café' | len```     outputs:  `4`
 
 ==============================================================================
 VICE                                             *builtin-vice* *vice*
@@ -3459,18 +3459,18 @@ VICE                                             *builtin-vice* *vice*
 
   Examples:
 
-      `echo foo bar | vice -m '2w' -c 'e'`
+      ```echo foo bar | vice -m '2w' -c 'e'```
                           Skips past `foo` with `-m '2w'`, then slices `bar`
                           into a field using `-c 'e'`. Output is 'bar'
 
-      `vice -i -m '/TODO' -m 'dd' notes.txt`
+      ```vice -i -m '/TODO' -m 'dd' notes.txt```
                           move to the first line containing 'TODO', then delete it
                           editing the file in place.
 
-      `vice -i -m ':g/^$/d' file.txt`
+      ```vice -i -m ':g/^$/d' file.txt```
                           delete all blank lines via `:g`, in place
 
-      `ls -l | vice -l -q --sep 'w' -c 'viW' -r 1:2 -c 'WEE' -c '$'`
+      ```ls -l | vice -l -q --sep 'w' -c 'viW' -r 1:2 -c 'WEE' -c '$'```
                           slice each line of `ls`'s output into quoted records.
                           `--sep 'w'` runs `'w'` after each command, to position
                           the cursor correctly for the next cut.
@@ -3511,25 +3511,25 @@ YES                                              *builtin-yes* *yes*
 
   Examples ~
 
-      `yes`
+      ```yes```
                                 repeat `y` forever, one per line
 
-      `yes ok`
+      ```yes ok```
                                 repeat `ok` forever
 
-      `yes foo bar biz`
+      ```yes foo bar biz```
                                 repeat `foo bar biz` (operands joined by
                                 single spaces) forever
 
-      `yes | head -n 5`
+      ```yes | head -n 5```
                                 print `y` five times: `head` closes the pipe
                                 after its fifth line and `yes` stops
 
-      `yes | thru -T 4096`
+      ```yes | thru -T 4096```
                                 feed an unbounded `y` stream into a stage
                                 that caps it at 4 KB
 
-      `printf 'retry\n' | yes`
+      ```printf 'retry\n' | yes```
                                 with no operands, repeat the text read from
                                 stdin instead of `y`
 
@@ -3581,7 +3581,7 @@ ZD                                               *builtin-zd* *zd*
   Options for `list`:
 
     `--sort {key}`       order by {key}: `frecency` (default), `visits`,
-                         `recent` (by last visit), or `path`. Counts and times
+                         ```recent``` (by last visit), or `path`. Counts and times
                          sort largest-first; `path` sorts alphabetically.
     `-r`, `--reverse`    reverse the sort direction
     `--json`             emit a JSON array of objects instead of the default
@@ -3596,7 +3596,7 @@ ZD                                               *builtin-zd* *zd*
   The default output is tab-separated, one record per line, with the path last
   so `cut`/`awk` parse the numeric columns cleanly even for odd paths:
 
-      `visits<TAB>last_visit<TAB>frecency<TAB>path`
+      ```visits<TAB>last_visit<TAB>frecency<TAB>path```
 
   `--json` emits an array of `{path, visits, last_visit, frecency}` objects;
   `--quoted` emits the same columns in the same order, |shell-quoted|(quoted-streams)
@@ -3606,17 +3606,17 @@ ZD                                               *builtin-zd* *zd*
 
   Examples:
 
-      `zd`                   open the directory picker
-      `zd fern`              jump to the best match for "fern"
-      `zd add`               record the current directory
-      `zd add -r ~/src`      record ~/src and every directory beneath it
-      `zd add --depth 2 .`   record . and two levels of subdirectories
-      `zd remove -r ~/old`   forget ~/old and its subdirectories
-      `zd clean`             drop entries for directories that no longer exist
-      `zd list`              dump every recorded directory, best-ranked first
-      `zd list --sort visits`  order the dump by visit count
-      `zd list src`          only paths containing "src"
-      `zd list --json | jq`  feed the structured stats to jq
+      ```zd```                   open the directory picker
+      ```zd fern```              jump to the best match for "fern"
+      ```zd add```               record the current directory
+      ```zd add -r ~/src```      record ~/src and every directory beneath it
+      ```zd add --depth 2 .```   record . and two levels of subdirectories
+      ```zd remove -r ~/old```   forget ~/old and its subdirectories
+      ```zd clean```             drop entries for directories that no longer exist
+      ```zd list```              dump every recorded directory, best-ranked first
+      ```zd list --sort visits```  order the dump by visit count
+      ```zd list src```          only paths containing "src"
+      ```zd list --json | jq```  feed the structured stats to jq
 
   This is a `shed` extension; `bash` and `POSIX` do not provide it.
 

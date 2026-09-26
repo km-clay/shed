@@ -28,8 +28,8 @@ of the name, or when using any of the operators below.
       Otherwise, expand to the value of {var}.
 
       Example:
-        `name=${1:-world}`
-        `echo "hello $name"`    # prints "hello world" if \$1 is unset
+        ```name=${1:-world}```
+        ```echo "hello $name"    # prints "hello world" if $1 is unset```
 
   `${var-word}`                                 *param-default-nonnull*
 
@@ -48,7 +48,7 @@ of the name, or when using any of the operators below.
       parameters.
 
       Example:
-        `echo ${cache:=/tmp/cache}`    # sets and uses \$cache
+        ```echo ${cache:=/tmp/cache}    # sets and uses $cache```
 
   `${var=word}`                                 *param-assign-nonnull*
 
@@ -64,7 +64,7 @@ of the name, or when using any of the operators below.
       default message is printed.
 
       Example:
-        `input=${1:?usage: myscript \<filename\>}`
+        ```input=${1:?usage: myscript <filename>}```
 
   `${var?word}`                                 *param-error-nonnull*
 
@@ -79,7 +79,7 @@ of the name, or when using any of the operators below.
       Otherwise, expand to {word}.
 
       Example:
-        `echo ${verbose:+--verbose}`   # flag only if \$verbose is set
+        ```echo ${verbose:+--verbose}   # flag only if $verbose is set```
 
   `${var+word}`                                 *param-alt-nonnull*
 
@@ -93,8 +93,8 @@ of the name, or when using any of the operators below.
       Expands to the length of the value of {var} in characters.
 
       Example:
-        `str="hello"`
-        `echo ${#str}`         # prints 5
+        ```str="hello"```
+        ```echo ${#str}         # prints 5```
 
 ==============================================================================
 7. Substring Removal                            *param-substring*
@@ -109,8 +109,8 @@ of the name, or when using any of the operators below.
       Remove longest matching prefix.
 
       Example:
-        `path="/home/user/file.txt"`
-        `echo ${path##*/}`     # prints "file.txt"
+        ```path="/home/user/file.txt"```
+        ```echo ${path##*/}     # prints "file.txt"```
 
   `${var%pattern}`                              *param-trim-short-right*
 
@@ -122,9 +122,9 @@ of the name, or when using any of the operators below.
       Remove longest matching suffix.
 
       Example:
-        `file="archive.tar.gz"`
-        `echo ${file%%.*}`     # prints "archive"
-        `echo ${file%.*}`      # prints "archive.tar"
+        ```file="archive.tar.gz"```
+        ```echo ${file%%.*}     # prints "archive"```
+        ```echo ${file%.*}      # prints "archive.tar"```
 
 ==============================================================================
 8. Search and Replace                           *param-replace*
@@ -139,9 +139,9 @@ of the name, or when using any of the operators below.
       Replace all matches.
 
       Example:
-        `str="hello world"`
-        `echo ${str/o/0}`      # prints "hell0 world"
-        `echo ${str//o/0}`     # prints "hell0 w0rld"
+        ```str="hello world"```
+        ```echo ${str/o/0}      # prints "hell0 world"```
+        ```echo ${str//o/0}     # prints "hell0 w0rld"```
 
   `${var/#pattern/replacement}`                 *param-replace-prefix*
 
@@ -171,9 +171,9 @@ of the name, or when using any of the operators below.
       Lowercase all characters.
 
       Example:
-        `name="john doe"`
-        `echo ${name^}`        # prints "John doe"
-        `echo ${name^^}`       # prints "JOHN DOE"
+        ```name="john doe"```
+        ```echo ${name^}        # prints "John doe"```
+        ```echo ${name^^}       # prints "JOHN DOE"```
 
 ==============================================================================
 10. Substrings                                  *param-slice*
@@ -190,10 +190,10 @@ of the name, or when using any of the operators below.
       to distinguish from `:-`). A negative {length} counts back from the
       end of the string instead of being an absolute character count:
 
-        `str="hello world"`
-        `echo ${str: -5}`      # prints "world"
-        `echo ${str:0:5}`      # prints "hello"
-        `echo ${str:0:-6}`     # prints "hello" (drop last 6 chars)
+        ```str="hello world"```
+        ```echo ${str: -5}      # prints "world"```
+        ```echo ${str:0:5}      # prints "hello"```
+        ```echo ${str:0:-6}     # prints "hello" (drop last 6 chars)```
 
 ==============================================================================
 11. Exit Status                                  *param-status*
@@ -202,15 +202,15 @@ of the name, or when using any of the operators below.
   pattern matched, a slice was in range, or a value changed does not affect
   `$?`.
 
-      `x=hello`
-      `y=${x%z}`             # `z` is not a suffix of `x`...
-      `echo $?`              # ...but $? is still 0
+      ```x=hello```
+      ```y=${x%z}             # z is not a suffix of x...```
+      ```echo $?              # ...but $? is still 0```
 
   To branch on whether an expansion changed a value, compare explicitly:
 
-      `if [ "$foo" != "${foo#prefix-}" ]; then`
-      `  echo "had a prefix"`
-      `fi`
+      ```if [ "$foo" != "${foo#prefix-}" ]; then
+        echo "had a prefix"
+      fi```
 
 ==============================================================================
 See also: |redirect| |glob| |arith|

@@ -9,8 +9,8 @@ substitution before evaluation.
   `$((expression))`
 
       Example:
-        `echo $((2 + 3))`       # prints: 5
-        `x=$((width * height))`
+        ```echo $((2 + 3))       # prints: 5```
+        ```x=$((width * height))```
 
 ==============================================================================
 1. Operators                                   *arith-operators*
@@ -23,7 +23,7 @@ substitution before evaluation.
       Grouping. Override default precedence.
 
       Example:
-        `echo $(( (2+3) * 4 ))`  # prints: 20
+        ```echo $(( (2+3) * 4 ))  # prints: 20```
 
   `**`                                         *arith-pow*
 
@@ -32,23 +32,23 @@ substitution before evaluation.
       negative exponent is an error.
 
       Example:
-        `echo $((2 ** 10))`      # prints: 1024
-        `echo $((2 ** 2 ** 3))`  # prints: 256
+        ```echo $((2 ** 10))      # prints: 1024```
+        ```echo $((2 ** 2 ** 3))  # prints: 256```
 
   `*` `/` `%`                                  *arith-muldivmod*
 
       Multiplication, division, and modulo (remainder).
 
       Example:
-        `echo $((10 / 3))`       # prints: 3
-        `echo $((10 % 3))`       # prints: 1
+        ```echo $((10 / 3))       # prints: 3```
+        ```echo $((10 % 3))       # prints: 1```
 
   `+` `-`                                      *arith-addsub*
 
       Addition and subtraction.
 
       Example:
-        `echo $((10 - 3 + 1))`   # prints: 8
+        ```echo $((10 - 3 + 1))   # prints: 8```
 
 ==============================================================================
 2. Variables in Expressions                    *arith-variables*
@@ -56,16 +56,16 @@ substitution before evaluation.
   Variables can be referenced by name inside arithmetic expressions.
   They are expanded and converted to numbers.
 
-      `x=10`
-      `echo $(($x + 5))`        # prints: 15
-      `echo $((x + 5))`         # also works
+      ```x=10```
+      ```echo $(($x + 5))        # prints: 15```
+      ```echo $((x + 5))         # also works```
 
   An unset (or empty) variable counts as 0. A variable whose value is
   not a plain integer is itself evaluated as an arithmetic expression,
   so references resolve transitively:
 
-      `x=3; y=x;   echo $((y + 1))`   # prints: 4  (y -> x -> 3)
-      `a=2; b=a+1; echo $((b * 2))`   # prints: 6
+      ```x=3; y=x;   echo $((y + 1))   # prints: 4  (y -> x -> 3)```
+      ```a=2; b=a+1; echo $((b * 2))   # prints: 6```
 
   A self- or mutual reference (`x=x`, `a=b; b=a`) is an error rather
   than an infinite loop.
@@ -75,11 +75,11 @@ substitution before evaluation.
 
   Integer literals may be written as:
 
-      decimal           `42`
-      hexadecimal        `0x` / `0X` prefix, e.g. `0xff` == 255
-      octal              leading `0`, e.g. `0755` == 493
-      radix              `base#digits`, base 2..64, e.g. `2#101` == 5,
-                         `16#ff` == 255, `36#z` == 35
+      decimal            42
+      hexadecimal        {0x} / {0X} prefix, e.g. {0xff} == 255
+      octal              leading {0}, e.g. {0755} == 493
+      radix              {base#digits}, base 2..64, e.g. {2#101} == 5,
+                         {16#ff} == 255, {36#z} == 35
 
   For `base#digits`, digits 0-9 then letters carry values 10 and up. For
   bases up to 36 letters are case-insensitive; for larger bases `a-z` are
@@ -90,11 +90,11 @@ substitution before evaluation.
 
   Arithmetic expressions can be nested with parentheses to any depth:
 
-      `echo $(( (1+2) * (3+4) ))`  # prints: 21
+      ```echo $(( (1+2) * (3+4) ))  # prints: 21```
 
   Arithmetic expansion can also appear inside other expansions:
 
-      `echo "Total: $((price * qty))"`
+      ```echo "Total: $((price * qty))"```
 
 ==============================================================================
 5. Whitespace                                  *arith-whitespace*
@@ -102,8 +102,8 @@ substitution before evaluation.
   Whitespace inside `$((...))` is ignored and can be used freely for
   readability:
 
-      `echo $((2+3))`           # prints: 5
-      `echo $(( 2 + 3 ))`       # same result
+      ```echo $((2+3))           # prints: 5```
+      ```echo $(( 2 + 3 ))       # same result```
 
 ==============================================================================
 See also: |param| |redirect| |glob|

@@ -153,6 +153,13 @@ pub(super) fn highlight_ex<W: fmt::Write>(
   highlight(out, input, &tks, palette, editor_cursor_pos, &[])
 }
 
+pub(crate) fn highlight_source(src: &str) -> String {
+  let mut out = String::new();
+  let tks = crate::readline::context::pure_context_tokens(src);
+  highlight(&mut out, src, &tks, &Palette::new(), usize::MAX, &[]).ok();
+  out
+}
+
 pub(super) fn highlight<W: fmt::Write>(
   out: &mut W,
   input: &str,

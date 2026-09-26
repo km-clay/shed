@@ -77,21 +77,21 @@ processes.
   peer's output to stdout - either a single request/response, or a
   live `subscribe` event stream:
 
-      `sock -U "$SHED_SOCK" --oneshot 'query::cwd'`
-      `sock -U "$SHED_SOCK" --oneshot subscribe    # streams until closed`
+      ```sock -U "$SHED_SOCK" --oneshot 'query::cwd'```
+      ```sock -U "$SHED_SOCK" --oneshot subscribe    # streams until closed```
 
   The message may also come from stdin, so a pipeline works:
 
-      `printf 'query::cwd' | sock -U "$SHED_SOCK" --oneshot`
+      ```printf 'query::cwd' | sock -U "$SHED_SOCK" --oneshot```
 
   Later examples use a `shedsock` shorthand for this:
 
-      `shedsock() { sock -U "$SHED_SOCK" --oneshot "$*"; }`
+      ```shedsock() { sock -U "$SHED_SOCK" --oneshot "$*"; }```
 
   Any tool that speaks Unix sockets works just as well - for
   instance, with socat:
 
-      `echo 'query::cwd' | socat - UNIX-CONNECT:$SHED_SOCK`
+      ```echo 'query::cwd' | socat - UNIX-CONNECT:$SHED_SOCK```
 
   Note: a shell can't query its own socket synchronously - it has to
   return to its poll loop to service the request - so background a
@@ -353,7 +353,7 @@ processes.
 
       Example:
 
-          `msg -b "build complete"`
+          ```msg -b "build complete"```
 
       lands on subscribers as:
 
@@ -389,13 +389,13 @@ processes.
       dispatched to background threads or processes, which post
       results back via the socket when ready:
 
-          `autocmd post-change-dir '{`
-          `  {`
-          `    git_branch=$(git branch --show-current 2>/dev/null)`
-          `    printf "msg::status::%s" "$git_branch" \\`
-          `      | socat - UNIX-CONNECT:$SHED_SOCK`
-          `  } &`
-          `}'`
+          ```autocmd post-change-dir '{
+            {
+              git_branch=$(git branch --show-current 2>/dev/null)
+              printf "msg::status::%s" "$git_branch" \
+                | socat - UNIX-CONNECT:$SHED_SOCK
+            } &
+          }'```
 
       The prompt renders immediately; the git info appears when
       the background job finishes.
@@ -417,8 +417,8 @@ processes.
       in real time. For example, a linting daemon could watch
       the buffer and post suggestions:
 
-          `shedsock line::get::buffer`
-          `shedsock msg::status::did you mean: git stash?`
+          ```shedsock line::get::buffer```
+          ```shedsock msg::status::did you mean: git stash?```
 
   9.4 Full Editor Replacement                  *socket-async-remote*
 
@@ -430,18 +430,18 @@ processes.
 
       Minimal echo-through implementation in shell:
 
-          `{ shedsock subscribe; } | {`
-          `  shedsock line::set::mode::remote`
-          `  while read line; do`
-          `    case $line in`
-          `      line>>key_event*)`
-          `        key=${line#*>>key_event>> }`
-          `        buf=$(shedsock line::get::buffer)`
-          `        shedsock "line::set::buffer::$buf$key"`
-          `        ;;`
-          `    esac`
-          `  done`
-          `}`
+          ```{ shedsock subscribe; } | {
+            shedsock line::set::mode::remote
+            while read line; do
+              case $line in
+                line>>key_event*)
+                  key=${line#*>>key_event>> }
+                  buf=$(shedsock line::get::buffer)
+                  shedsock "line::set::buffer::$buf$key"
+                  ;;
+              esac
+            done
+          }```
 
       More sophisticated wrappers can interpret keymap notation,
       implement modal editing, drive completion, or proxy the

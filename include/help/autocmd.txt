@@ -28,11 +28,11 @@ behavior without modifying the shell itself.
 
   Examples:
 
-      `autocmd post-cmd 'echo "exit: $?"'`
-      `autocmd post-change-dir 'echo "moved to $NEW_DIR"'`
-      `autocmd -c pre-cmd`
-      `autocmd`                  list every registered autocmd
-      `autocmd post-cmd`         list autocmds registered for post-cmd
+      ```autocmd post-cmd 'echo "exit: $?"'```
+      ```autocmd post-change-dir 'echo "moved to $NEW_DIR"'```
+      ```autocmd -c pre-cmd```
+      ```autocmd```                  list every registered autocmd
+      ```autocmd post-cmd```         list autocmds registered for post-cmd
 
                                                  *autocmd-list*
 
@@ -170,7 +170,7 @@ behavior without modifying the shell itself.
       status (for example a cancelled `fzf`) cancels completion and fires
       `on-completion-cancel`. Replacing `$MATCHES` with anything but
       an associative array is an error. If you want to set `$MATCHES`
-      to a single item, the idiom is `declare -A MATCHES=([candidate]="description")`
+      to a single item, the idiom is ```declare -A MATCHES=([candidate]="description")```
 
   `on-completion-cancel`                       *autocmd-on-completion-cancel*
 
@@ -210,14 +210,14 @@ behavior without modifying the shell itself.
 
       Example:
 
-          autocmd on-idle-timeout 'idle_handler'
+          ```autocmd on-idle-timeout 'idle_handler'
           idle_handler() {
             if (( IDLE_SECONDS < 600 )); then
               refresh_prompt
             else
               run_screensaver
             fi
-          }
+          }```
 
   2.9 Exit Event                               *autocmd-exit-event*
 
@@ -253,11 +253,11 @@ behavior without modifying the shell itself.
 
   Example:
 
-      `autocmd post-change-dir '`
-      `    if [[ "$NEW_DIR" == */projects/* ]]; then`
-      `        echo "entering project directory"  `
-      `    fi`
-      `'`
+      ```autocmd post-change-dir '
+          if [[ "$NEW_DIR" == */projects/* ]]; then
+              echo "entering project directory"
+          fi
+      '```
 
 ==============================================================================
 4. Behavior                                    *autocmd-behavior*
@@ -279,41 +279,41 @@ behavior without modifying the shell itself.
 
   Notify on directory change:
 
-      `autocmd post-change-dir 'echo "moved to $NEW_DIR"'`
+      ```autocmd post-change-dir 'echo "moved to $NEW_DIR"'```
 
   Custom time report with color (falls back to plain when piped):
 
-      `_time_func() {`
-      `    if [ -t 0 ]; then`
-      `        echo`
-      `        echo -e "\e[36;1m$TIME_CMD"`
-      `        echo -e "\e[36;1mreal\e[0m\t$TIME_REAL_FMT"`
-      `        echo -e "\e[36;1muser\e[0m\t$TIME_USER_FMT"`
-      `        echo -e "\e[36;1msys\e[0m\t$TIME_SYS_FMT"`
-      `        echo`
-      `    else`
-      `        echo`
-      `        echo "$TIME_CMD"`
-      `        echo -e "real\t$TIME_REAL_FMT"`
-      `        echo -e "user\t$TIME_USER_FMT"`
-      `        echo -e "sys\t$TIME_SYS_FMT"`
-      `        echo`
-      `    fi`
-      `}`
-      `autocmd on-time-report _time_func`
+      ```_time_func() {
+          if [ -t 0 ]; then
+              echo
+              echo -e "\e[36;1m$TIME_CMD"
+              echo -e "\e[36;1mreal\e[0m\t$TIME_REAL_FMT"
+              echo -e "\e[36;1muser\e[0m\t$TIME_USER_FMT"
+              echo -e "\e[36;1msys\e[0m\t$TIME_SYS_FMT"
+              echo
+          else
+              echo
+              echo "$TIME_CMD"
+              echo -e "real\t$TIME_REAL_FMT"
+              echo -e "user\t$TIME_USER_FMT"
+              echo -e "sys\t$TIME_SYS_FMT"
+              echo
+          fi
+      }
+      autocmd on-time-report _time_func```
 
   Refresh prompt on mode change (for mode indicator):
 
-      `autocmd post-mode-change 'kill -USR1 $$'`
+      ```autocmd post-mode-change 'kill -USR1 $$'```
       (SIGUSR1 can be used to remotely refresh the prompt. See |prompt|)
 
   Log completed jobs:
 
-      `autocmd on-job-finish 'echo "job done" >> /tmp/jobs.log'`
+      ```autocmd on-job-finish 'echo "job done" >> /tmp/jobs.log'```
 
   Clean up on exit:
 
-      `autocmd on-exit 'rm -f /tmp/my-shell-*.tmp'`
+      ```autocmd on-exit 'rm -f /tmp/my-shell-*.tmp'```
 
 ==============================================================================
 See also: |keybinds| |prompt| |ex|

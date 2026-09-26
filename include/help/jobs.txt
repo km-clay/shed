@@ -28,12 +28,12 @@ the foreground and background.
       prints the job number, PID, and command name, then immediately returns to the
       prompt:
 
-          `sleep 60 &`
+          ```sleep 60 &```
           `[1]  12345 running sleep`
 
   Pipelines can be backgrounded too:
 
-      `find / -name "*.log" | wc -l &`
+      ```find / -name "*.log" | wc -l &```
       `[1]  12345 running find |
             54321 running wc`
 
@@ -65,9 +65,9 @@ the foreground and background.
 
       Examples:
 
-          `jobs`         list all jobs
-          `jobs -l`      list jobs with PIDs
-          `jobs -r`      list only running jobs
+          ```jobs```         list all jobs
+          ```jobs -l```      list jobs with PIDs
+          ```jobs -r```      list only running jobs
 
   4.2 fg                                         *jobs-fg* *builtin-fg*
 
@@ -79,8 +79,8 @@ the foreground and background.
 
       Examples:
 
-          `fg`          bring current job to foreground
-          `fg %2`       bring job 2 to foreground
+          ```fg```          bring current job to foreground
+          ```fg %2```       bring job 2 to foreground
 
   4.3 bg                                         *jobs-bg* *builtin-bg*
 
@@ -92,8 +92,8 @@ the foreground and background.
 
       Examples:
 
-          `bg`          resume current job in background
-          `bg %2`       resume job 2 in background
+          ```bg```          resume current job in background
+          ```bg %2```       resume job 2 in background
 
   4.4 wait                                       *jobs-wait* *builtin-wait*
 
@@ -108,9 +108,9 @@ the foreground and background.
 
       Examples:
 
-          `wait`          wait for all jobs
-          `wait %1`       wait for job 1
-          `wait 4321`     wait for PID 4321
+          ```wait```          wait for all jobs
+          ```wait %1```       wait for job 1
+          ```wait 4321```     wait for PID 4321
 
   4.5 disown                                     *jobs-disown* *builtin-disown*
 
@@ -128,10 +128,10 @@ the foreground and background.
 
       Examples:
 
-          `disown`          disown the current job
-          `disown %2`       disown job 2
-          `disown -h %1`    protect job 1 from SIGHUP on shell exit
-          `disown -a`       disown all jobs
+          ```disown```          disown the current job
+          ```disown %2```       disown job 2
+          ```disown -h %1```    protect job 1 from SIGHUP on shell exit
+          ```disown -a```       disown all jobs
 
 ==============================================================================
 5. Socket Events                                 *jobs-events*

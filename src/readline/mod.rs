@@ -46,7 +46,7 @@ pub(crate) use context::{NestedSub, nested_subs};
 mod core;
 mod editcmd;
 mod editmode;
-mod highlight;
+pub(crate) mod highlight;
 mod histimport;
 mod history;
 mod layout;

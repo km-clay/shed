@@ -298,6 +298,31 @@ fn unescape_help(raw: &str) -> String {
       qt_state.toggle_single();
     }
     '`' => {
+      let mut lookahead = chars.clone();
+      if lookahead.next() == Some('`') && lookahead.next() == Some('`') {
+        chars.next();
+        chars.next();
+        let mut code = String::new();
+        loop {
+          match chars.next() {
+            None => break,
+            Some('`') => {
+              let mut close = chars.clone();
+              if close.next() == Some('`') && close.next() == Some('`') {
+                chars.next();
+                chars.next();
+                break;
+              }
+              code.push('`');
+            }
+            Some(c) => code.push(c),
+          }
+        }
+        let trimmed = code.strip_prefix('\n').unwrap_or(code.as_str());
+        let trimmed = trimmed.strip_suffix('\n').unwrap_or(trimmed);
+        result.push_str(&crate::readline::highlight::highlight_source(trimmed));
+        continue;
+      }
       result.push(markers::CODE);
       find_closer('`', &mut result, &mut chars);
     }
@@ -370,6 +395,27 @@ fn unescape_help(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn code_fence_highlights_and_preserves_content() {
+    let _g = crate::tests::testutil::TestGuard::new();
+    let out = style_help_content("```\nls -la foo\n```");
+    assert!(
+      out.contains('\u{1b}'),
+      "fence should emit highlighter SGR: {out:?}"
+    );
+    let (visible, _) = strip_sgr(&out);
+    assert_eq!(visible, "ls -la foo");
+  }
+
+  #[test]
+  fn single_backtick_stays_inline_code() {
+    let out = style_help_content("run `ls` now");
+    assert!(
+      out.contains(CODE_SEQ),
+      "inline code should use the flat CODE style"
+    );
+  }
 
   // `extract_ref_targets` probed directly — no need for full StyledHelp.
 

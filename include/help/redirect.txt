@@ -16,8 +16,8 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       truncating it if it does.
 
       Example:
-        `echo hello > out.txt`
-        `ls 2> errors.txt`       # redirect stderr
+        ```echo hello > out.txt```
+        ```ls 2> errors.txt       # redirect stderr```
 
   `command >| file`                            *redir-out-force*
 
@@ -30,7 +30,7 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       Append stdout to {file}, creating it if it does not exist.
 
       Example:
-        `echo line >> log.txt`
+        ```echo line >> log.txt```
 
 ==============================================================================
 2. Input Redirection                           *redir-input*
@@ -40,7 +40,7 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       Redirect {file} to stdin.
 
       Example:
-        `sort < unsorted.txt`
+        ```sort < unsorted.txt```
 
 ==============================================================================
 3. Read-Write Redirection                      *redir-readwrite*
@@ -54,8 +54,8 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       Useful with the |seek|(builtin-seek) builtin for random-access file operations.
 
       Example:
-        `exec 3<> data.bin`
-        `seek 3 0 set`           # seek to beginning
+        ```exec 3<> data.bin```
+        ```seek 3 0 set           # seek to beginning```
 
 ==============================================================================
 4. File Descriptor Duplication                 *redir-dup*
@@ -66,7 +66,7 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       to fd {N} goes to the same place as fd {M}.
 
       Example:
-        `command > out.txt 2>&1`  # stderr goes where stdout goes
+        ```command > out.txt 2>&1  # stderr goes where stdout goes```
 
   `command N<&M`                               *redir-dup-in*
 
@@ -87,19 +87,19 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       descriptors allocated at runtime, such as the one |sock|(builtin-sock)
       stores in `$SHED_CONN`:
 
-        `fd=1; echo hi >&$fd`       # write to the fd named by $fd
-        `read line <&"$conn"`       # quotes work too
-        `cat <&$((base + 1))`       # as does arithmetic
+        ```fd=1; echo hi >&$fd       # write to the fd named by $fd```
+        ```read line <&"$conn"       # quotes work too```
+        ```cat <&$((base + 1))       # as does arithmetic```
 
   `command N>&-`                               *redir-close-out*
   `command N<&-`                               *redir-close-in*
 
       Close file descriptor {N}. Because the source is expanded, a word
-      that evaluates to `-` closes the descriptor as well: with `d=-`,
-      `exec 3>&$d` is equivalent to `exec 3>&-`.
+      that evaluates to `-` closes the descriptor as well: with ```d=-```,
+      ```exec 3>&$d``` is equivalent to ```exec 3>&-```.
 
       Example:
-        `exec 3>&-`              # close fd 3
+        ```exec 3>&-              # close fd 3```
 
 ==============================================================================
 5. Pipelines                                   *redir-pipe*
@@ -110,7 +110,7 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       run concurrently as separate processes.
 
       Example:
-        `cat file.txt | grep pattern | sort`
+        ```cat file.txt | grep pattern | sort```
 
       Two |shopt|s control how stages run. `core.pipeline_style` selects
       the execution mechanism:
@@ -132,11 +132,11 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
 
       With the default `core.lastpipe=true`:
 
-        `printf '%s\n' a b c | while read x; do n=$((n + 1)); done`
-        `echo "$n"`        # prints 3
+        ```printf '%s\n' a b c | while read x; do n=$((n + 1)); done```
+        ```echo "$n"        # prints 3```
 
       Only the final stage can run in the current shell; an earlier
-      builtin (`read x | cat`) is always isolated and loses its
+      builtin (```read x | cat```) is always isolated and loses its
       assignments, whatever the style. See |shed-extensions|.
 
   `command1 |& command2`                       *pipe-and*
@@ -156,9 +156,9 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       are performed in the body unless the delimiter is quoted.
 
       Example:
-        `cat << EOF`
-        `Hello $USER`
-        `EOF`
+        ```cat << EOF
+        Hello $USER
+        EOF```
 
   `command << 'DELIM'`                         *redir-heredoc-literal*
 
@@ -166,9 +166,9 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       expansion in the heredoc body. The text is passed literally.
 
       Example:
-        `cat << 'EOF'`
-        `This $variable is not expanded`
-        `EOF`
+        ```cat << 'EOF'
+        This $variable is not expanded
+        EOF```
 
   `command <<- DELIM`                          *redir-heredoc-indent*
 
@@ -177,11 +177,11 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       indented for readability without affecting the content.
 
       Example:
-        `if true; then`
-        ` cat <<- EOF`
-        ` indented content`
-        ` EOF`
-        `fi`
+        ```if true; then
+         cat <<- EOF
+         indented content
+         EOF
+        fi```
 
 ==============================================================================
 7. Here Strings                                *herestring*
@@ -192,8 +192,8 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       trailing newline appended. {word} is subject to the usual expansions.
 
       Example:
-        `read first rest <<< "hello world"`
-        `bc <<< "2 + 2"`
+        ```read first rest <<< "hello world"```
+        ```bc <<< "2 + 2"```
 
 ==============================================================================
 8. File Descriptor Numbers                     *redir-fd*
@@ -219,9 +219,9 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
   Multiple redirections can appear on a single command, processed left
   to right:
 
-      `command > out.txt 2>&1`   # stdout to file, stderr to same file
-      `command 2>&1 > out.txt`   # different! stderr to terminal,
-                                 # stdout to file
+      ```command > out.txt 2>&1   # stdout to file, stderr to same file```
+      ```command 2>&1 > out.txt   # different! stderr to terminal,
+                                 # stdout to file```
 
   Order matters: each redirection is applied in sequence.
 

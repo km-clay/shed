@@ -14,18 +14,18 @@ integer variables, and arrays.
       Assign {value} to {name}. No spaces are allowed around the `=`.
       If {value} contains spaces or special characters, quote it:
 
-          `greeting="hello world"`
-          `path=/usr/bin`
-          `empty=`
+          ```greeting="hello world"```
+          ```path=/usr/bin```
+          ```empty=```
 
       Assignments can precede a command, in which case the variable
       is set only for the duration of that command:
 
-          `LC_ALL=C sort file.txt`
+          ```LC_ALL=C sort file.txt```
 
   Multiple assignments can appear on one line:
 
-      `a=1 b=2 c=3`
+      ```a=1 b=2 c=3```
 
 ==============================================================================
 2. Mutation Operators                            *var-mutation*
@@ -37,35 +37,35 @@ integer variables, and arrays.
 
       Add {value} to {name}.
 
-          `count=5`
-          `count+=3`       # count is now 8
+          ```count=5```
+          ```count+=3       # count is now 8```
 
   `name-=value`                                  *var-minus-eq*
 
       Subtract {value} from {name}.
 
-          `count=10`
-          `count-=4`       # count is now 6
+          ```count=10```
+          ```count-=4       # count is now 6```
 
   `name*=value`                                  *var-mult-eq*
 
       Multiply {name} by {value}.
 
-          `count=3`
-          `count*=5`       # count is now 15
+          ```count=3```
+          ```count*=5       # count is now 15```
 
   `name/=value`                                  *var-div-eq*
 
       Divide {name} by {value} (integer division).
 
-          `count=10`
-          `count/=3`       # count is now 3
+          ```count=10```
+          ```count/=3       # count is now 3```
 
   Note: When used with `+=` on a string variable, the value is
   appended as a string rather than performing arithmetic:
 
-      `greeting="hello"`
-      `greeting+=" world"`   # greeting is now "hello world"
+      ```greeting="hello"```
+      ```greeting+=" world"   # greeting is now "hello world"```
 
 ==============================================================================
 3. Arrays                                        *var-arrays*
@@ -76,21 +76,21 @@ integer variables, and arrays.
 
       Assign an indexed array. Elements are separated by whitespace.
 
-          `fruits=(apple banana cherry)`
+          ```fruits=(apple banana cherry)```
 
       Access individual elements with subscript notation:
 
-          `echo ${fruits[0]}`      # prints "apple"
-          `echo ${fruits[2]}`      # prints "cherry"
+          ```echo ${fruits[0]}      # prints "apple"```
+          ```echo ${fruits[2]}      # prints "cherry"```
 
       Access all elements:
 
-          `echo ${fruits[@]}`      # all elements as separate words
-          `echo ${fruits[*]}`      # all elements as a single word
+          ```echo ${fruits[@]}      # all elements as separate words```
+          ```echo ${fruits[*]}      # all elements as a single word```
 
       Get the number of elements:
 
-          `echo ${#fruits[@]}`     # prints 3
+          ```echo ${#fruits[@]}     # prints 3```
 
 ==============================================================================
 4. Variable Attributes                           *var-attributes*
@@ -100,12 +100,12 @@ integer variables, and arrays.
       Mark a variable for export to child processes. Exported
       variables are inherited by commands and subshells.
 
-          `export PATH="/usr/local/bin:$PATH"`
-          `export EDITOR=vim`
+          ```export PATH="/usr/local/bin:$PATH"```
+          ```export EDITOR=vim```
 
       Export an existing variable without changing its value:
 
-          `export name`
+          ```export name```
 
   `local name=value`                             *var-local*
 
@@ -113,18 +113,18 @@ integer variables, and arrays.
       Local variables are not visible outside the function in which
       they are declared.
 
-          `myfunc() {`
-          `  local tmp="working"`
-          `  echo $tmp`
-          `}`
+          ```myfunc() {
+            local tmp="working"
+            echo $tmp
+          }```
 
   `readonly name=value`                          *var-readonly*
 
       Mark a variable as read-only. Any subsequent attempt to assign
       to it will produce an error.
 
-          `readonly PI=3`
-          `PI=4`                   # error: PI is read-only
+          ```readonly PI=3```
+          ```PI=4                   # error: PI is read-only```
 
 ==============================================================================
 5. Special Parameters                            *var-special*
@@ -176,7 +176,7 @@ integer variables, and arrays.
 
       To unset a single array element:
 
-          `unset 'arr[2]'`
+          ```unset 'arr[2]'```
 
 ==============================================================================
 See also: |param| |arith|

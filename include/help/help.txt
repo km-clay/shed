@@ -46,15 +46,15 @@ Our *GitHub* repository can be found at `https://github.com/km-clay/shed`.
 2. Navigating Help                             *help-nav*
 
   `help {topic}`      Open a help page by name. Prefix matches work,
-                      so `help key` opens |keybinds|.
+                      so ```help key``` opens |keybinds|.
 
   `help {tag}`        Jump directly to a tagged section. Tags are the
                       words in the top right of each section.
 
                       Examples:
-                        `help help-nav`         jumps to this section
-                        `help prompt-escapes`   jumps to |prompt escape docs|(prompt-escape)
-                        `help heredoc`          jumps to |heredoc docs|(heredoc)
+                        ```help help-nav```         jumps to this section
+                        ```help prompt-escapes```   jumps to |prompt escape docs|(prompt-escape)
+                        ```help heredoc```          jumps to |heredoc docs|(heredoc)
 
   Tab completion for the `help` command will complete valid search tags.
 
@@ -122,10 +122,10 @@ Our *GitHub* repository can be found at `https://github.com/km-clay/shed`.
 
   Examples:
 
-      `export SHED_HPATH=$HOME/wiki:$HOME/notes`
-      `help mytopic`          opens $HOME/.shed/help/mytopic.txt
-      `help ./local.txt`      opens that file directly
-      `help my-tag`           tag search across all known pages
+      ```export SHED_HPATH=$HOME/wiki:$HOME/notes```
+      ```help mytopic```          opens $HOME/.shed/help/mytopic.txt
+      ```help ./local.txt```      opens that file directly
+      ```help my-tag```           tag search across all known pages
 
   Files added to a `SHED_HPATH` directory are discovered the next
   time `help` runs.
@@ -144,31 +144,36 @@ Our *GitHub* repository can be found at `https://github.com/km-clay/shed`.
   a `*` followed by whitespace stays a literal asterisk).
 
   `*tag*`             Searchable tag. Becomes the target of
-                      `help {tag}` lookups. Rendered bold yellow.
-                      Convention: place tags in the top-right of
-                      each section.
+                    `help {tag}` lookups. Rendered bold yellow.
+                    Convention: place tags in the top-right of
+                    each section.
 
   `|reference|`       Cross-reference link to another page or tag.
   `|ref|(target)`     Rendered underlined cyan. Tab into hint mode
-                      to follow; mouse click also works. A target
-                      can be put in parentheses after the reference
-                      to specify a target regardless of whats between
-                      the pipes.
+                    to follow; mouse click also works. A target
+                    can be put in parentheses after the reference
+                    to specify a target regardless of whats between
+                    the pipes.
 
   `` `code` ``            Inline code or literal command. Rendered
-                      green. Use for commands, filenames, flag
-                      names, anything the reader would type.
+                    green. Use for commands, filenames, flag
+                    names, anything the reader would type.
 
   `#header#`          Section header. Rendered bold magenta.
-                      Use sparingly -- typically at the top of a
-                      page or to introduce a major subsection.
+                    Use sparingly -- typically at the top of a
+                    page or to introduce a major subsection.
 
   `{keyword}`         Word highlighting. Rendered italic.
   `[optional]`        Useful for putting emphasis on specific words.
 
-  `~~~`...`~~~`       Raw block. Everything between the triple
-                      tildes is emitted unstyled -- useful when the
-                      content itself contains markup characters
-                      that would otherwise be interpreted.
+  `~~~`...`~~~`         Raw block. Everything between the triple
+                    tildes is emitted unstyled -- useful when the
+                    content itself contains markup characters
+                    that would otherwise be interpreted.
+
+  `\`\`\``...`\`\`\``         Code block. Shell source between an opening and
+                    closing \`\`\` is syntax-highlighted with the same
+                    highlighter as the command line -- useful for
+                    multi-line examples and scripts.
 
 ==============================================================================

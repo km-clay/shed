@@ -392,7 +392,7 @@ command history navigable with `Up` and `Down`.
   Named stashes can be predefined in your `shedrc` using the
   |stash|(builtin-stash) builtin:
 
-      `stash --save commit 'git commit -m ""' 16`
+      ```stash --save commit 'git commit -m ""' 16```
 
   Then recalled instantly from the editor:
 
@@ -406,7 +406,7 @@ CUSTOM COMMANDS                                                *ex-alias*
   the line is parsed; only the leading command word is replaced, so an
   address or range prefix on the invocation is preserved.
 
-      `excmd sort='!sort'`
+      ```excmd sort='!sort'```
 
   Then in ex mode:
 

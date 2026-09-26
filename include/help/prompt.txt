@@ -12,8 +12,8 @@ right-aligned prompt).
   The prompt is controlled by the `PS1` and `PSR` environment variables.
   Set them in your shell configuration:
 
-      `PS1='\u@\h:\W\$ '`
-      `PSR='$SHED_VI_MODE'`
+      ```PS1='\u@\h:\W\$ '```
+      ```PSR='$SHED_VI_MODE'```
 
   Prompts are re-expanded before each display, so command substitutions
   and functions are evaluated every time.
@@ -118,10 +118,10 @@ right-aligned prompt).
         `\c{reset}`
 
       In prompts:
-        `PS1='\c{bold green}\u\c{reset}@\c{blue}\h\c{reset}:\w\$ '`
+        ```PS1='\c{bold green}\u\c{reset}@\c{blue}\h\c{reset}:\w\$ '```
 
       In scripts:
-        `echo -p '\c{red}error:\c{reset} something went wrong'`
+        ```echo -p '\c{red}error:\c{reset} something went wrong'```
 
   `\e[...`                                     *prompt-ansi*
 
@@ -144,7 +144,7 @@ right-aligned prompt).
         `\e[1;32m`    bold green
 
       Example:
-        `PS1='\e[1;32m\u\e[0m@\e[34m\h\e[0m:\w\$ '`
+        ```PS1='\e[1;32m\u\e[0m@\e[34m\h\e[0m:\w\$ '```
 
 ==============================================================================
 3. Functions in Prompts                        *prompt-functions*
@@ -157,8 +157,8 @@ right-aligned prompt).
       not exist, the literal sequence is displayed.
 
       Example:
-        `git_branch() { git branch --show-current 2>/dev/null; }`
-        `PS1='\u@\h (\@git_branch)\$ '`
+        ```git_branch() { git branch --show-current 2>/dev/null; }```
+        ```PS1='\u@\h (\@git_branch)\$ '```
 
       This allows dynamic prompt content that updates on every command.
 
@@ -174,8 +174,8 @@ right-aligned prompt).
   PSR is restricted to a single line. If it contains newlines, only the
   first line is used.
 
-      `PSR='$SHED_VI_MODE'`
-      `PSR='\T'`              # show last command runtime on the right
+      ```PSR='$SHED_VI_MODE'```
+      ```PSR='\T'              # show last command runtime on the right```
 
 ==============================================================================
 5. Multi-Line Prompts                          *prompt-multiline*
@@ -183,7 +183,7 @@ right-aligned prompt).
   PS1 may span multiple lines using `\n`. The editor tracks line
   positions for proper cursor movement and redrawing.
 
-      `PS1='\e[1m\u@\h\e[0m\n\W\$ '`
+      ```PS1='\e[1m\u@\h\e[0m\n\W\$ '```
 
   This displays the username and hostname on the first line, and the
   working directory and prompt symbol on the second.
@@ -195,9 +195,9 @@ right-aligned prompt).
   expansion on its arguments. All prompt escape sequences listed above
   are recognized.
 
-      `echo -p '\u'`          # prints the current username
-      `echo -p '\W'`          # prints the truncated working directory
-      `echo -p '\e[31mred\e[0m'`  # prints "red" in red
+      ```echo -p '\u'          # prints the current username```
+      ```echo -p '\W'          # prints the truncated working directory```
+      ```echo -p '\e[31mred\e[0m'  # prints "red" in red```
 
   The `-p` flag can be combined with `-n` (no trailing newline) and
   `-e` (interpret escape sequences like `\n` and `\t`). When both `-e`
@@ -331,7 +331,7 @@ right-aligned prompt).
       `COMPLETE`. Useful in PSR or prompt functions.
 
       Example:
-        `PSR='$SHED_VI_MODE'`
+        ```PSR='$SHED_VI_MODE'```
 
 ==============================================================================
 9. Remote Refresh (SIGUSR1)                    *prompt-sigusr1*
@@ -341,7 +341,7 @@ right-aligned prompt).
   external processes (e.g. a background script that detects a state
   change).
 
-      `kill -USR1 $$`
+      ```kill -USR1 $$```
 
   Combined with prompt functions (see |prompt functions|(prompt-func)), this allows the
   prompt to reflect changes that happen outside the shell's normal

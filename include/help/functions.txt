@@ -10,7 +10,7 @@ Bundled functions are autoloaded on first call, and you can add your
 own or override a bundled one the same way; see |autoloading|. The body
 of any function can be inspected with `declare -f`:
 
-    `declare -f split`     show the implementation of `split`
+    ```declare -f split```     show the implementation of `split`
 
 Reading these implementations can provide good examples of idiomatic
 shed scripting. They exercise quoting, error handling,
@@ -67,12 +67,12 @@ Nested records ~                                         *nested-streams*
   further sub-tables, to any depth. The nesting can be heterogeneous — a
   scalar field beside a field that is an entire sub-record:
 
-      `hobbies=("reading" "rock climbing")`
-      `person=("alice" "$(quote "${hobbies[@]}")")`
+      ```hobbies=("reading" "rock climbing")```
+      ```person=("alice" "$(quote "${hobbies[@]}")")```
 
-      `quote "${person[@]}"`
+      ```quote "${person[@]}"```
           alice 'reading '\''rock climbing'\'''
-      `quote "${person[@]}" | unquote`
+      ```quote "${person[@]}" | unquote```
           alice
           reading 'rock climbing'       # field 2 is a sub-table
 
@@ -137,13 +137,13 @@ AUTOLOADING                                      *autoloading*
     functions. The path is read from the live variable when `autoload`
     runs, so exporting it and autoloading from the same `shedrc` works:
 
-        `export SHED_FUNC_PATH=$HOME/.shed/func`
-        `autoload greet`       resolve greet in the path, load on first call
+        ```export SHED_FUNC_PATH=$HOME/.shed/func```
+        ```autoload greet```       resolve greet in the path, load on first call
 
     Inspecting a function with `declare -f` also forces the load, so it
     doubles as a way to preview an autoloaded body:
 
-        `declare -f split`     load `split` if needed, then show it
+        ```declare -f split```     load `split` if needed, then show it
 
   Registering a directory ~
 
@@ -151,8 +151,8 @@ AUTOLOADING                                      *autoloading*
     it finds, rather than naming them one by one. Each argument may be a
     `:`-separated list, so a whole path registers at once:
 
-        `autoload -p $HOME/.shed/func`     register every function there
-        `autoload -p "$SHED_FUNC_PATH"`    register the whole path at once
+        ```autoload -p $HOME/.shed/func```     register every function there
+        ```autoload -p "$SHED_FUNC_PATH"```    register the whole path at once
 
   Completions ~                                      *SHED_COMPLETE_PATH*
 
@@ -162,8 +162,8 @@ AUTOLOADING                                      *autoloading*
     |complete|(builtin-complete) to register a spec. Named completions
     resolve against `SHED_COMPLETE_PATH`:
 
-        `autoload --comp deploy`                load deploy's completion
-        `autoload --comp -p $HOME/.shed/comp`   register a directory of them
+        ```autoload --comp deploy```                load deploy's completion
+        ```autoload --comp -p $HOME/.shed/comp```   register a directory of them
 
   Loading eagerly ~
 
@@ -190,7 +190,7 @@ LOGOUT                                           *function-logout* *logout*
 
   Examples:
 
-      `logout`           exit if this is a login shell
+      ```logout```           exit if this is a login shell
 
 ==============================================================================
 QCOUNT                                           *function-qcount* *qcount*
@@ -211,10 +211,10 @@ QCOUNT                                           *function-qcount* *qcount*
 
   Examples:
 
-      `producer | qcount`                count records
-      `producer | qcount -f`             field count per record
-      `producer | qcount -n`             count records, ignoring header
-      `producer | qcount -f | sort -u`   inspect record shapes
+      ```producer | qcount```                count records
+      ```producer | qcount -f```             field count per record
+      ```producer | qcount -n```             count records, ignoring header
+      ```producer | qcount -f | sort -u```   inspect record shapes
                                          (one unique line means a
                                          uniform stream)
 
@@ -243,19 +243,19 @@ QMAP                                             *function-qmap* *qmap*
 
   Examples:
 
-      `producer | qmap 'quote "$1" "extra"'`
+      ```producer | qmap 'quote "$1" "extra"'```
                           append a literal field to every record
 
-      `producer | qmap 'quote "${1^^}"'`
+      ```producer | qmap 'quote "${1^^}"'```
                           uppercase the first field
 
-      `producer | qmap 'quote "$2" "$1"'`
+      ```producer | qmap 'quote "$2" "$1"'```
                           swap fields 1 and 2 (assumes 2-field input)
 
-      `producer | qmap -n 'quote "$name" "$size"'`
+      ```producer | qmap -n 'quote "$name" "$size"'```
                           reference fields by their header names
 
-      `producer | qmap 'quote "$(realpath "$1")"'`
+      ```producer | qmap 'quote "$(realpath "$1")"'```
                           resolve path in field 1 to its absolute form
 
   See also: |quoted-streams|, |named-streams|, |function-qwhere|
@@ -279,13 +279,13 @@ QNAME                                            *function-qname* *qname*
 
   Examples:
 
-      `producer | qname name size user`
+      ```producer | qname name size user```
                           label a three-field stream
 
-      `producer | qname name size user | qtable -n`
+      ```producer | qname name size user | qtable -n```
                           name the columns, then render with headings
 
-      `producer | qname name size | qwhere -n '[ "$size" -gt 0 ]'`
+      ```producer | qname name size | qwhere -n '[ "$size" -gt 0 ]'```
                           name the columns, then filter by name
 
   See also: |quoted-streams|, |named-streams|, |function-qtable|
@@ -314,13 +314,13 @@ QPAD                                             *function-qpad* *qpad*
 
   Examples:
 
-      `producer | qpad`                  normalize record shape
-      `producer | qpad | qselect 1 3`    safe projection even when
+      ```producer | qpad```                  normalize record shape
+      ```producer | qpad | qselect 1 3```    safe projection even when
                                          some records had <3 fields
-      `producer | qpad -n | qtable -n`   pad a named stream, then
+      ```producer | qpad -n | qtable -n```   pad a named stream, then
                                          render it as a table
-      `producer | qpad | qcount -f \\`
-        `| sort -u`                      should print exactly one
+      ```producer | qpad | qcount -f \
+        | sort -u```                     should print exactly one
                                          number after padding
 
   See also: |quoted-streams|, |named-streams|, |function-qselect|,
@@ -346,13 +346,13 @@ QPIPE                                            *function-qpipe* *qpipe*
 
   Examples:
 
-      `producer | qpipe sort`            sort the fields within each
+      ```producer | qpipe sort```            sort the fields within each
                                          record
 
-      `producer | qpipe grep -v '^$'`    drop empty fields from each
+      ```producer | qpipe grep -v '^$'```    drop empty fields from each
                                          record
 
-      `producer | qpipe tr a-z A-Z`      uppercase every field
+      ```producer | qpipe tr a-z A-Z```      uppercase every field
 
   See also: |quoted-streams|, |named-streams|, |function-qmap|
 
@@ -377,13 +377,13 @@ QSELECT                                          *function-qselect* *qselect*
 
   Examples:
 
-      `producer | qselect 1`             keep only field 1
-      `producer | qselect 2 1`           swap fields 1 and 2
-      `producer | qselect 1 1 1`         emit field 1 three times
-      `producer | qselect 3 1`           keep fields 3 and 1 in that
+      ```producer | qselect 1```             keep only field 1
+      ```producer | qselect 2 1```           swap fields 1 and 2
+      ```producer | qselect 1 1 1```         emit field 1 three times
+      ```producer | qselect 3 1```           keep fields 3 and 1 in that
                                          order, drop field 2
-      `producer | qselect -n name size`  project by column name
-      `producer | qpad | qselect 3 1`    safe projection on padded
+      ```producer | qselect -n name size```  project by column name
+      ```producer | qpad | qselect 3 1```    safe projection on padded
                                          stream
 
   See also: |quoted-streams|, |named-streams|, |function-qpad|
@@ -409,9 +409,9 @@ QTABLE                                           *function-qtable* *qtable*
 
   Examples:
 
-      `producer | qtable`                render records as a table
+      ```producer | qtable```                render records as a table
 
-      `producer | qtable -n`             use the first record as
+      ```producer | qtable -n```             use the first record as
                                          column headings
 
   See also: |quoted-streams|, |named-streams|, |builtin-width|
@@ -439,20 +439,20 @@ QWHERE                                           *function-qwhere* *qwhere*
 
   Examples:
 
-      `producer | qwhere '[ "$1" = "active" ]'`
+      ```producer | qwhere '[ "$1" = "active" ]'```
                           keep records where field 1 equals "active"
 
-      `producer | qwhere '[ -f "$1" ]'`
+      ```producer | qwhere '[ -f "$1" ]'```
                           keep records whose first field names an
                           existing file
 
-      `producer | qwhere '[[ "$1" == git* ]]'`
+      ```producer | qwhere '[[ "$1" == git* ]]'```
                           glob match on field 1
 
-      `producer | qwhere -n '[ "$size" -gt 10 ]'`
+      ```producer | qwhere -n '[ "$size" -gt 10 ]'```
                           filter by a named column
 
-      `producer | qwhere '[ "${#1}" -gt 10 ]'`
+      ```producer | qwhere '[ "${#1}" -gt 10 ]'```
                           keep records where field 1 is longer than
                           10 characters
 
@@ -489,22 +489,22 @@ SPLIT                                            *function-split* *split*
 
   Examples:
 
-      `split : "$PATH" | unquote -a paths`
+      ```split : "$PATH" | unquote -a paths```
                                 split `PATH` into `$paths`, preserving
                                 structure of paths containing whitespace
 
-      `split , "a,b,c" | unquote`
+      ```split , "a,b,c" | unquote```
                                 prints `a`, `b`, `c` on three lines
 
-      `split "->" "x->y->z" | unquote -a chain`
+      ```split "->" "x->y->z" | unquote -a chain```
                                 multi-character delimiter, into an array
 
-      `find . -print0 | split -0 | unquote -0 | xargs -0 ...`
+      ```find . -print0 | split -0 | unquote -0 | xargs -0 ...```
                                 bridge `find -print0` into shed's
                                 quoted-stream protocol and back to
                                 a NUL-aware external consumer
 
-      `cat config.txt | split = | qwhere '[ "$1" = "some_key" ]'`
+      ```cat config.txt | split = | qwhere '[ "$1" = "some_key" ]'```
                                 stream mode: each line of the file
                                 is split on `=`, then filtered
 
@@ -522,5 +522,5 @@ VERSION                                          *function-version* *version*
 
   Examples:
 
-      `version`            outputs:  `0.28.1`
-      `version -v`         outputs:  `shed v0.28.1 (x86_64 linux)`
+      ```version```            outputs:  `0.28.1`
+      ```version -v```         outputs:  `shed v0.28.1 (x86_64 linux)`
