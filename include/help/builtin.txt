@@ -316,7 +316,7 @@ AUTOLOAD                                         *builtin-autoload* *autoload*
 
   `-c`     operate on completions rather than functions. A completion
   `--comp` file's stem is a command name; names resolve against
-           ```SHED_COMPLETE_PATH```, and the file is sourced the first time that
+           ```$SHED_COMPLETE_PATH```, and the file is sourced the first time that
            command is completed. See |builtin-complete|.
 
   A registered but not-yet-loaded function is also forced to load by
@@ -1619,7 +1619,7 @@ POPD                                             *builtin-popd* *popd*
 
   `-n`    do not change the current directory (stack only)
   `+N`    remove the entry at index N from the top (0-based).
-          ```+0``` is equivalent to plain `popd`.
+          `+0` is equivalent to plain ```popd```.
   `-N`    remove the entry at index N from the bottom.
 
   When using `+N` (N > 0) or `-N`, no directory change occurs.
@@ -2157,12 +2157,12 @@ RAISE                                            *builtin-raise* *raise*
     Examples (color shown as bracketed style):
 
       ```raise "expected '%1', got '%2'" int string```
-                      ```----      ----  --- ------```
-                       ```int``` and `string` are different colors
+                      `----      ----  --- ------`
+                      `int` and `string` are different colors
 
       ```raise "removing '%1', '%1', and '%1'" main dev prod```
-                      ```----  ----      ----```
-                       ```main```, `dev`, and `prod` all share a color
+                      `----  ----      ----`
+                      `main`, `dev`, and `prod` all share a color
 
   Examples:
 

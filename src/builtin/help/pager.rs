@@ -106,6 +106,7 @@ pub(super) struct HelpPager {
   scroll_offset: usize,
   filename: Option<String>,
   content: StyledHelp,
+  render_cache: Option<(u64, String)>,
 }
 
 impl HelpPager {
@@ -135,7 +136,23 @@ impl HelpPager {
       filename,
       content,
       cross_refs,
+      render_cache: None,
     })
+  }
+
+  /// Fingerprint of everything `render` depends on: the page content and the
+  /// active overlays (search hits, hover, hint keys). Scrolling doesn't change
+  /// it, so the baked frame is reused across scrolls instead of re-rendered.
+  fn render_fingerprint(&self) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let c = self.content.content();
+    c.len().hash(&mut h);
+    self.hovered.hash(&mut h);
+    self.search.active_result_idx1.hash(&mut h);
+    self.search.results.hash(&mut h);
+    self.ref_keys.hash(&mut h);
+    h.finish()
   }
   pub(super) fn content(&self) -> &str {
     self.content.content()
@@ -192,48 +209,53 @@ impl HelpPager {
       });
     }
 
-    // Build the overlay list for this frame. Order doesn't matter, the
-    // renderer sorts events by position internally.
-    let mut overlays: Vec<Overlay> = Vec::new();
+    let fp = self.render_fingerprint();
+    if self.render_cache.as_ref().is_none_or(|(c, _)| *c != fp) {
+      // Build the overlay list for this frame. Order doesn't matter, the
+      // renderer sorts events by position internally.
+      let mut overlays: Vec<Overlay> = Vec::new();
 
-    if let Some(idx) = self.hovered
-      && let Some(c_ref) = self.cross_refs.get(idx)
-    {
-      // insert overlay for hovered cross references
-      overlays.push(Overlay::Span {
-        range: c_ref.span().content_range(),
-        style: hover_style(),
-      });
-    }
-
-    for (i, (s, e)) in self.search.results.iter().enumerate() {
-      let is_focused = i + 1 == self.search.active_result_idx1;
-      // insert search result overlay
-      overlays.push(Overlay::Span {
-        range: *s..*e,
-        style: if is_focused {
-          search_focus_style()
-        } else {
-          search_hit_style()
-        },
-      });
-    }
-
-    for (ref_idx, ch) in &self.ref_keys {
-      if let Some(c_ref) = self.cross_refs.get(*ref_idx) {
-        // insert hint key text
-        overlays.push(Overlay::Insert {
-          pos: c_ref.span().content_range().end,
-          text: format!("[{ch}]"),
-          style: hint_key_style(),
+      if let Some(idx) = self.hovered
+        && let Some(c_ref) = self.cross_refs.get(idx)
+      {
+        // insert overlay for hovered cross references
+        overlays.push(Overlay::Span {
+          range: c_ref.span().content_range(),
+          style: hover_style(),
         });
       }
+
+      for (i, (s, e)) in self.search.results.iter().enumerate() {
+        let is_focused = i + 1 == self.search.active_result_idx1;
+        // insert search result overlay
+        overlays.push(Overlay::Span {
+          range: *s..*e,
+          style: if is_focused {
+            search_focus_style()
+          } else {
+            search_hit_style()
+          },
+        });
+      }
+
+      for (ref_idx, ch) in &self.ref_keys {
+        if let Some(c_ref) = self.cross_refs.get(*ref_idx) {
+          // insert hint key text
+          overlays.push(Overlay::Insert {
+            pos: c_ref.span().content_range().end,
+            text: format!("[{ch}]"),
+            style: hint_key_style(),
+          });
+        }
+      }
+
+      // apply overlays (search, hover, hint keys)
+      let rendered = render::render(self.content(), overlays);
+      self.render_cache = Some((fp, rendered));
     }
 
-    // apply overlays (search, hover, hint keys)
-    let rendered = render::render(self.content(), overlays);
-
     // final rendered content
+    let rendered = &self.render_cache.as_ref().unwrap().1;
     let content_lines: Vec<_> = rendered
       .lines()
       .skip(self.scroll_offset)
