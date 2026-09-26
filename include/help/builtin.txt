@@ -2997,8 +2997,8 @@ STAT                                             *builtin-stat* *stat*
 ==============================================================================
 THRU                                             *builtin-thru* *thru*
 
-  `thru [-c] [-a] [-E] [-t {dest}] [-S {n}] [-T {n}] [-F {byte}] [-U {byte}]`
-  `     [{file} ...]`
+  `thru [-c] [-a] [-E] [-t {dest}] [-v {var}] [-S {n}] [-T {n}] [-F {byte}]`
+  `     [-U {byte}] [{file} ...]`
 
   Pass input to standard output unchanged: a fork-free `cat`, with a few
   control-flow extras. With one or more {file} arguments it reads each in
@@ -3006,8 +3006,9 @@ THRU                                             *builtin-thru* *thru*
   input. Intended for these main use cases:
 
     - Reading file(s) without forking an external `cat`: `thru config.toml`.
-    - Capturing stdin into a variable without spawning an external process:
-      `var=$(thru)` instead of `var=$(cat)`.
+    - Capturing input into a variable byte-exactly, without a subshell:
+      `thru -v var` instead of `var=$(cat)` (no trailing-newline stripping,
+      and NUL bytes survive).
     - Counting raw byte throughput using `-c`
     - Controlling exact byte flow: `-S`/`-T` slice by position, `-F`/`-U`
       slice by delimiter, and `-t` mirrors to a file or descriptor.
@@ -3028,6 +3029,14 @@ THRU                                             *builtin-thru* *thru*
     `-a`, `--append`
                   Append to the tee destination instead of truncating it.
                   Only meaningful when `-t` is also given.
+
+    `-v {var}`, `--var {var}`
+                  Capture the output into shell variable {var} instead of
+                  writing to stdout, byte-for-byte: no trailing-newline
+                  stripping, and NUL bytes are preserved, unlike `$(...)`.
+                  The window flags apply first, so `-S`/`-T`/`-F`/`-U` slice
+                  straight into {var}. The whole captured range is buffered
+                  in memory; bound large streams with `-T`.
 
     `-c`, `--count`
                   After draining the input, write the total number of bytes
@@ -3102,9 +3111,9 @@ THRU                                             *builtin-thru* *thru*
       `stamp=$(thru ~/.local/share/shed/last_run)`
                                 read a file into a variable
 
-      `var=$(thru)`
-                                slurp stdin into `$var` without forking
-                                an external `cat`
+      `thru -v var`
+                                slurp stdin into `$var` byte-exact — no
+                                subshell, no trailing-newline stripping
 
       `producer | thru -t /dev/stderr | consumer`
                                 live-debug a pipeline: stream continues
