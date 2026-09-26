@@ -16,7 +16,8 @@ split() {
   fi
 
   if [ -n "$2" ]; then
-    input="$2"
+    input="${2%"$pat"}"
+    [ -n "$input" ] || return 0
 
     while true; do
       part="${input%%"${pat}"*}"
@@ -33,8 +34,10 @@ split() {
 
   if ! [ -t 0 ]; then
     while IFS= read -r line || [ -n "$line" ]; do
-      parts=()
+      line="${line%"$pat"}"
+      [ -n "$line" ] || continue
 
+      parts=()
       while true; do
         part="${line%%"${pat}"*}"
         push parts "$part"
@@ -44,9 +47,7 @@ split() {
         line="${line#*"${pat}"}"
       done
 
-      if (( "${#parts[@]}" )); then
-        quote "${parts[@]}"
-      fi
+      quote "${parts[@]}"
     done
     return 0
   fi

@@ -470,8 +470,11 @@ SPLIT                                            *function-split* *split*
   stream suitable for decoding/formatting via |unquote|(builtin-unquote),
   or for consumption by the `q`-prefixed adapter functions (see |quoted-streams|).
 
-  Trailing delimiters are stripped before splitting, so an empty
-  final field is never produced. An empty {string} produces no output.
+  A single trailing delimiter is stripped before splitting, so a
+  delimiter-terminated string does not yield an empty final field.
+  Interior empty fields are preserved. An empty {string}, or input
+  that is empty once the trailing delimiter is removed, produces no
+  output.
 
   `-0`    use the NUL byte as the delimiter. Equivalent to passing
           `$'\0'` as the pattern. Designed to pair with `find -print0`
@@ -483,9 +486,9 @@ SPLIT                                            *function-split* *split*
     once and exits.
 
     With only {pattern} (or `-0`) and data piped on stdin, reads each
-    input line and splits each independently. Each input line becomes
-    one or more output records depending on how many parts the
-    pattern produces.
+    input line and splits each independently. Each non-empty line
+    becomes one or more output records depending on how many parts the
+    pattern produces; blank lines produce no output.
 
   Examples:
 
