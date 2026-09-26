@@ -9,7 +9,7 @@ authors = ["Kyler Clay"]
 license = "GPL-3.0-or-later"
 repository = "https://github.com/km-clay/shed"
 publish = true
-version = "0.43.4"
+version = "0.43.5"
 
 edition = "2024"
 
