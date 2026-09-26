@@ -7,7 +7,7 @@
 	<img alt="GitHub last commit" src="https://img.shields.io/github/last-commit/km-clay/shed">
 </p>
 <h6 align="center">
-  A modern POSIX shell focusing on smooth line editing and rich interactive features.
+  A modern POSIX shell focusing on smooth line editing, interactive features, and powerful scripting.
 </h6>
 
 <img width="1924" height="1086" alt="shed_preview" src="https://github.com/user-attachments/assets/83276eb5-92bf-4eb4-891f-c2dfeddced5d" />
@@ -48,8 +48,10 @@ I started working on `shed` because in my experience, picking a shell meant maki
 - **[Syntax highlighting](https://github.com/km-clay/shed/wiki/Syntax-Highlighting)** - the line is highlighted with `shed`'s own lexer as you type, so unknown commands light up before you ever run them.
 - **[Prompt & status line](https://github.com/km-clay/shed/wiki/Prompt)** - familiar backslash escapes plus embedded function output, a right-hand prompt, and a fully configurable status line.
 - **[IPC socket](https://github.com/km-clay/shed/wiki/IPC-Socket)** - a Unix socket other processes can use to subscribe to shell events, query state, or even drive the line editor remotely.
-- **[Scripting extensions](https://github.com/km-clay/shed/wiki/shed-Scripting-Features)** - POSIX plus `try`/`catch`, Go-style `defer`, and shell-quoted records for passing structured data through pipelines.
+- **[Scripting extensions](https://github.com/km-clay/shed/wiki/shed-Scripting-Features)** - POSIX shell scripting, along with many unique builtins and extensions: `try`/`catch`, Go-style `defer`, and shell-quoted records for passing structured data through pipelines.
 - **[Configuration](https://github.com/km-clay/shed/wiki/Configuration)** - The `shopt` builtin, rc file sourcing and generation via `genrc`.
+
+And many more not listed here.
 
 ## Documentation
 
