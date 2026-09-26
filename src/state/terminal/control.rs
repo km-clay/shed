@@ -62,6 +62,8 @@ pub(crate) enum TermCtl {
   SyncEnd,
 
   RingBell,
+  Return,
+  BreakLine,
 }
 
 impl TermCtl {
@@ -90,6 +92,8 @@ impl Display for TermCtl {
       Self::SyncStart => write!(f, "\u{1b}[?2026h"),
       Self::SyncEnd => write!(f, "\u{1b}[?2026l"),
       Self::RingBell => write!(f, "\x07"),
+      Self::Return => write!(f, "\r"),
+      Self::BreakLine => writeln!(f),
     }
   }
 }

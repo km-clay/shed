@@ -17,10 +17,10 @@ use nix::{
 };
 
 use crate::{
-  flush_term, procio,
+  defer, exec_term, procio, queue_term,
   readline::Pos,
   sherr,
-  state::terminal::{TermCap, Terminal},
+  state::terminal::{CursorStyle, TermCap, Terminal},
   util::{error::ShResult, ui},
 };
 
@@ -660,19 +660,21 @@ impl FuzzyBuilder {
 
     let mut selector = self.build();
 
-    // The beam is set with a raw escape that bypasses `execute_control`, so the
-    // terminal's tracked style stays at the pre-picker value; restore to it on exit.
     let restore_style = Shed::term(Terminal::cursor_style);
-    crate::defer! {
-      flush_term!("{restore_style}").ok();
+    defer! {
+      exec_term!(TermCtl::Cursor(SetStyle(restore_style))).ok();
     };
 
     let tty_fd = PollFd::new(tty, PollFlags::POLLIN);
     let chosen = loop {
       selector.draw();
       let col = selector.query_cursor_col();
-      let down = if inline { "" } else { "\x1b[1B" };
-      flush_term!("{down}\r\x1b[{col}C\x1b[5 q").ok();
+      if !inline {
+        queue_term!(TermCtl::Cursor(Down(1))).ok();
+      }
+      queue_term!(TermCtl::Return).ok();
+      queue_term!(TermCtl::Cursor(Forward(col as u16))).ok();
+      exec_term!(TermCtl::Cursor(SetStyle(CursorStyle::Beam(true)))).ok();
 
       let mut decided = None;
       let mut poll_fds = vec![tty_fd.clone()];
@@ -723,7 +725,7 @@ impl FuzzyBuilder {
       }
 
       if !inline {
-        flush_term!("\x1b[1A").ok();
+        exec_term!(TermCtl::Cursor(Up(1))).ok();
       }
       selector.clear();
       if let Some(result) = decided {
@@ -732,7 +734,7 @@ impl FuzzyBuilder {
     };
 
     if inline {
-      flush_term!("\r\x1b[2K").ok();
+      exec_term!(TermCtl::Return, TermCtl::Clear(WholeLine)).ok();
     }
     Ok(chosen)
   }
@@ -1229,8 +1231,12 @@ impl FuzzySelector {
     // Query line. In embedded mode it sits one row below the prompt; inline
     // (standalone) it's the top row, so there's no leading newline.
     if !self.inline {
-      write_term!("\n").ok();
+      queue_term!(TermCtl::BreakLine).ok();
     }
+
+    // clear rows down so we arent drawing over anything weirdly
+    queue_term!(TermCtl::Clear(ScreenFromCursor)).ok();
+
     write_term!(
       "{} {}",
       Self::PROMPT,
@@ -1240,7 +1246,7 @@ impl FuzzySelector {
     let mut rows_drawn = 1usize;
 
     if self.filtered.is_empty() {
-      write_term!("\n").ok();
+      queue_term!(TermCtl::BreakLine).ok();
       write_term!("\x1b[2m(no matches)\x1b[22m").ok();
       rows_drawn += 1;
     } else {
@@ -1259,7 +1265,7 @@ impl FuzzySelector {
 
       // Column-major: cell (col c, row r) is candidate `(scroll_col + c) * rows + r`.
       for r in 0..grid_rows {
-        write_term!("\n").ok();
+        queue_term!(TermCtl::BreakLine).ok();
         rows_drawn += 1;
         for (c, width) in col_widths.iter().enumerate() {
           let idx = (self.scroll_col + c) * rows + r;
@@ -1339,7 +1345,7 @@ impl FuzzySelector {
         }
       }
 
-      write_term!("\n").ok();
+      queue_term!(TermCtl::BreakLine).ok();
       write_term!(
         "\x1b[2mItems {} to {} of {}\x1b[22m",
         first + 1,
@@ -1353,9 +1359,9 @@ impl FuzzySelector {
     // Park the cursor back on the first overlay row: the prompt line in embedded
     // mode (one above the query line), or the query line itself when inline.
     let up = rows_drawn - usize::from(self.inline);
-    write_term!("\x1b[{up}A\r").ok();
+    queue_term!(TermCtl::Cursor(Up(up as u16))).ok();
     if self.prompt_cursor_col > 0 {
-      write_term!("\x1b[{}C", self.prompt_cursor_col).ok();
+      queue_term!(TermCtl::Cursor(Forward(self.prompt_cursor_col as u16))).ok();
     }
 
     self.old_layout = Some(FuzzyLayout { rows: rows_drawn });
@@ -1367,25 +1373,25 @@ impl FuzzySelector {
       if self.inline {
         // Cursor rests on the first overlay row (the query line); erase it and
         // each row below, then return to it.
-        write_term!("\x1b[2K").ok();
+        queue_term!(TermCtl::Clear(WholeLine)).ok();
         for _ in 1..layout.rows {
-          write_term!("\x1b[1B\x1b[2K").ok();
+          queue_term!(TermCtl::Cursor(Down(1)), TermCtl::Clear(WholeLine)).ok();
         }
         if layout.rows > 1 {
-          write_term!("\x1b[{}A", layout.rows - 1).ok();
+          queue_term!(TermCtl::Cursor(Up(layout.rows as u16 - 1))).ok();
         }
-        write_term!("\r").ok();
+        queue_term!(TermCtl::Return).ok();
         return;
       }
       for _ in 0..layout.rows {
-        write_term!("\x1b[1B\x1b[2K").ok();
+        queue_term!(TermCtl::Cursor(Down(1)), TermCtl::Clear(WholeLine)).ok();
       }
       if layout.rows > 0 {
-        write_term!("\x1b[{}A", layout.rows).ok();
+        queue_term!(TermCtl::Cursor(Up(layout.rows as u16))).ok();
       }
-      write_term!("\r").ok();
+      queue_term!(TermCtl::Return).ok();
       if self.prompt_cursor_col > 0 {
-        write_term!("\x1b[{}C", self.prompt_cursor_col).ok();
+        queue_term!(TermCtl::Cursor(Forward(self.prompt_cursor_col as u16))).ok();
       }
     }
   }

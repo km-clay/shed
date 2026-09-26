@@ -331,7 +331,7 @@ impl GridSelector {
     let visible_end = ((self.scroll_col + num_cols) * rows).min(n);
 
     // break the line to move under the prompt
-    write_term!("\n").ok();
+    queue_term!(TermCtl::BreakLine).ok();
 
     // Column-major: cell (col c, row r) is candidate `(scroll_col + c) * rows + r`.
     for r in 0..grid_rows {
@@ -406,7 +406,7 @@ impl GridSelector {
         }
       }
       if r + 1 < grid_rows {
-        write_term!("\n").ok();
+        queue_term!(TermCtl::BreakLine).ok();
       }
     }
 
@@ -427,11 +427,7 @@ impl GridSelector {
 
     // Walk back up to the prompt row. Restore the column with \r +
     // horizontal move.
-    queue_term!(
-      TermCtl::Cursor(Up(rows_drawn as u16)),
-      TermCtl::PrintChar('\r')
-    )
-    .ok();
+    queue_term!(TermCtl::Cursor(Up(rows_drawn as u16)), TermCtl::Return).ok();
     if self.prompt_cursor_col > 0 {
       queue_term!(TermCtl::Cursor(Forward(self.prompt_cursor_col as u16))).ok();
     }
