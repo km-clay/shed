@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "shed-sh"
-version = "0.43.5"
+version = "0.43.6"
 dependencies = [
  "ariadne",
  "bitflags",
