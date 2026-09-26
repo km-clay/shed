@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "shed-sh"
-description = "A linux shell written in rust"
+description = "a POSIX shell written in rust"
 authors = ["Kyler Clay"]
 license = "GPL-3.0-or-later"
 repository = "https://github.com/km-clay/shed"

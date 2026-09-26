@@ -175,21 +175,40 @@ ARROPS                                           *builtin-arrops* *arrops*
   PUSH                                           *builtin-push* *push*
 
   `push {array} {value} ...`
+  `producer | push [-d {delim}] {array}`
 
       Append one or more values to the back of {array}. If {array}
       does not exist, it is created. Multiple values are appended
       left to right.
 
+      With no {value} operands and input piped on stdin, the stream is
+      appended instead. By default the whole stream becomes a single
+      element (byte-exact, including any trailing newline). With
+      `-d {delim}` the stream is split on the single-byte {delim} and
+      each record is appended; one trailing {delim} is stripped, so a
+      delimiter-terminated stream does not append an empty final
+      element, and interior empty fields are preserved. An empty stream
+      appends nothing.
+
       Examples:
           ```push myarr a b c```     append a, b, c to the back
+          ```producer | push myarr```       append the whole stream as one element
+          ```producer | push -d $'\n' myarr```   append each line as an element
 
   FPUSH                                          *builtin-fpush* *fpush*
 
   `fpush {array} {value} ...`
+  `producer | fpush [-d {delim}] {array}`
 
       Prepend one or more values to the front of {array}. Each value
       is pushed to the front sequentially, so the last value ends up
       at index 0.
+
+      Like |push|(builtin-push), a piped stream is consumed when no
+      {value} operands are given: the whole stream as one element, or
+      split into records with `-d {delim}`. Records are pushed to the
+      front in order, so a stream of `a`, `b`, `c` ends up as `c`, `b`, `a` at the
+      front.
 
       Example:
           ```fpush arr a b```    given arr=[c], result is [b, a, c]

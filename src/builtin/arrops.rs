@@ -13,9 +13,12 @@
 use std::collections::VecDeque;
 
 use crate::{
-  procio, set_var, sherr,
+  builtin::Builtin,
+  eval::lex::Span,
+  opt, procio, set_var, sherr,
   state::{
     Shed,
+    scopes::ScopeStack,
     vars::{VarFlags, VarKind, VarStr},
   },
   util::{
@@ -26,18 +29,38 @@ use crate::{
 
 use super::{BuiltinArgs, opt::OptSpec};
 
+fn push_val(v: &mut ScopeStack, name: &VarStr, val: &VarStr, span: Span, end: End) -> ShResult<()> {
+  match v.get_arr_mut(&name.to_str_lossy()).ok() {
+    Some(arr) => match end {
+      End::Front => arr.push_front(val.clone()),
+      End::Back => arr.push_back(val.clone()),
+    },
+    None => {
+      v.set_var(
+        &name.to_str_lossy(),
+        VarKind::arr([val.clone()]),
+        VarFlags::empty(),
+      )
+      .promote_err(span)?;
+    }
+  }
+  Ok(())
+}
+
 /// Trait that provides common functionality for array operations like push and pop.
 ///
 /// Each of the array operation builtins (`push`, `pop`, `fpush`, `fpop`) implement this trait,
 /// because the only difference between each one is the direction of the operation (front or back)
 /// and whether it is a push or pop.
-trait ArrOp {
+trait ArrOp: Builtin {
   /// Common options
+  #[rustfmt::skip]
   fn arr_opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new("count").short(b'c').argc(1),
-      OptSpec::new("variable").short(b'v').argc(1),
-      OptSpec::new("reverse").short(b'r'),
+      opt!("count"    | b'c', 1),
+      opt!("variable" | b'v', 1),
+      opt!("delim"    | b'd', 1),
+      opt!("reverse"  | b'r'),
     ]
   }
   /// Whether we are pushing or popping
@@ -51,31 +74,60 @@ trait ArrOp {
       Action::Pop => self.pop(args),
     }
   }
-  fn push(&self, args: BuiltinArgs) -> ShResult<()> {
+  fn push(&self, mut args: BuiltinArgs) -> ShResult<()> {
     let end = self.direction();
     if args.no_arguments() {
       return Err(sherr!(ParseErr @ args.span(), "missing array name").with_code(2));
     }
+    let input = self
+      .get_input_with(&mut args, |a| a.arguments().count() == 1)
+      .map(VarStr::from);
+
+    if let Some(input) = input {
+      if input.is_empty() {
+        return util::with_status(0);
+      }
+
+      let (name, span) = args.arguments().next().unwrap();
+
+      match args.opt_value("delim") {
+        Some(d) => {
+          let opt_span = args.opt_span("delim").unwrap();
+          if d.len() != 1 {
+            return Err(
+              sherr!(ParseErr @ opt_span, "delimiter must be a single character/byte").with_code(2),
+            );
+          }
+
+          let d = d[0];
+          let bytes = input.as_bytes();
+          let bytes = bytes.strip_suffix(&[d]).unwrap_or(bytes);
+          if bytes.is_empty() {
+            return util::with_status(0);
+          }
+
+          let parts = bytes.split(|b| *b == d);
+
+          Shed::vars_mut(|v| -> ShResult<()> {
+            for part in parts {
+              push_val(v, name, &VarStr::from(part), span, end)?;
+            }
+            Ok(())
+          })?;
+        }
+        None => Shed::vars_mut(|v| push_val(v, name, &input, span, end))?,
+      }
+
+      return util::with_status(0);
+    }
+
     let mut arguments = args.arguments();
     let name = arguments.next().unwrap().0;
 
     // each argument is pushed to the array
     Shed::vars_mut(|v| -> ShResult<()> {
       for (val, span) in arguments {
-        match v.get_arr_mut(&name.to_str_lossy()).ok() {
-          Some(arr) => match end {
-            End::Front => arr.push_front(val.clone()),
-            End::Back => arr.push_back(val.clone()),
-          },
-          None => {
-            v.set_var(
-              &name.to_str_lossy(),
-              VarKind::arr([val.clone()]),
-              VarFlags::empty(),
-            )
-            .promote_err(span)?;
-          }
-        }
+        push_val(v, name, val, span, end)?;
       }
       Ok(())
     })?;
