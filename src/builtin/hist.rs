@@ -828,9 +828,15 @@ impl super::Builtin for HistPull {
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let has_ex = args.has_opt("ex");
-    let hist = open_history(args.span(), has_ex, true)?;
 
-    let pulled = hist.refresh_hist_entries();
+    let before = readline::cached_command_count(has_ex);
+
+    let hist = open_history(args.span(), has_ex, true)?;
+    hist.refresh_hist_entries();
+
+    let after = readline::cached_command_count(has_ex);
+
+    let pulled = after.saturating_sub(before);
     status_msg!("hist: pulled {pulled} commands");
 
     util::with_status(0)

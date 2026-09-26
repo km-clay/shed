@@ -76,6 +76,7 @@ pub(super) use editmode::ModeReport;
 pub(super) use histimport::deserialize_history;
 pub(super) use history::{
   Branch, HistDump, HistEntry, History, MAIN_HIST_TABLE_NAME, MergeResult, ReflogEntry, Table,
+  cached_command_count,
 };
 pub(super) use linebuf::{Hint, Lines, Pos};
 

@@ -47,12 +47,26 @@ static SEARCH_ENTRIES: LazyLock<Arc<RwLock<HistTables>>> =
 static SEARCH_WATERMARKS: LazyLock<Arc<RwLock<HashMap<CacheKey, i64>>>> =
   LazyLock::new(|| Arc::new(RwLock::new(HashMap::default())));
 
-fn num_entries(key: &CacheKey) -> usize {
+pub(crate) fn cached_command_count(ex: bool) -> usize {
+  let table = Table(
+    if ex {
+      "ex_history"
+    } else {
+      MAIN_HIST_TABLE_NAME
+    }
+    .to_string(),
+  );
+  let branch = Branch(if ex {
+    "main".to_string()
+  } else {
+    Shed::hist_branch()
+  });
+  let key = CacheKey::new(&table, &branch);
   HIST_ENTRIES
     .read()
     .ok()
-    .and_then(|cache| cache.get(key).map(Vec::len))
-    .unwrap_or(0)
+    .and_then(|cache| cache.get(&key).map(|entries| entries.len()))
+    .unwrap_or_default()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1907,8 +1921,8 @@ impl History {
 
   pub(crate) fn refresh_hist_entries(&self) -> usize {
     let cache_key = self.cache_key();
-    let num_entries_before = num_entries(&cache_key);
     let entries = query_masked(None, &self.lock(), &self.table, &self.branch);
+    let total = entries.len();
     let max_ts = entries
       .iter()
       .filter_map(|e| e.timestamp.duration_since(std::time::UNIX_EPOCH).ok())
@@ -1925,8 +1939,7 @@ impl History {
       wm.insert(cache_key.clone(), max_ts);
     }
 
-    let num_entries_after = num_entries(&cache_key);
-    num_entries_after.saturating_sub(num_entries_before)
+    total
   }
 
   #[cfg(test)]
