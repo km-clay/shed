@@ -85,14 +85,9 @@ mod shell_intro_2_1 {
    * If the first line of a file of shell commands starts with the characters "#!", the results are unspecified.
    */
 
+  use crate::set_var;
   use crate::{
-    assert_output,
-    eval::execute::exec_dash_c,
-    input, procio,
-    state::{
-      Shed,
-      vars::{VarFlags, VarKind},
-    },
+    assert_output, eval::execute::exec_dash_c, input, procio, state::vars::VarKind,
     tests::testutil::TestGuard,
   };
   use std::io::Write;
@@ -181,7 +176,7 @@ mod shell_intro_2_1 {
     exec_dash_c("echo \"$*\"", args.clone()).unwrap();
     assert_output!(g, "a b c\n");
 
-    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
+    set_var!("IFS", VarKind::Str(":".into())).unwrap();
     exec_dash_c("echo \"$*\"", args.clone()).unwrap();
     assert_output!(g, "a:b:c\n");
   }

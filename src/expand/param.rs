@@ -1,3 +1,4 @@
+use crate::set_var;
 use bstr::ByteSlice;
 
 use crate::{
@@ -11,7 +12,7 @@ use crate::{
   state::{
     Shed,
     scopes::ScopeStack,
-    vars::{ArrIndex, ShellParam, VarFlags, VarKind, VarName, VarStr},
+    vars::{ArrIndex, ShellParam, VarKind, VarName, VarStr},
   },
   util::{
     self,
@@ -448,9 +449,7 @@ fn perform_param_expansion_inner(
             var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
           if allow_side_effects {
             let stored = VarStr::from(expanded.to_bytes());
-            Shed::vars_mut(|v| {
-              v.set_var(parsed.name(), VarKind::string(stored), VarFlags::empty())
-            })?;
+            set_var!(parsed.name(), VarKind::string(stored))?;
           }
           Ok(expanded)
         }
@@ -463,9 +462,7 @@ fn perform_param_expansion_inner(
             var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
           if allow_side_effects {
             let stored = VarStr::from(expanded.to_bytes());
-            Shed::vars_mut(|v| {
-              v.set_var(parsed.name(), VarKind::string(stored), VarFlags::empty())
-            })?;
+            set_var!(parsed.name(), VarKind::string(stored))?;
           }
           Ok(expanded)
         }
@@ -756,6 +753,7 @@ fn perform_param_expansion_inner(
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::set_var;
   use crate::state::{Shed, vars::VarFlags, vars::VarKind};
   use crate::tests::testutil::{TestGuard, test_input};
 
@@ -915,7 +913,7 @@ mod tests {
   }
 
   fn set_v_abcdef() {
-    Shed::vars_mut(|v| v.set_var("V", VarKind::Str("abcdef".into()), VarFlags::empty())).unwrap();
+    set_var!("V", VarKind::Str("abcdef".into())).unwrap();
   }
 
   #[test]
@@ -990,7 +988,7 @@ mod tests {
   #[test]
   fn param_default_unset_or_null_set() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("SET", VarKind::Str("value".into()), VarFlags::empty())).unwrap();
+    set_var!("SET", VarKind::Str("value".into())).unwrap();
 
     let result = test_param_expansion("SET:-fallback").unwrap();
     assert_eq!(result, "value");
@@ -1016,7 +1014,7 @@ mod tests {
   #[test]
   fn param_alt_set_not_null() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("SET", VarKind::Str("value".into()), VarFlags::empty())).unwrap();
+    set_var!("SET", VarKind::Str("value".into())).unwrap();
 
     let result = test_param_expansion("SET:+alt").unwrap();
     assert_eq!(result, "alt");
@@ -1069,7 +1067,7 @@ mod tests {
   #[test]
   fn param_length() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("STR", VarKind::Str("hello".into()), VarFlags::empty())).unwrap();
+    set_var!("STR", VarKind::Str("hello".into())).unwrap();
 
     let result = test_param_expansion("#STR").unwrap();
     assert_eq!(result, "5");
@@ -1078,8 +1076,7 @@ mod tests {
   #[test]
   fn param_substr() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("STR", VarKind::Str("hello world".into()), VarFlags::empty()))
-      .unwrap();
+    set_var!("STR", VarKind::Str("hello world".into())).unwrap();
 
     let result = test_param_expansion("STR:6").unwrap();
     assert_eq!(result, "world");
@@ -1088,8 +1085,7 @@ mod tests {
   #[test]
   fn param_substr_len() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("STR", VarKind::Str("hello world".into()), VarFlags::empty()))
-      .unwrap();
+    set_var!("STR", VarKind::Str("hello world".into())).unwrap();
 
     let result = test_param_expansion("STR:0:5").unwrap();
     assert_eq!(result, "hello");
@@ -1162,8 +1158,7 @@ mod tests {
   #[test]
   fn param_replace_first() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("STR", VarKind::Str("hello hello".into()), VarFlags::empty()))
-      .unwrap();
+    set_var!("STR", VarKind::Str("hello hello".into())).unwrap();
 
     let result = test_param_expansion("STR/hello/world").unwrap();
     assert_eq!(result, "world hello");
@@ -1172,8 +1167,7 @@ mod tests {
   #[test]
   fn param_replace_all() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("STR", VarKind::Str("hello hello".into()), VarFlags::empty()))
-      .unwrap();
+    set_var!("STR", VarKind::Str("hello hello".into())).unwrap();
 
     let result = test_param_expansion("STR//hello/world").unwrap();
     assert_eq!(result, "world world");
@@ -1182,9 +1176,8 @@ mod tests {
   #[test]
   fn param_indirect() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("REF", VarKind::Str("TARGET".into()), VarFlags::empty())).unwrap();
-    Shed::vars_mut(|v| v.set_var("TARGET", VarKind::Str("value".into()), VarFlags::empty()))
-      .unwrap();
+    set_var!("REF", VarKind::Str("TARGET".into())).unwrap();
+    set_var!("TARGET", VarKind::Str("value".into())).unwrap();
 
     let result = test_param_expansion("!REF").unwrap();
     assert_eq!(result, "value");
@@ -1207,8 +1200,7 @@ mod tests {
   #[test]
   fn param_exp_prefix_removal_escaped() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("branch", VarKind::Str("## main".into()), VarFlags::empty()))
-      .unwrap();
+    set_var!("branch", VarKind::Str("## main".into())).unwrap();
 
     test_input("echo \"${branch#\\#\\# }\"").unwrap();
 
@@ -1241,7 +1233,7 @@ mod tests {
   #[test]
   fn param_exp_suffix_removal_bare_parens() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("v", VarKind::Str("abc(x)".into()), VarFlags::empty())).unwrap();
+    set_var!("v", VarKind::Str("abc(x)".into())).unwrap();
 
     test_input("echo ${v%(x)}").unwrap();
     assert_eq!(guard.read_output(), "abc\n");
@@ -1250,7 +1242,7 @@ mod tests {
   #[test]
   fn param_exp_suffix_removal_bare_parens_double_quoted() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("v", VarKind::Str("abc(x)".into()), VarFlags::empty())).unwrap();
+    set_var!("v", VarKind::Str("abc(x)".into())).unwrap();
 
     test_input("echo \"${v%(x)}\"").unwrap();
     assert_eq!(guard.read_output(), "abc\n");
@@ -1259,7 +1251,7 @@ mod tests {
   #[test]
   fn param_exp_prefix_removal_bare_parens() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("v", VarKind::Str("(x)abc".into()), VarFlags::empty())).unwrap();
+    set_var!("v", VarKind::Str("(x)abc".into())).unwrap();
 
     test_input("echo ${v#(x)}").unwrap();
     assert_eq!(guard.read_output(), "abc\n");
@@ -1273,7 +1265,7 @@ mod tests {
   #[test]
   fn param_exp_replace_escaped_brace_unquoted() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("u", VarKind::Str("a}b".into()), VarFlags::empty())).unwrap();
+    set_var!("u", VarKind::Str("a}b".into())).unwrap();
 
     test_input("echo ${u/\\}/_}").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1282,7 +1274,7 @@ mod tests {
   #[test]
   fn param_exp_replace_escaped_brace_double_quoted() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("u", VarKind::Str("a}b".into()), VarFlags::empty())).unwrap();
+    set_var!("u", VarKind::Str("a}b".into())).unwrap();
 
     test_input("echo \"${u/\\}/_}\"").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1305,7 +1297,7 @@ mod tests {
   #[test]
   fn param_exp_replace_escaped_slash_unquoted() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("s", VarKind::Str("a/b".into()), VarFlags::empty())).unwrap();
+    set_var!("s", VarKind::Str("a/b".into())).unwrap();
 
     test_input("echo ${s/\\//_}").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1314,7 +1306,7 @@ mod tests {
   #[test]
   fn param_exp_replace_escaped_slash_double_quoted() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("s", VarKind::Str("a/b".into()), VarFlags::empty())).unwrap();
+    set_var!("s", VarKind::Str("a/b".into())).unwrap();
 
     test_input("echo \"${s/\\//_}\"").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1326,7 +1318,7 @@ mod tests {
   #[test]
   fn param_exp_replace_single_quoted_brace_double_quoted() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("u", VarKind::Str("a}b".into()), VarFlags::empty())).unwrap();
+    set_var!("u", VarKind::Str("a}b".into())).unwrap();
 
     test_input("echo \"${u/'}'/_}\"").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1335,7 +1327,7 @@ mod tests {
   #[test]
   fn param_exp_replace_single_quoted_slash_double_quoted() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("s", VarKind::Str("a/b".into()), VarFlags::empty())).unwrap();
+    set_var!("s", VarKind::Str("a/b".into())).unwrap();
 
     test_input("echo \"${s/'/'/_}\"").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1345,7 +1337,7 @@ mod tests {
   #[test]
   fn double_quote_apostrophe_stays_literal() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("hi".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("hi".into())).unwrap();
 
     test_input("echo \"${x}'s\"").unwrap();
     assert_eq!(guard.read_output(), "hi's\n");
@@ -1358,7 +1350,7 @@ mod tests {
   #[test]
   fn param_exp_replace_nested_double_quote() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("foo", VarKind::Str("bar".into()), VarFlags::empty())).unwrap();
+    set_var!("foo", VarKind::Str("bar".into())).unwrap();
 
     test_input("echo \"${foo/bar/\"biz\"}\"").unwrap();
     assert_eq!(guard.read_output(), "biz\n");
@@ -1370,7 +1362,7 @@ mod tests {
   #[test]
   fn param_exp_replace_nested_double_quote_with_apostrophe() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("foo", VarKind::Str("bar".into()), VarFlags::empty())).unwrap();
+    set_var!("foo", VarKind::Str("bar".into())).unwrap();
 
     test_input("echo \"${foo/bar/\"'biz\"}\"").unwrap();
     assert_eq!(guard.read_output(), "'biz\n");
@@ -1383,8 +1375,7 @@ mod tests {
   #[test]
   fn param_exp_ansi_c_quote_in_double_quoted_operand() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("s", VarKind::Str("first\nsecond".into()), VarFlags::empty()))
-      .unwrap();
+    set_var!("s", VarKind::Str("first\nsecond".into())).unwrap();
 
     test_input("printf '[%s]' \"${s%%$'\\n'*}\"").unwrap();
     assert_eq!(guard.read_output(), "[first]");
@@ -1394,8 +1385,8 @@ mod tests {
   #[test]
   fn param_exp_replace_nested_double_quote_expands_var() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("foo", VarKind::Str("bar".into()), VarFlags::empty())).unwrap();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("XX".into()), VarFlags::empty())).unwrap();
+    set_var!("foo", VarKind::Str("bar".into())).unwrap();
+    set_var!("x", VarKind::Str("XX".into())).unwrap();
 
     test_input("echo \"${foo/bar/\"$x\"}\"").unwrap();
     assert_eq!(guard.read_output(), "XX\n");
@@ -1404,7 +1395,7 @@ mod tests {
   #[test]
   fn param_exp_quoted_glob_meta_is_literal() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("foo", VarKind::Str("ba*r".into()), VarFlags::empty())).unwrap();
+    set_var!("foo", VarKind::Str("ba*r".into())).unwrap();
 
     // "*" makes the asterisk literal — strips the literal "*r" suffix.
     test_input("echo ${foo%\"*\"r}").unwrap();
@@ -1415,7 +1406,7 @@ mod tests {
   #[test]
   fn param_exp_unquoted_glob_meta_is_wildcard() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("foo", VarKind::Str("ba*r".into()), VarFlags::empty())).unwrap();
+    set_var!("foo", VarKind::Str("ba*r".into())).unwrap();
 
     // unquoted *r is a glob — shortest match is just "r".
     test_input("echo ${foo%*r}").unwrap();
@@ -1426,7 +1417,7 @@ mod tests {
   #[test]
   fn param_exp_backslash_glob_meta_is_literal() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("foo", VarKind::Str("ba*r".into()), VarFlags::empty())).unwrap();
+    set_var!("foo", VarKind::Str("ba*r".into())).unwrap();
 
     test_input("echo ${foo%\\*r}").unwrap();
     let out = guard.read_output();
@@ -1436,7 +1427,7 @@ mod tests {
   #[test]
   fn param_exp_single_quoted_glob_meta_is_literal() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("foo", VarKind::Str("ba*r".into()), VarFlags::empty())).unwrap();
+    set_var!("foo", VarKind::Str("ba*r".into())).unwrap();
 
     test_input("echo ${foo%'*'r}").unwrap();
     let out = guard.read_output();
@@ -1446,7 +1437,7 @@ mod tests {
   // ===================== Case conversion =====================
 
   fn set(name: &str, val: &str) {
-    Shed::vars_mut(|v| v.set_var(name, VarKind::Str(val.into()), VarFlags::empty())).unwrap();
+    set_var!(name, VarKind::Str(val.into())).unwrap();
   }
 
   #[test]

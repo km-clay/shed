@@ -1,3 +1,4 @@
+use crate::set_var;
 use std::{cell::Cell, str::FromStr};
 
 use bstr::ByteSlice;
@@ -488,14 +489,14 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
       let rhs = pop_num!();
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)?.wrapping_shl(rhs as u32);
-      Shed::vars_mut(|v| v.set_var(&lhs, VarKind::Int(new_val as i32), VarFlags::empty())).unwrap();
+      set_var!(&lhs, VarKind::Int(new_val as i32)).unwrap();
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::ShiftRAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)?.wrapping_shr(rhs as u32);
-      Shed::vars_mut(|v| v.set_var(&lhs, VarKind::Int(new_val as i32), VarFlags::empty())).unwrap();
+      set_var!(&lhs, VarKind::Int(new_val as i32)).unwrap();
       stack.push(StackVal::Num(new_val));
     }
   }
@@ -968,7 +969,7 @@ impl ArithTk {
           let op = tokens.next().unwrap();
           let val = read_var_as_i64(var)?;
           let delta: i64 = if matches!(op, ArithTk::Inc) { 1 } else { -1 };
-          Shed::vars_mut(|v| v.set_var(var, VarKind::string((val + delta).to_string().into()), VarFlags::empty())).unwrap();
+          set_var!(var, VarKind::string((val + delta).to_string().into())).unwrap();
           output.push(ArithTk::Num(val)); // push old value (postfix)
         } else {
           output.push(token); // keep as Var, may be assignment target
@@ -987,7 +988,7 @@ impl ArithTk {
         let val = read_var_as_i64(&var)?;
         let delta: i64 = if matches!(op, ArithTk::Inc) { 1 } else { -1 };
         let new_val = val + delta;
-        Shed::vars_mut(|v| v.set_var(&var, VarKind::string(new_val.to_string().into()), VarFlags::empty())).unwrap();
+        set_var!(&var, VarKind::string(new_val.to_string().into())).unwrap();
         output.push(ArithTk::Num(new_val)); // push new value (prefix)
       }
 
@@ -1276,7 +1277,7 @@ fn strip_enclosing_parens(s: &[u8]) -> Option<&[u8]> {
 #[expect(clippy::float_cmp)]
 mod tests {
   use super::*;
-  use crate::state::{Shed, vars::VarFlags, vars::VarKind};
+  use crate::state::{Shed, vars::VarKind};
   use crate::tests::testutil::TestGuard;
 
   fn arith(s: &str) -> f64 {
@@ -1389,14 +1390,14 @@ mod tests {
   fn arith_recursive_variable_resolution() {
     let _g = TestGuard::new();
     // A variable holding another name resolves transitively.
-    Shed::vars_mut(|v| v.set_var("x", VarKind::string("3".into()), VarFlags::empty())).unwrap();
-    Shed::vars_mut(|v| v.set_var("y", VarKind::string("x".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::string("3".into())).unwrap();
+    set_var!("y", VarKind::string("x".into())).unwrap();
     assert_eq!(arith("y+1"), 4.0);
     // A variable holding a sub-expression is evaluated.
-    Shed::vars_mut(|v| v.set_var("b", VarKind::string("x+1".into()), VarFlags::empty())).unwrap();
+    set_var!("b", VarKind::string("x+1".into())).unwrap();
     assert_eq!(arith("b*2"), 8.0);
     // A chain resolves to the end.
-    Shed::vars_mut(|v| v.set_var("a", VarKind::string("b".into()), VarFlags::empty())).unwrap();
+    set_var!("a", VarKind::string("b".into())).unwrap();
     assert_eq!(arith("a"), 4.0);
   }
 
@@ -1404,11 +1405,11 @@ mod tests {
   fn arith_recursion_cycle_errors_not_crashes() {
     // Self-reference must error (via the depth cap), not overflow the stack.
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("z", VarKind::string("z".into()), VarFlags::empty())).unwrap();
+    set_var!("z", VarKind::string("z".into())).unwrap();
     assert!(expand_arithmetic(None, b"z").is_err());
     // Mutual reference likewise.
-    Shed::vars_mut(|v| v.set_var("p", VarKind::string("q".into()), VarFlags::empty())).unwrap();
-    Shed::vars_mut(|v| v.set_var("q", VarKind::string("p".into()), VarFlags::empty())).unwrap();
+    set_var!("p", VarKind::string("q".into())).unwrap();
+    set_var!("q", VarKind::string("p".into())).unwrap();
     assert!(expand_arithmetic(None, b"p").is_err());
   }
 
@@ -1515,7 +1516,7 @@ mod tests {
   #[test]
   fn arith_plus_assign() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("3".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("3".into())).unwrap();
     arith("(x += 2)");
     let val = try_var!("x").unwrap();
     assert_eq!(val, "5");
@@ -1536,7 +1537,7 @@ mod tests {
   #[test]
   fn arith_postfix_inc() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("i", VarKind::Str("5".into()), VarFlags::empty())).unwrap();
+    set_var!("i", VarKind::Str("5".into())).unwrap();
     let result = arith("(i++)");
     assert_eq!(result, 5.0); // returns old value
     let val = try_var!("i").unwrap();
@@ -1546,7 +1547,7 @@ mod tests {
   #[test]
   fn arith_prefix_inc() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("i", VarKind::Str("5".into()), VarFlags::empty())).unwrap();
+    set_var!("i", VarKind::Str("5".into())).unwrap();
     let result = arith("(++i)");
     assert_eq!(result, 6.0); // returns new value
     let val = try_var!("i").unwrap();
@@ -1581,7 +1582,7 @@ mod tests {
   #[test]
   fn arith_with_variable() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("5".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("5".into())).unwrap();
     assert_eq!(arith("(x + 3)"), 8.0);
   }
 
@@ -1670,7 +1671,7 @@ mod tests {
   #[test]
   fn arith_minus_assign() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("10".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("10".into())).unwrap();
     assert_eq!(arith("(x -= 3)"), 7.0);
     assert_eq!(try_var!("x").unwrap(), "7");
   }
@@ -1678,7 +1679,7 @@ mod tests {
   #[test]
   fn arith_mul_assign() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("6".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("6".into())).unwrap();
     assert_eq!(arith("(x *= 7)"), 42.0);
     assert_eq!(try_var!("x").unwrap(), "42");
   }
@@ -1686,7 +1687,7 @@ mod tests {
   #[test]
   fn arith_div_assign() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("20".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("20".into())).unwrap();
     assert_eq!(arith("(x /= 4)"), 5.0);
     assert_eq!(try_var!("x").unwrap(), "5");
   }
@@ -1694,7 +1695,7 @@ mod tests {
   #[test]
   fn arith_mod_assign() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("17".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("17".into())).unwrap();
     assert_eq!(arith("(x %= 5)"), 2.0);
     assert_eq!(try_var!("x").unwrap(), "2");
   }
@@ -1702,35 +1703,35 @@ mod tests {
   #[test]
   fn arith_bit_and_assign() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("12".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("12".into())).unwrap();
     assert_eq!(arith("(x &= 10)"), 8.0);
   }
 
   #[test]
   fn arith_bit_or_assign() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("12".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("12".into())).unwrap();
     assert_eq!(arith("(x |= 3)"), 15.0);
   }
 
   #[test]
   fn arith_bit_xor_assign() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("12".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("12".into())).unwrap();
     assert_eq!(arith("(x ^= 10)"), 6.0);
   }
 
   #[test]
   fn arith_shift_l_assign() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("1".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("1".into())).unwrap();
     assert_eq!(arith("(x <<= 3)"), 8.0);
   }
 
   #[test]
   fn arith_shift_r_assign() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("32".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("32".into())).unwrap();
     assert_eq!(arith("(x >>= 2)"), 8.0);
   }
 
@@ -1739,7 +1740,7 @@ mod tests {
   #[test]
   fn arith_postfix_dec() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("5".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("5".into())).unwrap();
     // post-dec yields the pre-decrement value
     assert_eq!(arith("(x--)"), 5.0);
     assert_eq!(try_var!("x").unwrap(), "4");
@@ -1748,7 +1749,7 @@ mod tests {
   #[test]
   fn arith_prefix_dec() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("5".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("5".into())).unwrap();
     // pre-dec yields the new value
     assert_eq!(arith("(--x)"), 4.0);
     assert_eq!(try_var!("x").unwrap(), "4");
@@ -1810,14 +1811,14 @@ mod tests {
   #[test]
   fn arith_div_assign_by_zero_errors() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("5".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("5".into())).unwrap();
     assert!(expand_arithmetic(None, b"(x /= 0)").is_err());
   }
 
   #[test]
   fn arith_mod_assign_by_zero_errors() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("5".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("5".into())).unwrap();
     assert!(expand_arithmetic(None, b"(x %= 0)").is_err());
   }
 

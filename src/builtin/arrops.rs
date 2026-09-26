@@ -13,7 +13,7 @@
 use std::collections::VecDeque;
 
 use crate::{
-  procio, sherr,
+  procio, set_var, sherr,
   state::{
     Shed,
     vars::{VarFlags, VarKind, VarStr},
@@ -127,11 +127,9 @@ trait ArrOp {
     if let Some(var) = var {
       if popped.len() == 1 {
         let val = popped.pop_back().unwrap();
-        Shed::vars_mut(|v| v.set_var(&var.to_str_lossy(), VarKind::Str(val), VarFlags::empty()))?;
+        set_var!(&var.to_str_lossy(), Str(val))?;
       } else {
-        Shed::vars_mut(|v| {
-          v.set_var(&var.to_str_lossy(), VarKind::arr(popped), VarFlags::empty())
-        })?;
+        set_var!(&var.to_str_lossy(), arr(popped))?;
       }
     } else {
       for val in popped {
@@ -276,10 +274,8 @@ impl super::Builtin for Rotate {
 #[cfg(test)]
 mod tests {
   use crate::{
-    state::{
-      self, Shed,
-      vars::{VarFlags, VarKind, VarStr},
-    },
+    set_var,
+    state::{self, Shed, vars::VarStr},
     tests::testutil::{TestGuard, test_input},
     var,
   };
@@ -290,14 +286,7 @@ mod tests {
       .iter()
       .map(ToString::to_string)
       .collect::<VecDeque<_>>();
-    Shed::vars_mut(|v| {
-      v.set_var(
-        name,
-        VarKind::arr(arr.into_iter().map(Into::into)),
-        VarFlags::empty(),
-      )
-    })
-    .unwrap();
+    set_var!(name, arr(arr.into_iter().map(Into::into))).unwrap();
   }
 
   fn get_arr(name: &str) -> Vec<VarStr> {

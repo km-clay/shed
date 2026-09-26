@@ -3,6 +3,7 @@
 //! These functions do stuff like setting up the logger, parsing the command
 //! line arguments, hanging up child processes on exit, etc.
 
+use crate::set_var;
 use std::{
   io::Write,
   os::unix::ffi::{OsStrExt, OsStringExt},
@@ -34,7 +35,7 @@ use super::{
     logic::{LogTab, TrapTarget},
     meta::MetaTab,
     terminal::Terminal,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarKind, VarStr},
   },
   status_msg,
   util::{error::ShResult, flog},
@@ -290,7 +291,7 @@ pub(super) fn setup() -> Option<ShedArgs> {
 
   if !args.no_rc {
     if let Some(ref path) = args.rc_path {
-      Shed::vars_mut(|v| v.set_var("SHED_RC", VarKind::string(path.into()), VarFlags::EXPORT)).ok();
+      set_var!("SHED_RC", VarKind::string(path.into()); EXPORT).ok();
     }
     if let Err(e) = rc::source_env() {
       e.print_error();

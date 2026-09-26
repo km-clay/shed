@@ -384,6 +384,7 @@ impl Expander {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::set_var;
   use std::collections::VecDeque;
 
   // These tests build an `Expander.raw` from a marker-char string; convert it
@@ -484,7 +485,7 @@ mod tests {
   #[test]
   fn word_split_custom_ifs() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
+    set_var!("IFS", VarKind::Str(":".into())).unwrap();
 
     let raw = format!("{}a:b:c{}", markers::EXPAND_START, markers::EXPAND_END);
     let exp = Expander {
@@ -502,8 +503,7 @@ mod tests {
   #[test]
   fn word_split_empty_ifs() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(VarStr::default()), VarFlags::empty()))
-      .unwrap();
+    set_var!("IFS", VarKind::Str(VarStr::default())).unwrap();
 
     // Even as expansion output, an empty IFS suppresses all field splitting.
     let raw = format!(
@@ -579,7 +579,7 @@ mod tests {
   #[test]
   fn word_split_escaped_custom_ifs() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
+    set_var!("IFS", VarKind::Str(":".into())).unwrap();
 
     let raw = format!("a{}b:c", render(&escape::unescape_str(b"\\:")));
     let exp = Expander {

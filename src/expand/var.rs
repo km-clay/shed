@@ -281,6 +281,7 @@ pub(crate) fn is_var_name_ch(ch: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+  use crate::set_var;
   use bstr::ByteSlice;
   use itertools::Itertools;
 
@@ -325,8 +326,8 @@ mod tests {
   mod markers {
     pub(super) const DUB_QUOTE: char = '\u{fdd0}';
   }
+  use crate::state::vars::VarKind;
   use crate::state::vars::VarStr;
-  use crate::state::{Shed, vars::VarFlags, vars::VarKind};
   use crate::tests::testutil::TestGuard;
 
   // ===================== Variable Expansion (TestGuard) =====================
@@ -334,8 +335,7 @@ mod tests {
   #[test]
   fn var_expansion_basic() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("MYVAR", VarKind::Str("hello".into()), VarFlags::empty()))
-      .unwrap();
+    set_var!("MYVAR", VarKind::Str("hello".into())).unwrap();
 
     let raw = unescape_str(b"$MYVAR");
     let result = expand_raw(&mut raw.cursor()).unwrap();
@@ -345,7 +345,7 @@ mod tests {
   #[test]
   fn var_expansion_braced() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("FOO", VarKind::Str("bar".into()), VarFlags::empty())).unwrap();
+    set_var!("FOO", VarKind::Str("bar".into())).unwrap();
 
     let raw = unescape_str(b"${FOO}");
     let result = expand_raw(&mut raw.cursor()).unwrap();
@@ -364,8 +364,8 @@ mod tests {
   #[test]
   fn var_expansion_concatenated() {
     let _guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("A", VarKind::Str("hello".into()), VarFlags::empty())).unwrap();
-    Shed::vars_mut(|v| v.set_var("B", VarKind::Str("world".into()), VarFlags::empty())).unwrap();
+    set_var!("A", VarKind::Str("hello".into())).unwrap();
+    set_var!("B", VarKind::Str("world".into())).unwrap();
 
     let raw = unescape_str(b"${A}_${B}");
     let result = expand_raw(&mut raw.cursor()).unwrap();

@@ -231,7 +231,7 @@ pub(crate) fn prefix_assign_guard(tree: &Ast, assignments: &[NodeId]) -> impl Dr
       for (name, prior) in saved {
         match prior {
           Some(var) => {
-            v.update_var(&name, var.kind().clone()).ok();
+            v.set_var(&name, var.kind().clone(), VarFlags::empty()).ok();
             if !var.flags().contains(VarFlags::EXPORT) {
               v.unexport_var(&name);
             }

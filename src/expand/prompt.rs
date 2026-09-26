@@ -343,6 +343,7 @@ fn hostname(short: bool, out: &mut String) {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::set_var;
   use std::time::Duration;
 
   // ===================== tokenize_prompt =====================
@@ -752,8 +753,8 @@ mod tests {
   }
 
   fn set_var(name: &str, value: &str) {
-    use crate::state::vars::{VarFlags, VarKind};
-    Shed::vars_mut(|v| v.set_var(name, VarKind::string(value.into()), VarFlags::empty())).unwrap();
+    use crate::state::vars::VarKind;
+    set_var!(name, VarKind::string(value.into())).unwrap();
   }
 
   #[test]

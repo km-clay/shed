@@ -1,3 +1,4 @@
+use crate::set_var;
 use std::{
   io,
   net::{TcpListener, TcpStream},
@@ -36,7 +37,7 @@ use crate::{
   sherr, shopt, signal,
   state::{
     ForkKind, Shed,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarKind, VarStr},
   },
   util::{
     self,
@@ -362,10 +363,10 @@ fn install_socket_fd(
 
   match (target_fd, var_name) {
     (None, None) => {
-      Shed::vars_mut(|v| v.set_var(default_var, VarKind::Int(fd), VarFlags::empty()))?;
+      set_var!(default_var, VarKind::Int(fd))?;
     }
     (_, Some(var)) => {
-      Shed::vars_mut(|v| v.set_var(&var.to_str_lossy(), VarKind::Int(fd), VarFlags::empty()))?;
+      set_var!(&var.to_str_lossy(), VarKind::Int(fd))?;
     }
     _ => {}
   }

@@ -396,7 +396,7 @@ fn get_candidates_var_prefix_completes_with_shell_var() {
 }
 
 #[test]
-fn get_candidates_var_prefix_completes_even_when_prefix_is_set_var() {
+fn get_candidates_var_prefix_completes_even_when_prefix_isset_var() {
   // Regression: `$FOO<Tab>` used to return nothing when FOO itself was a set
   // variable, so a longer name like FOOBAR could never be completed.
   let _g = TestGuard::new();

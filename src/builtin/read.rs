@@ -36,7 +36,6 @@ bitflags! {
     const N_CHARS = 		0b0000_1000;
     const TIMEOUT = 		0b0001_0000;
     const QUOTED  = 		0b0010_0000;
-    const RAW = 			0b0100_0000;
   }
 }
 pub(super) struct Read;
@@ -48,7 +47,6 @@ impl super::Builtin for Read {
       OptSpec::new_long("quoted").short(b'q'),
       OptSpec::new_short("array", b'a').argc(1),
       OptSpec::new_short("n-chars", b'n').argc(1),
-      OptSpec::new_short("raw-chars", b'N').argc(1),
       OptSpec::new_short("timeout", b't').argc(1),
       OptSpec::new_short("prompt", b'p').argc(1),
       OptSpec::new_short("delim", b'd').argc(1),
@@ -76,14 +74,6 @@ impl super::Builtin for Read {
             .parse::<usize>()
             .ok_or_else(|| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
           max_bytes = Some(bytes);
-        }
-        "raw-chars" => {
-          let n = opt.value()?;
-          let bytes = n
-            .parse::<usize>()
-            .ok_or_else(|| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
-          max_bytes = Some(bytes);
-          flags |= ReadFlags::RAW;
         }
         "prompt" => {
           let p = opt.value()?;
@@ -141,12 +131,6 @@ impl super::Builtin for Read {
       }
     });
 
-    if flags.contains(ReadFlags::RAW) {
-      let sink = procio::stdin_sink()?;
-      let input = raw_read(&*sink, max_bytes.unwrap_or(0))?;
-      return assign_raw(&input, &arg_vec);
-    }
-
     let input = do_read(
       delim,
       !flags.contains(ReadFlags::NO_ESCAPE),
@@ -168,54 +152,6 @@ impl super::Builtin for Read {
       }
     }
   }
-}
-
-/// Read exactly `n` bytes verbatim, ignoring delimiters, escapes, and IFS splitting
-fn raw_read(sink: &dyn Sink, n: usize) -> ShResult<Vec<u8>> {
-  let mut buf = Vec::with_capacity(n.min(CHUNK_SIZE));
-  let mut chunk = [0u8; CHUNK_SIZE];
-  while buf.len() < n {
-    let want = (n - buf.len()).min(chunk.len());
-    match sink.read(&mut chunk[..want]) {
-      Ok(0) => break,
-      Ok(r) => buf.extend_from_slice(&chunk[..r]),
-      Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-        if signal::sigint_pending() {
-          Shed::set_status(130);
-          return Ok(Vec::new());
-        }
-      }
-      Err(e) => return Err(e.into()),
-    }
-  }
-  Shed::set_status(i32::from(buf.len() != n));
-  Ok(buf)
-}
-
-/// Assign raw bytes to the first named variable (or `REPLY`), with no field
-/// splitting; any further named variables are cleared.
-fn assign_raw(input: &[u8], vars: &[(VarStr, Span)]) -> ShResult<()> {
-  let target = vars
-    .first()
-    .map(|(name, _)| name.to_str_lossy().into_owned());
-  let name = target.as_deref().unwrap_or("REPLY");
-  Shed::vars_mut(|v| {
-    v.set_var(
-      name,
-      VarKind::string(VarStr::from(input)),
-      VarFlags::empty(),
-    )
-  })?;
-  for (extra, _) in vars.iter().skip(1) {
-    Shed::vars_mut(|v| {
-      v.set_var(
-        &extra.to_str_lossy(),
-        VarKind::string(VarStr::default()),
-        VarFlags::empty(),
-      )
-    })?;
-  }
-  Ok(())
 }
 
 fn do_read(
@@ -730,9 +666,10 @@ impl super::Builtin for ReadKey {
 
 #[cfg(test)]
 mod tests {
+  use crate::set_var;
   use crate::state::terminal::Terminal;
   use crate::state::vars::VarStr;
-  use crate::state::{self, Shed, vars::VarFlags, vars::VarKind};
+  use crate::state::{self, Shed, vars::VarKind};
   use crate::tests::testutil::{TestGuard, test_input};
   use crate::var;
 
@@ -835,7 +772,7 @@ mod tests {
     // The zero-width gluing pass must not swallow these (zero bytes != zero
     // display width).
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
+    set_var!("IFS", VarKind::Str(":".into())).unwrap();
     test_input("read -a f < <(echo 'a::b')").unwrap();
     assert_eq!(arr("f"), vec!["a", "", "b"]);
   }
@@ -845,7 +782,7 @@ mod tests {
     // POSIX: `ws* hard ws*` is a single delimiter. `a , b` with IFS=' ,'
     // must yield two fields, not three (no spurious empty from trailing ws).
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(" ,".into()), VarFlags::empty())).unwrap();
+    set_var!("IFS", VarKind::Str(" ,".into())).unwrap();
     test_input("read -a f < <(echo 'a , b')").unwrap();
     assert_eq!(arr("f"), vec!["a", "b"]);
   }
@@ -853,7 +790,7 @@ mod tests {
   #[test]
   fn read_ws_hard_ws_scalar_split() {
     let g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(" ,".into()), VarFlags::empty())).unwrap();
+    set_var!("IFS", VarKind::Str(" ,".into())).unwrap();
     test_input("read x y < <(echo 'a , b'); echo \"[$x][$y]\"").unwrap();
     assert_eq!(g.read_output().trim(), "[a][b]");
   }
@@ -893,7 +830,7 @@ mod tests {
   #[test]
   fn read_custom_ifs() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
+    set_var!("IFS", VarKind::Str(":".into())).unwrap();
 
     test_input("read x y z < <(echo 'a:b:c')").unwrap();
     assert_eq!(var!("x"), "a");
@@ -904,7 +841,7 @@ mod tests {
   #[test]
   fn read_custom_ifs_remainder() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("IFS", VarKind::Str(":".into()), VarFlags::empty())).unwrap();
+    set_var!("IFS", VarKind::Str(":".into())).unwrap();
 
     test_input("read x y < <(echo 'a:b:c:d')").unwrap();
     assert_eq!(var!("x"), "a");

@@ -786,6 +786,7 @@ fn handle_line_set(
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::set_var;
 
   // ─── No-arg requests ─────────────────────────────────────────────────
 
@@ -1293,8 +1294,7 @@ mod tests {
   #[test]
   fn handler_query_get_var_returns_value() {
     let _g = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("XYZZY", VarKind::Str("magic".into()), VarFlags::empty()))
-      .unwrap();
+    set_var!("XYZZY", VarKind::Str("magic".into())).unwrap();
     let mut rl = fresh_readline();
     let (resp, _) = run_handler(
       SocketRequest::Query(QueryHeader::GetVar("XYZZY".into())),
@@ -1315,7 +1315,7 @@ mod tests {
   }
 
   #[test]
-  fn handler_query_set_var_persists_and_ok() {
+  fn handler_queryset_var_persists_and_ok() {
     let _g = TestGuard::new();
     let mut rl = fresh_readline();
     let (resp, _) = run_handler(

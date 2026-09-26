@@ -11,6 +11,7 @@ use super::{
     ast::{Ast, NodeId},
   },
 };
+use crate::set_var;
 use crate::{
   builtin::{self, BUILTIN_NAMES},
   errln,
@@ -26,7 +27,7 @@ use crate::{
     logic::TrapTarget,
     meta::{CmdTimer, MetaTab},
     terminal::Terminal,
-    vars::{ShellParam, VarFlags, VarKind, VarStr},
+    vars::{ShellParam, VarKind, VarStr},
   },
   util::{
     self,
@@ -133,7 +134,7 @@ fn commit_underscore() {
   }
   let last = LAST_ARG.with(|l| l.borrow_mut().take());
   if let Some(arg) = last {
-    Shed::vars_mut(|v| v.set_var("_", VarKind::string(arg), VarFlags::EXPORT)).ok();
+    set_var!("_", VarKind::string(arg); EXPORT).ok();
   }
 }
 
@@ -399,7 +400,7 @@ impl Dispatcher {
   }
   pub(crate) fn dispatch_cmd(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
     let (line, _) = tree.span_for(node).clone().line_and_col().unwrap_or((0, 0));
-    Shed::vars_mut(|v| v.set_var("LINENO", VarKind::Int((line + 1) as i32), VarFlags::empty()))?;
+    set_var!("LINENO", VarKind::Int((line + 1) as i32))?;
 
     let result = self.route_command(tree, node, true);
     commit_underscore();

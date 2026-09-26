@@ -1,3 +1,4 @@
+use crate::set_var;
 use std::{collections::VecDeque, fs, os::unix::fs::MetadataExt, path::PathBuf, str::FromStr};
 
 use crate::{
@@ -9,7 +10,7 @@ use crate::{
   sherr,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarKind, VarStr},
   },
   util::{
     self,
@@ -212,7 +213,7 @@ fn eval_binary(
             .iter()
             .map(|m| m.map(|mat| VarStr::from(mat.as_str())).unwrap_or_default())
             .collect();
-          Shed::vars_mut(|v| v.set_var("SHED_REMATCH", VarKind::arr(groups), VarFlags::LOCAL))?;
+          set_var!("SHED_REMATCH", VarKind::arr(groups); LOCAL)?;
           Ok(true)
         } else {
           Shed::vars_mut(|v| v.unset_var("SHED_REMATCH")).ok();

@@ -749,6 +749,7 @@ fn get_old_pwd() -> PathBuf {
 
 #[cfg(test)]
 pub(super) mod tests {
+  use crate::set_var;
   use std::env;
   use std::fs;
 
@@ -1121,7 +1122,7 @@ pub(super) mod tests {
 
     test_input(format!("cd {}", temp_dir.path().display())).unwrap();
 
-    Shed::vars_mut(|v| v.set_var("CDPATH", VarKind::Str("".into()), VarFlags::EXPORT)).unwrap();
+    set_var!("CDPATH", VarKind::Str("".into()); EXPORT).unwrap();
     test_input("cd child").unwrap();
 
     let cwd = env::current_dir().unwrap();

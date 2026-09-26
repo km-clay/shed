@@ -1,3 +1,4 @@
+use crate::set_var;
 use std::str::FromStr;
 
 use crate::{
@@ -125,9 +126,10 @@ impl super::Builtin for GetOpts {
 
 fn advance_optind(opt_index: usize, amount: usize) -> ShResult<()> {
   Shed::vars_mut(|v| {
-    v.update_var(
+    v.set_var(
       "OPTIND",
       VarKind::Str((opt_index + amount).to_string().into()),
+      VarFlags::empty(),
     )
   })
 }
@@ -168,7 +170,7 @@ impl GetOpts {
         // char does not match any option in the spec, report error and set opt_var to "?".
         Self::advance_one_char(cur.last_in_arg, cur.opt_index)?;
         if opts_spec.silent_err {
-          Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::empty()))?;
+          set_var!(opt_var, VarKind::Str("?".into()))?;
           Shed::vars_mut(|v| {
             v.set_var(
               "OPTARG",
@@ -177,7 +179,7 @@ impl GetOpts {
             )
           })?;
         } else {
-          Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::empty()))?;
+          set_var!(opt_var, VarKind::Str("?".into()))?;
           sherr!(
             ExecFail @ blame,
             "illegal option '-{ch}'",
@@ -284,7 +286,7 @@ impl GetOpts {
       // value begins at byte offset `char_idx + 2` (past `-` and the flag).
       let arg = &argv[cur.arr_idx];
       let optarg = VarStr::from(&arg.as_bytes()[cur.char_idx + 2..]);
-      Shed::vars_mut(|v| v.set_var("OPTARG", VarKind::string(optarg), VarFlags::empty()))?;
+      set_var!("OPTARG", VarKind::string(optarg))?;
       advance_optind(cur.opt_index, 1)?;
     } else if let Some(next_arg) = argv.get(cur.arr_idx + 1) {
       // Next arg is the argument
@@ -300,7 +302,7 @@ impl GetOpts {
     } else {
       // Missing required argument
       if opts_spec.silent_err {
-        Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str(":".into()), VarFlags::empty()))?;
+        set_var!(opt_var, VarKind::Str(":".into()))?;
         Shed::vars_mut(|v| {
           v.set_var(
             "OPTARG",
@@ -309,7 +311,7 @@ impl GetOpts {
           )
         })?;
       } else {
-        Shed::vars_mut(|v| v.set_var(opt_var, VarKind::Str("?".into()), VarFlags::empty()))?;
+        set_var!(opt_var, VarKind::Str("?".into()))?;
         sherr!(
           ExecFail @ blame,
           "option '-{ch}' requires an argument",

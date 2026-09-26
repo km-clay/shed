@@ -532,6 +532,28 @@ macro_rules! try_var {
   };
 }
 
+#[macro_export]
+macro_rules! set_var {
+  ($name:expr, $kind:ident$(($($inner:tt)*))?) => {{
+    use $crate::state::vars::VarFlags;
+    use $crate::state::vars::VarKind;
+    $crate::state::Shed::vars_mut(|v| v.set_var($name, VarKind::$kind$(($($inner)*))?, VarFlags::empty()))
+  }};
+  ($name:expr, $kind:ident$(($($inner:tt)*))?; $($flag:ident $(|)?)* $(|)?) => {{
+    use $crate::state::vars::VarFlags;
+    use $crate::state::vars::VarKind;
+    $crate::state::Shed::vars_mut(|v| v.set_var($name, VarKind::$kind$(($($inner)*))?, $(VarFlags::$flag)|*))
+  }};
+  ($name:expr, $kind:expr) => {{
+    use $crate::state::vars::VarFlags;
+    $crate::state::Shed::vars_mut(|v| v.set_var($name, $kind, VarFlags::empty()))
+  }};
+  ($name:expr, $kind:expr; $($flag:ident $(|)?)* $(|)?) => {{
+    use $crate::state::vars::VarFlags;
+    $crate::state::Shed::vars_mut(|v| v.set_var($name, $kind, $(VarFlags::$flag)|*))
+  }};
+}
+
 /// Get a shell option from `Shed::shopts()`.
 #[macro_export]
 macro_rules! shopt {

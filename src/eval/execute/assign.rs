@@ -10,6 +10,7 @@
 //! Also handles assignment arithmetic operations like `+=`, `-=`, `*=`, and `/=` for integer and string variables,
 //! as well as array appending for indexed arrays.
 
+use crate::set_var;
 use std::collections::VecDeque;
 
 use itertools::Itertools;
@@ -319,9 +320,16 @@ impl super::Dispatcher {
           };
 
           if let Some((name, idx)) = indexed {
-            Shed::vars_mut(|v| v.update_var_indexed(&name.to_str_lossy(), idx, var.to_string()))?;
+            Shed::vars_mut(|v| {
+              v.set_var_indexed(
+                &name.to_str_lossy(),
+                idx,
+                var.to_string(),
+                VarFlags::empty(),
+              )
+            })?;
           } else {
-            Shed::vars_mut(|v| v.update_var(var_name, var.kind().clone()))?;
+            set_var!(var_name, var.kind().clone())?;
           }
         }
       }

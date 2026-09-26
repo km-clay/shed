@@ -451,6 +451,7 @@ pub(super) fn read_tags(content: &str, name: &str) -> Vec<ScoredTag> {
 #[cfg(test)]
 mod open_help_tests {
   use super::*;
+  use crate::set_var;
   use crate::state::Shed;
   use crate::state::terminal::Terminal;
   use crate::state::vars::{VarFlags, VarKind, VarStr};
@@ -563,8 +564,7 @@ mod open_help_tests {
     let _g = TestGuard::new();
     let dir = tempfile::TempDir::new().unwrap();
     let dir_raw = dir.path().display().to_string();
-    Shed::vars_mut(|v| v.set_var("SHED_HPATH", VarKind::Str(dir_raw.into()), VarFlags::EXPORT))
-      .unwrap();
+    set_var!("SHED_HPATH", VarKind::Str(dir_raw.into()); EXPORT).unwrap();
     let file_path = dir.path().join("some_help_file.txt");
     std::fs::write(
       &file_path,
@@ -582,8 +582,7 @@ mod open_help_tests {
     let _g = TestGuard::new();
     let dir = tempfile::TempDir::new().unwrap();
     let dir_raw = dir.path().display().to_string();
-    Shed::vars_mut(|v| v.set_var("SHED_HPATH", VarKind::Str(dir_raw.into()), VarFlags::EXPORT))
-      .unwrap();
+    set_var!("SHED_HPATH", VarKind::Str(dir_raw.into()); EXPORT).unwrap();
     let file_path = dir.path().join("some_help_file.txt");
 
     let body = "This is some help content\nmore content  *more-content*\nfoo bar biz";

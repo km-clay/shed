@@ -340,13 +340,10 @@ pub(super) fn get_comp_opts<'a>(opts: impl Iterator<Item = &'a Opt>) -> ShResult
 
 #[cfg(test)]
 mod tests {
+  use crate::set_var;
   use crate::{
     readline::Candidate,
-    state::{
-      self, Shed,
-      meta::MetaTab,
-      vars::{VarFlags, VarKind},
-    },
+    state::{self, Shed, meta::MetaTab, vars::VarKind},
     tests::testutil::{TestGuard, test_input},
   };
   use std::fs;
@@ -583,8 +580,7 @@ mod tests {
   #[test]
   fn compgen_variables() {
     let guard = TestGuard::new();
-    Shed::vars_mut(|v| v.set_var("TESTCOMPVAR", VarKind::Str("x".into()), VarFlags::empty()))
-      .unwrap();
+    set_var!("TESTCOMPVAR", VarKind::Str("x".into())).unwrap();
 
     test_input("compgen -v TESTCOMP").unwrap();
     let out = guard.read_output();

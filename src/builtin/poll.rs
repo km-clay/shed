@@ -1,3 +1,4 @@
+use crate::set_var;
 use std::{
   fmt::Display,
   os::fd::{AsRawFd, RawFd},
@@ -93,8 +94,7 @@ impl super::Builtin for Poll {
       }
     }
 
-    Shed::vars_mut(|v| v.update_var(&revents.to_str_lossy(), VarKind::AssocArr(revents_arr)))
-      .with_code(2)?;
+    set_var!(&revents.to_str_lossy(), VarKind::AssocArr(revents_arr)).with_code(2)?;
 
     util::with_status(i32::from(n == 0))
   }

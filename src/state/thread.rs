@@ -84,15 +84,13 @@ impl super::Shed {
 
 #[cfg(test)]
 mod tests {
+  use crate::set_var;
   use std::{sync::Arc, thread};
 
   use crate::{
     eval::parse::ParsedSrc,
     procio::Sinks,
-    state::{
-      Shed,
-      vars::{VarFlags, VarKind},
-    },
+    state::{Shed, vars::VarKind},
     tests::testutil::TestGuard,
   };
 
@@ -108,14 +106,14 @@ mod tests {
   fn timeline_fork_isolates_vars() {
     let _g = TestGuard::new();
 
-    Shed::vars_mut(|v| v.set_var("x", VarKind::Str("parent".into()), VarFlags::empty())).unwrap();
+    set_var!("x", VarKind::Str("parent".into())).unwrap();
 
     let spec = Shed::fork_spec(Sinks::new(), empty_ast());
 
     let (inherited, child_val) = thread::spawn(move || {
       Shed::install(spec);
       let inherited = Shed::vars(|v| v.try_get_var("x"));
-      Shed::vars_mut(|v| v.set_var("x", VarKind::Str("child".into()), VarFlags::empty())).unwrap();
+      set_var!("x", VarKind::Str("child".into())).unwrap();
       let child_val = Shed::vars(|v| v.get_var("x"));
       (inherited, child_val)
     })

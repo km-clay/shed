@@ -7,6 +7,7 @@
 //!
 //! It manages the function call stack, variable scope, redirections, and error handling specific to function execution.
 
+use crate::set_var;
 use bstr::ByteSlice;
 use shed_macros::styled_format;
 
@@ -23,7 +24,7 @@ use crate::{
     meta::MetaTab,
     shopt,
     terminal::Terminal,
-    vars::{VarFlags, VarKind},
+    vars::VarKind,
   },
   util::{
     self,
@@ -200,7 +201,7 @@ impl super::Dispatcher {
 
     // getopts OPTIND variable
     // scoped per-script and per-function call
-    Shed::vars_mut(|v| v.set_var("OPTIND", VarKind::Int(1), VarFlags::LOCAL)).ok();
+    set_var!("OPTIND", VarKind::Int(1); LOCAL).ok();
 
     let Some(root) = func_body.get_root() else {
       return Err(sherr!(

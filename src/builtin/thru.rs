@@ -4,11 +4,8 @@ use crate::{
   builtin::{BuiltinArgs, opt::OptSpec},
   errln, opt,
   procio::{self, OsSink, Sink},
-  sherr, signal,
-  state::{
-    Shed,
-    vars::{VarKind, VarStr},
-  },
+  set_var, sherr, signal,
+  state::vars::VarStr,
   util::{self, error::ShResult},
 };
 
@@ -196,7 +193,7 @@ impl super::Builtin for Thru {
       && let Some(name) = var
     {
       let sink = VarStr::from(sink);
-      Shed::vars_mut(|v| v.update_var(&name.to_str_lossy(), VarKind::string(sink)))?;
+      set_var!(&name.to_str_lossy(), string(sink))?;
     }
 
     if count {
