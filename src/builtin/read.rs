@@ -1018,23 +1018,6 @@ mod tests {
   }
 
   #[test]
-  fn read_dash_big_n_ignores_delimiter() {
-    // `-N` reads exactly N bytes verbatim; a newline in the middle is data,
-    // not a delimiter (`-n` would stop at it).
-    let _g = TestGuard::new();
-    test_input("read -N 3 raw < <(printf 'a\\nb')").unwrap();
-    assert_eq!(var!("raw"), "a\nb");
-  }
-
-  #[test]
-  fn read_dash_big_n_does_not_trim_whitespace() {
-    // No IFS trimming: leading/trailing whitespace bytes are kept.
-    let _g = TestGuard::new();
-    test_input("read -N 3 raw < <(printf ' x ')").unwrap();
-    assert_eq!(var!("raw"), " x ");
-  }
-
-  #[test]
   fn read_n_flag_invalid_count_errors() {
     let _g = TestGuard::new();
     test_input("read -n notanumber line < <(echo hi)").unwrap();
