@@ -152,7 +152,7 @@
       meta = with pkgs.lib; {
         description = "A Linux shell written in Rust";
         homepage = "https://github.com/km-clay/shed";
-        license = licenses.mit;
+        license = licenses.gpl3Plus;
         maintainers = [ ];
         platforms = platforms.linux ++ platforms.darwin;
         mainProgram = "shed";

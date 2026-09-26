@@ -25,6 +25,7 @@
 - [Known issues](#known-issues)
 - [AI Usage](#ai-usage)
 - [Notes](#notes)
+- [License](#license)
 <!--tocend-->
 
 
@@ -135,3 +136,7 @@ Full disclosure can be found here: [AI_POLICY.md](./AI_POLICY.md).
 ## Notes
 
 `shed` is experimental software and is currently under active development. Using an experimental shell is inherently risky business, there is no guarantee that your computer will not explode when you run this. That being said, I've been daily driving it for 11 months at the time of writing and my computer has not exploded yet. Use it at your own risk, the software is provided as-is.
+
+## License
+
+`shed` is free software, licensed under the **GNU General Public License v3.0 or later** (`GPL-3.0-or-later`). See [LICENSE](./LICENSE) for the full text.

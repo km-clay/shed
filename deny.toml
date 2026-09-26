@@ -1,0 +1,18 @@
+# cargo-deny configuration.
+#
+# shed is GPL-3.0-or-later. Every dependency license below is GPL-compatible
+# (permissive, or GPL/LGPL), so it may be combined into the GPLv3 work.
+# cargo-deny checks licenses against this allow-list; with no config it falls
+# back to an empty allow-list and rejects every crate.
+
+[licenses]
+allow = [
+  "GPL-3.0-or-later",
+  "LGPL-2.1-or-later",
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "Unlicense",
+  "Zlib",
+  "Unicode-3.0",
+]
