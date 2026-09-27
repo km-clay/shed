@@ -2854,8 +2854,9 @@ STAT                                             *builtin-stat* *stat*
   In a {format} string, `%` introduces a specifier and `%%` is a literal
   `%`. Any other character is copied verbatim, so escapes like `\n` and
   `\t` are taken from the surrounding shell quoting, not interpreted by
-  `stat`. Unlike GNU `stat`, width and precision modifiers between the
-  `%` and the specifier letter are not supported.
+  `stat`. A `%` may carry `printf`-style flags and a field width (e.g.
+  `%-8s`, `%08s`); a precision (`%.3n`) truncates string fields but is
+  ignored for numeric ones.
 
   File specifiers (default, and with `-L`):
 

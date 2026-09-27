@@ -16,7 +16,7 @@ use crate::{
   util::{
     self,
     error::ShResult,
-    strops::{self, ByteCursor, Field, FieldParams, SliceCursor, StrFmt},
+    strops::{self, ByteCursor, Count, Field, FieldParams, SliceCursor, StrFmt},
   },
 };
 
@@ -104,7 +104,7 @@ impl StrFmt for FileFmt {
   fn render(
     &self,
     conv: &Self::Conv,
-    _field: &FieldParams,
+    field: &FieldParams,
     src: &mut Self::Source,
   ) -> ShResult<Field> {
     let mut body = String::new();
@@ -115,7 +115,7 @@ impl StrFmt for FileFmt {
     Ok(if conv.is_numeric() {
       Field::numeric(body, None, None)
     } else {
-      Field::string(body)
+      Field::string(truncate_to_prec(body, field))
     })
   }
 }
@@ -155,7 +155,7 @@ impl StrFmt for FsFmt {
   fn render(
     &self,
     conv: &Self::Conv,
-    _field: &FieldParams,
+    field: &FieldParams,
     src: &mut Self::Source,
   ) -> ShResult<Field> {
     let mut body = String::new();
@@ -164,10 +164,19 @@ impl StrFmt for FsFmt {
       .map_err(|e| sherr!(ExecFail, "stat: Failed to format field: {e}"))?;
     let body = body.into_bytes();
     Ok(if matches!(conv, FsConv::FileName | FsConv::FsType(_)) {
-      Field::string(body)
+      Field::string(truncate_to_prec(body, field))
     } else {
       Field::numeric(body, None, None)
     })
+  }
+}
+
+/// Truncate a string field's body to the specifier's precision (`%.Ns`),
+/// mirroring `printf`. Numeric fields ignore precision.
+fn truncate_to_prec(body: Vec<u8>, field: &FieldParams) -> Vec<u8> {
+  match field.precision() {
+    Some(Count::Static(p)) => body.get(..*p).map(<[u8]>::to_vec).unwrap_or(body),
+    _ => body,
   }
 }
 
