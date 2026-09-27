@@ -1859,3 +1859,32 @@ mod exit_status_2_8 {
     );
   }
 }
+
+mod arrays_shed_extension {
+  /*
+   * Arrays are not part of POSIX; shed provides them as a bash-style extension,
+   * with one deliberate divergence: shed's indexed arrays are DENSE, not sparse.
+   *
+   * In bash an indexed array is effectively a map from integer to value, so
+   * assigning past the end leaves a gap -- `arr=(a b); arr[5]=z` keeps three
+   * elements (a, b, z) and `${#arr[@]}` is 3. shed backs indexed arrays with a
+   * VecDeque, so the same assignment resizes the array and fills the gap with
+   * empty-string elements: six elements, `${#arr[@]}` is 6. Likewise there is no
+   * sparse "hole": every index in 0..len is a real element.
+   *
+   * Sparse / arbitrary-key storage is served by associative arrays (declare -A)
+   * instead. The tests below pin shed's dense behavior; the bash result is noted
+   * in each case.
+   */
+
+  test_input! {
+    // bash: 3 (indices 2..4 stay unset). shed: 6 (gap filled with empties).
+    dense_out_of_range_assignment_fills_gaps:
+      "arr=(a b); arr[5]=z; echo ${#arr[@]}" => "6\n";
+
+    // The gap slots are real empty-string elements, so a quoted [@] expansion
+    // emits them as words. bash: 3 words; shed: 6.
+    dense_gap_slots_are_empty_string_elements:
+      "arr=(a b); arr[5]=z; set -- \"${arr[@]}\"; echo $#" => "6\n";
+  }
+}

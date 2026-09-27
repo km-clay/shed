@@ -81,4 +81,12 @@ DEVIATIONS                                                  *shed-deviations*
                   is just `${arr[0]}` and `${#arr}` is the length of
                   that first element.                       |variables|
 
+  dense arrays    Indexed arrays are dense: assigning past the end
+                  fills the gap with empty elements, so
+                  `arr=(a b); arr[5]=z` leaves 6 elements and
+                  `${#arr[@]}` is 6. `bash` indexed arrays are sparse --
+                  the gap stays unset and the count is 3. Use an
+                  associative array (`declare -A`) for sparse or
+                  arbitrary-key storage.                    |variables|
+
 ==============================================================================
