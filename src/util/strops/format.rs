@@ -44,14 +44,6 @@ pub(crate) struct FieldParams {
 }
 
 impl FieldParams {
-  fn new() -> Self {
-    Self {
-      flags: FmtFlags::empty(),
-      width: None,
-      precision: None,
-    }
-  }
-
   pub(crate) fn flags(&self) -> FmtFlags {
     self.flags
   }
@@ -75,14 +67,13 @@ impl NumPrefix {
   pub(crate) fn new(sign: Option<Sign>, base: Option<Base>) -> Option<Self> {
     sign.map(Self::Sign).or_else(|| base.map(Self::Base))
   }
-  pub(crate) fn marker(&self) -> &'static [u8] {
+  pub(crate) fn marker(self) -> &'static [u8] {
     match self {
       NumPrefix::Sign(Sign::Plus) => b"+",
       NumPrefix::Sign(Sign::Minus) => b"-",
       NumPrefix::Sign(Sign::Space) => b" ",
       NumPrefix::Base(Base::Hex(Case::Upper)) => b"0X",
       NumPrefix::Base(Base::Hex(Case::Lower)) => b"0x",
-      NumPrefix::Base(Base::Binary) => b"0b",
       NumPrefix::Base(Base::Octal) => b"0",
     }
   }
@@ -97,7 +88,6 @@ pub(crate) enum Case {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Base {
   Hex(Case),
-  Binary,
   Octal,
 }
 
@@ -374,7 +364,7 @@ fn pad_field(field: &Field, params: &FieldParams, out: &mut Vec<u8>) {
   }
   let (sign, zero_ok): (Option<&[u8]>, bool) = match field.kind() {
     FieldKind::String | FieldKind::Raw => (None, false),
-    FieldKind::Numeric { prefix, zero_pad } => (prefix.map(|p| p.marker()), *zero_pad),
+    FieldKind::Numeric { prefix, zero_pad } => (prefix.map(NumPrefix::marker), *zero_pad),
   };
 
   let Some(Count::Static(width)) = params.width().copied() else {
@@ -385,7 +375,7 @@ fn pad_field(field: &Field, params: &FieldParams, out: &mut Vec<u8>) {
     return;
   };
 
-  let total = sign.map(|s| s.len()).unwrap_or(0) + body.chars().count();
+  let total = sign.map_or(0, <[u8]>::len) + body.chars().count();
   if total >= width {
     if let Some(sign) = sign {
       out.extend_from_slice(sign);
