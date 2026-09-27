@@ -88,6 +88,37 @@ pub(crate) fn validate_fd(fd: RawFd) -> io::Result<()> {
   Ok(())
 }
 
+/// Return freed heap pages to the OS
+#[cfg(target_env = "gnu")]
+pub(crate) fn reclaim_heap() {
+  // SAFETY: malloc_trim only releases unused top-of-heap pages back to the OS.
+  unsafe {
+    nix::libc::malloc_trim(0);
+  }
+}
+#[cfg(not(target_env = "gnu"))]
+pub(crate) fn reclaim_heap() {}
+
+/// Captured-output size above which a transient (command sub, etc.) flags the
+/// heap for reclamation. Small captures don't bother.
+pub(crate) const HEAP_TRIM_THRESHOLD: usize = 4 * 1024 * 1024;
+
+static HEAP_DIRTY: AtomicBool = AtomicBool::new(false);
+
+/// Flag that a large transient allocation just happened; the heap is trimmed at
+/// the next return to the prompt via [`reclaim_heap_if_dirty`]. This keeps the
+/// trim off the per-command hot path — only flagged transients pay for it.
+pub(crate) fn mark_heap_dirty() {
+  HEAP_DIRTY.store(true, Ordering::Relaxed);
+}
+
+/// Trim the heap back to the OS if [`mark_heap_dirty`] fired since the last check.
+pub(crate) fn try_heap_trim() {
+  if HEAP_DIRTY.swap(false, Ordering::Relaxed) {
+    reclaim_heap();
+  }
+}
+
 /// Like `dup()`, but places the new fd at `MIN_INTERNAL_FD` or above so it
 /// doesn't collide with user-managed fds.
 pub(crate) fn dup_high(fd: BorrowedFd) -> nix::Result<OwnedFd> {
@@ -2048,6 +2079,12 @@ pub(super) fn capture_command(
       let truncated = sink.was_truncated();
       let size = sink.limit();
       let captured = sink.into_inner();
+
+      // A large captured transient (e.g. `$(fd)`, `$(find ~)`) leaves the arena
+      // grown once freed; flag it so the next prompt trims it back.
+      if captured.len() > HEAP_TRIM_THRESHOLD {
+        mark_heap_dirty();
+      }
 
       let status = loop {
         match waitpid(child, Some(WtFlag::WUNTRACED)) {

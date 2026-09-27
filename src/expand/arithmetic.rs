@@ -14,7 +14,7 @@ use crate::{
   util::{
     self,
     error::{ShErr, ShResult},
-    strops::{self, ByteCursor, SliceCursor},
+    strops::{self, ByteCursor, ParseRadix, SliceCursor},
   },
 };
 
@@ -164,11 +164,6 @@ fn radix_digit_value(c: u8, base: u32) -> Option<u32> {
 /// Parse an ASCII byte buffer as a base-10 `i64` (arithmetic literals are ASCII).
 fn parse_decimal(bytes: &[u8]) -> Option<i64> {
   std::str::from_utf8(bytes).ok()?.parse().ok()
-}
-
-/// Parse an ASCII byte buffer as an `i64` in the given radix.
-fn parse_radix(bytes: &[u8], radix: u32) -> Option<i64> {
-  i64::from_str_radix(std::str::from_utf8(bytes).ok()?, radix).ok()
 }
 
 /// Depth limit for recursive arithmetic variable resolution.
@@ -519,85 +514,50 @@ impl ArithTk {
       b' ' | b'\t' => { cur.next_byte(); }
 
       b'0'..=b'9' => {
-        let mut num = util::scratch_buf();
-        let first = cur.next_byte().unwrap();
-        num.push(first);
-
-        // Hex (0x... / 0X...) or octal (0NNN); otherwise decimal.
-        let parsed: i64 = if first == b'0' && matches!(cur.peek_byte(), Some(b'x' | b'X')) {
-          cur.next_byte(); // consume x/X
-          let mut hex = util::scratch_buf();
-          while let Some(d) = cur.peek_byte() {
-            if d.is_ascii_hexdigit() {
-              hex.push(d);
-              cur.next_byte();
-            } else {
-              break;
-            }
-          }
-          if hex.is_empty() {
-            return Err(sherr!(ParseErr, "Invalid hex literal '0{}'", first as char));
-          }
-          parse_radix(&hex, 16).ok_or_else(|| sherr!(
-            ParseErr, "Invalid hex literal: '0x{}'", hex.as_bstr(),
-          ))?
-        } else if first == b'0' && cur.peek_byte().is_some_and(|d| d.is_ascii_digit()) {
-          // Octal, collect remaining octal digits.
-          let mut oct = util::scratch_buf();
-          while let Some(d) = cur.peek_byte() {
-            if matches!(d, b'0'..=b'7') {
-              oct.push(d);
-              cur.next_byte();
-            } else if d.is_ascii_digit() {
-              return Err(sherr!(ParseErr, "Invalid digit '{}' in octal literal", d as char));
-            } else {
-              break;
-            }
-          }
-          parse_radix(&oct, 8).ok_or_else(|| sherr!(
-            ParseErr, "Invalid octal literal: '0{}'", oct.as_bstr(),
-          ))?
-        } else {
-          while let Some(d) = cur.peek_byte() {
-            if d.is_ascii_digit() {
-              num.push(d);
-              cur.next_byte();
-            } else {
-              break;
-            }
-          }
-          // `base#digits` radix literal (bash), base 2..=64.
-          if cur.peek_byte() == Some(b'#') {
-            cur.next_byte(); // consume '#'
-            let base: u32 = parse_decimal(&num)
-              .and_then(|n| u32::try_from(n).ok())
-              .filter(|b| (2..=64).contains(b))
-              .ok_or_else(|| sherr!(ParseErr, "Invalid arithmetic base '{}' (must be 2..64)", num.as_bstr()))?;
-            let mut digits = util::scratch_buf();
-            while let Some(d) = cur.peek_byte() {
-              if d.is_ascii_alphanumeric() || d == b'@' || d == b'_' {
-                digits.push(d);
-                cur.next_byte();
-              } else {
-                break;
-              }
-            }
-            if digits.is_empty() {
-              return Err(sherr!(ParseErr, "Missing digits after base '{base}#'"));
-            }
-            let mut result: i64 = 0;
-            for &c in &digits {
-              let d = radix_digit_value(c, base).ok_or_else(|| {
-                sherr!(ParseErr, "Invalid digit '{}' for base {base}", c as char)
-              })?;
-              result = result * i64::from(base) + i64::from(d);
-            }
-            result
+        let mut literal = util::scratch_buf();
+        while let Some(d) = cur.peek_byte() {
+          if d.is_ascii_alphanumeric() {
+            literal.push(d);
+            cur.next_byte();
           } else {
-            parse_decimal(&num).ok_or_else(|| sherr!(
-              ParseErr, "Invalid number in arithmetic expression: '{}'", num.as_bstr(),
-            ))?
+            break;
           }
+        }
+
+        let parsed: i64 = if cur.peek_byte() == Some(b'#') {
+          // `base#digits` radix literal (bash), base 2..=64.
+          cur.next_byte(); // consume '#'
+          let base: u32 = parse_decimal(&literal)
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|b| (2..=64).contains(b))
+            .ok_or_else(|| sherr!(ParseErr, "Invalid arithmetic base '{}' (must be 2..64)", literal.as_bstr()))?;
+
+          let mut digits = util::scratch_buf();
+          while let Some(d) = cur.peek_byte() {
+            if d.is_ascii_alphanumeric() || d == b'@' || d == b'_' {
+              digits.push(d);
+              cur.next_byte();
+            } else {
+              break;
+            }
+          }
+          if digits.is_empty() {
+            return Err(sherr!(ParseErr, "Missing digits after base '{base}#'"));
+          }
+          let mut result: i64 = 0;
+          for &c in &digits {
+            let d = radix_digit_value(c, base).ok_or_else(|| {
+              sherr!(ParseErr, "Invalid digit '{}' for base {base}", c as char)
+            })?;
+            result = result * i64::from(base) + i64::from(d);
+          }
+          result
+        } else {
+          // Shared integer-literal grammar (0x / 0b / 0NNN / decimal), same as
+          // `printf %d`.
+          i64::parse_radix(&literal.to_str_lossy()).ok_or_else(|| sherr!(
+            ParseErr, "Invalid number in arithmetic expression: '{}'", literal.as_bstr(),
+          ))?
         };
 
         tokens.push(Self::Num(parsed));
@@ -1384,6 +1344,23 @@ mod tests {
     // base out of range, and a digit out of range for the base
     assert!(expand_arithmetic(None, b"1#0").is_err());
     assert!(expand_arithmetic(None, b"2#5").is_err());
+  }
+
+  #[test]
+  fn arith_prefix_literals() {
+    // Same integer-literal grammar as `printf %d`: 0x hex, 0b binary, 0NNN octal.
+    assert_eq!(arith("0xff"), 255.0);
+    assert_eq!(arith("0XFF"), 255.0);
+    assert_eq!(arith("0b1010"), 10.0);
+    assert_eq!(arith("0B1010"), 10.0);
+    assert_eq!(arith("010"), 8.0);
+    assert_eq!(arith("0b101+0x0f"), 20.0);
+  }
+
+  #[test]
+  fn arith_binary_literal_invalid() {
+    assert!(expand_arithmetic(None, b"0b").is_err()); // no digits
+    assert!(expand_arithmetic(None, b"0b2").is_err()); // 2 is not a binary digit
   }
 
   #[test]

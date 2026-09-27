@@ -740,10 +740,10 @@ impl FuzzyBuilder {
       exec_term!(TermCtl::Return, TermCtl::Clear(WholeLine)).ok();
     }
 
-    // this can allocate a ton
-    // so lets make sure we give it back to our operating system
+    // A pick over a huge candidate set (e.g. scry over a whole home dir) grows
+    // the heap a lot; flag it so the next prompt returns that memory to the OS.
     drop(selector);
-    procio::reclaim_heap();
+    procio::mark_heap_dirty();
     Ok(chosen)
   }
 }

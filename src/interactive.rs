@@ -26,7 +26,7 @@ use crate::{
   exec_term,
   input::{self, Input},
   keys::{KeyEvent, KeyMapMatch},
-  lifecycle, outln,
+  lifecycle, outln, procio,
   readline::{Prompt, ReadlineEvent, ShedLine},
   sherr, shopt,
   signal::{
@@ -356,6 +356,7 @@ fn shed_loop_iter(
 
   cmd::try_hash();
   util::flog::update_log_level();
+  procio::try_heap_trim();
   let _flush_guard = state::terminal::FlushGuard; // flushes terminal on drop
 
   poll_fds.clear();
