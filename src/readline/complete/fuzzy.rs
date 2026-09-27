@@ -155,6 +155,9 @@ fn subseq_window(candidate: &[char], query: &[char]) -> Option<(usize, usize)> {
 
 /// Fast, zero-alloc subsequence check
 pub(crate) fn is_subsequence(candidate: &str, query: &[char]) -> bool {
+  if query.is_empty() {
+    return true; // the empty query is a subsequence of everything
+  }
   let mut qi = 0;
   for c in candidate.chars() {
     if c.eq_ignore_ascii_case(&query[qi]) {
