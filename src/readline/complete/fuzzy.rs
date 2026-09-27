@@ -739,6 +739,11 @@ impl FuzzyBuilder {
     if inline {
       exec_term!(TermCtl::Return, TermCtl::Clear(WholeLine)).ok();
     }
+
+    // this can allocate a ton
+    // so lets make sure we give it back to our operating system
+    drop(selector);
+    procio::reclaim_heap();
     Ok(chosen)
   }
 }
