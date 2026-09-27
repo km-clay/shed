@@ -1851,7 +1851,7 @@ PWD                                              *builtin-pwd* *pwd*
 ==============================================================================
 QUOTE                                            *builtin-quote* *quote*
 
-  `quote [arg...]`
+  `quote [-n] [-v {name}] [arg...]`
 
   Encode arguments as shell-quoted strings and print the results.
   Output uses the minimal quoting needed for each argument:
@@ -1864,6 +1864,16 @@ QUOTE                                            *builtin-quote* *quote*
     - arguments containing control characters (newline, tab, etc.) are
       emitted as ANSI-C strings (`$'...'`) with backslash escapes
     - the empty string is emitted as `''`
+
+  Options:
+
+    `-v {name}`, `--var {name}`     quote the value of variable {name}
+                                    instead of a literal argument.
+                                    Scalars and integers quote their
+                                    value; arrays quote each element,
+                                    space-joined. The mirror of
+                                    `unquote -v`.
+    `-n`, `--no-nl`                 omit the trailing newline
 
   When data is piped to `quote` on standard input, the entire input is
   treated as a single value and encoded as one shell-quoted string.

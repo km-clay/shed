@@ -1,7 +1,7 @@
 use crate::{
   builtin::opt::OptSpec,
   expand::escape,
-  match_loop, opt, procio,
+  match_loop, opt, procio, sherr,
   state::{
     Shed,
     vars::{VarFlags, VarKind, VarStr},
@@ -25,30 +25,54 @@ fn join_bytes(parts: &[Vec<u8>], sep: &[u8]) -> Vec<u8> {
 pub(super) struct Quote;
 impl super::Builtin for Quote {
   fn opts(&self) -> Vec<OptSpec> {
-    vec![opt!("var" | b'v', 1)]
+    vec![opt!("var" | b'v', 1), opt!("no-nl" | b'n')]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    if let Some(stdin) = self.get_input(&mut args) {
-      procio::outln_bytes(&escape::shell_quote_bytes(&stdin));
-      return util::with_status(0);
-    }
+    let no_nl = args.has_opt("no-nl");
+    if let Some(name) = args.opt_value("var") {
+      let Some(var) = quote_var(&name.to_str_lossy()) else {
+        let span = args.opt_span("var").unwrap();
+        return Err(sherr!(ExecFail @ span, "variable '{name}' is unset").with_code(2));
+      };
 
-    let mut parts: Vec<Vec<u8>> = args
-      .arguments()
-      .map(|(s, _)| escape::shell_quote_bytes(s.as_bytes()))
-      .collect();
-
-    for opt in args.options() {
-      if opt.key() == "var" {
-        let var = opt.value()?;
-        if let Some(quoted) = quote_var(&var.to_str_lossy()) {
-          parts.push(quoted);
-        }
+      if var.is_empty() {
+        return util::with_status(0);
       }
-    }
 
-    procio::outln_bytes(&join_bytes(&parts, b" "));
-    util::with_status(0)
+      procio::out_bytes(&var);
+      if !no_nl {
+        procio::out_bytes(b"\n");
+      }
+
+      util::with_status(0)
+    } else if let Some(stdin) = self.get_input(&mut args) {
+      if stdin.is_empty() {
+        return util::with_status(0);
+      }
+
+      procio::out_bytes(&escape::shell_quote_bytes(&stdin));
+
+      if !no_nl {
+        procio::out_bytes(b"\n");
+      }
+
+      util::with_status(0)
+    } else {
+      let parts: Vec<Vec<u8>> = args
+        .arguments()
+        .map(|(s, _)| escape::shell_quote_bytes(s.as_bytes()))
+        .collect();
+
+      if parts.is_empty() {
+        return util::with_status(0);
+      }
+
+      procio::out_bytes(&join_bytes(&parts, b" "));
+      if !no_nl {
+        procio::out_bytes(b"\n");
+      }
+      util::with_status(0)
+    }
   }
 }
 
