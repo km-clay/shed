@@ -65,7 +65,7 @@ pub(crate) fn cached_command_count(ex: bool) -> usize {
   HIST_ENTRIES
     .read()
     .ok()
-    .and_then(|cache| cache.get(&key).map(|entries| entries.len()))
+    .and_then(|cache| cache.get(&key).map(Vec::len))
     .unwrap_or_default()
 }
 

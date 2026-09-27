@@ -1,37 +1,24 @@
 use std::iter::Peekable;
 
-use bitflags::bitflags;
 use bstr::ByteSlice;
 
 use crate::{
+  errln,
   expand::escape,
   match_loop, procio, sherr,
   state::vars::VarStr,
   util::{
     self,
     error::ShResult,
-    strops::{self, ByteCursor, SliceCursor},
+    strops::{
+      self, Base, ByteCursor, Case, Count, Field, FieldParams, FmtFlags, Formatter, ParseRadix,
+      Sign, SliceCursor, StrFmt,
+    },
   },
+  varstr,
 };
 
-bitflags! {
-  #[derive(Debug, Clone, Copy)]
-  pub struct PrintFlags: u8 {
-    const JUST_LEFT = 1;
-    const SHOW_SIGN = 1 << 1;
-    const SPACE_SIGN = 1 << 2;
-    const ALT_FORM = 1 << 3;
-    const ZERO_PAD = 1 << 4;
-  }
-}
-
-enum Case {
-  Lower,
-  Upper,
-}
-
 enum Conversion {
-  Percent,
   SignedDecimal,
   UnsignedDecimal,
   UnsignedOctal,
@@ -48,568 +35,38 @@ enum Conversion {
   StrfTime(VarStr),
 }
 
-#[derive(Debug, Clone, Copy)]
-enum DynNum {
-  Number(i32),
-  Star,
+/// printf's value stream plus the soft-error accumulator. A bad number is
+/// non-fatal (the `0` fallback is still rendered), so the error rides in the
+/// source rather than aborting `render`.
+struct PrintfArgs {
+  args: Peekable<std::vec::IntoIter<Vec<u8>>>,
+  errors: Vec<PrintfErr>,
 }
 
-pub(super) struct PrintFormatter(Box<[Segment]>);
+struct PrintfFmt;
 
-impl PrintFormatter {
-  pub(super) fn parse(fmt_str: &[u8]) -> ShResult<Self> {
-    let mut segments = vec![];
-    let mut cur = SliceCursor::new(fmt_str);
-    let mut literal = util::scratch_buf();
+impl StrFmt for PrintfFmt {
+  type Source = PrintfArgs;
+  type Conv = Conversion;
 
-    match_loop!(cur.next_byte() => b, {
-      b'%' => {
-        if !literal.is_empty() {
-          segments.push(Segment::Literal(escape::expand_ansi_c(&literal)));
-          literal.clear();
-        }
-
-        let spec = FmtSpec::parse(&mut cur);
-        segments.push(Segment::Spec(spec?));
-      }
-      _ => literal.push(b),
-    });
-
-    if !literal.is_empty() {
-      segments.push(Segment::Literal(escape::expand_ansi_c(&literal)));
-    }
-
-    Ok(Self(segments.into_boxed_slice()))
+  fn expand_literal(&self, literal: Vec<u8>) -> Vec<u8> {
+    escape::expand_ansi_c(&literal)
   }
 
-  pub(super) fn apply_once<I: Iterator<Item = Vec<u8>>>(
-    &self,
-    args: &mut Peekable<I>,
-  ) -> ShResult<Rendered> {
-    let mut out = Rendered::default();
-    for seg in &self.0 {
-      match seg {
-        Segment::Literal(s) => out.text.extend_from_slice(s),
-        Segment::Spec(spec) => {
-          let rendered = spec.apply(args)?;
-          out.text.extend_from_slice(&rendered.text);
-          out.merge_errors(rendered);
-        }
-      }
-    }
-    Ok(out)
-  }
-
-  pub(super) fn has_specs(&self) -> bool {
-    self.0.iter().any(|s| matches!(s, Segment::Spec(_)))
-  }
-}
-
-enum Segment {
-  Literal(Vec<u8>),
-  Spec(FmtSpec),
-}
-
-pub(super) struct FmtSpec {
-  flags: PrintFlags,
-  width: Option<DynNum>,
-  precision: Option<DynNum>,
-  conversion: Conversion,
-}
-
-/// Parse a printf numeric argument, returning the value and any soft error.
-/// A *missing* argument (fewer args than conversions) yields `0` with no error;
-/// a *present* argument that fails to parse yields `0` plus a
-/// [`PrintfErr::BadNumber`], so the caller still substitutes `0` and continues
-/// formatting while the run is flagged to exit non-zero.
-fn parse_num_arg<T: std::str::FromStr + Default>(arg: Option<Vec<u8>>) -> (T, Option<PrintfErr>) {
-  let Some(arg) = arg else {
-    return (T::default(), None);
-  };
-
-  // posix thing: if a char leads with a quote, we parse it
-  // as an integer, returning its actual byte value
-  if let Some((&quote, rest)) = arg.split_first()
-    && matches!(quote, b'\'' | b'"')
-  {
-    let byte = rest.first().copied().unwrap_or(0);
-    return (byte.to_string().parse().unwrap_or_default(), None);
-  }
-  match arg.to_str_lossy().parse() {
-    Ok(v) => (v, None),
-    Err(_) => (
-      T::default(),
-      Some(PrintfErr::BadNumber(arg.to_str_lossy().into())),
-    ),
-  }
-}
-
-/// Write the stderr diagnostic for each collected printf error. Returns whether
-/// any were present, so the caller can set a non-zero exit status.
-fn emit_printf_errors(errors: &[PrintfErr]) -> bool {
-  for err in errors {
-    match err {
-      PrintfErr::BadNumber(arg) => crate::errln!("printf: {arg}: invalid number"),
-    }
-  }
-  !errors.is_empty()
-}
-
-impl FmtSpec {
-  pub(super) fn parse(cur: &mut SliceCursor) -> ShResult<Self> {
-    Ok(Self {
-      flags: Self::parse_flags(cur)?,
-      width: Self::parse_width(cur)?,
-      precision: Self::parse_precision(cur)?,
-      conversion: Self::parse_conversion(cur)?,
-    })
-  }
-
-  pub(super) fn apply<I: Iterator<Item = Vec<u8>>>(
-    &self,
-    args: &mut Peekable<I>,
-  ) -> ShResult<Rendered> {
-    // Resolve dynamic width/precision. Negative width means left-justify
-    // with abs(width); negative precision is treated as absent.
-    let (flags, width) = self.resolve_width(args)?;
-    let prec = self.resolve_precision(args)?;
-
-    // Numeric conversions return a `Rendered` (they may report a bad number);
-    // the rest produce plain text and are wrapped with `Rendered::new`.
-    #[rustfmt::skip]
-    let out = match &self.conversion {
-      Conversion::SignedDecimal       => Self::apply_signed_int(args, flags, width, prec)?,
-      Conversion::UnsignedDecimal     => Self::apply_unsigned_int(args, flags, width, prec)?,
-      Conversion::UnsignedOctal       => Self::apply_unsigned_octal(args, flags, width, prec)?,
-      Conversion::UnsignedHex(case)   => Self::apply_unsigned_hex(args, flags, width, prec, case)?,
-      Conversion::FixedPointDecimal   => Self::apply_fixed_float(args, flags, width, prec)?,
-      Conversion::Scientific(case)    => Self::apply_scientific(args, flags, width, prec, case)?,
-      Conversion::HumanSize           => Self::apply_human_size(args, flags, width)?,
-      Conversion::ShortestFloat(case) => Self::apply_shortest_float(args, flags, width, prec, case)?,
-
-      Conversion::Percent             => Rendered::new("%".into()),
-      Conversion::Char                => Rendered::new(Self::apply_char(args, flags, width)?),
-      Conversion::Str                 => Rendered::new(Self::apply_str(args, flags, width, prec)?),
-      Conversion::RepeatStr           => Rendered::new(Self::apply_repeat_str(args, width)?),
-      Conversion::AnsiC               => Rendered::new(Self::apply_ansi_c(args, flags, width, prec)?),
-      Conversion::ShellQuote          => Rendered::new(Self::apply_shell_quote(args, flags, width)?),
-      Conversion::StrfTime(fmt)       => Rendered::new(Self::apply_strftime(args, flags, width, &fmt.to_str_lossy())?),
-    };
-
-    Ok(out)
-  }
-
-  /// Upper bound on a resolved field width or precision. Caps the memory a
-  /// pathological spec (e.g. `%.999999999d`) can demand, and stays within the
-  /// `u16` range the `format!` width/precision machinery accepts.
-  const MAX_FIELD: usize = u16::MAX as usize;
-
-  fn resolve_width<I: Iterator<Item = Vec<u8>>>(
-    &self,
-    args: &mut Peekable<I>,
-  ) -> ShResult<(PrintFlags, Option<usize>)> {
-    let raw = match self.width {
-      Some(DynNum::Star) => Some(Self::parse_int_arg(args)?),
-      Some(DynNum::Number(n)) => Some(n),
-      None => None,
-    };
-    match raw {
-      Some(n) if n < 0 => Ok((
-        self.flags | PrintFlags::JUST_LEFT,
-        Some((n.unsigned_abs() as usize).min(Self::MAX_FIELD)),
-      )),
-      Some(n) => Ok((self.flags, Some((n as usize).min(Self::MAX_FIELD)))),
-      None => Ok((self.flags, None)),
-    }
-  }
-
-  fn resolve_precision<I: Iterator<Item = Vec<u8>>>(
-    &self,
-    args: &mut Peekable<I>,
-  ) -> ShResult<Option<usize>> {
-    let raw = match self.precision {
-      Some(DynNum::Star) => Some(Self::parse_int_arg(args)?),
-      Some(DynNum::Number(n)) => Some(n),
-      None => None,
-    };
-    match raw {
-      Some(n) if n < 0 => Ok(None),
-      Some(n) => Ok(Some((n as usize).min(Self::MAX_FIELD))),
-      None => Ok(None),
-    }
-  }
-
-  fn apply_signed_int<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-    prec: Option<usize>,
-  ) -> ShResult<Rendered> {
-    let (n, err): (i64, _) = parse_num_arg(args.next());
-    let abs = n.unsigned_abs();
-    let sign = pick_sign(n.is_negative(), flags);
-
-    let mut digits: String = abs.to_string();
-    if let Some(p) = prec {
-      digits = format!("{digits:0>p$}");
-    }
-
-    let digits = digits.as_bytes();
-
-    Ok(Rendered {
-      text: pad_to_width(digits, sign, flags, width, prec.is_none()),
-      errors: err.into_iter().collect(),
-    })
-  }
-
-  fn apply_human_size<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-  ) -> ShResult<Rendered> {
-    let (n, err): (u64, _) = parse_num_arg(args.next());
-    let mut s = String::new();
-    strops::format_size(n, &mut s).ok();
-    Ok(Rendered {
-      text: pad_to_width(s.as_bytes(), b"", flags, width, true),
-      errors: err.into_iter().collect(),
-    })
-  }
-
-  fn apply_unsigned_int<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-    prec: Option<usize>,
-  ) -> ShResult<Rendered> {
-    let (n, err): (u64, _) = parse_num_arg(args.next());
-
-    let mut digits = n.to_string();
-    if let Some(p) = prec {
-      digits = format!("{digits:0>p$}");
-    }
-
-    let digits = digits.as_bytes();
-
-    Ok(Rendered {
-      text: pad_to_width(digits, b"", flags, width, prec.is_none()),
-      errors: err.into_iter().collect(),
-    })
-  }
-
-  fn apply_unsigned_octal<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-    prec: Option<usize>,
-  ) -> ShResult<Rendered> {
-    let (n, err): (u64, _) = parse_num_arg(args.next());
-
-    let mut digits = format!("{n:o}");
-    if let Some(p) = prec {
-      digits = format!("{digits:0>p$}");
-    }
-
-    // # flag for %o: ensure at least one leading 0.
-    let prefix = if flags.contains(PrintFlags::ALT_FORM) && !digits.starts_with('0') {
-      "0"
-    } else {
-      ""
-    };
-
-    let digits = digits.as_bytes();
-
-    Ok(Rendered {
-      text: pad_to_width(digits, prefix.as_bytes(), flags, width, prec.is_none()),
-      errors: err.into_iter().collect(),
-    })
-  }
-
-  fn apply_unsigned_hex<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-    prec: Option<usize>,
-    case: &Case,
-  ) -> ShResult<Rendered> {
-    let (n, err): (u64, _) = parse_num_arg(args.next());
-
-    let mut digits = match case {
-      Case::Lower => format!("{n:x}"),
-      Case::Upper => format!("{n:X}"),
-    };
-    if let Some(p) = prec {
-      digits = format!("{digits:0>p$}");
-    }
-
-    // # flag for %x/%X: prepend 0x/0X for non-zero values.
-    let prefix = if flags.contains(PrintFlags::ALT_FORM) && n != 0 {
-      match case {
-        Case::Lower => "0x",
-        Case::Upper => "0X",
-      }
-    } else {
-      ""
-    };
-
-    let digits = digits.as_bytes();
-
-    Ok(Rendered {
-      text: pad_to_width(digits, prefix.as_bytes(), flags, width, prec.is_none()),
-      errors: err.into_iter().collect(),
-    })
-  }
-
-  fn apply_fixed_float<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-    prec: Option<usize>,
-  ) -> ShResult<Rendered> {
-    let (f, err): (f64, _) = parse_num_arg(args.next());
-    let p = prec.unwrap_or(6);
-
-    let body = format!("{f:.p$}");
-    let abs_body = body.trim_start_matches('-').as_bytes();
-    let sign = pick_sign(f.is_sign_negative() && f != 0.0, flags);
-
-    // For floats, ZERO_PAD applies independent of precision (precision
-    // controls digits after decimal point, not minimum total digits).
-    Ok(Rendered {
-      text: pad_to_width(abs_body, sign, flags, width, true),
-      errors: err.into_iter().collect(),
-    })
-  }
-
-  fn apply_scientific<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-    prec: Option<usize>,
-    case: &Case,
-  ) -> ShResult<Rendered> {
-    let (f, err): (f64, _) = parse_num_arg(args.next());
-    let p = prec.unwrap_or(6);
-
-    let raw = match case {
-      Case::Lower => format!("{f:.p$e}"),
-      Case::Upper => format!("{f:.p$E}"),
-    };
-    let normalized = normalize_exponent(raw.as_bytes());
-    let abs_body = normalized.trim_start_with(|c| c == '-');
-    let sign = pick_sign(f.is_sign_negative() && f != 0.0, flags);
-
-    Ok(Rendered {
-      text: pad_to_width(abs_body, sign, flags, width, true),
-      errors: err.into_iter().collect(),
-    })
-  }
-
-  fn apply_shortest_float<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-    prec: Option<usize>,
-    case: &Case,
-  ) -> ShResult<Rendered> {
-    let (f, err): (f64, _) = parse_num_arg(args.next());
-    // %g: precision is number of significant digits (default 6, minimum 1).
-    let p = prec.unwrap_or(6).max(1);
-
-    // POSIX %g: use scientific when exponent < -4 or >= precision.
-    let abs = f.abs();
-    let exp = if abs == 0.0 {
-      0i32
-    } else {
-      abs.log10().floor() as i32
-    };
-    let use_scientific = exp < -4 || exp >= p as i32;
-
-    let body = if use_scientific {
-      let mantissa_prec = p.saturating_sub(1);
-      let raw = match case {
-        Case::Lower => format!("{f:.mantissa_prec$e}"),
-        Case::Upper => format!("{f:.mantissa_prec$E}"),
-      };
-      let normalized = normalize_exponent(raw.as_bytes());
-
-      if flags.contains(PrintFlags::ALT_FORM) {
-        normalized
-      } else {
-        strip_trailing_zeros(&normalized)
-      }
-    } else {
-      let fp = (p as i32 - 1 - exp).max(0) as usize;
-      let raw = format!("{f:.fp$}").as_bytes().to_vec();
-      if flags.contains(PrintFlags::ALT_FORM) {
-        raw
-      } else {
-        strip_trailing_zeros(&raw)
-      }
-    };
-    let abs_body = body.trim_start_with(|c| c == '-');
-    let sign = pick_sign(f.is_sign_negative() && f != 0.0, flags);
-
-    Ok(Rendered {
-      text: pad_to_width(abs_body, sign, flags, width, true),
-      errors: err.into_iter().collect(),
-    })
-  }
-
-  fn apply_char<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-  ) -> ShResult<Vec<u8>> {
-    let arg = args.next().unwrap_or_default();
-    // POSIX %c: take first character of the argument.
-    let c = arg.get(..1).unwrap_or_default();
-    Ok(pad_to_width(c, b"", flags, width, false))
-  }
-
-  fn apply_str<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-    prec: Option<usize>,
-  ) -> ShResult<Vec<u8>> {
-    let s = args.next().unwrap_or_default();
-    let s = match prec {
-      Some(p) => s.get(..p).unwrap_or(&s).to_vec(),
-      None => s,
-    };
-    Ok(pad_to_width(&s, b"", flags, width, false))
-  }
-
-  fn apply_repeat_str<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    width: Option<usize>,
-  ) -> ShResult<Vec<u8>> {
-    // The width slot is the repeat count (`%*r` / `%5r`), not a field width, so
-    // there is no padding. A bare `%r` with no count degrades to a single copy.
-    let s = args.next().unwrap_or_default();
-    Ok(s.repeat(width.unwrap_or(1)))
-  }
-
-  fn apply_ansi_c<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-    prec: Option<usize>,
-  ) -> ShResult<Vec<u8>> {
-    let s = args.next().unwrap_or_default();
-    let expanded = escape::expand_ansi_c(&s);
-    let truncated = match prec {
-      Some(p) => expanded.into_iter().take(p).collect::<Vec<u8>>(),
-      None => expanded,
-    };
-    Ok(pad_to_width(&truncated, b"", flags, width, false))
-  }
-
-  fn apply_shell_quote<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-  ) -> ShResult<Vec<u8>> {
-    let s = args.next().unwrap_or_default();
-    let quoted = escape::shell_quote(&String::from_utf8_lossy(&s));
-    Ok(pad_to_width(quoted.as_bytes(), b"", flags, width, false))
-  }
-
-  fn apply_strftime<I: Iterator<Item = Vec<u8>>>(
-    args: &mut Peekable<I>,
-    flags: PrintFlags,
-    width: Option<usize>,
-    format: &str,
-  ) -> ShResult<Vec<u8>> {
-    use crate::state::{Shed, meta::MetaTab};
-    use chrono::{Local, TimeZone};
-    let arg = args.next().unwrap_or_else(|| b"-1".to_vec());
-    let secs: i64 = String::from_utf8_lossy(&arg).parse().unwrap_or(-1);
-
-    let dt = if secs == -1 {
-      // Current time
-      Local::now()
-    } else if secs == -2 {
-      // Shell start time: convert the monotonic Instant we recorded at
-      // startup into a wall-clock time by subtracting its elapsed duration
-      // from "now".
-      let shell_start_instant = Shed::meta(MetaTab::shell_time);
-      let elapsed = shell_start_instant.elapsed();
-      let now = Local::now();
-      chrono::Duration::from_std(elapsed)
-        .ok()
-        .and_then(|d| now.checked_sub_signed(d))
-        .unwrap_or(now)
-    } else if secs >= 0 {
-      Local
-        .timestamp_opt(secs, 0)
-        .single()
-        .unwrap_or_else(Local::now)
-    } else {
-      Local::now()
-    };
-
-    let formatted = dt.format(format).to_string();
-    Ok(pad_to_width(formatted.as_bytes(), b"", flags, width, false))
-  }
-
-  fn parse_int_arg<I: Iterator<Item = Vec<u8>>>(args: &mut Peekable<I>) -> ShResult<i32> {
-    // Missing or non-numeric args default to 0 (matches bash printf).
-    let Some(arg) = args.next() else {
+  fn take_count(&self, src: &mut Self::Source) -> ShResult<isize> {
+    // Missing or non-numeric `*` args default to 0 (matches bash printf).
+    let Some(arg) = src.args.next() else {
       return Ok(0);
     };
-    Ok(String::from_utf8_lossy(&arg).parse::<i32>().unwrap_or(0))
+    Ok(VarStr::from(arg).parse::<isize>().unwrap_or(0))
   }
 
-  fn parse_flags(cur: &mut SliceCursor) -> ShResult<PrintFlags> {
-    let mut flags = PrintFlags::empty();
-    match_loop!(cur.peek_byte() => b, {
-      b'-' => { flags |= PrintFlags::JUST_LEFT; cur.bump(); },
-      b'+' => { flags |= PrintFlags::SHOW_SIGN; cur.bump(); },
-      b' ' => { flags |= PrintFlags::SPACE_SIGN; cur.bump(); },
-      b'#' => { flags |= PrintFlags::ALT_FORM; cur.bump(); },
-      b'0' => { flags |= PrintFlags::ZERO_PAD; cur.bump(); },
-      _ => break,
-    });
-    Ok(flags)
-  }
-  fn parse_width(cur: &mut SliceCursor) -> ShResult<Option<DynNum>> {
-    match cur.peek_byte() {
-      Some(b'*') => {
-        cur.bump();
-        Ok(Some(DynNum::Star))
-      }
-      Some(b'0'..=b'9') => {
-        let width = Self::parse_uint(cur)?;
-        Ok(Some(DynNum::Number(width)))
-      }
-      _ => Ok(None),
-    }
-  }
-  fn parse_precision(cur: &mut SliceCursor) -> ShResult<Option<DynNum>> {
-    if !cur.bump_if_eq(b'.') {
-      return Ok(None);
-    }
-    match cur.peek_byte() {
-      Some(b'*') => {
-        cur.bump();
-        Ok(Some(DynNum::Star))
-      }
-      Some(b'0'..=b'9') => {
-        let precision = Self::parse_uint(cur)?;
-        Ok(Some(DynNum::Number(precision)))
-      }
-      _ => Ok(Some(DynNum::Number(0))),
-    }
-  }
-  fn parse_conversion(cur: &mut SliceCursor) -> ShResult<Conversion> {
+  fn parse_conv(&self, cur: &mut SliceCursor) -> ShResult<Conversion> {
     let Some(b) = cur.next_byte() else {
       return Err(sherr!(ParseErr, "invalid conversion specification"));
     };
 
     match b {
-      b'%' => Ok(Conversion::Percent),
       b'd' | b'i' => Ok(Conversion::SignedDecimal),
       b'u' => Ok(Conversion::UnsignedDecimal),
       b'o' => Ok(Conversion::UnsignedOctal),
@@ -640,8 +97,6 @@ impl FmtSpec {
         });
 
         // The `T` after the closing paren is the actual conversion letter.
-        // Without it, `%(...)T` was being parsed as `%(...)` followed by a
-        // literal `T`, leaking the T into the output.
         match cur.next_byte() {
           Some(b'T') => {}
           Some(other) => {
@@ -665,68 +120,340 @@ impl FmtSpec {
     }
   }
 
-  fn parse_uint(cur: &mut SliceCursor) -> ShResult<i32> {
-    let mut digits = util::scratch_buf();
-    while let Some(b) = cur.next_byte_if(|b| b.is_ascii_digit()) {
-      digits.push(b);
-    }
-    let width = std::str::from_utf8(&digits)
-      .ok()
-      .and_then(|s| s.parse::<usize>().ok())
-      .ok_or_else(|| sherr!(ParseErr, "invalid width"))?;
+  fn render(
+    &self,
+    conv: &Conversion,
+    field: &FieldParams,
+    src: &mut Self::Source,
+  ) -> ShResult<Field> {
+    let flags = field.flags();
+    let prec = prec_of(field);
 
-    Ok(width as i32)
+    #[rustfmt::skip]
+    let rendered = match conv {
+      Conversion::SignedDecimal       => render_signed(src, flags, prec),
+      Conversion::UnsignedDecimal     => render_unsigned(src, prec),
+      Conversion::UnsignedOctal       => render_octal(src, flags, prec),
+      Conversion::UnsignedHex(case)   => render_hex(src, flags, prec, *case),
+      Conversion::FixedPointDecimal   => render_fixed(src, flags, prec),
+      Conversion::Scientific(case)    => render_scientific(src, flags, prec, *case),
+      Conversion::ShortestFloat(case) => render_shortest(src, flags, prec, *case),
+      Conversion::HumanSize           => render_human(src),
+      Conversion::Char                => render_char(src),
+      Conversion::Str                 => render_str(src, prec),
+      Conversion::RepeatStr           => render_repeat(src, field),
+      Conversion::AnsiC               => render_ansi_c(src, prec),
+      Conversion::ShellQuote          => render_shell_quote(src),
+      Conversion::StrfTime(fmt)       => render_strftime(src, &fmt.to_str_lossy()),
+    };
+
+    Ok(rendered)
   }
 }
 
-/// Pick the appropriate sign prefix character based on whether the value
-/// is negative and which sign-flag is set.
-fn pick_sign(negative: bool, flags: PrintFlags) -> &'static [u8] {
-  if negative {
-    b"-"
-  } else if flags.contains(PrintFlags::SHOW_SIGN) {
-    b"+"
-  } else if flags.contains(PrintFlags::SPACE_SIGN) {
-    b" "
-  } else {
-    b""
-  }
-}
-
-/// Common padding logic shared by all conversion handlers.
-///
-/// `prefix` is sign/marker characters (`-`, `+`, ` `, `0x`, `0X`, `0`) that
-/// stick to the body. With zero-padding the prefix stays attached to the
-/// body and zeros are inserted between them; with space-padding the
-/// spaces go outside the prefix.
-///
-/// `zero_pad_allowed` should be false for non-numeric conversions (string,
-/// char, time, etc.) where the `0` flag has no semantic effect, and for
-/// integer conversions with explicit precision (precision already supplies
-/// the leading zeros).
-fn pad_to_width(
-  body: &[u8],
-  prefix: &[u8],
-  flags: PrintFlags,
-  width: Option<usize>,
-  zero_pad_allowed: bool,
-) -> Vec<u8> {
-  let total_chars = prefix.chars().count() + body.chars().count();
-  let Some(w) = width else {
-    return [prefix, body].concat();
+/// Parse a printf numeric argument, returning the value and any soft error.
+/// A *missing* argument (fewer args than conversions) yields `0` with no error;
+/// a *present* argument that fails to parse yields `0` plus a
+/// [`PrintfErr::BadNumber`], so the caller still substitutes `0` and continues
+/// formatting while the run is flagged to exit non-zero.
+fn parse_num_arg<T: ParseRadix + Default>(arg: Option<Vec<u8>>) -> (T, Option<PrintfErr>) {
+  let Some(arg) = arg else {
+    return (T::default(), None);
   };
-  if total_chars >= w {
-    return [prefix, body].concat();
-  }
-  let pad = w - total_chars;
 
-  if flags.contains(PrintFlags::JUST_LEFT) {
-    [prefix, body, &b" ".repeat(pad)].concat()
-  } else if zero_pad_allowed && flags.contains(PrintFlags::ZERO_PAD) {
-    [prefix, &b"0".repeat(pad), body].concat()
-  } else {
-    [&b" ".repeat(pad), prefix, body].concat()
+  // posix thing: if a char leads with a quote, we parse it
+  // as an integer, returning its actual byte value
+  if let Some((&quote, rest)) = arg.split_first()
+    && matches!(quote, b'\'' | b'"')
+  {
+    let byte = rest.first().copied().unwrap_or(0);
+    let byte_s = varstr!("{byte}");
+    return (
+      ParseRadix::parse_radix(&byte_s.to_str_lossy()).unwrap_or_default(),
+      None,
+    );
   }
+
+  match ParseRadix::parse_radix(&arg.to_str_lossy()) {
+    Some(v) => (v, None),
+    None => (
+      T::default(),
+      Some(PrintfErr::BadNumber(arg.to_str_lossy().into())),
+    ),
+  }
+}
+
+/// Parse a floating-point argument for the `%f`/`%e`/`%g` conversions. Floats
+/// have no base prefixes and a leading `0` (`0.5`) is not an octal marker, so
+/// this parses decimal directly instead of routing through the integer-literal
+/// grammar. The POSIX leading-quote trick still applies.
+fn parse_float_arg(arg: Option<Vec<u8>>) -> (f64, Option<PrintfErr>) {
+  let Some(arg) = arg else {
+    return (0.0, None);
+  };
+
+  if let Some((&quote, rest)) = arg.split_first()
+    && matches!(quote, b'\'' | b'"')
+  {
+    let byte = rest.first().copied().unwrap_or(0);
+    return (f64::from(byte), None);
+  }
+
+  match arg.to_str_lossy().trim().parse::<f64>() {
+    Ok(v) => (v, None),
+    Err(_) => (0.0, Some(PrintfErr::BadNumber(arg.to_str_lossy().into()))),
+  }
+}
+
+/// Write the stderr diagnostic for each collected printf error. Returns whether
+/// any were present, so the caller can set a non-zero exit status.
+fn emit_printf_errors(errors: &[PrintfErr]) -> bool {
+  for err in errors {
+    match err {
+      PrintfErr::BadNumber(arg) => errln!("printf: {arg}: invalid number"),
+    }
+  }
+  !errors.is_empty()
+}
+
+/// Select the sign prefix for a numeric conversion from the value's sign and
+/// the `+`/space flags.
+fn sign_for(negative: bool, flags: FmtFlags) -> Option<Sign> {
+  if negative {
+    Some(Sign::Minus)
+  } else if flags.contains(FmtFlags::PLUS) {
+    Some(Sign::Plus)
+  } else if flags.contains(FmtFlags::SPACE) {
+    Some(Sign::Space)
+  } else {
+    None
+  }
+}
+
+fn prec_of(field: &FieldParams) -> Option<usize> {
+  match field.precision() {
+    Some(Count::Static(p)) => Some(*p),
+    _ => None,
+  }
+}
+
+fn render_int(src: &mut PrintfArgs, flags: Option<FmtFlags>, prec: Option<usize>) -> Field {
+  let (n, err): (i64, _) = parse_num_arg(src.args.next());
+  src.errors.extend(err);
+  let sign = flags.and_then(|f| sign_for(n.is_negative(), f));
+
+  let mut digits = n.unsigned_abs().to_string();
+  if let Some(p) = prec {
+    digits = format!("{digits:0>p$}");
+  }
+
+  Field::numeric_padded(digits.into_bytes(), sign, None, prec.is_none())
+}
+
+fn render_signed(src: &mut PrintfArgs, flags: FmtFlags, prec: Option<usize>) -> Field {
+  render_int(src, Some(flags), prec)
+}
+
+fn render_unsigned(src: &mut PrintfArgs, prec: Option<usize>) -> Field {
+  render_int(src, None, prec)
+}
+
+fn render_octal(src: &mut PrintfArgs, flags: FmtFlags, prec: Option<usize>) -> Field {
+  let (n, err): (u64, _) = parse_num_arg(src.args.next());
+  src.errors.extend(err);
+
+  let mut digits = format!("{n:o}");
+  if let Some(p) = prec {
+    digits = format!("{digits:0>p$}");
+  }
+
+  // # flag for %o: ensure at least one leading 0.
+  let base = (flags.contains(FmtFlags::ALT) && !digits.starts_with('0')).then_some(Base::Octal);
+
+  Field::numeric_padded(digits.into_bytes(), None, base, prec.is_none())
+}
+
+fn render_hex(src: &mut PrintfArgs, flags: FmtFlags, prec: Option<usize>, case: Case) -> Field {
+  let (n, err): (u64, _) = parse_num_arg(src.args.next());
+  src.errors.extend(err);
+
+  let mut digits = match case {
+    Case::Lower => format!("{n:x}"),
+    Case::Upper => format!("{n:X}"),
+  };
+  if let Some(p) = prec {
+    digits = format!("{digits:0>p$}");
+  }
+
+  // # flag for %x/%X: prepend 0x/0X for non-zero values.
+  let base = (flags.contains(FmtFlags::ALT) && n != 0).then_some(Base::Hex(case));
+
+  Field::numeric_padded(digits.into_bytes(), None, base, prec.is_none())
+}
+
+fn render_fixed(src: &mut PrintfArgs, flags: FmtFlags, prec: Option<usize>) -> Field {
+  let (f, err) = parse_float_arg(src.args.next());
+  src.errors.extend(err);
+  let p = prec.unwrap_or(6);
+
+  let body = format!("{f:.p$}");
+  let abs = body.trim_start_matches('-').as_bytes().to_vec();
+  let sign = sign_for(f.is_sign_negative() && f != 0.0, flags);
+
+  // For floats, zero-padding applies independent of precision (precision
+  // controls digits after the decimal point, not minimum total digits).
+  Field::numeric_padded(abs, sign, None, true)
+}
+
+fn render_scientific(
+  src: &mut PrintfArgs,
+  flags: FmtFlags,
+  prec: Option<usize>,
+  case: Case,
+) -> Field {
+  let (f, err) = parse_float_arg(src.args.next());
+  src.errors.extend(err);
+  let p = prec.unwrap_or(6);
+
+  let raw = match case {
+    Case::Lower => format!("{f:.p$e}"),
+    Case::Upper => format!("{f:.p$E}"),
+  };
+  let normalized = normalize_exponent(raw.as_bytes());
+  let abs = normalized.trim_start_with(|c| c == '-').to_vec();
+  let sign = sign_for(f.is_sign_negative() && f != 0.0, flags);
+
+  Field::numeric_padded(abs, sign, None, true)
+}
+
+fn render_shortest(
+  src: &mut PrintfArgs,
+  flags: FmtFlags,
+  prec: Option<usize>,
+  case: Case,
+) -> Field {
+  let (f, err) = parse_float_arg(src.args.next());
+  src.errors.extend(err);
+  // %g: precision is number of significant digits (default 6, minimum 1).
+  let p = prec.unwrap_or(6).max(1);
+
+  // POSIX %g: use scientific when exponent < -4 or >= precision.
+  let abs_val = f.abs();
+  let exp = if abs_val == 0.0 {
+    0i32
+  } else {
+    abs_val.log10().floor() as i32
+  };
+  let use_scientific = exp < -4 || exp >= p as i32;
+
+  let body = if use_scientific {
+    let mantissa_prec = p.saturating_sub(1);
+    let raw = match case {
+      Case::Lower => format!("{f:.mantissa_prec$e}"),
+      Case::Upper => format!("{f:.mantissa_prec$E}"),
+    };
+    let normalized = normalize_exponent(raw.as_bytes());
+
+    if flags.contains(FmtFlags::ALT) {
+      normalized
+    } else {
+      strip_trailing_zeros(&normalized)
+    }
+  } else {
+    let fp = (p as i32 - 1 - exp).max(0) as usize;
+    let raw = format!("{f:.fp$}").into_bytes();
+    if flags.contains(FmtFlags::ALT) {
+      raw
+    } else {
+      strip_trailing_zeros(&raw)
+    }
+  };
+  let abs = body.trim_start_with(|c| c == '-').to_vec();
+  let sign = sign_for(f.is_sign_negative() && f != 0.0, flags);
+
+  Field::numeric_padded(abs, sign, None, true)
+}
+
+fn render_human(src: &mut PrintfArgs) -> Field {
+  let (n, err): (u64, _) = parse_num_arg(src.args.next());
+  src.errors.extend(err);
+  let mut s = String::new();
+  strops::format_size(n, &mut s).ok();
+  Field::numeric_padded(s.into_bytes(), None, None, true)
+}
+
+fn render_char(src: &mut PrintfArgs) -> Field {
+  let arg = src.args.next().unwrap_or_default();
+  // POSIX %c: take first byte of the argument.
+  Field::string(arg.get(..1).unwrap_or_default().to_vec())
+}
+
+fn render_str(src: &mut PrintfArgs, prec: Option<usize>) -> Field {
+  let s = src.args.next().unwrap_or_default();
+  let s = match prec {
+    Some(p) => s.get(..p).unwrap_or(&s).to_vec(),
+    None => s,
+  };
+  Field::string(s)
+}
+
+fn render_repeat(src: &mut PrintfArgs, field: &FieldParams) -> Field {
+  // The width slot is the repeat count (`%*r` / `%5r`), not a field width, so
+  // the field is emitted raw with no padding. A bare `%r` degrades to a single
+  // copy.
+  let count = match field.width() {
+    Some(Count::Static(n)) => *n,
+    _ => 1,
+  };
+  let s = src.args.next().unwrap_or_default();
+  Field::raw(s.repeat(count))
+}
+
+fn render_ansi_c(src: &mut PrintfArgs, prec: Option<usize>) -> Field {
+  let s = src.args.next().unwrap_or_default();
+  let expanded = escape::expand_ansi_c(&s);
+  let truncated = match prec {
+    Some(p) => expanded.into_iter().take(p).collect(),
+    None => expanded,
+  };
+  Field::string(truncated)
+}
+
+fn render_shell_quote(src: &mut PrintfArgs) -> Field {
+  let s = src.args.next().unwrap_or_default();
+  let quoted = escape::shell_quote_bytes(&s);
+  Field::string(quoted)
+}
+
+fn render_strftime(src: &mut PrintfArgs, format: &str) -> Field {
+  use crate::state::{Shed, meta::MetaTab};
+  use chrono::{Local, TimeZone};
+  let arg = src.args.next().unwrap_or_else(|| b"-1".to_vec());
+  let secs: i64 = VarStr::from(arg).parse().unwrap_or(-1);
+
+  let dt = if secs == -1 {
+    // Current time
+    Local::now()
+  } else if secs == -2 {
+    // Shell start time: convert the monotonic Instant we recorded at startup
+    // into a wall-clock time by subtracting its elapsed duration from "now".
+    let shell_start_instant = Shed::meta(MetaTab::shell_time);
+    let elapsed = shell_start_instant.elapsed();
+    let now = Local::now();
+    chrono::Duration::from_std(elapsed)
+      .ok()
+      .and_then(|d| now.checked_sub_signed(d))
+      .unwrap_or(now)
+  } else if secs >= 0 {
+    Local
+      .timestamp_opt(secs, 0)
+      .single()
+      .unwrap_or_else(Local::now)
+  } else {
+    Local::now()
+  };
+
+  Field::string(dt.format(format).to_string().into_bytes())
 }
 
 /// Convert Rust's exponent format (`1e2`, `1.5e-3`) to POSIX printf style
@@ -789,25 +516,6 @@ pub(super) enum PrintfErr {
   BadNumber(String),
 }
 
-#[derive(Debug, Default, Clone)]
-pub(super) struct Rendered {
-  text: Vec<u8>,
-  errors: Vec<PrintfErr>,
-}
-
-impl Rendered {
-  pub(super) fn new(text: Vec<u8>) -> Self {
-    Self {
-      text,
-      errors: vec![],
-    }
-  }
-
-  pub(super) fn merge_errors(&mut self, other: Self) {
-    self.errors.extend(other.errors);
-  }
-}
-
 pub(super) struct Printf;
 impl super::Builtin for Printf {
   fn no_help(&self) -> bool {
@@ -831,35 +539,41 @@ impl super::Builtin for Printf {
         .next()
         .ok_or_else(|| sherr!(ExecFail, "printf: missing format string"))?;
     }
-    let (format_str, _) = first;
 
-    let formatter = PrintFormatter::parse(format_str.as_bytes())?;
+    let (format_str, _) = first;
+    let formatter = Formatter::parse(&PrintfFmt, format_str.as_bytes())?;
     let remaining: Vec<Vec<u8>> = arg_iter.map(|(s, _)| s.as_bytes().to_vec()).collect();
 
-    let mut values = remaining.into_iter().peekable();
+    let mut src = PrintfArgs {
+      args: remaining.into_iter().peekable(),
+      errors: vec![],
+    };
 
     // Set when any present numeric argument fails to convert; printf still emits
     // the `0` fallback and continues, but exits non-zero (POSIX).
     let mut had_error = false;
+    let mut out = vec![];
 
     if formatter.has_specs() {
       // Recycle the format string until args are exhausted. If a full cycle
       // consumes no arguments (e.g. the only spec is `%%`), stop instead of
       // looping forever.
       loop {
-        let before = values.len();
-        let rendered = formatter.apply_once(&mut values)?;
-        procio::out_bytes(&rendered.text);
-        had_error |= emit_printf_errors(&rendered.errors);
-        if values.peek().is_none() || values.len() == before {
+        let before = src.args.len();
+        out.clear();
+        src.errors.clear();
+        formatter.render(&mut src, &mut out)?;
+        procio::out_bytes(&out);
+        had_error |= emit_printf_errors(&src.errors);
+        if src.args.peek().is_none() || src.args.len() == before {
           break;
         }
       }
     } else {
       // No specs: emit format once, ignore extra args.
-      let rendered = formatter.apply_once(&mut values)?;
-      procio::out_bytes(&rendered.text);
-      had_error |= emit_printf_errors(&rendered.errors);
+      formatter.render(&mut src, &mut out)?;
+      procio::out_bytes(&out);
+      had_error |= emit_printf_errors(&src.errors);
     }
 
     util::with_status(i32::from(had_error))
@@ -1129,11 +843,11 @@ mod tests {
   // ===================== Unicode escapes (\u / \U) =====================
 
   // `\uHHHH`: up to 4 hex digits -> a BMP scalar, UTF-8 encoded. Bytes pinned
-  // to bash's output for U+F130 (`printf '' | xxd` -> ef 84 b0).
+  // to bash's output for U+F130 (`printf '' | xxd` -> ef 84 b0).
   #[test]
   fn printf_unicode_u_bmp() {
     let guard = TestGuard::new();
-    test_input(r"printf '\uf130'").unwrap();
+    test_input(r"printf ''").unwrap();
     assert_eq!(guard.read_output().as_bytes(), b"\xef\x84\xb0");
   }
 
@@ -1155,11 +869,11 @@ mod tests {
     assert_eq!(guard.read_output(), "HI");
   }
 
-  // ...and a following literal survives: `x` -> U+F130 then a bare 'x'.
+  // ...and a following literal survives: `x` -> U+F130 then a bare 'x'.
   #[test]
   fn printf_unicode_stops_before_literal() {
     let guard = TestGuard::new();
-    test_input(r"printf '\uf130x'").unwrap();
+    test_input(r"printf 'x'").unwrap();
     assert_eq!(guard.read_output().as_bytes(), b"\xef\x84\xb0x");
   }
 

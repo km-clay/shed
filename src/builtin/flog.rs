@@ -8,7 +8,7 @@ use crate::{
   state::{Shed, vars::VarStr},
   try_var,
   util::{self, error::ShResult, ui},
-  var, varstr,
+  varstr,
 };
 
 use super::{argv, opt::OptSpec};
@@ -107,7 +107,7 @@ impl Flog {
   }
 
   fn get_log_level() -> Option<log::Level> {
-    let level = var!("FLOG_LEVEL").to_ascii_uppercase();
+    let level = try_var!("FLOG_LEVEL")?.to_ascii_uppercase();
     String::from_utf8_lossy(&level).parse::<log::Level>().ok()
   }
 }

@@ -1561,8 +1561,7 @@ impl VarTab {
       if var.flags.contains(VarFlags::READONLY) {
         return Err(sherr!(
           ExecFail,
-          "cannot unset readonly variable '{}'",
-          var_name,
+          "cannot unset readonly variable '{var_name}'"
         ));
       }
       if var.flags.contains(VarFlags::EXPORT) {
@@ -1587,17 +1586,14 @@ impl VarTab {
               } else {
                 return Err(sherr!(
                   ExecFail,
-                  "Index {} out of bounds for array '{}'",
-                  n,
-                  var_name,
+                  "Index {n} out of bounds for array '{var_name}'"
                 ));
               }
             }
             _ => {
               return Err(sherr!(
                 ExecFail,
-                "Cannot index all elements of array '{}'",
-                var_name,
+                "Cannot index all elements of array '{var_name}'"
               ));
             }
           };
@@ -1614,8 +1610,7 @@ impl VarTab {
           let ArrIndex::Key(key) = idx else {
             return Err(sherr!(
               ExecFail,
-              "Cannot assign to all elements of associative array '{}'",
-              var_name,
+              "Cannot assign to all elements of associative array '{var_name}'",
             ));
           };
           for (k, v) in items.iter_mut() {
@@ -1628,7 +1623,7 @@ impl VarTab {
           return Ok(());
         }
         _ => {
-          return Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name,));
+          return Err(sherr!(ExecFail, "Variable '{var_name}' is not an array"));
         }
       }
     }
@@ -1641,8 +1636,7 @@ impl VarTab {
     if var.flags.contains(VarFlags::READONLY) {
       return Err(sherr!(
         ExecFail,
-        "cannot unset readonly variable '{}'",
-        var_name
+        "cannot unset readonly variable '{var_name}'"
       ));
     }
     match var.kind_mut() {
@@ -1654,8 +1648,7 @@ impl VarTab {
           _ => {
             return Err(sherr!(
               ExecFail,
-              "Cannot unset all elements of array '{}'",
-              var_name,
+              "Cannot unset all elements of array '{var_name}'"
             ));
           }
         };
@@ -1668,14 +1661,13 @@ impl VarTab {
         let ArrIndex::Key(key) = idx else {
           return Err(sherr!(
             ExecFail,
-            "Cannot unset all elements of associative array '{}'",
-            var_name,
+            "Cannot unset all elements of associative array '{var_name}'"
           ));
         };
         items.retain(|(k, _)| k != &key);
         Ok(())
       }
-      _ => Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name)),
+      _ => Err(sherr!(ExecFail, "Variable '{var_name}' is not an array")),
     }
   }
   pub(crate) fn put_var(&mut self, name: &str, var: Var) {
@@ -1693,7 +1685,7 @@ impl VarTab {
     };
     if let Some(var) = self.vars.get_mut(var_name) {
       if var.flags.contains(VarFlags::READONLY) && !flags.contains(VarFlags::READONLY) {
-        return Err(sherr!(ExecFail, "Variable '{}' is readonly", var_name,));
+        return Err(sherr!(ExecFail, "Variable '{var_name}' is readonly"));
       }
       var.kind = val;
       var.flags |= flags;

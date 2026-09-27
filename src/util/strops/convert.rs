@@ -1,335 +1,15 @@
-//! Shell-aware byte-string utilities
-//!
-//! escape/quote-aware splitting and delimiter scanning, byte cursors, and size/time/mode parsing and formatting.
+//! Human-readable parsing and formatting of durations, sizes, and file modes,
+//! plus the natural-language [`TimeReader`].
 
-use std::{collections::VecDeque, fmt::Display};
-
-use bstr::ByteSlice;
 use chrono::{DateTime, Datelike, Days, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 
 use crate::{
-  eval::lex::{Span, Tk},
-  match_loop, sherr,
+  sherr,
   state::vars::VarStr,
-  util::Direction,
-  varstr,
+  util::{Direction, error::ShResult},
 };
 
-use super::error::ShResult;
-
-pub(crate) trait VarStrDisplay {
-  fn to_var_str(&self) -> VarStr;
-}
-
-impl<T: Display + ?Sized> VarStrDisplay for T {
-  fn to_var_str(&self) -> VarStr {
-    varstr!("{self}")
-  }
-}
-
-/// Used to track whether the lexer is currently inside a quote, and if so, which type
-#[derive(Default, Copy, Debug, PartialEq, Clone)]
-pub(crate) enum QuoteState {
-  #[default]
-  Outside,
-  Single,
-  Double,
-}
-
-impl QuoteState {
-  pub(crate) fn outside(self) -> bool {
-    matches!(self, QuoteState::Outside)
-  }
-  pub(crate) fn in_single(self) -> bool {
-    matches!(self, QuoteState::Single)
-  }
-  pub(crate) fn in_double(self) -> bool {
-    matches!(self, QuoteState::Double)
-  }
-  pub(crate) fn in_quote(self) -> bool {
-    !self.outside()
-  }
-  /// Toggles whether we are in a double quote. If self = `QuoteState::Single` or `QuoteState::Backtick,` this does nothing, since double quotes inside those quotes are just literal characters
-  pub(crate) fn toggle_double(&mut self) {
-    match self {
-      QuoteState::Outside => *self = QuoteState::Double,
-      QuoteState::Double => *self = QuoteState::Outside,
-      QuoteState::Single => {}
-    }
-  }
-  /// Toggles whether we are in a single quote. If self == `QuoteState::Double` or `QuoteState::Backtick,` this does nothing, since single quotes inside those quotes are just literal characters
-  pub(crate) fn toggle_single(&mut self) {
-    match self {
-      QuoteState::Outside => *self = QuoteState::Single,
-      QuoteState::Single => *self = QuoteState::Outside,
-      QuoteState::Double => {}
-    }
-  }
-}
-
-/* - splitting functions
- * the splitting functions in std are fine, but don't cut it when quoting rules and escaping are involved
- * so we have to roll our own stuff. we can take a functional approach to to this that generalizes quite well
- */
-
-pub(crate) fn split_tk(tk: &Tk, pat: &[u8]) -> Vec<Tk> {
-  let slice = tk.slice(); // scary! make sure the tk's source input is still alive
-  let base = tk.span.range().start;
-  split_all_with(
-    slice.as_bytes(),
-    |s| split_at_unescaped(s, pat),
-    |start, end| {
-      let start = base + start;
-      let end = base + end;
-      Tk::new(tk.class.clone(), Span::new(start, end, tk.source()))
-    },
-  )
-}
-
-pub(crate) fn split_all_with<T, F, B>(slice: &[u8], segment_fn: F, mut build: B) -> Vec<T>
-where
-  F: Fn(&[u8]) -> Option<(usize, usize)>,
-  B: FnMut(usize, usize) -> T,
-{
-  let mut cursor = 0;
-  let mut splits = vec![];
-  while let Some((len, skip)) = segment_fn(&slice[cursor..]) {
-    splits.push(build(cursor, cursor + len));
-    cursor += len + skip;
-  }
-  if let Some(remaining) = slice.get(cursor..) {
-    splits.push(build(cursor, cursor + remaining.len()));
-  }
-  splits
-}
-
-/// Splits a byte slice at the first occurrence of a pattern, but only if the pattern is not escaped by a backslash
-/// and not in quotes. Returns None if the pattern is not found or only found escaped.
-pub(crate) fn split_at_unescaped(slice: &[u8], pat: &[u8]) -> Option<(usize, usize)> {
-  split_at_any_unescaped(slice, &[pat])
-}
-
-pub(crate) fn split_at_any_unescaped(slice: &[u8], pats: &[&[u8]]) -> Option<(usize, usize)> {
-  split_at_any_inner(slice, pats, b'\\', b'\'', b'"')
-}
-
-pub(crate) fn split_assignment_raw(arg: &[u8]) -> (&[u8], Option<&[u8]>) {
-  let Some((e, l)) = split_at_unescaped(arg, b"=") else {
-    return (arg, None);
-  };
-  (arg[..e].trim(), Some(&arg[e + l..]))
-}
-
-/// Split at the first of `pats` not escaped by `esc` and not inside a
-/// `sng_quote`/`dub_quote` region. Shared by the backslash and marker
-/// variants; only the escape/quote characters differ.
-fn split_at_any_inner(
-  slice: &[u8],
-  pats: &[&[u8]],
-  esc: u8,
-  sng_quote: u8,
-  dub_quote: u8,
-) -> Option<(usize, usize)> {
-  let mut qt_state = QuoteState::default();
-  let mut i = 0;
-
-  while i < slice.len() {
-    let b = slice[i];
-    match b {
-      _ if b == esc => {
-        i += 2;
-        continue;
-      }
-      _ if b == sng_quote => qt_state.toggle_single(),
-      _ if b == dub_quote => qt_state.toggle_double(),
-      _ if qt_state.in_quote() => {
-        i += 1;
-        continue;
-      }
-      _ => {}
-    }
-
-    for pat in pats {
-      if slice[i..].starts_with(pat) {
-        return Some((i, pat.len()));
-      }
-    }
-
-    i += 1;
-  }
-
-  None
-}
-
-pub(crate) fn pos_is_escaped(slice: &[u8], pos: usize) -> bool {
-  let mut escaped = false;
-  let mut i = pos;
-  while i > 0 && slice[i - 1] == b'\\' {
-    escaped = !escaped;
-    i -= 1;
-  }
-  escaped
-}
-
-pub(crate) fn ends_with_unescaped(slice: &[u8], pat: &[u8]) -> bool {
-  slice.ends_with(pat) && !pos_is_escaped(slice, slice.len() - pat.len())
-}
-
-pub(crate) fn has_unescaped(slice: &[u8], pat: &[u8]) -> bool {
-  split_at_unescaped(slice, pat).is_some()
-}
-
-/// A forward, byte-at-a-time cursor over some source text.
-///
-/// Implemented by the lexer (advancing its own `cursor`) and by [`SliceCursor`]
-/// for standalone scans over a plain byte slice (arithmetic, tests, etc). This
-/// is what lets the delimiter scanners below crawl bytes without caring whether
-/// they're driving the live lexer or a throwaway buffer.
-pub(crate) trait ByteCursor {
-  /// The byte at the current position, without advancing.
-  fn peek_byte(&self) -> Option<u8>;
-  /// Consume and return the byte at the current position, advancing by one.
-  fn next_byte(&mut self) -> Option<u8>;
-  /// The byte at the current position + `n`, without advancing.
-  fn peek_nth(&self, n: usize) -> Option<u8>;
-  /// Consume the byte at the current position, advancing by one. Equivalent to `next_byte()`, but doesn't return the byte.
-  fn bump(&mut self) {
-    self.next_byte();
-  }
-  /// Consume and return the byte at the current position if it satisfies the predicate `f`.
-  /// Returns `None` if the byte does not satisfy `f` or if there is no byte to consume.
-  fn next_byte_if(&mut self, f: impl FnOnce(u8) -> bool) -> Option<u8> {
-    let b = self.peek_byte()?;
-    if f(b) { self.next_byte() } else { None }
-  }
-  /// Consume the byte at the current position if it satisfies the predicate `f`.
-  /// Returns `true` if a byte was consumed, `false` otherwise.
-  /// A byte that does not satisfy `f` is not consumed.
-  fn bump_if(&mut self, f: impl Fn(u8) -> bool) -> bool {
-    let Some(b) = self.peek_byte() else {
-      return false;
-    };
-    if f(b) {
-      self.next_byte();
-      true
-    } else {
-      false
-    }
-  }
-  /// Consume the byte at the current position if it is equal to `b`.
-  /// Returns `true` if a byte was consumed, `false` otherwise.
-  /// A byte that does not equal `b` is not consumed.
-  fn bump_if_eq(&mut self, b: u8) -> bool {
-    self.bump_if(|x| x == b)
-  }
-  /// Consume bytes at the current position while they satisfy the predicate `f`.
-  /// Stops when a byte does not satisfy `f` or when there are no more bytes to consume.
-  /// A byte that does not satisfy `f` is not consumed.
-  fn bump_while(&mut self, f: impl Fn(u8) -> bool) {
-    while self.bump_if(&f) {}
-  }
-  /// Returns `true` if there are no more bytes to consume, `false` otherwise.
-  fn is_empty(&self) -> bool {
-    self.peek_byte().is_none()
-  }
-}
-
-/// A [`ByteCursor`] over a borrowed byte slice, tracking its own position.
-/// For callers that need to scan an in-memory buffer rather than the lexer.
-pub(crate) struct SliceCursor<'a> {
-  bytes: &'a [u8],
-  pos: usize,
-}
-
-impl<'a> SliceCursor<'a> {
-  pub(crate) fn new(bytes: &'a [u8]) -> Self {
-    Self { bytes, pos: 0 }
-  }
-  /// Number of bytes consumed so far.
-  pub(crate) fn pos(&self) -> usize {
-    self.pos
-  }
-
-  pub(crate) fn into_slice(self) -> &'a [u8] {
-    &self.bytes[self.pos..]
-  }
-}
-
-impl ByteCursor for SliceCursor<'_> {
-  fn peek_byte(&self) -> Option<u8> {
-    self.bytes.get(self.pos).copied()
-  }
-  fn peek_nth(&self, n: usize) -> Option<u8> {
-    self.bytes.get(self.pos + n).copied()
-  }
-  fn next_byte(&mut self) -> Option<u8> {
-    let b = self.peek_byte()?;
-    self.pos += 1;
-    Some(b)
-  }
-}
-
-/// Scan a balanced `(...)`, consuming through the closing paren. `depth` is the
-/// nesting already entered — pass `1` when the opening `(` was just consumed.
-/// Returns `true` if the group closed, `false` if input ran out first.
-pub(crate) fn scan_parens<C: ByteCursor>(c: &mut C, depth: usize) -> bool {
-  scan_delims(b'(', c, depth)
-}
-
-/// Scan a balanced `${...}`, following nested `${...}` / `$(...)`. See
-/// [`scan_parens`] for the `depth` convention and return value.
-pub(crate) fn scan_param_exp<C: ByteCursor>(c: &mut C, mut depth: usize) -> bool {
-  let mut qt = QuoteState::default();
-  match_loop!(c.next_byte() => b, {
-    b'\\' => { c.next_byte(); }
-    b'\'' => qt.toggle_single(),
-    b'"' if !qt.in_single() => qt.toggle_double(),
-    _ if qt.in_quote() => {}
-    b'$' if c.peek_byte() == Some(b'{') => {
-      c.next_byte();
-      depth += 1;
-    }
-    b'$' if c.peek_byte() == Some(b'(') => {
-      c.next_byte();
-      // Reuse the paren-matcher so an inner `$(... } ...)` doesn't trip the
-      // param-expansion closer scan.
-      if !scan_parens(c, 1) {
-        return false;
-      }
-    }
-    b'}' => {
-      depth -= 1;
-      if depth == 0 { break; }
-    }
-    _ => {}
-  });
-  depth == 0
-}
-
-fn scan_delims<C: ByteCursor>(opener: u8, c: &mut C, mut depth: usize) -> bool {
-  let closer = match opener {
-    b'(' => b')',
-    b'{' => b'}',
-    b'[' => b']',
-    b'<' => b'>',
-    // Only ever called with the literals above; a new opener is a caller bug.
-    _ => unreachable!("scan_delims: invalid opener {opener:#x}"),
-  };
-  let mut qt = QuoteState::default();
-  match_loop!(c.next_byte() => b, {
-    b'\\' => { c.next_byte(); }
-    b'\'' => qt.toggle_single(),
-    b'"' if !qt.in_single() => qt.toggle_double(),
-    _ if qt.in_quote() => {}
-    _ if b == opener => depth += 1,
-    _ if b == closer => {
-      depth -= 1;
-      if depth == 0 { break; }
-    }
-    _ => {}
-  });
-  depth == 0
-}
+use super::{ByteCursor, SliceCursor};
 
 pub(crate) fn format_time(dur: std::time::Duration) -> String {
   const ETERNITY: u128 = f32::INFINITY as u128;
@@ -742,21 +422,24 @@ impl<'a> TimeReader<'a> {
     })
   }
 
+  #[rustfmt::skip]
   fn month_num(word: &VarStr) -> Option<u32> {
     Some(match word.as_bytes() {
-      b"jan" | b"january" => 1,
+      b"jan" | b"january"  => 1,
       b"feb" | b"february" => 2,
-      b"mar" | b"march" => 3,
-      b"apr" | b"april" => 4,
-      b"may" => 5,
-      b"jun" | b"june" => 6,
-      b"jul" | b"july" => 7,
-      b"aug" | b"august" => 8,
-      b"sep" | b"sept" | b"september" => 9,
-      b"oct" | b"october" => 10,
+      b"mar" | b"march"    => 3,
+      b"apr" | b"april"    => 4,
+      b"may"               => 5,
+      b"jun" | b"june"     => 6,
+      b"jul" | b"july"     => 7,
+      b"aug" | b"august"   => 8,
+      b"oct" | b"october"  => 10,
       b"nov" | b"november" => 11,
       b"dec" | b"december" => 12,
-      _ => return None,
+      b"sep"
+      | b"sept"
+      | b"september"       => 9,
+      _                    => return None,
     })
   }
 
@@ -767,28 +450,29 @@ impl<'a> TimeReader<'a> {
       _ => None,
     }
   }
+  #[rustfmt::skip]
   fn unit_micros(unit: &VarStr) -> Option<i64> {
     const MICROS: i64 = 1;
     const MILLIS: i64 = 1000 * MICROS;
     const SECOND: i64 = 1000 * MILLIS;
-    const MINUTE: i64 = 60 * SECOND;
-    const HOUR: i64 = 60 * MINUTE;
-    const DAY: i64 = 24 * HOUR;
-    const WEEK: i64 = 7 * DAY;
-    const MONTH: i64 = 30 * DAY; // approximate
-    const YEAR: i64 = 365 * DAY; // approximate
+    const MINUTE: i64 = 60   * SECOND;
+    const HOUR  : i64 = 60   * MINUTE;
+    const DAY   : i64 = 24   * HOUR;
+    const WEEK  : i64 = 7    * DAY;
+    const MONTH : i64 = 30   * DAY; // approximate
+    const YEAR  : i64 = 365  * DAY; // approximate
 
     match unit.as_bytes() {
       b"us" | b"micro" | b"micros" | b"microsecond" | b"microseconds" => Some(MICROS),
       b"ms" | b"milli" | b"millis" | b"millisecond" | b"milliseconds" => Some(MILLIS),
-      b"s" | b"sec" | b"secs" | b"second" | b"seconds" => Some(SECOND),
-      b"m" | b"min" | b"mins" | b"minute" | b"minutes" => Some(MINUTE),
-      b"h" | b"hr" | b"hrs" | b"hour" | b"hours" => Some(HOUR),
-      b"d" | b"day" | b"days" => Some(DAY),
-      b"w" | b"wk" | b"wks" | b"week" | b"weeks" => Some(WEEK),
-      b"mo" | b"month" | b"months" => Some(MONTH),
-      b"y" | b"yr" | b"yrs" | b"year" | b"years" => Some(YEAR),
-      _ => None,
+      b"s"  | b"sec"   | b"secs"   | b"second"      | b"seconds"      => Some(SECOND),
+      b"m"  | b"min"   | b"mins"   | b"minute"      | b"minutes"      => Some(MINUTE),
+      b"h"  | b"hr"    | b"hrs"    | b"hour"        | b"hours"        => Some(HOUR),
+      b"d"  | b"day"   | b"days"                                      => Some(DAY),
+      b"w"  | b"wk"    | b"wks"    | b"week"        | b"weeks"        => Some(WEEK),
+      b"mo" | b"month" | b"months"                                    => Some(MONTH),
+      b"y"  | b"yr"    | b"yrs"    | b"year"        | b"years"        => Some(YEAR),
+      _                                                               => None,
     }
   }
   fn tokenize(s: &str) -> ShResult<Vec<TimeTk>> {
@@ -866,77 +550,6 @@ impl<'a> TimeReader<'a> {
     }
     Ok(total)
   }
-}
-
-// this needs to be at least 2
-pub(crate) const EDIT_WEIGHT: usize = 2;
-
-pub(crate) fn levenshtein(left: &[u8], right: &[u8]) -> usize {
-  /*
-   * Levenshtein algorithm
-   * https://en.wikipedia.org/wiki/Levenshtein_distance
-   *
-   * Given two strings, find the minimum number of edits required for one string to be turned into the other.
-   * Useful for check typos, e.g. `gti` -> "Did you mean 'git'?"
-   */
-  let m = left.len();
-  let n = right.len();
-
-  // We are using the Damerau transposition checks, so we need
-  // bookkeeping for three rows.
-  let mut prev: Vec<usize> = (0..=n).map(|j| j * EDIT_WEIGHT).collect();
-  let mut prev2: Vec<usize> = vec![0usize; n + 1]; // this is the row before prev, used for transposition
-  let mut curr: Vec<usize> = vec![0usize; n + 1];
-
-  // Since we are tracking three rows, we need an easy way to rotate them
-  // as we iterate through the strings. VecDeque will do nicely for this
-  let mut rows: VecDeque<&mut Vec<usize>> = [&mut prev2, &mut prev, &mut curr].into();
-
-  // minimum of three values macro thing
-  macro_rules! min3 {
-    ($a:expr, $b:expr, $c:expr) => {
-      ::std::cmp::min(::std::cmp::min($a, $b), $c)
-    };
-  }
-
-  // Damerau-Levenshtein: check for transposition
-  let check_transpose = |i: usize, j: usize| -> bool {
-    i >= 2 && j >= 2 && left[i - 1] == right[j - 2] && left[i - 2] == right[j - 1]
-  };
-  // transposition costs half as much as an edit
-  // so that typos like 'gti' -> 'git' match only on 'git'
-  let transpose_cost = EDIT_WEIGHT / 2;
-
-  for i in 1..=m {
-    rows[2][0] = i * EDIT_WEIGHT; // base case: first column is i deletions from
-    // the empty prefix of the other string
-    for j in 1..=n {
-      rows[2][j] = if left[i - 1] == right[j - 1] {
-        // both bytes match, free move
-        rows[1][j - 1]
-      } else {
-        // Price each edit against its own predecessor. A substitution,
-        // deletion, or insertion each cost EDIT_WEIGHT
-        let sub = rows[1][j - 1] + EDIT_WEIGHT; // substitution
-        let del = rows[1][j] + EDIT_WEIGHT; // deletion
-        let ins = rows[2][j - 1] + EDIT_WEIGHT; // insertion
-        let mut best = min3!(sub, del, ins);
-
-        if check_transpose(i, j) {
-          // transpositions cost half
-          best = best.min(rows[0][j - 2] + transpose_cost);
-        }
-
-        best
-      }
-    }
-
-    rows.rotate_left(1);
-  }
-
-  // return the bottom right value
-  // thank you Vladimir Levenshtein
-  rows[1][n]
 }
 
 #[cfg(test)]
@@ -1088,118 +701,6 @@ mod format_time_tests {
       "got {:?}",
       format_time(dur)
     );
-  }
-}
-
-#[cfg(test)]
-mod levenshtein_tests {
-  use super::{EDIT_WEIGHT, levenshtein};
-
-  /// Convenience wrapper so the cases read as strings.
-  fn lev(a: &str, b: &str) -> usize {
-    levenshtein(a.as_bytes(), b.as_bytes())
-  }
-
-  // ─── identity & empty strings ────────────────────────────────────
-
-  #[test]
-  fn identical_is_zero() {
-    assert_eq!(lev("cat", "cat"), 0);
-    assert_eq!(lev("", ""), 0);
-  }
-
-  // Regression: the DP boundary must be *weighted*. Building an n-byte string
-  // from the empty string is n insertions, each costing EDIT_WEIGHT — not a
-  // raw 0,1,2,... count. (Previously `("" -> "abc")` returned 3 instead of 6.)
-  #[test]
-  fn empty_boundary_is_weighted() {
-    assert_eq!(lev("", "abc"), 3 * EDIT_WEIGHT);
-    assert_eq!(lev("abc", ""), 3 * EDIT_WEIGHT);
-    assert_eq!(lev("", "a"), EDIT_WEIGHT);
-  }
-
-  // ─── single ordinary edits each cost EDIT_WEIGHT ─────────────────
-
-  #[test]
-  fn one_substitution() {
-    assert_eq!(lev("a", "b"), EDIT_WEIGHT);
-  }
-
-  #[test]
-  fn one_insertion() {
-    assert_eq!(lev("a", "ab"), EDIT_WEIGHT);
-  }
-
-  #[test]
-  fn one_deletion() {
-    assert_eq!(lev("ab", "a"), EDIT_WEIGHT);
-  }
-
-  // Regression for the base-case bug: a leading deletion runs the optimal
-  // alignment along the boundary, and must still cost a full edit. `cat -> at`
-  // previously came back as 1 instead of EDIT_WEIGHT.
-  #[test]
-  fn boundary_hugging_indel_is_full_weight() {
-    assert_eq!(lev("cat", "at"), EDIT_WEIGHT); // leading deletion
-    assert_eq!(lev("cat", "cats"), EDIT_WEIGHT); // trailing insertion
-  }
-
-  // ─── transposition is the Damerau feature: half an edit ──────────
-
-  #[test]
-  fn adjacent_transposition_is_half() {
-    let half = EDIT_WEIGHT / 2;
-    assert_eq!(lev("ab", "ba"), half);
-    assert_eq!(lev("teh", "the"), half);
-    assert_eq!(lev("gti", "git"), half);
-    assert_eq!(lev("grpe", "grep"), half);
-    assert_eq!(lev("dokcer", "docker"), half);
-  }
-
-  // The whole point of weighting the transposition: `gti` should read as a
-  // single swap of `git` (cheap), strictly beating the substitution `gtp` and
-  // the deletion `gt` (both a full edit). This is what makes the typo suggester
-  // surface `git` alone instead of tied three ways.
-  #[test]
-  fn transposition_beats_ordinary_edits() {
-    assert!(lev("gti", "git") < lev("gti", "gtp"));
-    assert!(lev("gti", "git") < lev("gti", "gt"));
-    assert_eq!(lev("gti", "gtp"), EDIT_WEIGHT); // substitution
-    assert_eq!(lev("gti", "gt"), EDIT_WEIGHT); // deletion
-  }
-
-  // Regression for the transpose-leak bug: `ab -> aba` and `eco -> echo` are
-  // plain insertions that happen to satisfy the local transposition predicate,
-  // but the cheap transposition price must NOT leak onto a move that wasn't
-  // actually a transposition. Both previously returned 1 instead of EDIT_WEIGHT.
-  #[test]
-  fn insertion_masquerading_as_transposition_is_full_weight() {
-    assert_eq!(lev("ab", "aba"), EDIT_WEIGHT);
-    assert_eq!(lev("eco", "echo"), EDIT_WEIGHT);
-  }
-
-  // ─── multi-edit ──────────────────────────────────────────────────
-
-  #[test]
-  fn kitten_sitting_is_three_edits() {
-    // k→s, e→i, and insert g: three ordinary edits, no transposition.
-    assert_eq!(lev("kitten", "sitting"), 3 * EDIT_WEIGHT);
-  }
-
-  // ─── metric properties ───────────────────────────────────────────
-
-  #[test]
-  fn distance_is_symmetric() {
-    for (a, b) in [
-      ("kitten", "sitting"),
-      ("dokcer", "docker"),
-      ("cat", "at"),
-      ("ab", "aba"),
-      ("gti", "git"),
-      ("", "abc"),
-    ] {
-      assert_eq!(lev(a, b), lev(b, a), "asymmetric on {a:?} / {b:?}");
-    }
   }
 }
 

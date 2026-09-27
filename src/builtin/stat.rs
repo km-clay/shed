@@ -1,6 +1,7 @@
 #![expect(clippy::unnecessary_cast)]
 use std::{fmt, mem, os::unix::fs::MetadataExt};
 
+use bstr::ByteSlice;
 use nix::{
   libc,
   sys::{stat, statfs, statvfs},
@@ -10,12 +11,12 @@ use crate::{
   builtin::opt::OptSpec,
   errln,
   expand::escape,
-  match_loop, opt, outln, sherr,
+  opt, outln, sherr,
   state::vars::VarStr,
   util::{
     self,
-    error::{ShErr, ShResult, ShResultExt},
-    strops::{ByteCursor, SliceCursor},
+    error::ShResult,
+    strops::{self, ByteCursor, Field, FieldParams, SliceCursor, StrFmt},
   },
 };
 
@@ -29,6 +30,146 @@ const S_IFCHR: u32 = libc::S_IFCHR as u32;
 const S_IFBLK: u32 = libc::S_IFBLK as u32;
 const S_IFSOCK: u32 = libc::S_IFSOCK as u32;
 const S_IFIFO: u32 = libc::S_IFIFO as u32;
+
+struct FileFmt;
+impl StrFmt for FileFmt {
+  type Source = FileInfo;
+  type Conv = FileConv;
+
+  fn parse_conv(&self, cur: &mut SliceCursor) -> ShResult<Self::Conv> {
+    let Some(b) = cur.next_byte() else {
+      return Err(sherr!(ExecFail, "stat: Incomplete format specifier"));
+    };
+    Ok(match b {
+      b'a' => FileConv::Perms(StatDisplay::Machine(Base::Octal)),
+      b'A' => FileConv::Perms(StatDisplay::Human),
+      b'b' => FileConv::AllocBlocks,
+      b'B' => FileConv::BlockSize,
+      b'C' => FileConv::SecCtx,
+      b'd' | b'D' | b'R' => FileConv::DevType(Device::DevType(Base::Hex)),
+      first @ (b'H' | b'L') => {
+        let Some(next) = cur.next_byte() else {
+          return Err(sherr!(ExecFail, "Incomplete format specifier"));
+        };
+        match (first, next) {
+          (b'H', b'd') => FileConv::DevType(Device::MajorNumber),
+          (b'H', b'r') => FileConv::DevType(Device::MajorDevType(Base::Decimal)),
+          (b'L', b'd') => FileConv::DevType(Device::MinorNumber),
+          (b'L', b'r') => FileConv::DevType(Device::MinorDevType(Base::Decimal)),
+          _ => {
+            return Err(sherr!(
+              ExecFail,
+              "stat: Unsupported format specifier '{}' for '%{}'",
+              next as char,
+              first as char
+            ));
+          }
+        }
+      }
+      b'f' => FileConv::HexMode,
+      b'F' => FileConv::FileType,
+      b'g' => FileConv::Gid,
+      b'G' => FileConv::GidName,
+      b'h' => FileConv::HardLinks,
+      b'i' => FileConv::Inode,
+      b'm' => FileConv::MountPnt,
+      b'n' => FileConv::Filename,
+      b'N' => FileConv::QuotedFilename,
+      b'o' => FileConv::IoHint,
+      b's' => FileConv::FileSize(StatDisplay::Machine(Base::Decimal)),
+      b'S' => FileConv::FileSize(StatDisplay::Human),
+      b'r' => FileConv::DevType(Device::DevType(Base::Decimal)),
+      b't' => FileConv::DevType(Device::MajorDevType(Base::Hex)),
+      b'T' => FileConv::DevType(Device::MinorDevType(Base::Hex)),
+      b'u' => FileConv::Uid,
+      b'U' => FileConv::UidName,
+      b'w' => FileConv::Time(FileTime::Birth(TimeDisplay::Readable)),
+      b'W' => FileConv::Time(FileTime::Birth(TimeDisplay::EpochSeconds)),
+      b'x' => FileConv::Time(FileTime::Access(TimeDisplay::Readable)),
+      b'X' => FileConv::Time(FileTime::Access(TimeDisplay::EpochSeconds)),
+      b'y' => FileConv::Time(FileTime::Modify(TimeDisplay::Readable)),
+      b'Y' => FileConv::Time(FileTime::Modify(TimeDisplay::EpochSeconds)),
+      b'z' => FileConv::Time(FileTime::StatChange(TimeDisplay::Readable)),
+      b'Z' => FileConv::Time(FileTime::StatChange(TimeDisplay::EpochSeconds)),
+      _ => {
+        return Err(sherr!(
+          ExecFail,
+          "stat: Unsupported format specifier '%{}'",
+          b as char
+        ));
+      }
+    })
+  }
+
+  fn render(
+    &self,
+    conv: &Self::Conv,
+    _field: &FieldParams,
+    src: &mut Self::Source,
+  ) -> ShResult<Field> {
+    let mut body = String::new();
+    conv
+      .format(&mut body, src)
+      .map_err(|e| sherr!(ExecFail, "stat: Failed to format field: {e}"))?;
+    let body = body.into_bytes();
+    Ok(if conv.is_numeric() {
+      Field::numeric(body, None, None)
+    } else {
+      Field::string(body)
+    })
+  }
+}
+
+struct FsFmt;
+impl StrFmt for FsFmt {
+  type Source = FsInfo;
+  type Conv = FsConv;
+
+  fn parse_conv(&self, cur: &mut SliceCursor) -> ShResult<Self::Conv> {
+    let Some(b) = cur.next_byte() else {
+      return Err(sherr!(ExecFail, "stat: Incomplete format specifier"));
+    };
+    Ok(match b {
+      b'a' => FsConv::FreeBlocksForNonRoot,
+      b'b' => FsConv::TotalBlocks,
+      b'c' => FsConv::TotalNodes,
+      b'd' => FsConv::FreeNodes,
+      b'f' => FsConv::FreeBlocks,
+      b'i' => FsConv::FsId,
+      b'l' => FsConv::MaxNameLen,
+      b'n' => FsConv::FileName,
+      b's' => FsConv::BlockSize,
+      b'S' => FsConv::FundamentalBs,
+      b't' => FsConv::FsType(StatDisplay::Machine(Base::Hex)),
+      b'T' => FsConv::FsType(StatDisplay::Human),
+      _ => {
+        return Err(sherr!(
+          ExecFail,
+          "stat: Unsupported format specifier '%{}'",
+          b as char
+        ));
+      }
+    })
+  }
+
+  fn render(
+    &self,
+    conv: &Self::Conv,
+    _field: &FieldParams,
+    src: &mut Self::Source,
+  ) -> ShResult<Field> {
+    let mut body = String::new();
+    conv
+      .format(&mut body, "", src)
+      .map_err(|e| sherr!(ExecFail, "stat: Failed to format field: {e}"))?;
+    let body = body.into_bytes();
+    Ok(if matches!(conv, FsConv::FileName | FsConv::FsType(_)) {
+      Field::string(body)
+    } else {
+      Field::numeric(body, None, None)
+    })
+  }
+}
 
 #[derive(Clone, Copy)]
 enum Base {
@@ -66,8 +207,7 @@ enum Device {
   DevType(Base),
 }
 
-enum FileFmt {
-  Literal(VarStr),
+enum FileConv {
   Perms(StatDisplay),
   AllocBlocks,
   BlockSize,
@@ -398,117 +538,54 @@ impl FileInfo {
   }
 }
 
-impl FileFmt {
+impl FileConv {
+  fn is_numeric(&self) -> bool {
+    matches!(
+      self,
+      FileConv::AllocBlocks
+        | FileConv::BlockSize
+        | FileConv::IoHint
+        | FileConv::Gid
+        | FileConv::HardLinks
+        | FileConv::Inode
+        | FileConv::Uid
+        | FileConv::HexMode
+        | FileConv::FileSize(StatDisplay::Machine(_))
+        | FileConv::Perms(StatDisplay::Machine(_))
+        | FileConv::Time(
+          FileTime::Birth(TimeDisplay::EpochSeconds)
+            | FileTime::Access(TimeDisplay::EpochSeconds)
+            | FileTime::Modify(TimeDisplay::EpochSeconds)
+            | FileTime::StatChange(TimeDisplay::EpochSeconds)
+        )
+    )
+  }
   fn format(&self, f: &mut impl fmt::Write, stat: &FileInfo) -> fmt::Result {
     match self {
-      FileFmt::Literal(var_str)/**/=> write!(f, "{var_str}"),
-      FileFmt::AllocBlocks /*---*/ => write!(f, "{}", stat.st_blocks),
-      FileFmt::HexMode /*-------*/ => write!(f, "{:x}", stat.st_mode),
-      FileFmt::Gid /*===========*/ => write!(f, "{}", stat.st_gid),
-      FileFmt::HardLinks /*-----*/ => write!(f, "{}", stat.st_nlink),
-      FileFmt::Inode /*=========*/ => write!(f, "{}", stat.st_ino),
-      FileFmt::Filename /*------*/ => write!(f, "{}", stat.name),
-      FileFmt::BlockSize /*=====*/ |
-      FileFmt::IoHint /*========*/ => write!(f, "{}", stat.st_blksize),
-      FileFmt::Uid /*===========*/ => write!(f, "{}", stat.st_uid),
-      FileFmt::FileSize(disp) /**/ => stat.fmt_filesize(f, *disp),
-      FileFmt::FileType /*------*/ => stat.fmt_filetype(f),
-      FileFmt::Perms(stat_display) => stat.fmt_mode(f, *stat_display),
-      FileFmt::SecCtx /*--------*/ => stat.fmt_sec_ctx(f),
-      FileFmt::GidName /*=======*/ => stat.fmt_gid_name(f),
-      FileFmt::MountPnt /*------*/ => stat.fmt_mount_pnt(f),
-      FileFmt::QuotedFilename /**/ => stat.fmt_quoted_name(f),
-      FileFmt::UidName /*-------*/ => stat.fmt_uid_name(f),
-      FileFmt::DevType(device)/*=*/=> stat.fmt_dev_type(f, *device),
-      FileFmt::Time(file_time)/*-*/=> stat.fmt_time(f, *file_time),
+      FileConv::BlockSize /*=====*/ |
+      FileConv::IoHint /*========*/ => write!(f, "{}",   stat.st_blksize),
+      FileConv::AllocBlocks /*---*/ => write!(f, "{}",   stat.st_blocks),
+      FileConv::Gid /*===========*/ => write!(f, "{}",   stat.st_gid),
+      FileConv::HardLinks /*-----*/ => write!(f, "{}",   stat.st_nlink),
+      FileConv::Inode /*=========*/ => write!(f, "{}",   stat.st_ino),
+      FileConv::Filename /*------*/ => write!(f, "{}",   stat.name),
+      FileConv::Uid /*===========*/ => write!(f, "{}",   stat.st_uid),
+      FileConv::HexMode /*-------*/ => write!(f, "{:x}", stat.st_mode),
+      FileConv::FileSize(disp) /**/ => stat.fmt_filesize(f, *disp),
+      FileConv::FileType /*------*/ => stat.fmt_filetype(f),
+      FileConv::Perms(stat_display) => stat.fmt_mode(f,     *stat_display),
+      FileConv::SecCtx /*--------*/ => stat.fmt_sec_ctx(f),
+      FileConv::GidName /*=======*/ => stat.fmt_gid_name(f),
+      FileConv::MountPnt /*------*/ => stat.fmt_mount_pnt(f),
+      FileConv::QuotedFilename /**/ => stat.fmt_quoted_name(f),
+      FileConv::UidName /*-------*/ => stat.fmt_uid_name(f),
+      FileConv::DevType(device)/*=*/=> stat.fmt_dev_type(f, *device),
+      FileConv::Time(file_time)/*-*/=> stat.fmt_time(f,     *file_time),
     }
   }
 }
 
-struct FileFmtArgs(Vec<FileFmt>);
-
-impl FileFmtArgs {
-  fn parse(bytes: &[u8]) -> Result<Self, ShErr> {
-    let mut cur = SliceCursor::new(bytes);
-    let mut literal = util::scratch_buf();
-    let mut args = vec![];
-
-    match_loop!(cur.next_byte() => b, {
-      b'%' => {
-        let Some(b) = cur.next_byte() else {
-          return Err(sherr!(ExecFail, "stat: Incomplete format specifier"));
-        };
-        if b == b'%' {
-          literal.push(b'%');
-          continue
-        }
-        args.push(FileFmt::Literal(mem::take(&mut literal).as_slice().into()));
-
-        match b {
-          b'a' => args.push(FileFmt::Perms(StatDisplay::Machine(Base::Octal))),
-          b'A' => args.push(FileFmt::Perms(StatDisplay::Human)),
-          b'b' => args.push(FileFmt::AllocBlocks),
-          b'B' => args.push(FileFmt::BlockSize),
-          b'C' => args.push(FileFmt::SecCtx),
-          b'd' |
-          b'D' |
-          b'R' => args.push(FileFmt::DevType(Device::DevType(Base::Hex))),
-          first @ (b'H' | b'L') => {
-            let Some(next) = cur.next_byte() else {
-              return Err(sherr!(ExecFail, "stat: Incomplete format specifier"));
-            };
-
-            match (first, next) {
-              (b'H', b'd') => args.push(FileFmt::DevType(Device::MajorNumber)),
-              (b'H', b'r') => args.push(FileFmt::DevType(Device::MajorDevType(Base::Decimal))),
-              (b'L', b'd') => args.push(FileFmt::DevType(Device::MinorNumber)),
-              (b'L', b'r') => args.push(FileFmt::DevType(Device::MinorDevType(Base::Decimal))),
-              _ => return Err(sherr!(ExecFail, "stat: Unsupported format specifier '{}' for '%{}'", next as char, first as char)),
-            }
-          }
-          b'f' => args.push(FileFmt::HexMode),
-          b'F' => args.push(FileFmt::FileType),
-          b'g' => args.push(FileFmt::Gid),
-          b'G' => args.push(FileFmt::GidName),
-          b'h' => args.push(FileFmt::HardLinks),
-          b'i' => args.push(FileFmt::Inode),
-          b'm' => args.push(FileFmt::MountPnt),
-          b'n' => args.push(FileFmt::Filename),
-          b'N' => args.push(FileFmt::QuotedFilename),
-          b'o' => args.push(FileFmt::IoHint),
-          b's' => args.push(FileFmt::FileSize(StatDisplay::Machine(Base::Decimal))),
-          b'S' => args.push(FileFmt::FileSize(StatDisplay::Human)),
-          b'r' => args.push(FileFmt::DevType(Device::DevType(Base::Decimal))),
-          b't' => args.push(FileFmt::DevType(Device::MajorDevType(Base::Hex))),
-          b'T' => args.push(FileFmt::DevType(Device::MinorDevType(Base::Hex))),
-          b'u' => args.push(FileFmt::Uid),
-          b'U' => args.push(FileFmt::UidName),
-          b'w' => args.push(FileFmt::Time(FileTime::Birth(TimeDisplay::Readable))),
-          b'W' => args.push(FileFmt::Time(FileTime::Birth(TimeDisplay::EpochSeconds))),
-          b'x' => args.push(FileFmt::Time(FileTime::Access(TimeDisplay::Readable))),
-          b'X' => args.push(FileFmt::Time(FileTime::Access(TimeDisplay::EpochSeconds))),
-          b'y' => args.push(FileFmt::Time(FileTime::Modify(TimeDisplay::Readable))),
-          b'Y' => args.push(FileFmt::Time(FileTime::Modify(TimeDisplay::EpochSeconds))),
-          b'z' => args.push(FileFmt::Time(FileTime::StatChange(TimeDisplay::Readable))),
-          b'Z' => args.push(FileFmt::Time(FileTime::StatChange(TimeDisplay::EpochSeconds))),
-          _ => {
-            return Err(sherr!(ExecFail, "stat: Unsupported format specifier '%{}'", b as char));
-          }
-        }
-      }
-      _ => literal.push(b),
-    });
-
-    if !literal.is_empty() {
-      args.push(FileFmt::Literal(mem::take(&mut literal).as_slice().into()));
-    }
-
-    Ok(Self(args))
-  }
-}
-
-enum FsFmt {
-  Literal(VarStr),
+enum FsConv {
   FreeBlocksForNonRoot,
   FreeBlocks,
   TotalBlocks,
@@ -596,21 +673,20 @@ fn fs_type_of(path: &str) -> (Option<u64>, Option<String>) {
   }
 }
 
-impl FsFmt {
+impl FsConv {
   fn format(&self, f: &mut impl fmt::Write, name: &str, stat: &FsInfo) -> fmt::Result {
     match self {
-      FsFmt::Literal(var_str )/**/=> write!(f, "{var_str}"),
-      FsFmt::FileName /*=======*/ => write!(f, "{name}"),
-      FsFmt::FreeBlocksForNonRoot => write!(f, "{}", stat.avail_blks),
-      FsFmt::FreeBlocks /*=====*/ => write!(f, "{}", stat.free_blks),
-      FsFmt::TotalBlocks /*----*/ => write!(f, "{}", stat.total_blks),
-      FsFmt::TotalNodes /*=====*/ => write!(f, "{}", stat.total_nodes),
-      FsFmt::FreeNodes /*------*/ => write!(f, "{}", stat.free_nodes),
-      FsFmt::FsId /*===========*/ => write!(f, "{}", stat.fs_id),
-      FsFmt::MaxNameLen /*-----*/ => write!(f, "{}", stat.name_max),
-      FsFmt::BlockSize /*------*/ => write!(f, "{}", stat.block_size),
-      FsFmt::FundamentalBs /*==*/ => write!(f, "{}", stat.fundamental_bs),
-      FsFmt::FsType(stat_display) => stat.fmt_fs_type(f, *stat_display)
+      FsConv::FileName /*=======*/ => write!(f, "{name}"),
+      FsConv::FreeBlocksForNonRoot => write!(f, "{}", stat.avail_blks),
+      FsConv::FreeBlocks /*=====*/ => write!(f, "{}", stat.free_blks),
+      FsConv::TotalBlocks /*----*/ => write!(f, "{}", stat.total_blks),
+      FsConv::TotalNodes /*=====*/ => write!(f, "{}", stat.total_nodes),
+      FsConv::FreeNodes /*------*/ => write!(f, "{}", stat.free_nodes),
+      FsConv::FsId /*===========*/ => write!(f, "{}", stat.fs_id),
+      FsConv::MaxNameLen /*-----*/ => write!(f, "{}", stat.name_max),
+      FsConv::BlockSize /*------*/ => write!(f, "{}", stat.block_size),
+      FsConv::FundamentalBs /*==*/ => write!(f, "{}", stat.fundamental_bs),
+      FsConv::FsType(stat_display) => stat.fmt_fs_type(f, *stat_display)
     }
   }
 }
@@ -676,54 +752,6 @@ fn fs_type_readable(id: statfs::FsType) -> &'static str {
   }
 }
 
-struct FsFmtArgs(Vec<FsFmt>);
-
-impl FsFmtArgs {
-  fn parse(bytes: &[u8]) -> Result<Self, ShErr> {
-    let mut cur = SliceCursor::new(bytes);
-    let mut literal = util::scratch_buf();
-    let mut args = vec![];
-
-    match_loop!(cur.next_byte() => b, {
-      b'%' => {
-        let Some(b) = cur.next_byte() else {
-          return Err(sherr!(ExecFail, "stat: Incomplete format specifier"));
-        };
-        if b == b'%' {
-          literal.push(b'%');
-          continue
-        }
-        args.push(FsFmt::Literal(mem::take(&mut literal).as_slice().into()));
-
-        match b {
-          b'a' => args.push(FsFmt::FreeBlocksForNonRoot),
-          b'b' => args.push(FsFmt::TotalBlocks),
-          b'c' => args.push(FsFmt::TotalNodes),
-          b'd' => args.push(FsFmt::FreeNodes),
-          b'f' => args.push(FsFmt::FreeBlocks),
-          b'i' => args.push(FsFmt::FsId),
-          b'l' => args.push(FsFmt::MaxNameLen),
-          b'n' => args.push(FsFmt::FileName),
-          b's' => args.push(FsFmt::BlockSize),
-          b'S' => args.push(FsFmt::FundamentalBs),
-          b't' => args.push(FsFmt::FsType(StatDisplay::Machine(Base::Hex))),
-          b'T' => args.push(FsFmt::FsType(StatDisplay::Human)),
-          _ => {
-            return Err(sherr!(ExecFail, "stat: Unsupported format specifier '%{}'", b as char));
-          }
-        }
-      }
-      _ => literal.push(b),
-    });
-
-    if !literal.is_empty() {
-      args.push(FsFmt::Literal(mem::take(&mut literal).as_slice().into()));
-    }
-
-    Ok(Self(args))
-  }
-}
-
 pub(super) struct Stat;
 impl super::Builtin for Stat {
   fn strict_opts(&self) -> bool {
@@ -776,41 +804,36 @@ impl super::Builtin for Stat {
       format.unwrap_or_else(|| Self::DEFAULT_FILE_FMT.into())
     };
 
-    let mut buf = String::new();
-    let mut status = 0;
-
-    if fs_stat {
-      let fmt_args = FsFmtArgs::parse(format.as_bytes())?;
-      for (arg, _) in arg_vec {
-        let stat = match FsInfo::for_path(&arg.to_str_lossy()) {
-          Ok(stat) => stat,
+    let status = if fs_stat {
+      Self::render_all(
+        &FsFmt,
+        format.as_bytes(),
+        arg_vec,
+        |(arg, _span)| match FsInfo::for_path(&arg.to_str_lossy()) {
+          Ok(s) => Some(s),
           Err(e) => {
-            errln!("stat: Failed to statfs '{}': {e}", arg.to_str_lossy());
-            status = 1;
-            continue;
+            errln!(
+              "stat: Failed to stat filesystem for '{}': {e}",
+              arg.to_str_lossy()
+            );
+            None
           }
-        };
-        for fmt in &fmt_args.0 {
-          fmt.format(&mut buf, &arg.to_str_lossy(), &stat)?;
-        }
-
-        outln!("{}", mem::take(&mut buf));
-      }
+        },
+      )?
     } else {
-      let fmt_args = FileFmtArgs::parse(format.as_bytes())?;
-      for (arg, span) in arg_vec {
-        let Ok(stat) = FileInfo::new(deref, arg.to_str_lossy().into()).promote_err(span) else {
-          errln!("stat: Failed to stat '{}'", arg.to_str_lossy());
-          status = 1;
-          continue;
-        };
-        for fmt in &fmt_args.0 {
-          fmt.format(&mut buf, &stat)?;
-        }
-
-        outln!("{}", mem::take(&mut buf));
-      }
-    }
+      Self::render_all(
+        &FileFmt,
+        format.as_bytes(),
+        arg_vec,
+        |(arg, _span)| match FileInfo::new(deref, arg.clone()) {
+          Ok(s) => Some(s),
+          Err(e) => {
+            errln!("stat: Failed to stat '{}': {e}", arg.to_str_lossy());
+            None
+          }
+        },
+      )?
+    };
 
     util::with_status(status)
   }
@@ -821,6 +844,30 @@ impl Stat {
   const DEFAULT_FS_FMT: &str = "  File: %N\n    ID: %i\tNamelen: %l\t Type: %t\nBlock size: %s\tFundamental block size: %S\nBlocks: Total: %b\tFree: %f\tAvailable: %a\nInodes: Total: %c\tFree: %d";
   const TERSE_FILE_FMT: &str = "%n %s %b %f %u %g %D %i %h %t %T %X %Y %Z %W %o";
   const TERSE_FS_FMT: &str = "%n %i %l %t %s %S %b %f %a %c %d";
+
+  fn render_all<S: StrFmt, T>(
+    set: &S,
+    format: &[u8],
+    args: impl IntoIterator<Item = T>,
+    mut make_src: impl FnMut(T) -> Option<S::Source>,
+  ) -> ShResult<i32> {
+    let fmt = strops::Formatter::parse(set, format)?;
+    let mut buf = vec![];
+    let mut status = 0;
+
+    for arg in args {
+      let Some(mut src) = make_src(arg) else {
+        status = 1;
+        continue;
+      };
+      buf.clear();
+      fmt.render(&mut src, &mut buf)?;
+
+      outln!("{}", mem::take(&mut buf).to_str_lossy());
+    }
+
+    Ok(status)
+  }
 }
 
 #[cfg(test)]
@@ -834,13 +881,11 @@ mod tests {
 
   /// Build a `FileInfo` for `path` and render `fmt` against it.
   fn render(deref: bool, path: &str, fmt: &str) -> String {
-    let info = FileInfo::new(deref, path.into()).unwrap();
-    let args = FileFmtArgs::parse(fmt.as_bytes()).unwrap();
-    let mut out = String::new();
-    for f in &args.0 {
-      f.format(&mut out, &info).unwrap();
-    }
-    out
+    let mut info = FileInfo::new(deref, path.into()).unwrap();
+    let f = strops::Formatter::parse(&FileFmt, fmt.as_bytes()).unwrap();
+    let mut out = vec![];
+    f.render(&mut info, &mut out).unwrap();
+    out.to_str_lossy().into_owned()
   }
 
   fn chmod(path: &Path, mode: u32) {
@@ -950,8 +995,7 @@ mod tests {
   #[test]
   fn unknown_and_incomplete_specifiers_error() {
     let _g = TestGuard::new();
-    assert!(FileFmtArgs::parse(b"%").is_err());
-    assert!(FileFmtArgs::parse(b"%q").is_err());
+    assert!(strops::Formatter::parse(&FileFmt, b"%q").is_err());
   }
 
   #[test]
