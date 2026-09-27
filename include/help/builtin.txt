@@ -3027,7 +3027,7 @@ STAT                                             *builtin-stat* *stat*
 ==============================================================================
 THRU                                             *builtin-thru* *thru*
 
-  `thru [-c] [-a] [-E] [-t {dest}] [-v {var}] [-S {n}] [-T {n}] [-F {byte}]`
+  `thru [-c] [-a] [-t {dest}] [-v {var}] [-S {n}] [-T {n}] [-F {byte}]`
   `     [-U {byte}] [{file} ...]`
 
   Pass input to standard output unchanged: a fork-free `cat`, with a few
@@ -3091,26 +3091,16 @@ THRU                                             *builtin-thru* *thru*
                   Discard input up to and including the first {byte}, then
                   begin passing through. {byte} must be exactly one byte
                   (`$'\0'`, `:`, ...) and is itself consumed, never emitted.
-                  The marker that opens a slice. Exits non-zero if {byte} is
-                  never seen before end of input.
+                  The marker that opens a slice. Exits non-zero (see Exit
+                  status) if {byte} is never seen before end of input.
 
     `-U {byte}`, `--until {byte}`
                   Stop once the next {byte} is seen, passing through
                   everything before it; the {byte} is consumed but not
                   emitted. {byte} must be exactly one byte. The marker that
-                  closes a slice. Exits non-zero if {byte} is never seen
-                  before end of input, which is what terminates a record
-                  loop: `while thru -U $'\0'; do ...; done`.
-
-    `-E`, `--report-eof`
-                  Exit non-zero when no bytes were passed through, so a
-                  count loop stops at end of input the way `read` does:
-                  `while thru -T {n} -E <&{fd}; do ...; done`. Without this
-                  flag `thru` always exits 0 on empty input (like `cat`).
-                  A read error that moved no bytes also exits non-zero.
-                  Marker loops (`-U`/`-F`) need no `-E`: a missing delimiter
-                  already exits non-zero, and `-E` would wrongly stop them
-                  on a legitimately empty record (two adjacent delimiters).
+                  closes a slice. Exits non-zero (see Exit status) if {byte}
+                  is never seen before end of input, which is what terminates
+                  a record loop: `while thru -U $'\0'; do ...; done`.
 
   Behavior notes ~
 
@@ -3127,10 +3117,27 @@ THRU                                             *builtin-thru* *thru*
     `-F` and `-U` each consume their delimiter without emitting it, so
     `thru -F A -U B` yields exactly the bytes between the first `A` and the
     next `B`. A marker whose delimiter is never found exits non-zero even if
-    bytes were emitted; that is how a marker loop ends, and why such loops
-    take no `-E`. Either marker forces byte-at-a-time reads, so that `thru`
-    can stop precisely at the delimiter without over-reading the stream;
-    prefer `-S`/`-T` when a fixed offset or count will do.
+    bytes were emitted; that is how a marker loop ends. Either marker forces
+    byte-at-a-time reads, so that `thru` can stop precisely at the delimiter
+    without over-reading the stream; prefer `-S`/`-T` when a fixed offset or
+    count will do.
+
+  Exit status ~
+
+  `0`   everything requested was delivered: all `-T` bytes taken, the
+        `-F`/`-U` delimiter found, or a plain read moved at least one byte
+  `1`   end of input with no bytes moved — the clean EOF that ends a
+        `while thru` loop, the way `read` returns non-zero at EOF
+  `2`   usage or bad option
+  `3`   `-T` was set but the stream ended before {n} bytes; the short read
+        is still emitted (a truncated final record)
+  `4`   `-U` was set but its delimiter never appeared before end of input
+  `5`   `-F` was set but its delimiter never appeared before end of input
+  `6`   a non-blocking source had no data ready (would block)
+
+  When more than one condition holds, the highest code is reported: an
+  unmet `-F`/`-U` marker outranks a short `-T` take, so a record loop can
+  tell "delimiter missing" from "count short" from a clean end of input.
 
   Examples ~
 

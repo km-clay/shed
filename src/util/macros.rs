@@ -532,6 +532,18 @@ macro_rules! try_var {
   };
 }
 
+/// Set a shell variable
+///
+/// The value is specified as a [`VarKind`] member, and flags can be specified as a list of [`VarFlags`].
+/// You don't need to type out the `VarKind::` path, the macro does it internally
+/// example:
+/// ```
+/// // use the VarKind::string() constructor
+/// set_var!("myvar", string("hello world"))?;
+///
+/// // use the VarKind::Int(n) variant
+/// set_var!("mynum", Int(5))?;
+/// ```
 #[macro_export]
 macro_rules! set_var {
   ($name:expr, $kind:ident$(($($inner:tt)*))?) => {{

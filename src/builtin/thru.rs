@@ -1,3 +1,4 @@
+//! The [`thru`](`Thru`) builtin
 use std::{fs, io, sync::Arc};
 
 use crate::{
@@ -12,7 +13,6 @@ use crate::{
 struct ThruOpts {
   count: bool,
   append: bool,
-  report_eof: bool,
   tee: Option<VarStr>,
   var: Option<VarStr>,
   take: Option<usize>,
@@ -21,9 +21,10 @@ struct ThruOpts {
   until: Option<u8>,
 }
 
-/// Identity function that reads from stdin or files and writes to stdout, optionally teeing to a file and counting bytes.
+/// Primitive command that simply reads bytes from stdin or files and writes to stdout or a variable.
 ///
-/// Basically `cat` + `tee`, with no fork involved. Useful for keeping pipelines in-process if speed matters in a script.
+/// Has several options for precisely controlling the flow of input and output,
+/// effectively making this command a "valve" for pipelines.
 pub(super) struct Thru;
 impl super::Builtin for Thru {
   fn strict_opts(&self) -> bool {
@@ -34,7 +35,6 @@ impl super::Builtin for Thru {
     vec![
       opt!("count"      | b'c'   ),
       opt!("append"     | b'a'   ),
-      opt!("report-eof" | b'E'   ),
       opt!("tee"        | b't', 1),
       opt!("limit"      | b'L', 1),
       opt!("take"       | b'T', 1),
@@ -48,18 +48,22 @@ impl super::Builtin for Thru {
     args.opt_value("limit").inspect(|_| {
       errln!("thru: warning: `-L`/`--limit` are deprecated, use `-T`/`--take` instead");
     });
-    let opts = Self::parse_opts(&args)?;
+    let mut status = 0;
+    let mut set_status = |s: i32| {
+      if status < s {
+        status = s;
+      }
+    };
     let ThruOpts {
       count,
       append,
-      report_eof,
       var,
       tee,
       skip,
       mut take,
       mut from,
       mut until,
-    } = opts;
+    } = Self::parse_opts(&args)?;
 
     let mut tee_file: Option<Arc<dyn Sink>> = tee
       .map(|dest| {
@@ -124,6 +128,10 @@ impl super::Builtin for Thru {
           Some(l) => skip.saturating_add(l),
           None => buf.len(),
         };
+        if window == 0 {
+          break;
+        }
+
         let cap = if from.is_some() || until.is_some() {
           1
         } else {
@@ -137,7 +145,10 @@ impl super::Builtin for Thru {
           Ok(0) => break,
           Ok(n) => n,
           Err(e) => match e.kind() {
-            io::ErrorKind::WouldBlock => break,
+            io::ErrorKind::WouldBlock => {
+              set_status(6);
+              break;
+            }
             io::ErrorKind::Interrupted => {
               signal::check_signals()?;
               continue;
@@ -165,6 +176,7 @@ impl super::Builtin for Thru {
         }
         if until.is_some() && emit.first() == until.as_ref() {
           until = None;
+          take = None;
           break 'sources;
         }
 
@@ -200,9 +212,31 @@ impl super::Builtin for Thru {
       errln!("thru: {byte_count} bytes");
     }
 
-    let failed = (report_eof && byte_count == 0) || from.is_some() || until.is_some();
+    // thru exit statuses:
+    // 1: we read 0 bytes (EOF)
+    // 2: usage error/bad option
+    // 3: -T is set, and we didn't take the number of bytes requested
+    // 4: -F is set, and we never found the target byte
+    // 5: -U is set, and we never found the target byte
 
-    let status = i32::from(failed);
+    if byte_count == 0 {
+      // note: this also includes the "-S is set, and we skipped everything" case
+      set_status(1);
+    }
+
+    if byte_count > 0 && take.is_some_and(|t| t > 0) {
+      // 2 is reserved for usage errors
+      set_status(3);
+    }
+
+    if until.is_some() {
+      set_status(4);
+    }
+
+    if from.is_some() {
+      set_status(5);
+    }
+
     util::with_status(status)
   }
 }
@@ -211,7 +245,6 @@ impl Thru {
   fn parse_opts(args: &BuiltinArgs) -> ShResult<ThruOpts> {
     let count = args.has_opt("count");
     let append = args.has_opt("append");
-    let report_eof = args.has_opt("report-eof");
     let tee = args.opt_value("tee");
     let var = args.opt_value("var");
     let take = args
@@ -258,7 +291,6 @@ impl Thru {
     Ok(ThruOpts {
       count,
       append,
-      report_eof,
       tee,
       var,
       take,
@@ -266,5 +298,86 @@ impl Thru {
       from,
       until,
     })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use crate::state::Shed;
+  use crate::tests::testutil::{TestGuard, test_input};
+
+  fn status_of(cmd: &str) -> i32 {
+    let _g = TestGuard::new();
+    test_input(cmd).unwrap();
+    Shed::get_status()
+  }
+
+  #[test]
+  fn take_full_is_zero() {
+    assert_eq!(status_of(r"printf '0123' | thru -T 4 >/dev/null"), 0);
+  }
+
+  #[test]
+  fn take_partial_is_short_take() {
+    assert_eq!(status_of(r"printf '01' | thru -T 4 >/dev/null"), 3);
+  }
+
+  #[test]
+  fn take_zero_bytes_is_clean_eof_not_short_take() {
+    // A -T read that gets nothing is a clean boundary (1), not a truncation (3);
+    // this is what lets `while thru -T n` terminate cleanly.
+    assert_eq!(status_of(r"printf '' | thru -T 4 >/dev/null"), 1);
+  }
+
+  #[test]
+  fn eof_is_one() {
+    assert_eq!(status_of(r"printf '' | thru >/dev/null"), 1);
+  }
+
+  #[test]
+  fn plain_read_with_data_is_zero() {
+    assert_eq!(status_of(r"printf 'abc' | thru >/dev/null"), 0);
+  }
+
+  #[test]
+  fn until_found_is_zero() {
+    assert_eq!(
+      status_of("printf 'ab\\000cd' | thru --until $'\\0' >/dev/null"),
+      0
+    );
+  }
+
+  #[test]
+  fn until_not_found_is_four() {
+    assert_eq!(
+      status_of("printf 'abcd' | thru --until $'\\0' >/dev/null"),
+      4
+    );
+  }
+
+  #[test]
+  fn from_found_is_zero() {
+    assert_eq!(
+      status_of("printf 'ab\\000cd' | thru --from $'\\0' >/dev/null"),
+      0
+    );
+  }
+
+  #[test]
+  fn from_not_found_is_five() {
+    assert_eq!(
+      status_of("printf 'abcd' | thru --from $'\\0' >/dev/null"),
+      5
+    );
+  }
+
+  #[test]
+  fn until_outranks_short_take() {
+    // Overlap: partial -T read (would be 3) with an unmet --until (4). The
+    // higher code wins.
+    assert_eq!(
+      status_of("printf '01' | thru -T 4 --until $'\\0' >/dev/null"),
+      4
+    );
   }
 }
