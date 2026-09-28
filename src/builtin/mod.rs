@@ -51,6 +51,7 @@ mod dirstack;
 mod echo;
 mod evaluate;
 mod exec;
+mod fcntl;
 mod fixcmd;
 mod flog;
 mod flowctl;
@@ -65,7 +66,7 @@ mod jobctl;
 mod keymap;
 mod len;
 mod msg;
-mod opt;
+pub(crate) mod opt;
 mod poll;
 mod printf;
 mod pwd;
@@ -140,6 +141,7 @@ register_builtins! {
   b"export"   => varcmds ::Export,
   b"false"    => self    ::False,
   b"fc"       => fixcmd  ::FixCmd,
+  b"fcntl"    => fcntl   ::Fcntl,
   b"fg"       => jobctl  ::Fg,
   b"flog"     => flog    ::Flog,
   b"forget"   => forget  ::Forget,
@@ -202,6 +204,8 @@ register_builtins! {
 }
 
 /// Lookup a name in the builtin table via binary search
+///
+/// Binary search means the table must be sorted.
 pub(super) fn lookup_builtin(name: &[u8]) -> Option<&'static dyn Builtin> {
   BUILTIN_TABLE
     .binary_search_by_key(&name, |(n, _)| n)

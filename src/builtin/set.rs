@@ -1,4 +1,4 @@
-use std::{fmt::Write, iter::Peekable, str::FromStr};
+use std::{fmt::Write, str::FromStr};
 
 use unicode_width::UnicodeWidthStr;
 
@@ -21,7 +21,7 @@ use crate::{
   },
 };
 
-use super::opt::Parsed;
+use super::opt::{Parsed, Role, scan_options};
 use bitflags::bitflags;
 
 bitflags! {
@@ -247,20 +247,6 @@ pub(crate) fn build_set_call(readable: bool) -> String {
   }
 }
 
-/// How the caller of [`scan_options`] classifies a short flag character.
-pub(crate) enum Role {
-  Set(SetFlags),
-  Invocation,
-  InvocationArg,
-  Unknown,
-}
-
-/// Outcome of scanning a run of `set`-style option words.
-pub(crate) struct SetOpts {
-  /// A `--` terminator was consumed; operands follow.
-  pub terminated: bool,
-}
-
 /// Reset every `set`-option to its default value (`set -`).
 fn reset_set_opts() {
   Shed::shopts_mut(|o| o.set = ShOptSet::default());
@@ -268,7 +254,7 @@ fn reset_set_opts() {
 
 /// Apply a resolved [`SetFlags`] set to the shell's shopt table with the given
 /// polarity (`on` = enable). `emacs` is special-cased to invert `vi`.
-fn apply_set_flags(on: bool, flags: SetFlags, span: Span) -> ShResult<()> {
+pub(crate) fn apply_set_flags(on: bool, flags: SetFlags, span: Span) -> ShResult<()> {
   for opt in flags.get_shopt_fields() {
     if opt == "emacs" {
       let val = if on { "false" } else { "true" };
@@ -281,115 +267,18 @@ fn apply_set_flags(on: bool, flags: SetFlags, span: Span) -> ShResult<()> {
   Ok(())
 }
 
-/// Handle a `-o` / `+o` occurrence. The long-option name is taken from the rest
-/// of the current cluster if present (`-oerrexit`), otherwise from following
-/// operand words (`-o errexit`). With no name at all, prints the current
-/// settings, matching `set -o`.
-fn apply_long_o<I>(
-  on: bool,
-  cluster: &mut Peekable<impl Iterator<Item = char>>,
-  words: &mut Peekable<I>,
-  span: Span,
-) -> ShResult<()>
-where
-  I: Iterator<Item = (VarStr, Span)>,
-{
-  let attached: String = cluster.by_ref().collect();
-  if !attached.is_empty() {
-    let flag = SetFlags::from_str(&attached).promote_err(span)?;
-    return apply_set_flags(on, flag, span);
-  }
-
-  let mut found = false;
-  while let Some((word, _)) = words.peek() {
-    let word = word.to_str_lossy();
-    if word.starts_with('-') || word.starts_with('+') {
-      break;
-    }
-    found = true;
-    let (name, name_span) = words.next().unwrap();
-    let flag = SetFlags::from_str(&name.to_str_lossy()).promote_err(name_span)?;
-    apply_set_flags(on, flag, span)?;
-  }
-
-  if !found {
+/// Resolve one `set -o NAME` occurrence: a name resolves to a [`SetFlags`] and
+/// is applied; `None` (bare `-o`/`+o`) prints the current settings, matching
+/// `set -o`. This is the `long_opt` hook passed to [`scan_options`], shared by
+/// the `set` builtin and shell invocation parsing.
+pub(crate) fn apply_long_set(on: bool, name: Option<&str>, span: Span) -> ShResult<()> {
+  if let Some(name) = name {
+    let flag = SetFlags::from_str(name).promote_err(span)?;
+    apply_set_flags(on, flag, span)
+  } else {
     outln!("{}", build_set_call(on));
+    Ok(())
   }
-  Ok(())
-}
-
-/// Scan and apply a leading run of `set`-style option words from `words`.
-///
-/// Handles polarity (`-`/`+`), bundled shorts (`-ex`, `+ex`), `-o NAME` /
-/// `+o NAME` (including the attached `-oNAME` form and the no-name "print"
-/// form), and the `--` terminator. Stops — *without consuming* — at the first
-/// operand, a lone `-`, or a `--long` word, leaving it in `words` for the
-/// caller. `--` is consumed and reported via [`SetOpts::terminated`].
-///
-/// `classify` decides what each short char means; `on_invocation` handles any
-/// char classified as [`Role::Invocation`], receiving the attached argument
-/// (leftover cluster chars) if present and the remaining `words` so it can pull
-/// a separate argument. `strict` makes an unknown short flag an error.
-pub(crate) fn scan_options<I>(
-  words: &mut Peekable<I>,
-  classify: impl Fn(char) -> Role,
-  mut on_invocation: impl FnMut(char, Option<VarStr>, &mut Peekable<I>, Span) -> ShResult<()>,
-  strict: bool,
-) -> ShResult<SetOpts>
-where
-  I: Iterator<Item = (VarStr, Span)>,
-{
-  while let Some((word, span)) = words.peek().cloned() {
-    let word = word.to_str_lossy();
-    match word.chars().next() {
-      Some('-' | '+') => {}
-      _ => break, // first operand — leave it in `words`
-    }
-    if word == "-" {
-      break; // a lone `-` is an operand, not an option
-    }
-    if word.starts_with("--") {
-      if word == "--" {
-        words.next();
-        return Ok(SetOpts { terminated: true });
-      }
-      break; // `--long` word: caller handles it; don't consume
-    }
-
-    words.next(); // commit: it's a short cluster or `-o`
-    let on = word.starts_with('-');
-    let mut cluster = word[1..].chars().collect::<Vec<_>>().into_iter().peekable();
-    let mut flags = SetFlags::empty();
-
-    while let Some(ch) = cluster.next() {
-      if ch == 'o' {
-        apply_long_o(on, &mut cluster, words, span)?;
-        continue;
-      }
-      match classify(ch) {
-        Role::Set(f) => flags |= f,
-        Role::Invocation => {
-          // a bare invocation flag: doesn't consume the rest of the cluster
-          on_invocation(ch, None, words, span)?;
-        }
-        Role::InvocationArg => {
-          // getopt rule: leftover cluster chars are this option's argument.
-          let attached: String = cluster.by_ref().collect();
-          let attached = (!attached.is_empty()).then(|| VarStr::from(attached));
-          on_invocation(ch, attached, words, span)?;
-          break; // an arg-taking option ends the cluster
-        }
-        Role::Unknown if strict => {
-          return Err(sherr!(ParseErr @ span, "invalid option: -{ch}").with_code(2));
-        }
-        Role::Unknown => break,
-      }
-    }
-
-    apply_set_flags(on, flags, span)?;
-  }
-
-  Ok(SetOpts { terminated: false })
 }
 
 pub(super) struct Set;
@@ -444,6 +333,8 @@ impl super::Builtin for Set {
     let outcome = scan_options(
       &mut it,
       |ch| SetFlags::try_from(ch).map_or(Role::Unknown, Role::Set),
+      apply_set_flags,
+      apply_long_set,
       |ch, _, _, span| Err(sherr!(ParseErr @ span, "invalid option: -{ch}").with_code(2)),
       true,
     )?;

@@ -24,7 +24,10 @@ use crate::{
 
 use super::{
   autocmd,
-  builtin::set::{Role, SetFlags, scan_options},
+  builtin::{
+    opt::{Role, scan_options},
+    set::{SetFlags, apply_long_set, apply_set_flags},
+  },
   eval::{execute::exec_nonint, lex::Span},
   outln,
   procio::{self, RedirType},
@@ -231,6 +234,8 @@ fn parse_args() -> ShResult<ShedArgs> {
           's' | 'i' | 'l' | 'w' | 'I' => Role::Invocation,
           other => SetFlags::try_from(other).map_or(Role::Unknown, Role::Set),
         },
+        apply_set_flags,
+        apply_long_set,
         |ch, attached, rest, span| apply_invocation_flag(ch, attached, rest, span, &mut cfg),
         true,
       )?;

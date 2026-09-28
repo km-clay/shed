@@ -344,3 +344,140 @@ fn take_args(
   }
   Ok(args)
 }
+
+/// How a caller of [`scan_options`] classifies a short flag character.
+pub(crate) enum Role<F> {
+  /// A toggle flag carrying the caller's own flag value.
+  Set(F),
+  /// An invocation-only flag that takes no argument.
+  Invocation,
+  /// An invocation flag that consumes an argument.
+  InvocationArg,
+  /// Not a recognized flag.
+  Unknown,
+}
+
+/// Outcome of scanning a run of `set`-style option words.
+pub(crate) struct ScanOutcome {
+  /// A `--` terminator was consumed; operands follow.
+  pub terminated: bool,
+}
+
+/// Scan and dispatch a leading run of `set`-style option words from `words`.
+///
+/// Handles polarity (`-`/`+`), bundled shorts (`-ex`, `+ex`), `-o NAME` /
+/// `+o NAME` (including the attached `-oNAME` form, several names after one
+/// `-o`, and the no-name "print" form), and the `--` terminator. Stops —
+/// *without consuming* — at the first operand, a lone `-`, or a `--long` word,
+/// leaving it in `words` for the caller. `--` is consumed and reported via
+/// [`ScanOutcome::terminated`].
+///
+/// The grammar is generic; the caller supplies the meaning:
+/// - `classify` decides what each short char is ([`Role`]).
+/// - `set_flag` applies one toggle flag. A word's toggle flags are collected
+///   and applied only after the whole cluster parses, so a later error in the
+///   same word applies none of them.
+/// - `long_opt` handles a `-o`/`+o` name (`Some`) or the no-name print form
+///   (`None`).
+/// - `invocation` handles a char classified as [`Role::Invocation`] /
+///   [`Role::InvocationArg`], receiving the attached argument (leftover cluster
+///   chars) if present and the remaining `words` so it can pull a separate one.
+/// - `strict` makes an unknown short flag an error rather than a stop.
+pub(crate) fn scan_options<I, F>(
+  words: &mut Peekable<I>,
+  classify: impl Fn(char) -> Role<F>,
+  mut set_flag: impl FnMut(bool, F, Span) -> ShResult<()>,
+  mut long_opt: impl FnMut(bool, Option<&str>, Span) -> ShResult<()>,
+  mut invocation: impl FnMut(char, Option<VarStr>, &mut Peekable<I>, Span) -> ShResult<()>,
+  strict: bool,
+) -> ShResult<ScanOutcome>
+where
+  I: Iterator<Item = (VarStr, Span)>,
+{
+  while let Some((word, span)) = words.peek().cloned() {
+    let word = word.to_str_lossy();
+    match word.chars().next() {
+      Some('-' | '+') => {}
+      _ => break, // first operand — leave it in `words`
+    }
+    if word == "-" {
+      break; // a lone `-` is an operand, not an option
+    }
+    if word.starts_with("--") {
+      if word == "--" {
+        words.next();
+        return Ok(ScanOutcome { terminated: true });
+      }
+      break; // `--long` word: caller handles it; don't consume
+    }
+
+    words.next(); // commit: it's a short cluster or `-o`
+    let on = word.starts_with('-');
+    let mut cluster = word[1..].chars().collect::<Vec<_>>().into_iter().peekable();
+    let mut pending: Vec<F> = vec![];
+
+    while let Some(ch) = cluster.next() {
+      if ch == 'o' {
+        scan_long(on, &mut cluster, words, span, &mut long_opt)?;
+        continue;
+      }
+      match classify(ch) {
+        Role::Set(f) => pending.push(f),
+        Role::Invocation => invocation(ch, None, words, span)?,
+        Role::InvocationArg => {
+          // getopt rule: leftover cluster chars are this option's argument.
+          let attached: String = cluster.by_ref().collect();
+          let attached = (!attached.is_empty()).then(|| VarStr::from(attached));
+          invocation(ch, attached, words, span)?;
+          break; // an arg-taking option ends the cluster
+        }
+        Role::Unknown if strict => {
+          return Err(sherr!(ParseErr @ span, "invalid option: -{ch}").with_code(2));
+        }
+        Role::Unknown => break,
+      }
+    }
+
+    for f in pending {
+      set_flag(on, f, span)?;
+    }
+  }
+
+  Ok(ScanOutcome { terminated: false })
+}
+
+/// Handle a `-o` / `+o` occurrence. The name is taken from the rest of the
+/// current cluster if present (`-oname`), otherwise from following operand
+/// words (`-o name`, several allowed). With no name at all, `long_opt` is
+/// called once with `None` to print the current settings.
+fn scan_long<I>(
+  on: bool,
+  cluster: &mut Peekable<impl Iterator<Item = char>>,
+  words: &mut Peekable<I>,
+  span: Span,
+  long_opt: &mut impl FnMut(bool, Option<&str>, Span) -> ShResult<()>,
+) -> ShResult<()>
+where
+  I: Iterator<Item = (VarStr, Span)>,
+{
+  let attached: String = cluster.by_ref().collect();
+  if !attached.is_empty() {
+    return long_opt(on, Some(&attached), span);
+  }
+
+  let mut found = false;
+  while let Some((word, _)) = words.peek() {
+    let word = word.to_str_lossy();
+    if word.starts_with('-') || word.starts_with('+') {
+      break;
+    }
+    found = true;
+    let (name, name_span) = words.next().unwrap();
+    long_opt(on, Some(&name.to_str_lossy()), name_span)?;
+  }
+
+  if !found {
+    long_opt(on, None, span)?;
+  }
+  Ok(())
+}
