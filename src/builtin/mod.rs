@@ -61,6 +61,7 @@ mod getopts;
 mod hash;
 mod help;
 mod hist;
+mod int;
 mod intro;
 mod jobctl;
 mod keymap;
@@ -174,6 +175,7 @@ register_builtins! {
   b"quote"    => quote   ::Quote,
   b"raise"    => flowctl ::Raise,
   b"read"     => read    ::Read,
+  b"readint"  => int     ::ReadInt,
   b"readkey"  => read    ::ReadKey,
   b"readonly" => varcmds ::Readonly,
   b"return"   => flowctl ::Return,
@@ -201,6 +203,7 @@ register_builtins! {
   b"unset"    => varcmds ::Unset,
   b"vice"     => vice    ::Vice,
   b"wait"     => jobctl  ::Wait,
+  b"writeint" => int     ::WriteInt,
   b"yes"      => self    ::Yes,
   b"zd"       => cd      ::Zd,
 }

@@ -2173,6 +2173,112 @@ READ                                             *builtin-read* *read*
   See also: |quote|(builtin-quote), |unquote|(builtin-unquote)
 
 ==============================================================================
+READINT                                          *builtin-readint* *readint*
+
+  `readint --type {type} [--big-endian]`
+  `readint --width {bits} [--signed] [--big-endian]`
+  `readint [--signed] [--big-endian]`                    (width inferred)
+
+  Read a binary integer from standard input and print its decimal
+  value. With `--width` or `--type`, `readint` consumes exactly that
+  many bytes; with neither, it infers the width from the input (see
+  below). It decodes the bytes according to the sign and byte order and
+  writes the result to stdout with no trailing newline, so it drops
+  cleanly into a `$(readint ...)` substitution. Read from another
+  descriptor by redirecting stdin, e.g. `readint <&5`.
+
+  A binary integer is defined by three facts, and the flags name each:
+  how many bytes, in what order, and whether it can be negative.
+
+  Flags ~
+
+    `-w {bits}`, `--width {bits}`   width in *bits*: `8`, `16`, `32`,
+                                    `64`, or `128`. The value is spaced,
+                                    not attached: `-w 16`, not `-w16`.
+    `-s`, `--signed`               decode as a signed (two's-complement)
+                                    integer. Unsigned by default.
+    `-E`, `--big-endian`           most-significant byte first. The
+                                    default is little-endian.
+    `-T {type}`, `--type {type}`   width and sign together, by Rust name:
+                                    `u8`/`i8`, `u16`/`i16`, `u32`/`i32`,
+                                    `u64`/`i64`, `u128`/`i128`. Mutually
+                                    exclusive with `-w`/`-s`; byte order
+                                    is still set separately with `-E`.
+
+  Width inference ~
+
+  With neither `--width` nor `--type`, `readint` infers the width from
+  the input: it reads standard input and decodes exactly the bytes it
+  finds, so `thru -T 3 | readint` yields a 24-bit value.
+  `--signed`/`--big-endian` still apply. Because this drains stdin to
+  end-of-file it is meant for a bounded stream such as a `thru` slice;
+  the maximum is 16 bytes, and `readint` reads no more than that before
+  erroring, so an oversized or unbounded source fails fast instead of
+  being consumed whole. More than 16 bytes, or empty input, is an error.
+
+  Unknown options are rejected, so a mistyped flag such as `--be` fails
+  loudly instead of silently decoding the wrong byte order.
+
+  Exit status ~
+
+  `0`     a value was read and printed
+  nonzero on a usage error (an invalid width or type, an unknown option,
+  or `--type` combined with `-w`/`-s`); on a fixed-width read that hits
+  end-of-input early; or, in inferred mode, on empty input or more than
+  16 bytes
+
+  Examples ~
+
+      ```printf '\x2c\x01' | readint -w 16```
+                                little-endian u16 -> 300
+      ```printf '\xff\xff' | readint --type i16```
+                                signed 16-bit -> -1
+      ```readint --type u32 --big-endian <&5```
+                                read a big-endian u32 from fd 5
+      ```thru -T 3 | readint```
+                                infer width from a 3-byte slice -> 24-bit
+
+  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+
+  See also: |builtin-writeint|, |builtin-thru|, |builtin-read|.
+
+==============================================================================
+WRITEINT                                         *builtin-writeint* *writeint*
+
+  `writeint --type {type} [--big-endian] [{value}]`
+  `writeint --width {bits} [--signed] [--big-endian] [{value}]`
+
+  Encode an integer as a fixed-width binary value and write the raw
+  bytes to stdout (no trailing newline). This is the inverse of
+  |builtin-readint|; the width, sign, and byte-order flags mean exactly
+  the same thing and take the same values.
+
+  {value} comes from the argument, or from standard input when no
+  argument is given, e.g. `echo 300 | writeint -w 16`. It is parsed as
+  decimal, or with a `0x`/`0b`/`0` prefix for hex/binary/octal, and may
+  carry a leading `-` for negatives.
+
+  A value that does not fit the width is truncated to the low {width}
+  bytes rather than reported as an error, the way a narrowing cast
+  wraps: `writeint -w 8 300` writes the single byte `0x2c`.
+
+  Exit status ~
+
+  `0`     the bytes were written
+  nonzero on a usage error: no width or type, an invalid width or type,
+  a missing or non-numeric value, or `--type` combined with `-w`/`-s`
+
+  Examples ~
+
+      ```writeint -w 16 300```            little-endian -> 2c 01
+      ```writeint --type i16 -1```        two's-complement -> ff ff
+      ```writeint --type u32 -E 44100```  big-endian -> 00 00 ac 44
+
+  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+
+  See also: |builtin-readint|, |builtin-thru|.
+
+==============================================================================
 READONLY                                         *builtin-readonly* *readonly*
 
   `readonly [-p] [name[=value] ...]`

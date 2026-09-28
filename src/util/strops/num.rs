@@ -32,6 +32,11 @@ impl ParseRadix for i64 {
     i64::from_str_radix(s, radix).ok()
   }
 }
+impl ParseRadix for i128 {
+  fn from_radix(s: &str, radix: u32) -> Option<Self> {
+    i128::from_str_radix(s, radix).ok()
+  }
+}
 impl ParseRadix for u64 {
   fn from_radix(s: &str, radix: u32) -> Option<Self> {
     u64::from_str_radix(s, radix).ok()

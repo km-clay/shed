@@ -24,14 +24,17 @@ impl super::Builtin for Pipe {
       opt!("no-cloexec" | b'C'   ),
     ]
   }
+  #[rustfmt::skip]
   #[cfg(linux_like)]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("array" | b'a', 1),
-      opt!("size" | b's', 1),
-      opt!("non-block" | b'n'),
-      opt!("no-cloexec" | b'C'),
-      opt!("packet" | b'p'),
+      opt!("array"      | b'a', 1),
+      opt!("size"       | b's', 1),
+      opt!("non-block"  | b'n'   ),
+      opt!("no-cloexec" | b'C'   ),
+      opt!("non-block"  | b'n'   ),
+      opt!("no-cloexec" | b'C'   ),
+      opt!("packet"     | b'p'   ),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
