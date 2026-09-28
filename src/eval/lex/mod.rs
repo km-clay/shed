@@ -26,7 +26,7 @@ use crate::{
     self,
     error::ShResult,
     pos::Pos,
-    strops::{self, ByteCursor, QuoteState, SliceCursor},
+    strops::{self, ByteCursor, QuoteState, SliceCursor, scan_brackets},
   },
 };
 
@@ -816,13 +816,37 @@ impl<'a> LexStream<'a> {
   /// This is a speculative operation; if it fails, the lexer will roll back to
   /// its previous state.
   fn read_redir(&mut self) -> Option<ShResult<Tk>> {
+    let read_target = |this: &mut Self| {
+      if this.bump_if_eq(b'-') {
+        return Some(());
+      }
+      let start = this.cursor;
+
+      if this.bump_if(|b| b.is_ascii_digit()) {
+        this.bump_while(|b| b.is_ascii_digit());
+      } else if this.bump_if(|b| b == b'{') {
+        if !this.bump_if(|b| b.is_ascii_alphabetic() || b == b'_') {
+          return None;
+        }
+        this.bump_while(|b| b.is_ascii_alphanumeric() || b == b'_');
+        if this.bump_if_eq(b'[') && !scan_brackets(this, 1) {
+          return None;
+        }
+        if !this.bump_if_eq(b'}') {
+          return None;
+        }
+      }
+
+      if this.cursor == start {
+        return None;
+      }
+      Some(())
+    };
+
     self.attempt(|this| {
       let start = this.cursor;
 
       match_loop!(this.peek_byte() => b, {
-        b'&' if this.peek_nth(1) == Some(b'>') => {
-          this.bump();
-        }
         b'>' => {
           if this.peek_nth(1) == Some(b'(') {
             return None; // It's a process sub
@@ -841,10 +865,7 @@ impl<'a> LexStream<'a> {
             return Some(Ok(tk));
           }
 
-          // '&' consumed by bump_if_eq above; now lex the dup target (fd or '-')
-          if !this.bump_if_eq(b'-') {
-            this.bump_while(|b| b.is_ascii_digit());
-          }
+          read_target(this);
 
           let tk = this.get_token(start..this.cursor, TkRule::Redir);
           return Some(Ok(tk));
@@ -893,9 +914,7 @@ impl<'a> LexStream<'a> {
             Some(b'&') => {
               this.bump();
 
-              if !this.bump_if_eq(b'-') {
-                this.bump_while(|b| b.is_ascii_digit());
-              }
+              read_target(this);
 
               let tk = this.get_token(start..this.cursor, TkRule::Redir);
               return Some(Ok(tk));
@@ -906,9 +925,10 @@ impl<'a> LexStream<'a> {
           let tk = this.get_token(start..this.cursor, TkRule::Redir);
           return Some(Ok(tk));
         }
-        b'0'..=b'9' => {
-          this.bump_while(|b| b.is_ascii_digit());
+        b'&' if this.peek_nth(1) == Some(b'>') => {
+          this.bump();
         }
+        b'{' | b'0'..=b'9' => read_target(this)?,
         _ => {
           return None;
         }
@@ -1239,6 +1259,10 @@ impl<'a> LexStream<'a> {
         tk.flags |= flags;
         self.set_next_is_cmd(true);
         return Ok(tk);
+      }
+      b'{' if self.cursor == start && let Some(redir) = self.read_redir() => {
+        // bracketed redir target, something like {var}>&-
+        return redir;
       }
       b'{' if self.cursor == start && self.next_is_cmd() => {
         // brace group

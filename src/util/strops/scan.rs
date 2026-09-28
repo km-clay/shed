@@ -218,12 +218,18 @@ pub(crate) fn scan_parens<C: ByteCursor>(c: &mut C, depth: usize) -> bool {
   scan_delims(b'(', c, depth)
 }
 
+/// Scan a balanced `[...]`; see [`scan_parens`]. Does not recurse into
+/// `$(...)`, so a literal `]` in a command substitution closes early.
+pub(crate) fn scan_brackets<C: ByteCursor>(c: &mut C, depth: usize) -> bool {
+  scan_delims(b'[', c, depth)
+}
+
 /// Scan a balanced `${...}`, following nested `${...}` / `$(...)`. See
 /// [`scan_parens`] for the `depth` convention and return value.
 pub(crate) fn scan_param_exp<C: ByteCursor>(c: &mut C, mut depth: usize) -> bool {
   let mut qt = QuoteState::default();
   match_loop!(c.next_byte() => b, {
-    b'\\' => { c.next_byte(); }
+    b'\\' if !qt.in_single() => c.bump(),
     b'\'' => qt.toggle_single(),
     b'"' if !qt.in_single() => qt.toggle_double(),
     _ if qt.in_quote() => {}
@@ -259,7 +265,7 @@ fn scan_delims<C: ByteCursor>(opener: u8, c: &mut C, mut depth: usize) -> bool {
   };
   let mut qt = QuoteState::default();
   match_loop!(c.next_byte() => b, {
-    b'\\' => { c.next_byte(); }
+    b'\\' if !qt.in_single() => c.bump(),
     b'\'' => qt.toggle_single(),
     b'"' if !qt.in_single() => qt.toggle_double(),
     _ if qt.in_quote() => {}

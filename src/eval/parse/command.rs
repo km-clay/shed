@@ -17,7 +17,7 @@ use crate::{
 use super::{
   NdFlags, NdRule, Node, ParseStream, ShResult, Span, Tk, TkFlags, TkRule,
   node::AssignKind,
-  procio::{RedirBldr, RedirSpec, RedirTarget, RedirType},
+  procio::{FdSlot, RedirBldr, RedirSpec, RedirTarget, RedirType},
   sherr,
 };
 
@@ -59,14 +59,14 @@ impl ParseStream {
       // LCOV_EXCL_STOP
     };
 
-    let target = if redir_bldr.dup_from_word {
-      extend_span!(*span, next_tk.span);
-      RedirTarget::FdExpr(next_tk)
-    } else if class == RedirType::HereString {
+    let target = if class == RedirType::HereString {
       RedirTarget::HereDoc {
         body: next_tk.word(),
         flags: next_tk.flags | TkFlags::HERESTRING,
       }
+    } else if redir_bldr.dup_from_word {
+      extend_span!(*span, next_tk.span);
+      RedirTarget::Fd(FdSlot::Word(next_tk))
     } else {
       extend_span!(*span, next_tk.span);
       RedirTarget::Path(next_tk)
@@ -88,8 +88,8 @@ impl ParseStream {
     redirs.push(redir);
     if redir_tk.flags.contains(TkFlags::REDIR_ALL) {
       redirs.push(RedirSpec::Dup {
-        from: 1,
-        to: 2,
+        from: 1.into(),
+        to: 2.into(),
         mode: RedirType::Output,
       });
     }

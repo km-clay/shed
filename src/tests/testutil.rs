@@ -229,9 +229,9 @@ impl TestGuard {
     let (stdin_read, stdin_write) = unistd::pipe().unwrap();
 
     let redirs: RedirSet = vec![
-      RedirSpec::dup(stdin_read.as_raw_fd(), 0, RedirType::Input),
-      RedirSpec::dup(pty_slave.as_raw_fd(), 1, RedirType::Output),
-      RedirSpec::dup(pty_slave.as_raw_fd(), 2, RedirType::Output),
+      RedirSpec::dup(stdin_read.as_raw_fd().into(), 0.into(), RedirType::Input),
+      RedirSpec::dup(pty_slave.as_raw_fd().into(), 1.into(), RedirType::Output),
+      RedirSpec::dup(pty_slave.as_raw_fd().into(), 2.into(), RedirType::Output),
     ]
     .into();
     let redir_guard = Sinks::apply_set(&redirs).unwrap();

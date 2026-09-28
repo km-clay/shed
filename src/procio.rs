@@ -53,11 +53,16 @@ use crate::{
   },
   expand::Expander,
   lifecycle, match_loop, sherr, shopt, signal,
-  state::{Shed, shopt::ReadLimit, terminal::Terminal, vars::VarStr},
+  state::{
+    Shed,
+    shopt::ReadLimit,
+    terminal::Terminal,
+    vars::{VarName, VarStr},
+  },
   util::{
     self,
     error::{ShErr, ShResult},
-    strops::{ByteCursor, SliceCursor},
+    strops::{self, ByteCursor, SliceCursor},
   },
   varstr,
 };
@@ -196,6 +201,39 @@ pub(crate) fn pipes_high() -> nix::Result<(OwnedFd, OwnedFd)> {
   Ok((move_high(r)?, move_high(w)?))
 }
 
+#[cfg(linux_like)]
+pub(crate) fn pipes_high_with(cloexec: bool, nonblock: bool) -> nix::Result<(OwnedFd, OwnedFd)> {
+  let mut o_flags = OFlag::empty();
+  if cloexec {
+    o_flags |= OFlag::O_CLOEXEC;
+  }
+  if nonblock {
+    o_flags |= OFlag::O_NONBLOCK;
+  }
+
+  let (r, w) = nix::unistd::pipe2(o_flags)?;
+  if cloexec {
+    Ok((move_high(r)?, move_high(w)?))
+  } else {
+    Ok((move_high_no_cloexec(r)?, move_high_no_cloexec(w)?))
+  }
+}
+
+#[cfg(not(linux_like))]
+pub(crate) fn pipes_high_with(cloexec: bool, nonblock: bool) -> nix::Result<(OwnedFd, OwnedFd)> {
+  let (r, w) = nix::unistd::pipe()?;
+  let (r, w) = if cloexec {
+    (move_high(r)?, move_high(w)?)
+  } else {
+    (move_high_no_cloexec(r)?, move_high_no_cloexec(w)?)
+  };
+  if nonblock {
+    fcntl(r.as_fd(), FcntlArg::F_SETFL(OFlag::O_NONBLOCK))?;
+    fcntl(w.as_fd(), FcntlArg::F_SETFL(OFlag::O_NONBLOCK))?;
+  }
+  Ok((r, w))
+}
+
 pub(crate) fn pipes_high_no_cloexec() -> nix::Result<(OwnedFd, OwnedFd)> {
   let (r, w) = nix::unistd::pipe()?;
   Ok((move_high_no_cloexec(r)?, move_high_no_cloexec(w)?))
@@ -209,16 +247,75 @@ pub(crate) fn pipes_high_nonblocking() -> nix::Result<(OwnedFd, OwnedFd)> {
   Ok((r, w))
 }
 
+fn read_brace_var(cur: &mut SliceCursor, bytes: &[u8]) -> Option<VarStr> {
+  let start = cur.pos();
+  if !cur.bump_if(|b| b.is_ascii_alphabetic() || b == b'_') {
+    return None;
+  }
+  cur.bump_while(|b| b.is_ascii_alphanumeric() || b == b'_');
+  if cur.bump_if_eq(b'[') && !strops::scan_brackets(cur, 1) {
+    return None; // unterminated subscript
+  }
+  let end = cur.pos();
+  cur
+    .bump_if_eq(b'}')
+    .then(|| VarStr::from(&bytes[start..end]))
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum FdSlot {
+  Var(VarStr),
+  Raw(RawFd),
+  Word(Tk),
+}
+
+impl FdSlot {
+  fn resolve_source(&self) -> ShResult<Option<RawFd>> {
+    match self {
+      FdSlot::Raw(raw) => Ok(Some(*raw)),
+      FdSlot::Var(var_str) => {
+        let vn = VarName::parse(&var_str.to_str_lossy(), true)?;
+        Shed::vars(|v| v.resolve_var(&vn))
+          .ok_or_else(|| sherr!(NotFound, "var not found: {var_str}"))?
+          .to_str_lossy()
+          .trim()
+          .parse::<RawFd>()
+          .map(Some)
+          .map_err(|_| sherr!(ParseErr, "var {var_str} does not resolve to a valid fd"))
+      }
+      FdSlot::Word(word) => expand_fd(word),
+    }
+  }
+
+  fn resolve(&self) -> ShResult<RawFd> {
+    self
+      .resolve_source()?
+      .ok_or_else(|| sherr!(ParseErr, "redirection target cannot be '-'"))
+  }
+}
+
+impl From<RawFd> for FdSlot {
+  fn from(fd: RawFd) -> Self {
+    FdSlot::Raw(fd)
+  }
+}
+
+impl From<VarStr> for FdSlot {
+  fn from(var: VarStr) -> Self {
+    FdSlot::Var(var)
+  }
+}
+
 /// Step one of our redirection building pipeline.
 ///
 /// The parser uses these to create `RedirSpecs`.
 #[derive(Default, Debug)]
 pub(super) struct RedirBldr {
-  pub fd: Option<RawFd>,
+  pub fd: Option<FdSlot>,
   pub class: Option<RedirType>,
   pub target: Option<RedirTarget>,
   pub span: Option<Span>,
-  pub dup_from_word: bool, // target fd is not a literal digit
+  pub dup_from_word: bool,
 }
 
 impl RedirBldr {
@@ -227,7 +324,13 @@ impl RedirBldr {
   }
   pub(crate) fn with_fd(self, fd: RawFd) -> Self {
     Self {
-      fd: Some(fd),
+      fd: Some(FdSlot::Raw(fd)),
+      ..self
+    }
+  }
+  pub(crate) fn with_fd_var(self, var: VarStr) -> Self {
+    Self {
+      fd: Some(FdSlot::Var(var)),
       ..self
     }
   }
@@ -269,8 +372,7 @@ impl RedirBldr {
     match target {
       RedirTarget::Path(path) if class.is_file_op() => Ok(RedirSpec::file(fd, path, class)),
       RedirTarget::Close => Ok(RedirSpec::close(fd)),
-      RedirTarget::Fd(src_fd) if class.is_dup_op() => Ok(RedirSpec::dup_spanned(src_fd, fd, class)),
-      RedirTarget::FdExpr(word) if class.is_dup_op() => Ok(RedirSpec::dup_expr(word, fd, class)),
+      RedirTarget::Fd(src_fd) if class.is_dup_op() => Ok(RedirSpec::dup(src_fd, fd, class)),
       RedirTarget::HereDoc { body, flags } => {
         // Strip leading tabs per line BEFORE expansion (POSIX order).
         let buf: VarStr = if flags.contains(TkFlags::HERESTRING) {
@@ -311,10 +413,21 @@ impl RedirBldr {
   pub(crate) fn parse(bytes: &[u8]) -> ShResult<Self> {
     let mut cur = SliceCursor::new(bytes);
     let mut src_fd = util::scratch_buf();
+    let mut src_var = None;
     let mut tgt_fd = util::scratch_buf();
+    let mut tgt_var = None;
     let mut redir = RedirBldr::new();
 
     match_loop!(cur.next_byte() => ch, {
+      b'{' => match read_brace_var(&mut cur, bytes) {
+        Some(v) => tgt_var = Some(v),
+        None => {
+          return Err(sherr!(
+            ParseErr,
+            "Invalid brace variable in redirection operator"
+          ));
+        }
+      }
       b'>' => {
         redir = redir.with_class(RedirType::Output);
         if cur.bump_if_eq(b'>') {
@@ -346,14 +459,22 @@ impl RedirBldr {
           continue
         } else if cur.bump_if_eq(b'-') {
           src_fd.push(b'-');
+        } else if cur.bump_if_eq(b'{') {
+          match read_brace_var(&mut cur, bytes) {
+            Some(v) => src_var = Some(v),
+            None => {
+              return Err(sherr!(
+                  ParseErr,
+                  "Invalid brace variable in redirection operator"
+              ));
+            }
+          }
         } else {
           while let Some(next_ch) = cur.next_byte_if(|b| b.is_ascii_digit()) {
             src_fd.push(next_ch);
           }
         }
-        if src_fd.is_empty() {
-          // No inline fd or `-`: the dup source is a following word, expanded
-          // at redirection time (e.g. `>&$fd`).
+        if src_fd.is_empty() && src_var.is_none() {
           redir = redir.with_dup_from_word();
         }
       }
@@ -372,15 +493,23 @@ impl RedirBldr {
       }
     });
 
-    let tgt_fd = util::parse_bytes::<i32>(&tgt_fd).unwrap_or_else(|| match redir.class.unwrap() {
-      RedirType::Input | RedirType::ReadWrite | RedirType::HereDoc | RedirType::HereString => 0,
-      _ => 1,
-    });
-    redir = redir.with_fd(tgt_fd);
+    if let Some(fd_var) = tgt_var {
+      redir = redir.with_fd_var(fd_var);
+    } else {
+      let tgt_fd =
+        util::parse_bytes::<i32>(&tgt_fd).unwrap_or_else(|| match redir.class.unwrap() {
+          RedirType::Input | RedirType::ReadWrite | RedirType::HereDoc | RedirType::HereString => 0,
+          _ => 1,
+        });
+      redir = redir.with_fd(tgt_fd);
+    }
+
     if *src_fd == *b"-" {
       redir = redir.with_target(RedirTarget::Close);
-    } else if let Some(src_fd) = util::parse_bytes::<i32>(&src_fd) {
-      redir = redir.with_target(RedirTarget::Fd(src_fd));
+    } else if let Some(src_fd) = util::parse_bytes::<RawFd>(&src_fd) {
+      redir = redir.with_target(RedirTarget::Fd(FdSlot::Raw(src_fd)));
+    } else if let Some(src_var) = src_var {
+      redir = redir.with_target(RedirTarget::Fd(FdSlot::Var(src_var)));
     }
     Ok(redir)
   }
@@ -394,7 +523,7 @@ impl TryFrom<Tk> for RedirBldr {
       let flags = tk.flags;
 
       Ok(RedirBldr {
-        fd: Some(0),
+        fd: Some(FdSlot::Raw(0)),
         class: Some(RedirType::HereDoc),
         target: Some(RedirTarget::HereDoc {
           body: tk.word(),
@@ -458,8 +587,7 @@ impl RedirType {
 #[derive(Clone, Debug)]
 pub(super) enum RedirTarget {
   Path(Tk),
-  Fd(RawFd),
-  FdExpr(Tk),
+  Fd(FdSlot),
   Close,
   HereDoc { body: VarStr, flags: TkFlags },
 }
@@ -470,61 +598,51 @@ pub(super) enum RedirTarget {
 #[derive(Debug, Clone)]
 pub(super) enum RedirSpec {
   File {
-    fd: RawFd,
+    fd: FdSlot,
     path: Tk,
     mode: RedirType,
   },
   Dup {
-    from: RawFd,
-    to: RawFd,
-    mode: RedirType,
-  },
-  DupExpr {
-    word: Tk,
-    to: RawFd,
+    from: FdSlot,
+    to: FdSlot,
     mode: RedirType,
   },
   Close {
-    fd: RawFd,
+    fd: FdSlot,
   },
   Buffer {
-    fd: RawFd,
+    fd: FdSlot,
     buf: VarStr,
     flags: TkFlags,
   },
 }
 
 impl RedirSpec {
-  pub(crate) fn file(fd: RawFd, path: Tk, mode: RedirType) -> Self {
+  pub(crate) fn file(fd: FdSlot, path: Tk, mode: RedirType) -> Self {
     Self::File { fd, path, mode }
   }
-  pub(crate) fn dup_spanned(from: RawFd, to: RawFd, mode: RedirType) -> Self {
+  pub(crate) fn dup(from: FdSlot, to: FdSlot, mode: RedirType) -> Self {
     Self::Dup { from, to, mode }
   }
-  pub(crate) fn dup_expr(word: Tk, to: RawFd, mode: RedirType) -> Self {
-    Self::DupExpr { word, to, mode }
-  }
-  pub(crate) fn close(fd: RawFd) -> Self {
+  pub(crate) fn close(fd: FdSlot) -> Self {
     Self::Close { fd }
   }
   /// The span of the redirection operator, if this spec carries one. Used to
   /// point errors at the offending redirect.
-  pub(crate) fn buffer(fd: RawFd, buf: VarStr, flags: TkFlags) -> Self {
+  pub(crate) fn buffer(fd: FdSlot, buf: VarStr, flags: TkFlags) -> Self {
     Self::Buffer { fd, buf, flags }
   }
-  pub(crate) fn target_fd(&self) -> RawFd {
+  pub(crate) fn target_fd(&self) -> ShResult<RawFd> {
     match self {
-      RedirSpec::Dup { to, .. } | RedirSpec::DupExpr { to, .. } => *to,
+      RedirSpec::Dup { to, .. } => to.resolve(),
       RedirSpec::File { fd, .. } | RedirSpec::Close { fd, .. } | RedirSpec::Buffer { fd, .. } => {
-        *fd
+        fd.resolve()
       }
     }
   }
   pub(crate) fn mode(&self) -> RedirType {
     match self {
-      RedirSpec::File { mode, .. }
-      | RedirSpec::Dup { mode, .. }
-      | RedirSpec::DupExpr { mode, .. } => *mode,
+      RedirSpec::File { mode, .. } | RedirSpec::Dup { mode, .. } => *mode,
       RedirSpec::Close { .. } => RedirType::Null,
       RedirSpec::Buffer { .. } => RedirType::HereDoc,
     }
@@ -537,16 +655,8 @@ impl RedirSpec {
   /// brief borrow to read the current fd.
   pub(crate) fn as_sink(&self) -> ShResult<Arc<dyn Sink>> {
     let sink: Arc<dyn Sink> = match self {
-      RedirSpec::Dup { from, .. } => {
-        let sink = Shed::sinks(|s| s.get(*from)).ok_or_else(ebadf)?;
-        if sink.kind() == SinkKind::Close {
-          return Err(ebadf().into());
-        }
-        sink
-      }
-      RedirSpec::Close { .. } => Arc::new(CloseSink),
-      RedirSpec::DupExpr { word, .. } => match expand_fd(word)? {
-        None => Arc::new(CloseSink), // got '-' as the word
+      RedirSpec::Dup { from, .. } => match from.resolve_source()? {
+        None => Arc::new(CloseSink),
         Some(fd) => {
           let sink = Shed::sinks(|s| s.get(fd)).ok_or_else(ebadf)?;
           if sink.kind() == SinkKind::Close {
@@ -555,6 +665,7 @@ impl RedirSpec {
           sink
         }
       },
+      RedirSpec::Close { .. } => Arc::new(CloseSink),
       RedirSpec::File { path, mode, .. } => {
         let span = path.span;
         let path = path
@@ -600,11 +711,6 @@ impl RedirSpec {
     };
 
     Ok(sink)
-  }
-
-  #[cfg(test)]
-  pub(crate) fn dup(from: RawFd, to: RawFd, mode: RedirType) -> Self {
-    Self::Dup { from, to, mode }
   }
 }
 
@@ -822,6 +928,15 @@ pub(crate) enum OsPipe {
 impl OsPipe {
   pub(crate) fn pipes() -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
     let (r, w) = pipes_high()?;
+    let w = Arc::new(Self::Write(OsSink::new(w)));
+    let r = Arc::new(Self::Read(OsSink::new(r)));
+    Ok((r, w))
+  }
+  pub(crate) fn pipes_with(
+    cloexec: bool,
+    nonblock: bool,
+  ) -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
+    let (r, w) = pipes_high_with(cloexec, nonblock)?;
     let w = Arc::new(Self::Write(OsSink::new(w)));
     let r = Arc::new(Self::Read(OsSink::new(r)));
     Ok((r, w))
@@ -1750,6 +1865,18 @@ impl RedirGuard {
   pub(crate) fn apply_sink(&mut self, fd: RawFd, sink: Arc<dyn Sink>) -> ShResult<()> {
     validate_fd(fd)?;
 
+    // everything above 10 is off limits for new FDs
+    // but closing them is fine
+    if fd >= MIN_INTERNAL_FD && sink.kind() != SinkKind::Close {
+      return Err(
+        sherr!(
+          ExecFail,
+          "file descriptor {fd} is reserved; user descriptors must be below {MIN_INTERNAL_FD}"
+        )
+        .with_code(1),
+      );
+    }
+
     Shed::sinks(|sinks| {
       let old = sinks.redirect(fd, sink);
       self.try_save(fd, old);
@@ -1763,7 +1890,7 @@ impl RedirGuard {
   /// Swaps the current sink for the target fd with the new sink specified by the redirection spec.
   /// Swaps it back on drop, unless [`RedirGuard::persist()`] is called.
   pub(crate) fn apply(&mut self, r: &RedirSpec) -> ShResult<()> {
-    let fd = r.target_fd();
+    let fd = r.target_fd()?;
 
     let sink = r.as_sink()?; // runs expansion. careful!
     self.apply_sink(fd, sink)
