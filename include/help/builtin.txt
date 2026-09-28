@@ -28,6 +28,7 @@ The following builtins are available:
   `export`      mark variables for export to environment    |builtin-export|
   `false`       return exit status 1                        |builtin-false|
   `fc`          edit and re-exec commands from history      |builtin-fc|
+  `fcntl`       get and set file-descriptor flags           |builtin-fcntl|
   `flog`        write a formatted log message               |builtin-flog|
   `fg`          bring a job to the foreground               |builtin-fg|
   `forget`      reset shell state to its launch baseline    |builtin-forget|
@@ -881,6 +882,63 @@ FC                                               *builtin-fc* *fc*
       ```fc -s echo```              re-exec last command starting with "echo"
       ```fc -s cat=dog```           re-exec with cat -> dog substitution
       ```fc -e vim```               edit last command in vim
+
+==============================================================================
+FCNTL                                            *builtin-fcntl* *fcntl*
+
+  `fcntl {fd}`
+  `fcntl {fd} [-cna] [+cna] [-o {name}] [+o {name}] ...`
+
+  Get and set boolean flags on one of the shell's own file descriptors,
+  using the same `-`/`+` polarity as |builtin-set|: `-` turns a flag on,
+  `+` turns it off. {fd} is a descriptor the shell holds: a standard
+  stream (`0`, `1`, `2`) or one opened with `exec` (`exec 5<file`).
+
+  With no flags, `fcntl` prints {fd}'s current state and exits. With one
+  or more flags, it applies them and prints nothing.
+
+  Flags ~
+
+    `-c`, `+c`, `-o cloexec`    close-on-exec (`FD_CLOEXEC`): the fd is
+                                closed automatically when the shell execs
+                                an external command.
+    `-n`, `+n`, `-o nonblock`   non-blocking I/O (`O_NONBLOCK`): reads and
+                                writes return immediately rather than
+                                waiting. Pairs with |builtin-poll| and a
+                                `thru` that reports would-block.
+    `-a`, `+a`, `-o append`     append mode (`O_APPEND`): every write is
+                                positioned at end-of-file atomically.
+
+  Short flags bundle and mix polarity per word, e.g. `fcntl 5 -na +c`
+  sets nonblock and append while clearing close-on-exec.
+
+  Query forms ~
+
+  A bare `fcntl {fd}`, or `fcntl {fd} -o` with no name, prints a verbose
+  listing: the access `mode` (`read-only`/`write-only`/`read-write`,
+  which is fixed at open and cannot be changed here) followed by each
+  flag and whether it is on. `fcntl {fd} +o` instead prints a terse,
+  re-inputable `fcntl` command that reproduces the current flag state,
+  suitable for snapshot-and-restore.
+
+  Exit status ~
+
+  `0`   the flags were applied, or the query printed
+  `1`   {fd} is not open, or the underlying `fcntl(2)` call failed
+  `2`   usage error: missing or non-numeric {fd}, or an unknown flag
+
+  Examples ~
+
+      ```exec 5<config.toml; fcntl 5 -n```
+                                make fd 5 non-blocking
+      ```fcntl 1```             show stdout's mode and flags
+      ```fcntl 5 -o cloexec```  set close-on-exec via its long name
+      ```saved=$(fcntl 5 +o)```
+                                snapshot fd 5's flags; `eval "$saved"`
+                                restores them
+
+  See also: |builtin-set| (the `-o`/`+o` convention), |builtin-thru|,
+  |builtin-poll|
 
 ==============================================================================
 FLOG                       *builtin-flog* *flog* *FLOG_FMT* *flog-fmt*
