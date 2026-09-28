@@ -1687,6 +1687,70 @@ POLL                                             *builtin-poll* *poll*
   See also: |builtin-sock|, |builtin-listen|, |builtin-accept|.
 
 ==============================================================================
+PIPE                                             *builtin-pipe* *pipe*
+
+  `pipe [-a {name}] [-n] [-C]`
+  `pipe [-a {name}] [-n] [-C] [-s {size}] [-p]`          (Linux)
+
+  Create an anonymous pipe (`pipe(2)`) and store its two ends in an
+  array. Element `0` is the read end, element `1` is the write end;
+  both are file descriptors the shell holds. With no `-a`, the array
+  is named `PIPE`.
+
+  The fds live in the shell's internal range (`10` and up) and are
+  close-on-exec by default, so they are not inherited across an `exec`
+  of an external command unless you dup them onto a lower number first.
+  Redirect through them with the `{name[i]}` fd-variable syntax:
+  `>&${name[1]}` to write, `<&${name[0]}` to read, and
+  `exec {name[i]}>&-` to close an end.
+
+  Flags ~
+
+    `-a {name}`, `--array {name}`       store the ends in array {name}
+                                    instead of `PIPE`.
+    `-n`, `--non-block`                 create both ends non-blocking
+                                    (`O_NONBLOCK`); pairs well with
+                                    |poll|(builtin-poll) and |thru|(builtin-thru).
+    `-C`, `--no-cloexec`                leave close-on-exec off, so the
+                                    ends survive an `exec`.
+
+
+    {Linux Only}
+
+    `-s {size}`, `--size {size}`        request a pipe buffer of
+                                    {size} bytes, accepting suffixes
+                                    like `64K` or `1M`. The kernel
+                                    rounds up to a page and caps the
+                                    value; the request is advisory.
+    `-p`, `--packet`                    packet mode (`O_DIRECT`):
+                                    each write becomes a discrete
+                                    record that a read returns whole.
+
+  A reader sees end-of-file only once every write end is closed,
+  including the copy the shell itself holds — so after handing the
+  write end to a producer, close your own copy (`exec {name[1]}>&-`)
+  or the reader will hang. A write blocks when the buffer fills and
+  no one is draining it.
+
+  Exit status ~
+
+  `0`   the pipe was created and the array was set
+  nonzero on a bad `-s` value, or if `pipe(2)` failed.
+
+  Examples ~
+
+      ```pipe -a p```           create a pipe; `p=(rfd wfd)`
+      ```echo hi >&${p[1]}; exec {p[1]}>&-; thru <&${p[0]}```
+                                write, close the writer, then drain
+      ```pipe -a p; producer >&${p[1]} & exec {p[1]}>&-```
+                                hand the write end to a background
+                                producer and close the parent's copy
+      ```pipe -n -a p```        non-blocking ends for an event loop
+
+  See also: |builtin-fcntl|, |builtin-poll|, |builtin-thru|,
+  |builtin-exec|.
+
+==============================================================================
 POPD                                             *builtin-popd* *popd*
 
   `popd [-n] [+N | -N]`

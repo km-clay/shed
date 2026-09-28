@@ -202,7 +202,28 @@ pub(crate) fn pipes_high() -> nix::Result<(OwnedFd, OwnedFd)> {
 }
 
 #[cfg(linux_like)]
-pub(crate) fn pipes_high_with(cloexec: bool, nonblock: bool) -> nix::Result<(OwnedFd, OwnedFd)> {
+fn set_pipe_size(fd: BorrowedFd, size: u64) -> io::Result<()> {
+  let want = libc::c_int::try_from(size)
+    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "pipe size too large"))?;
+
+  fcntl(fd, FcntlArg::F_SETPIPE_SZ(want))
+    .inspect(|got| {
+      if *got < want {
+        errln!("warning: pipe buffer size '{got}' less than requested '{want}'");
+      }
+    })
+    .map_err(|e| io::Error::from_raw_os_error(e as i32))?;
+
+  Ok(())
+}
+
+#[cfg(linux_like)]
+pub(crate) fn pipes_high_with(
+  cloexec: bool,
+  nonblock: bool,
+  size: Option<u64>,
+  packet: bool,
+) -> nix::Result<(OwnedFd, OwnedFd)> {
   let mut o_flags = OFlag::empty();
   if cloexec {
     o_flags |= OFlag::O_CLOEXEC;
@@ -210,8 +231,17 @@ pub(crate) fn pipes_high_with(cloexec: bool, nonblock: bool) -> nix::Result<(Own
   if nonblock {
     o_flags |= OFlag::O_NONBLOCK;
   }
+  if packet {
+    o_flags |= OFlag::O_DIRECT;
+  }
 
   let (r, w) = nix::unistd::pipe2(o_flags)?;
+
+  if let Some(size) = size {
+    set_pipe_size(r.as_fd(), size).ok();
+    set_pipe_size(w.as_fd(), size).ok();
+  }
+
   if cloexec {
     Ok((move_high(r)?, move_high(w)?))
   } else {
@@ -220,7 +250,12 @@ pub(crate) fn pipes_high_with(cloexec: bool, nonblock: bool) -> nix::Result<(Own
 }
 
 #[cfg(not(linux_like))]
-pub(crate) fn pipes_high_with(cloexec: bool, nonblock: bool) -> nix::Result<(OwnedFd, OwnedFd)> {
+pub(crate) fn pipes_high_with(
+  cloexec: bool,
+  nonblock: bool,
+  _size: Option<u64>,
+  _packet: bool,
+) -> nix::Result<(OwnedFd, OwnedFd)> {
   let (r, w) = nix::unistd::pipe()?;
   let (r, w) = if cloexec {
     (move_high(r)?, move_high(w)?)
@@ -935,8 +970,10 @@ impl OsPipe {
   pub(crate) fn pipes_with(
     cloexec: bool,
     nonblock: bool,
+    size: Option<u64>,
+    packet: bool,
   ) -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
-    let (r, w) = pipes_high_with(cloexec, nonblock)?;
+    let (r, w) = pipes_high_with(cloexec, nonblock, size, packet)?;
     let w = Arc::new(Self::Write(OsSink::new(w)));
     let r = Arc::new(Self::Read(OsSink::new(r)));
     Ok((r, w))

@@ -67,6 +67,7 @@ mod keymap;
 mod len;
 mod msg;
 pub(crate) mod opt;
+mod pipe;
 mod poll;
 mod printf;
 mod pwd;
@@ -161,6 +162,7 @@ register_builtins! {
   b"local"    => varcmds ::Local,
   b"msg"      => msg     ::Msg,
   b"nextd"    => dirjump ::NextD,
+  b"pipe"     => pipe    ::Pipe,
   b"poll"     => poll    ::Poll,
   b"pop"      => arrops  ::Pop,
   b"popd"     => dirstack::PopDir,
@@ -373,7 +375,7 @@ pub(super) trait Builtin: Sync {
     let guard = match Sinks::try_apply_set(&redirs, fatal) {
       Ok(Some(g)) => g,
       Ok(None) => return Ok(()), // non-fatal error, skip
-      Err(e) => return Err(e),   // fatal error, propagate
+      Err(e) => return Err(e.promote(tree.span_for(node_id))), // fatal error, propagate
     };
 
     if fork_builtins {
