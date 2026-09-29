@@ -92,6 +92,19 @@ pub(crate) fn expand_alias_with_pos(input: String) -> (String, Option<usize>) {
 }
 
 pub(crate) fn expand_keymap(s: &str) -> Vec<KeyEvent> {
+  let mut keys = expand_keymap_raw(s);
+
+  // expand leader keys now
+  if keys
+    .iter()
+    .any(|KeyEvent(code, _)| *code == KeyCode::Leader)
+  {
+    keys = resolve_leaders(keys);
+  }
+  keys
+}
+
+pub(crate) fn expand_keymap_raw(s: &str) -> Vec<KeyEvent> {
   let mut keys = Vec::new();
   let mut chars = s.chars().collect::<VecDeque<char>>();
   while let Some(ch) = chars.pop_front() {
@@ -111,13 +124,7 @@ pub(crate) fn expand_keymap(s: &str) -> Vec<KeyEvent> {
               }
             }
             '>' => {
-              if alias.eq_ignore_ascii_case("leader") {
-                let mut leader = shopt!(prompt.leader.clone());
-                if leader == "\\" {
-                  leader.push('\\');
-                }
-                keys.extend(expand_keymap(&leader));
-              } else if let Some(key) = parse_key_alias(&alias) {
+              if let Some(key) = parse_key_alias(&alias) {
                 keys.push(key);
               }
               break;
@@ -135,44 +142,83 @@ pub(crate) fn expand_keymap(s: &str) -> Vec<KeyEvent> {
   keys
 }
 
+fn resolve_leaders(keys: Vec<KeyEvent>) -> Vec<KeyEvent> {
+  let mut leader = shopt!(prompt.leader.clone());
+  if leader == "\\" {
+    leader.push('\\');
+  }
+
+  let mut expanded = expand_keymap_raw(&leader);
+  expanded.retain(|KeyEvent(code, _)| *code != KeyCode::Leader);
+
+  let mut new_keys = vec![];
+
+  for KeyEvent(code, mods) in keys {
+    let KeyCode::Leader = code else {
+      new_keys.push(KeyEvent(code, mods));
+      continue;
+    };
+    let mut seq = expanded.clone();
+    if let Some(KeyEvent(_, seq_mods)) = seq.first_mut() {
+      *seq_mods |= mods;
+    }
+
+    new_keys.extend(seq);
+  }
+
+  new_keys
+}
+
+fn get_fn_key(s: &str) -> Option<KeyCode> {
+  (s.len() > 1 && s.starts_with('F'))
+    .then(|| s[1..].parse::<u8>().ok())
+    .flatten()
+    .map(KeyCode::F)
+}
+
+#[rustfmt::skip]
 pub(crate) fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
   let parts: Vec<&str> = alias.split('-').collect();
   let (mods_parts, key_name) = parts.split_at(parts.len() - 1);
   let mut mods = ModKeys::NONE;
   for m in mods_parts {
     match m.to_uppercase().as_str() {
-      "C" => mods |= ModKeys::CTRL,
+      "C"       => mods |= ModKeys::CTRL,
       "A" | "M" => mods |= ModKeys::ALT,
-      "S" => mods |= ModKeys::SHIFT,
-      _ => return None,
+      "S"       => mods |= ModKeys::SHIFT,
+      _         => return None,
     }
   }
 
   let raw_key = key_name.first()?;
   let key = match raw_key.to_uppercase().as_str() {
     "CR" | "ENTER" | "RETURN" => KeyCode::Enter,
-    "ESC" | "ESCAPE" => KeyCode::Esc,
-    "TAB" => KeyCode::Tab,
-    "BS" | "BACKSPACE" => KeyCode::Backspace,
-    "DEL" | "DELETE" => KeyCode::Delete,
-    "INS" | "INSERT" => KeyCode::Insert,
-    "SPACE" => KeyCode::Char(' '),
-    "UP" => KeyCode::Up,
-    "DOWN" => KeyCode::Down,
-    "LEFT" => KeyCode::Left,
-    "RIGHT" => KeyCode::Right,
-    "HOME" => KeyCode::Home,
-    "END" => KeyCode::End,
-    "CMD" => KeyCode::ExMode,
-    "PGUP" | "PAGEUP" => KeyCode::PageUp,
-    "PGDN" | "PAGEDOWN" => KeyCode::PageDown,
-    // F-keys: F1..F12 (any u8 the user writes — let the renderer decide
-    // what's reasonable). Matches the rendering produced by as_vim_seq.
-    k if k.starts_with('F') && k.len() > 1 && k[1..].parse::<u8>().is_ok() => {
-      KeyCode::F(k[1..].parse::<u8>().unwrap())
+    "ESC" | "ESCAPE"          => KeyCode::Esc,
+    "TAB"                     => KeyCode::Tab,
+    "BS" | "BACKSPACE"        => KeyCode::Backspace,
+    "DEL" | "DELETE"          => KeyCode::Delete,
+    "INS" | "INSERT"          => KeyCode::Insert,
+    "SPACE"                   => KeyCode::Char(' '),
+    "UP"                      => KeyCode::Up,
+    "DOWN"                    => KeyCode::Down,
+    "LEFT"                    => KeyCode::Left,
+    "RIGHT"                   => KeyCode::Right,
+    "HOME"                    => KeyCode::Home,
+    "END"                     => KeyCode::End,
+    "CMD"                     => KeyCode::ExMode,
+    "PGUP" | "PAGEUP"         => KeyCode::PageUp,
+    "LEADER"                  => KeyCode::Leader,
+    "PGDN" | "PAGEDOWN"       => KeyCode::PageDown,
+
+    k => {
+      if let Some(fn_key) = get_fn_key(k) {
+        fn_key
+      } else if k.len() == 1 {
+        KeyCode::Char(raw_key.chars().next().unwrap())
+      } else {
+        return None;
+      }
     }
-    k if k.len() == 1 => KeyCode::Char(raw_key.chars().next().unwrap()),
-    _ => return None,
   };
 
   Some(KeyEvent(key, mods))

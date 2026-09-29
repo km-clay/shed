@@ -16,6 +16,7 @@ use crate::{
   errln,
   eval::lex::{Span, Tk},
   expand::{alias, escape},
+  keys::KeyCode,
   shopt,
   state::{Shed, meta::MetaTab, params, vars::VarStr},
   system_msg,
@@ -593,8 +594,13 @@ pub(crate) struct ShOptHist {
 }
 
 fn validate_leader(v: &String) -> Result<(), String> {
-  if alias::expand_keymap(v).is_empty() {
-    Err(format!("invalid leader key sequence '{v}'"))
+  let keys = alias::expand_keymap_raw(v);
+  if keys.is_empty() {
+    Err(format!("invalid leader key sequence: '{v}'"))
+  } else if keys.iter().any(|key| key.0 == KeyCode::Leader) {
+    Err(format!(
+      "leader key sequence cannot reference itself: '{v}'"
+    ))
   } else {
     Ok(())
   }

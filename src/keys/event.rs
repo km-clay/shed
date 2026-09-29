@@ -134,6 +134,10 @@ impl KeyEvent {
         seq.extend_from_slice(pos_display.as_bytes());
         needs_angle_bracket = true;
       }
+      KeyCode::Leader => {
+        seq.extend_from_slice(b"Leader");
+        needs_angle_bracket = true;
+      }
     }
 
     if needs_angle_bracket {
@@ -180,6 +184,7 @@ pub(crate) enum KeyCode {
 
   // weird stuff
   ExMode, // keycode emitted by the <cmd> byte alias in vim keymaps
+  Leader, // key referred to by the <leader> alias
 }
 
 impl KeyCode {
@@ -195,6 +200,7 @@ impl KeyCode {
         | KeyCode::Back
         | KeyCode::Forward
         | KeyCode::ExMode
+        | KeyCode::Leader
         | KeyCode::Verbatim(_)
     )
   }
