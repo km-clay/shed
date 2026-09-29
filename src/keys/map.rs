@@ -63,6 +63,7 @@ pub(crate) struct KeyMap {
   pub flags: KeyMapFlags,
   pub keys: VarStr,
   pub action: VarStr,
+  pub remap: bool,
 }
 
 impl KeyMap {
@@ -90,6 +91,10 @@ impl Display for KeyMap {
     let keys = escape::shell_quote(&self.keys.to_str_lossy());
     let action = escape::shell_quote(&self.action.to_str_lossy());
 
-    write!(f, "keymap {flags} {keys} {action}")
+    if self.remap {
+      write!(f, "keymap {flags} {keys} {action}")
+    } else {
+      write!(f, "keymap --noremap {flags} {keys} {action}")
+    }
   }
 }

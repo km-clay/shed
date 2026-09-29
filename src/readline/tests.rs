@@ -2099,6 +2099,7 @@ mod readline_mod_coverage {
         flags: KeyMapFlags::EMACS,
         keys: "<C-a>".into(),
         action: "<C-e>".into(),
+        remap: false,
       });
     });
     line.handle_keymap(&key!(Ctrl + 'a')).unwrap();
@@ -2314,6 +2315,7 @@ mod keymap_implied_submit {
         flags: KeyMapFlags::NORMAL,
         keys: keys.into(),
         action: action.into(),
+        remap: false,
       });
     });
   }
@@ -2358,6 +2360,7 @@ mod normal_command_mappings {
         flags: KeyMapFlags::NORMAL,
         keys: keys.into(),
         action: action.into(),
+        remap: false,
       });
     });
   }

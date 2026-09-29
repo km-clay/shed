@@ -752,13 +752,9 @@ fn resolve_keymap(readline: &mut ShedLine) -> ShResult<()> {
   if let Some(km) = exact {
     // exact match, run it
     let action = km.action_expanded();
+    let remap = km.remap;
     readline.pending_keymap_mut().clear();
-    for key in action {
-      let event = readline.handle_key(&key).transpose();
-      if let Some(event) = event {
-        handle_readline_event(readline, event)?;
-      }
-    }
+    readline.replay_keys(action, remap)?;
   } else {
     // flush keys
     let buffered = std::mem::take(readline.pending_keymap_mut());
@@ -999,9 +995,10 @@ mod tests {
     // hold the 'j' KeyEvent waiting for the next key to disambiguate.
     Shed::logic_mut(|l| {
       l.insert_keymap(KeyMap {
-        flags: crate::keys::KeyMapFlags::EMACS,
+        flags: KeyMapFlags::EMACS,
         keys: "jk".into(),
         action: "<esc>".into(),
+        remap: false,
       });
     });
 
@@ -1087,6 +1084,7 @@ mod tests {
       flags: KeyMapFlags::EMACS,
       keys: "ab".into(),
       action: "xy".into(),
+      remap: false,
     };
     Shed::logic_mut(|l| l.insert_keymap(km));
     // Feed the pending bytes that match.

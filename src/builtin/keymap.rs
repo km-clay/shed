@@ -1,48 +1,44 @@
 use super::opt::OptSpec;
 use crate::{
   keys::{KeyMap, KeyMapFlags},
-  outln, sherr,
+  opt, outln, sherr,
   state::Shed,
   util::{self, error::ShResult},
 };
 
 pub(super) struct KeyMapBuiltin;
 impl super::Builtin for KeyMapBuiltin {
+  fn strict_opts(&self) -> bool {
+    true
+  }
+  #[rustfmt::skip]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("normal", b'n'),
-      OptSpec::new_short("emacs", b'e'),
-      OptSpec::new_short("insert", b'i'),
-      OptSpec::new_short("visual", b'v'),
-      OptSpec::new_short("ex", b'x'),
-      OptSpec::new_short("op-pending", b'o'),
-      OptSpec::new_short("replace", b'r'),
-      OptSpec::new_long("remove").argc(1),
+      opt!("normal"     | b'n'),
+      opt!("emacs"      | b'e'),
+      opt!("insert"     | b'i'),
+      opt!("visual"     | b'v'),
+      opt!("ex"         | b'x'),
+      opt!("op-pending" | b'o'),
+      opt!("replace"    | b'r'),
+      opt!("noremap"          ),
+      opt!("remove"           ).argc(1),
     ]
   }
+  #[rustfmt::skip]
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
+    let remove = args.opt_value("remove");
+    let remap = !args.has_opt("noremap");
+
     let mut flags = KeyMapFlags::empty();
-    let mut remove = None;
-    for opt in args.options() {
-      match opt.key() {
-        "normal" => flags |= KeyMapFlags::NORMAL,
-        "insert" => flags |= KeyMapFlags::INSERT,
-        "visual" => flags |= KeyMapFlags::VISUAL,
-        "ex" => flags |= KeyMapFlags::EX,
-        "op-pending" => flags |= KeyMapFlags::OP_PENDING,
-        "replace" => flags |= KeyMapFlags::REPLACE,
-        "emacs" => flags |= KeyMapFlags::EMACS,
-        "remove" => {
-          remove = Some(opt.value()?.to_string());
-        }
-        _ => {
-          return Err(
-            sherr!(ExecFail @ opt.span(), "Invalid option for keymap: '{opt}'").with_code(2),
-          );
-        }
-      }
-    }
+    flags.set(KeyMapFlags::NORMAL,     args.has_opt("normal"    ));
+    flags.set(KeyMapFlags::INSERT,     args.has_opt("insert"    ));
+    flags.set(KeyMapFlags::VISUAL,     args.has_opt("visual"    ));
+    flags.set(KeyMapFlags::EX,         args.has_opt("ex"        ));
+    flags.set(KeyMapFlags::OP_PENDING, args.has_opt("op-pending"));
+    flags.set(KeyMapFlags::REPLACE,    args.has_opt("replace"   ));
+    flags.set(KeyMapFlags::EMACS,      args.has_opt("emacs"     ));
 
     if args.no_arguments() && remove.is_none() {
       display_keymaps(flags);
@@ -59,7 +55,7 @@ impl super::Builtin for KeyMapBuiltin {
     }
 
     if let Some(keys) = remove {
-      Shed::logic_mut(|l| l.remove_keymap(&keys, flags));
+      Shed::logic_mut(|l| l.remove_keymap(&keys.to_str_lossy(), flags));
       return util::with_status(0);
     }
 
@@ -81,6 +77,7 @@ impl super::Builtin for KeyMapBuiltin {
 
     let keymap = KeyMap {
       flags,
+      remap,
       keys: keys.clone(),
       action: action.clone(),
     };
@@ -120,6 +117,7 @@ mod tests {
   fn compare_exact_match() {
     let km = KeyMap {
       flags: KeyMapFlags::NORMAL,
+      remap: false,
       keys: "jk".into(),
       action: "<ESC>".into(),
     };
@@ -131,6 +129,7 @@ mod tests {
   fn compare_prefix_match() {
     let km = KeyMap {
       flags: KeyMapFlags::NORMAL,
+      remap: false,
       keys: "jk".into(),
       action: "<ESC>".into(),
     };
@@ -142,6 +141,7 @@ mod tests {
   fn compare_no_match() {
     let km = KeyMap {
       flags: KeyMapFlags::NORMAL,
+      remap: false,
       keys: "jk".into(),
       action: "<ESC>".into(),
     };

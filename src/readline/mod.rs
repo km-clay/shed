@@ -1,4 +1,5 @@
 use nix::poll::PollTimeout;
+use std::cell::Cell;
 use std::string::ToString;
 use std::{
   collections::VecDeque,
@@ -15,13 +16,14 @@ use std::{
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use crate::defer;
 use crate::readline::editmode::ExNdRule;
 use crate::{
   autocmd, builtin, eval, exec_term, expand,
   expand::{alias, prompt},
   interactive::{self, LoopAction, Redraw},
   key, keys,
-  keys::{KeyCode, KeyEvent, KeyMap, KeyMapFlags, KeyMapMatch, ModKeys},
+  keys::{KeyCode, KeyEvent, KeyMapFlags, KeyMapMatch, ModKeys},
   match_loop, motion, procio, queue_term, sherr, shopt,
   state::{
     self, Shed, db,
@@ -87,6 +89,23 @@ pub(super) use register::{restore_registers, save_registers};
 pub(crate) mod tests;
 pub(super) const DEFAULT_PS1: &str =
   "\\e[0m\\n\\e[1;0m\\u\\e[1;36m@\\e[1;31m\\h\\n\\e[1;36m\\W\\e[1;32m/\\n\\e[1;32m\\$\\e[0m ";
+
+const MAX_KEYMAP_DEPTH: usize = 100;
+thread_local! {
+  static KEYMAP_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
+
+fn inc_map_depth() -> usize {
+  KEYMAP_DEPTH.with(|d| {
+    let prev = d.get();
+    d.set(prev + 1);
+    prev
+  })
+}
+
+fn dec_map_depth() {
+  KEYMAP_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+}
 
 /// A simple line editor with optional history
 ///
@@ -985,13 +1004,14 @@ impl ShedLine {
     } else if is_exact {
       // We have a single exact match. Execute it.
       let keymap = matches.remove(0);
+      let remap = keymap.remap;
       self.pending_keymap.clear();
+
       let action = keymap.action_expanded();
-      for key in action {
-        if let Some(event) = self.handle_key(&key)? {
-          return Ok(Some(event));
-        }
+      if let Some(event) = self.replay_keys(action, remap)? {
+        return Ok(Some(event));
       }
+
       // Implied submission: if the keymap left a non-empty search/ex pending
       // (e.g. it ended in `/foo`), run it so the trailing `<CR>` is optional.
       // A bare `/` or `:` that opened an empty prompt is left for the user.
@@ -1021,17 +1041,21 @@ impl ShedLine {
     }
     let keymap_flags = self.curr_keymap_flags();
     let matches = Shed::logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
-    let action = matches
+    let keymap = matches
       .iter()
-      .find(|km| km.compare(&self.pending_keymap) == KeyMapMatch::IsExact)
-      .map(KeyMap::action_expanded);
-    let keys = if let Some(action) = action {
+      .find(|km| km.compare(&self.pending_keymap) == KeyMapMatch::IsExact);
+
+    let (keys, remap) = if let Some(km) = keymap {
       self.pending_keymap.clear();
-      action
+      let remap = km.remap;
+      let keys = km.action_expanded();
+      (keys, remap)
     } else {
-      std::mem::take(&mut self.pending_keymap)
+      let keys = std::mem::take(&mut self.pending_keymap);
+      let remap = false;
+      (keys, remap)
     };
-    self.replay_keys(keys, false)
+    self.replay_keys(keys, remap)
   }
 
   /// Process any available input and return readline event
@@ -1147,13 +1171,23 @@ impl ShedLine {
   }
 
   /// Replay a sequence of `KeyEvent`s as if they came from the input stream.
+  ///
+  /// `remap` decides if the sequence can trigger keymaps or not.
   pub(crate) fn replay_keys(
     &mut self,
     keys: Vec<KeyEvent>,
-    with_keymaps: bool,
+    remap: bool,
   ) -> ShResult<Option<ReadlineEvent>> {
     for key in keys {
-      let ev = if with_keymaps {
+      let ev = if remap {
+        defer! { dec_map_depth(); }
+        if inc_map_depth() > MAX_KEYMAP_DEPTH {
+          return Err(sherr!(
+            ExecFail,
+            "keymap recursion limit ({MAX_KEYMAP_DEPTH}) exceeded"
+          ));
+        }
+
         self.dispatch_key(key)?
       } else {
         self.handle_key(&key)?
@@ -1162,7 +1196,7 @@ impl ShedLine {
         return Ok(Some(ev));
       }
       // Abort the replay if a search-style motion found no target, matching
-      // vim's behavior of cancelling macro playback on a failed `f`/`/`.
+      // vim's behavior of cancelling macro playback on a failed `f` or `/`.
       if self.core.editor.search_failed() {
         break;
       }
