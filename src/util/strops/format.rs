@@ -114,7 +114,8 @@ pub(crate) enum FieldKind {
     zero_pad: bool,
   },
   String,
-  Raw,
+  Styled, // uses display width for padding, instead of char count
+  Raw,    // no padding applied, used for literal segments
 }
 
 /// One rendered directive, before width padding
@@ -138,6 +139,12 @@ impl Field {
     Self {
       body,
       kind: FieldKind::String,
+    }
+  }
+  pub(crate) fn styled(body: Vec<u8>) -> Self {
+    Self {
+      body,
+      kind: FieldKind::Styled,
     }
   }
   pub(crate) fn raw(body: Vec<u8>) -> Self {
@@ -165,6 +172,12 @@ impl Field {
   }
 }
 
+/// A trait for a set of conversion specifiers and their rendering logic.
+///
+/// Based on the formatting logic of `printf` - implementors define a `Source` that provides
+/// values, and a `Conv` that defines a set of conversion letters.
+///
+/// The engine handles parsing the format string and applying width/precision/padding.
 pub(crate) trait StrFmt {
   /// Where values come from. Arg iterator for `printf`, `&FileInfo` for `stat -c`, etc.
   type Source;
@@ -204,6 +217,11 @@ enum Segment<C> {
   Spec(FieldParams, C),
 }
 
+/// `printf`-style formatting engine.
+///
+/// Made generic so that many builtins can re-use the same internal formatting logic
+/// Requires an implementor of [`StrFmt`] and a format string.
+/// [`Formatter::render()`] requires a source of values to format, which is also defined by the [`StrFmt`] implementor.
 pub(crate) struct Formatter<'s, S: StrFmt> {
   set: &'s S,
   segments: Box<[Segment<S::Conv>]>,
@@ -306,6 +324,7 @@ impl<'s, S: StrFmt> Formatter<'s, S> {
       .any(|s| matches!(s, Segment::Spec(_, _)))
   }
 
+  /// Render the format string against a source of values, producing a byte vector.
   pub(crate) fn render(&self, src: &mut S::Source, out: &mut Vec<u8>) -> ShResult<()> {
     for seg in &self.segments {
       match seg {
@@ -363,7 +382,7 @@ fn pad_field(field: &Field, params: &FieldParams, out: &mut Vec<u8>) {
     return;
   }
   let (sign, zero_ok): (Option<&[u8]>, bool) = match field.kind() {
-    FieldKind::String | FieldKind::Raw => (None, false),
+    FieldKind::String | FieldKind::Styled | FieldKind::Raw => (None, false),
     FieldKind::Numeric { prefix, zero_pad } => (prefix.map(NumPrefix::marker), *zero_pad),
   };
 
@@ -375,7 +394,11 @@ fn pad_field(field: &Field, params: &FieldParams, out: &mut Vec<u8>) {
     return;
   };
 
-  let total = sign.map_or(0, <[u8]>::len) + body.chars().count();
+  let measured = match field.kind() {
+    FieldKind::Styled => util::ui::calc_str_width(&body.to_str_lossy()),
+    _ => body.chars().count(),
+  };
+  let total = sign.map_or(0, <[u8]>::len) + measured;
   if total >= width {
     if let Some(sign) = sign {
       out.extend_from_slice(sign);

@@ -1,5 +1,5 @@
 split() {
-  local USAGE=("Usage: split <%1> [<%2>] " 'pattern' 'string')
+  local USAGE=("Usage: split <%(1)> [<%(2)>] " 'pattern' 'string')
 	[ "$#" -ge 1 ] || raise "${USAGE[@]}"
 
 	local pat="$1" parts part input line

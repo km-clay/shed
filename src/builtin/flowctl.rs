@@ -1,12 +1,14 @@
+use std::{iter::Peekable, vec};
+
 use crate::{
   HashMap,
-  eval::execute,
+  eval::{execute, lex::Span},
   opt, sherr,
-  state::{Shed, logic::TrapTarget},
+  state::{Shed, logic::TrapTarget, vars::VarStr},
   util::{
     self,
-    error::{ShErr, ShErrKind, ShResult, ShResultExt},
-    strops::{ByteCursor, SliceCursor},
+    error::{self, ShErr, ShErrKind, ShResult, ShResultExt},
+    strops::{self, ByteCursor, Field, FieldParams, SliceCursor, StrFmt},
   },
   varstr,
 };
@@ -14,11 +16,91 @@ use bstr::ByteSlice;
 
 use yansi::Paint;
 
-use crate::match_loop;
-
 use super::opt::OptSpec;
 
-/// A trait for flow control builtins (break, continue, return, exit).
+struct RaiseFmt;
+
+enum RaiseConv {
+  Index(usize),
+}
+
+#[derive(Debug)]
+struct RaiseCtx {
+  args: Peekable<vec::IntoIter<(VarStr, Span)>>,
+  color_map: HashMap<usize, yansi::Color>,
+}
+
+impl RaiseCtx {
+  fn get_color(&mut self, id: usize) -> yansi::Color {
+    *self.color_map.entry(id).or_insert_with(error::next_color)
+  }
+}
+
+impl StrFmt for RaiseFmt {
+  type Source = RaiseCtx;
+  type Conv = RaiseConv;
+  fn parse_conv(&self, cur: &mut SliceCursor) -> ShResult<Self::Conv> {
+    let mut buf = util::scratch_buf();
+    let paren_err = || {
+      Err(
+        sherr!(
+          ParseErr,
+          "format specifiers be numbers enclosed in parenthesis",
+        )
+        .with_note("e.g. `%(1)`".into()),
+      )
+    };
+
+    if !cur.bump_if_eq(b'(') {
+      return paren_err();
+    }
+    while let Some(b @ (b'0'..=b'9')) = cur.peek_byte() {
+      cur.bump();
+      buf.push(b);
+    }
+    if buf.is_empty() || !cur.bump_if_eq(b')') {
+      return paren_err();
+    }
+
+    if buf.is_empty() {
+      return Err(
+        sherr!(ParseErr, "invalid format specifier",)
+          .with_note("expected a number between parenthesis or '%'".into()),
+      );
+    }
+
+    let Some(digit) = util::parse_bytes(&buf) else {
+      return Err(sherr!(
+        ParseErr,
+        "invalid format specifier: expected a number, got '{}'",
+        buf.to_str_lossy()
+      ));
+    };
+
+    Ok(RaiseConv::Index(digit))
+  }
+
+  fn render(
+    &self,
+    conv: &Self::Conv,
+    _field: &FieldParams,
+    src: &mut Self::Source,
+  ) -> ShResult<Field> {
+    let RaiseConv::Index(idx) = conv;
+    let Some((arg, _)) = src.args.next() else {
+      return Err(sherr!(
+        ParseErr,
+        "invalid format specifier: no argument for '%({idx})'",
+      ));
+    };
+    let color = src.get_color(*idx);
+    let painted = arg.paint(color);
+
+    Ok(Field::styled(varstr!("{painted}").into_bytes()))
+  }
+}
+
+/// A trait for flow control builtins (break, continue, return, exit, raise).
 ///
 /// The way flowctl works in `shed` is by leveraging Rust's error propagation to unwind the call stack until it reaches the appropriate control flow construct (loop, function, or shell exit).
 /// This doubles as a true error propagation, if the error created never reaches a context that waits to catch it, it will bubble all the way up to main, where it will be printed.
@@ -215,62 +297,23 @@ impl super::Builtin for Raise {
     }
 
     let mut message_parts = vec![];
-    let mut part = util::scratch_buf();
-    let mut color_map: HashMap<u32, yansi::Color> = HashMap::default();
-    let mut arg_iter = args.arguments();
+    let arg_iter = args
+      .arguments()
+      .map(|(a, s)| (a.clone(), s))
+      .collect::<Vec<_>>()
+      .into_iter()
+      .peekable();
 
-    while let Some((arg, span)) = arg_iter.next() {
-      let mut bytes = SliceCursor::new(arg.as_bytes());
-      match_loop!(bytes.next_byte() => b, {
-        b'%' => {
-          let Some(n_b) = bytes.next_byte() else {
-            part.push(b'%');
-            break;
-          };
-          let mut color_id = util::scratch_buf();
-          match n_b {
-            b'%' => part.push(b'%'),
-            _ if n_b.is_ascii_digit() => {
-              color_id.push(n_b);
+    let mut ctx = RaiseCtx {
+      args: arg_iter,
+      color_map: HashMap::default(),
+    };
 
-              while let Some(n_b) = bytes.next_byte_if(|n| n.is_ascii_digit()) {
-                color_id.push(n_b);
-              }
-
-              let Some(color_id) = util::parse_bytes(&color_id) else {
-                return Err(sherr!(
-                  SyntaxErr @ span,
-                  "Invalid color code: expected a number, got '{}'",
-                  color_id.to_str_lossy()
-                ))
-              };
-              color_map.entry(color_id).or_insert_with(crate::util::error::next_color);
-
-              let Some((arg,_)) = arg_iter.next() else {
-                return Err(sherr!(
-                  SyntaxErr @ span,
-                  "missing format arg for '%{color_id}'",
-                ));
-              };
-
-              let color = color_map.get(&color_id).unwrap();
-              let arg = arg.to_str_lossy();
-              let painted = arg.paint(*color);
-
-              part.extend_from_slice(varstr!("{painted}").as_bytes());
-            }
-            _ => {
-              return Err(sherr!(
-                SyntaxErr @ span,
-                "Invalid format specifier: '%{}'",
-                n_b as char
-              ).with_note("'raise' only takes digits or '%' after '%'".into()).with_note("to include a literal '%', use '%%'".into()));
-            }
-          }
-        }
-        _ => part.push(b),
-      });
-      message_parts.push(std::mem::take(&mut part));
+    while let Some((fmt, span)) = ctx.args.next() {
+      let f = strops::Formatter::parse(&RaiseFmt, &fmt).promote_err(span)?;
+      let mut buf = vec![];
+      f.render(&mut ctx, &mut buf).promote_err(span)?;
+      message_parts.push(buf);
     }
 
     let message = message_parts.into_iter().fold(vec![], |mut acc, s| {

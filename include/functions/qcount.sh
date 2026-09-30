@@ -5,7 +5,7 @@ qcount() {
 		case $opt in
 			f) fields=1 ;;
 			n) has_names=1 ;;
-			*) raise "Unrecognized option: '%1'" "$opt" ;;
+			*) raise "Unrecognized option: '%(1)'" "$opt" ;;
 		esac
 	done
 	shift $((OPTIND - 1))
