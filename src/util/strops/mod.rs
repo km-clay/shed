@@ -10,7 +10,9 @@ mod num;
 mod quote;
 mod scan;
 
-pub(crate) use convert::{TimeReader, format_mode, format_size, format_time, parse_size};
+pub(crate) use convert::{
+  TimeReader, format_mode, format_size, format_time, parse_paren_strftime, parse_size, strftime,
+};
 pub(crate) use distance::{EDIT_WEIGHT, levenshtein};
 pub(crate) use format::{Base, Case, Count, Field, FieldParams, FmtFlags, Formatter, Sign, StrFmt};
 pub(crate) use num::{ParseRadix, VarStrDisplay};

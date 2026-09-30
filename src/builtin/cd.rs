@@ -146,11 +146,11 @@ enum SortKind {
 
 pub(super) struct Zd;
 impl super::BuiltinRouter for Zd {
-  fn default_sub() -> &'static dyn super::Builtin {
+  fn default_sub(&self) -> &'static dyn super::Builtin {
     &ZdJump
   }
 
-  fn sub_for(word: &[u8]) -> Option<&'static dyn super::Builtin> {
+  fn sub_for(&self, word: &[u8]) -> Option<&'static dyn super::Builtin> {
     match word {
       b"add" => Some(&ZdAdd),
       b"remove" => Some(&ZdRemove),

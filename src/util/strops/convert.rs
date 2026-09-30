@@ -11,6 +11,96 @@ use crate::{
 
 use super::{ByteCursor, SliceCursor};
 
+/// chrono's strftime rejects specifiers that glibc passes through untouched
+/// (`%N`, `%Q`, ...), and its `Display` impl signals that by failing, which
+/// `to_string()` turns into a panic. bash emits unknown specifiers literally,
+/// so escape anything chrono can't parse into a `%%` sequence first.
+fn escape_unknown_specs(format: &str) -> String {
+  use chrono::format::{Item, StrftimeItems};
+
+  const MODIFIERS: &[u8] = b"-_0^#:.";
+
+  let bytes = format.as_bytes();
+  let mut out = String::with_capacity(format.len());
+  let mut i = 0;
+
+  while i < bytes.len() {
+    if bytes[i] != b'%' {
+      let start = i;
+      while i < bytes.len() && bytes[i] != b'%' {
+        i += 1;
+      }
+      out.push_str(&format[start..i]);
+      continue;
+    }
+
+    let start = i;
+    i += 1;
+    while i < bytes.len() && (MODIFIERS.contains(&bytes[i]) || bytes[i].is_ascii_digit()) {
+      i += 1;
+    }
+    if i < bytes.len() {
+      i += format[i..].chars().next().map_or(1, char::len_utf8);
+    }
+
+    let spec = &format[start..i];
+    if StrftimeItems::new(spec).any(|item| matches!(item, Item::Error)) {
+      out.push('%');
+    }
+    out.push_str(spec);
+  }
+
+  out
+}
+
+/// Parse a parenthesised strftime sub-format and its trailing `T`, as in
+/// `printf`'s `%(%Y-%m-%d)T`. The cursor starts just past the `(`.
+pub(crate) fn parse_paren_strftime(cur: &mut SliceCursor) -> ShResult<VarStr> {
+  let mut fmt = Vec::new();
+  loop {
+    match cur.next_byte() {
+      Some(b'\\') => {
+        let Some(escaped) = cur.next_byte() else {
+          return Err(sherr!(ParseErr, "unterminated strftime format"));
+        };
+        fmt.push(escaped);
+      }
+      Some(b')') => break,
+      Some(b) => fmt.push(b),
+      None => return Err(sherr!(ParseErr, "unterminated strftime format")),
+    }
+  }
+
+  match cur.next_byte() {
+    Some(b'T') => Ok(VarStr::from(fmt.as_slice())),
+    Some(other) => Err(sherr!(
+      ParseErr,
+      "expected 'T' after strftime format, got '{}'",
+      other as char
+    )),
+    None => Err(sherr!(
+      ParseErr,
+      "unterminated strftime conversion: expected 'T' after ')'"
+    )),
+  }
+}
+
+/// Format `dt` with a user-supplied strftime string.
+///
+/// Tolerates specifiers chrono does not implement, and reports a genuine
+/// formatting failure instead of panicking the way `to_string()` does.
+pub(crate) fn strftime<Tz: TimeZone>(dt: &DateTime<Tz>, format: &str) -> ShResult<String>
+where
+  Tz::Offset: std::fmt::Display,
+{
+  use std::fmt::Write;
+
+  let mut out = String::with_capacity(format.len());
+  write!(out, "{}", dt.format(&escape_unknown_specs(format)))
+    .map_err(|_| sherr!(ParseErr, "invalid strftime format '{format}'"))?;
+  Ok(out)
+}
+
 pub(crate) fn format_time(dur: std::time::Duration) -> String {
   const ETERNITY: u128 = f32::INFINITY as u128;
   let mut micros = dur.as_micros();

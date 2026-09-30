@@ -627,6 +627,10 @@ impl VarStr {
     &self.0
   }
 
+  pub(crate) fn into_bytes(self) -> Vec<u8> {
+    self.0.to_vec()
+  }
+
   pub(crate) fn with_capacity(capacity: usize) -> Self {
     Self(HipByt::with_capacity(capacity))
   }

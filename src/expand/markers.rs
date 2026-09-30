@@ -10,11 +10,6 @@ pub(crate) const ARG_SEP: Marker = '\u{fdd6}';
 /// Used to represent an empty `$@` expansion
 pub(crate) const NULL_EXPAND: Marker = '\u{fdd5}';
 
-// Display markers (help/syntax highlighting and format placeholders). These
-// live in `String`s on the display path, not in the byte-native expansion
-// pipeline (which uses `stream::Marker`).
-/// Escape/placeholder sentinel used by display formatters (e.g. flog's `%`).
-pub(crate) const ESCAPE: Marker = '\u{fdd9}';
 /// Reset to default styling for help/syntax highlighting.
 pub(crate) const RESET: Marker = '\u{fdda}';
 

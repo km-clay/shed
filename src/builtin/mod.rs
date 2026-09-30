@@ -45,6 +45,7 @@ mod arrops;
 mod autocmd;
 mod autoload;
 mod cd;
+mod chrono;
 mod complete;
 mod dirjump;
 mod dirstack;
@@ -127,6 +128,7 @@ register_builtins! {
   b"break"    => flowctl ::Break,
   b"builtin"  => self    ::BuiltinBuiltin,
   b"cd"       => cd      ::Cd,
+  b"chrono"   => chrono  ::Chrono,
   b"command"  => self    ::CommandBuiltin,
   b"compadd"  => complete::Compadd,
   b"compgen"  => complete::CompGen,
@@ -234,7 +236,7 @@ pub(crate) fn fork_behavior_for(name: &[u8]) -> Option<ForkBehavior> {
 /// Has exactly one required member: `execute()`, which is called to run the builtin.
 /// All other members have default implementations.
 pub(super) trait Builtin: Sync {
-  /// The actual logic of the builtin. The only required member of Builtin.
+  /// The actual logic of the builtin. The only required member of `Builtin`.
   fn execute(&self, args: BuiltinArgs) -> ShResult<()>;
 
   /// The option specification for the builtin.
@@ -275,6 +277,11 @@ pub(super) trait Builtin: Sync {
   /// `exit` also overrides this, so it doesn't stop the parent shell in subshells
   fn fork_behavior(&self) -> ForkBehavior {
     ForkBehavior::Never
+  }
+
+  /// Used by `BuiltinRouter` for builtins that have nested subcommands
+  fn as_router(&self) -> Option<&dyn BuiltinRouter> {
+    None
   }
 
   /// The way that the builtin parses its options. Some of them are weird, like `set`
@@ -492,20 +499,34 @@ pub(super) trait Builtin: Sync {
 /// [`Builtin::get_argv_and_opts`] -> [`BuiltinRouter::route_parse`]
 /// [`Builtin::execute`] -> [`BuiltinRouter::dispatch_sub`]
 pub(crate) trait BuiltinRouter {
-  fn sub_from_args(args: &BuiltinArgs) -> Option<&'static dyn Builtin> {
+  fn sub_from_args(&self, args: &BuiltinArgs) -> Option<&'static dyn Builtin> {
     match args.argv().first() {
-      Some(Word::Arg(word, _)) => Self::sub_for(word.as_bytes()),
+      Some(Word::Arg(word, _)) => self.sub_for(word.as_bytes()),
       _ => None,
     }
   }
-  fn sub_from_tokens(tokens: &[Tk]) -> Option<&'static dyn Builtin> {
-    tokens
-      .get(1)
+  fn route_parse(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed>
+  where
+    Self: Sized,
+  {
+    let mut router = self as &dyn BuiltinRouter;
+    let mut arg_idx = 1;
+
+    while let Some(arg) = argv.get(arg_idx)
+      && !arg.slice().starts_with_str("-")
+      && let Some(sub) = router.sub_for(&arg.slice())
+      && let Some(sub_router) = sub.as_router()
+    {
+      router = sub_router;
+      arg_idx += 1;
+    }
+
+    let sub = argv
+      .get(arg_idx)
       .filter(|tk| !tk.slice().starts_with_str("-"))
-      .and_then(|tk| Self::sub_for(tk.slice().as_bytes()))
-  }
-  fn route_parse(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
-    let sub = Self::sub_from_tokens(argv).unwrap_or_else(Self::default_sub);
+      .and_then(|tk| router.sub_for(&tk.slice()))
+      .unwrap_or_else(|| router.default_sub());
+
     let parsed = opt::parse_opts_with(
       argv,
       &sub.opts(),
@@ -517,20 +538,20 @@ pub(crate) trait BuiltinRouter {
     Ok(parsed)
   }
   fn dispatch_sub(&self, args: BuiltinArgs) -> ShResult<()> {
-    let sub = Self::sub_from_args(&args);
+    let sub = self.sub_from_args(&args);
     let (mut words, span, cmd_span) = args.unpack();
     if sub.is_some() {
       // strip the verb word before handing the rest to the subcommand
       words.remove(0);
     }
-    let sub = sub.unwrap_or_else(Self::default_sub);
+    let sub = sub.unwrap_or_else(|| self.default_sub());
 
     sub.execute(BuiltinArgs::new(words, span, cmd_span))
   }
   /// The default subcommand to run if no subcommand is specified.
-  fn default_sub() -> &'static dyn Builtin;
+  fn default_sub(&self) -> &'static dyn Builtin;
   /// Lookup a subcommand by name. Returns `None` if the subcommand does not exist.
-  fn sub_for(word: &[u8]) -> Option<&'static dyn Builtin>;
+  fn sub_for(&self, word: &[u8]) -> Option<&'static dyn Builtin>;
 }
 
 // The easy ones

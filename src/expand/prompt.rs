@@ -869,23 +869,6 @@ mod tests {
   }
 
   #[test]
-  fn substitute_strips_escape_markers_from_backslashes() {
-    // Regression: `\$shed` in a prompt context used to leave a PUA ESCAPE
-    // marker glued to the `$` after the substitute pass, because the word-
-    // context strip step was never reached. The final prompt should contain
-    // just the literal `$shed`, no marker char.
-    let _g = crate::tests::testutil::TestGuard::new();
-    with_substitute(true, || {
-      let out = expand_prompt(b"\\\\$foo").unwrap();
-      assert_eq!(out, "$foo");
-      assert!(
-        !out.contains(crate::expand::markers::ESCAPE),
-        "escape marker leaked: {out:?}"
-      );
-    });
-  }
-
-  #[test]
   fn substitute_does_not_recurse_on_value() {
     // A var whose value contains $X stays literal after one substitution
     // pass; we don't re-run the tokenizer/expander on output.

@@ -5,7 +5,7 @@ use bstr::ByteSlice;
 use crate::{
   errln,
   expand::escape,
-  match_loop, procio, sherr,
+  procio, sherr,
   state::vars::VarStr,
   util::{
     self,
@@ -83,39 +83,7 @@ impl StrFmt for PrintfFmt {
       b'b' => Ok(Conversion::AnsiC),
       b'q' => Ok(Conversion::ShellQuote),
       b'h' => Ok(Conversion::HumanSize),
-      b'(' => {
-        let mut strftime = util::scratch_buf();
-        match_loop!(cur.next_byte() => b, {
-          b'\\' => {
-            let Some(escaped) = cur.next_byte() else {
-              return Err(sherr!(ParseErr, "unterminated strftime format"))
-            };
-            strftime.push(escaped);
-          }
-          b')' => break,
-          _ => strftime.push(b),
-        });
-
-        // The `T` after the closing paren is the actual conversion letter.
-        match cur.next_byte() {
-          Some(b'T') => {}
-          Some(other) => {
-            return Err(sherr!(
-              ParseErr,
-              "expected 'T' after strftime format, got '{}'",
-              other as char,
-            ));
-          }
-          None => {
-            return Err(sherr!(
-              ParseErr,
-              "unterminated strftime conversion: expected 'T' after ')'",
-            ));
-          }
-        }
-
-        Ok(Conversion::StrfTime(strftime.as_slice().into()))
-      }
+      b'(' => Ok(Conversion::StrfTime(strops::parse_paren_strftime(cur)?)),
       _ => Err(sherr!(ParseErr, "invalid conversion specification")),
     }
   }
@@ -144,7 +112,7 @@ impl StrFmt for PrintfFmt {
       Conversion::RepeatStr           => render_repeat(src, field),
       Conversion::AnsiC               => render_ansi_c(src, prec),
       Conversion::ShellQuote          => render_shell_quote(src),
-      Conversion::StrfTime(fmt)       => render_strftime(src, &fmt.to_str_lossy()),
+      Conversion::StrfTime(fmt)       => render_strftime(src, &fmt.to_str_lossy())?,
     };
 
     Ok(rendered)
@@ -425,7 +393,7 @@ fn render_shell_quote(src: &mut PrintfArgs) -> Field {
   Field::string(quoted)
 }
 
-fn render_strftime(src: &mut PrintfArgs, format: &str) -> Field {
+fn render_strftime(src: &mut PrintfArgs, format: &str) -> ShResult<Field> {
   use crate::state::{Shed, meta::MetaTab};
   use chrono::{Local, TimeZone};
   let arg = src.args.next().unwrap_or_else(|| b"-1".to_vec());
@@ -453,7 +421,7 @@ fn render_strftime(src: &mut PrintfArgs, format: &str) -> Field {
     Local::now()
   };
 
-  Field::string(dt.format(format).to_string().into_bytes())
+  Ok(Field::string(strops::strftime(&dt, format)?.into_bytes()))
 }
 
 /// Convert Rust's exponent format (`1e2`, `1.5e-3`) to POSIX printf style
@@ -1102,6 +1070,27 @@ mod tests {
       out.chars().count(),
       4,
       "expected a 4-digit year, got {out:?}"
+    );
+  }
+
+  #[test]
+  fn printf_strftime_unknown_spec_is_literal() {
+    // Regression: chrono rejects glibc specifiers like %N, and its Display
+    // impl signalled that by failing, which to_string() turned into a panic.
+    // bash emits them literally.
+    let guard = TestGuard::new();
+    test_input(r"printf '%(%N)T' 0").unwrap();
+    assert_eq!(guard.read_output(), "%N");
+  }
+
+  #[test]
+  fn printf_strftime_mixes_known_and_unknown_specs() {
+    let guard = TestGuard::new();
+    test_input(r"printf '%(%Y-%N)T' 0").unwrap();
+    let out = guard.read_output();
+    assert!(
+      out.ends_with("-%N") && out.len() == 7,
+      "expected a year then a literal %N, got {out:?}"
     );
   }
 

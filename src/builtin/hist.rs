@@ -441,10 +441,10 @@ impl HistQuery {
 
 pub(super) struct Hist;
 impl super::BuiltinRouter for Hist {
-  fn default_sub() -> &'static dyn super::Builtin {
+  fn default_sub(&self) -> &'static dyn super::Builtin {
     &HistList
   }
-  fn sub_for(word: &[u8]) -> Option<&'static dyn super::Builtin> {
+  fn sub_for(&self, word: &[u8]) -> Option<&'static dyn super::Builtin> {
     match word {
       b"pull" => Some(&HistPull),
       b"branch" => Some(&HistBranch),
