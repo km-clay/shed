@@ -953,25 +953,35 @@ FLOG                       *builtin-flog* *flog* *FLOG_FMT* *flog-fmt*
   `-p {prefix}` / `--prefix {prefix}`
 
       Format string for the prefix that appears before the message.
-      Supports two classes of placeholders:
+      See |flog-fmt| below for the syntax.
 
-      Named placeholders (expanded first) ~
+  Prefix format ~
 
-        `{level}`    log level label, styled with color
-        `{source}`   name of the source file or `<stdin>`
-        `{line}`     line number of the `flog` call in the source
-        `{col}`      column of the `flog` call in the source
+    The prefix uses `printf`-style conversions. Both `-p` and `FLOG_FMT`
+    accept the same syntax.
 
-      Date/time codes (expanded second, via strftime conventions) ~
+      `%L`    log level label, styled with color
+      `%S`    name of the source file, or `<stdin>`
+      `%l`    line number of the `flog` call in the source
+      `%c`    column of the `flog` call in the source
+      `%%`    a literal `%`
 
-        `%H`  hour (24-hour clock, 00-23)
-        `%M`  minute (00-59)
-        `%S`  second (00-60)
-        `%Y`  4-digit year
-        `%m`  month (01-12)
-        `%d`  day of month (01-31)
+    `%({strftime})T`   a timestamp, taken when the message is logged
 
-      Any strftime format code accepted by chrono is valid.
+      The text between the parentheses is a strftime format, the same
+      notation |builtin-printf| uses for its `%({fmt})T` conversion. A
+      specifier chrono does not implement is emitted literally rather
+      than raising an error. Every `%({fmt})T` in one prefix reads the
+      same instant, so they cannot disagree.
+
+          ```flog -p '[%(%H:%M:%S)T %L]' info "started"```
+
+    Each conversion accepts the usual `%[flags][width][.precision]`
+    field parameters, so `%-10l` left-justifies the line number in a
+    10-column field and `%30S` right-justifies the source name.
+
+    An unrecognized conversion is an error, so a typo is reported
+    rather than silently printed.
 
   The `FLOG_LEVEL` environment variable controls the minimum level that
   produces output. A call whose level is below `FLOG_LEVEL` is silently
@@ -986,17 +996,17 @@ FLOG                       *builtin-flog* *flog* *FLOG_FMT* *flog-fmt*
   The `FLOG_FMT` environment variable sets the default prefix format
   used when `-p` is not specified. The `-p` flag takes precedence
   over `FLOG_FMT` if both are present. If neither is set, the prefix
-  defaults to `[{level}]`. Useful for setting a project-wide log
+  defaults to `[%L]`. Useful for setting a project-wide log
   format once in `.shedrc` rather than passing `-p` to every call.
 
   Examples:
 
       ```flog info "starting up"```
-      ```flog -p '[%H:%M:%S {level}]' warn "disk usage high"```
-      ```flog -p '[{level} {source}:{line}]' error "unexpected value"```
+      ```flog -p '[%(%H:%M:%S)T %L]' warn "disk usage high"```
+      ```flog -p '[%L %S:%l]' error "unexpected value"```
       ```FLOG_LEVEL=debug flog debug "entering loop"```
-      ```FLOG_FMT='[%H:%M:%S {level}]' flog info "started"```
-      ```export FLOG_FMT='[{level} {source}:{line}]'  # in .shedrc```
+      ```FLOG_FMT='[%(%H:%M:%S)T %L]' flog info "started"```
+      ```export FLOG_FMT='[%L %S:%l]'  # in .shedrc```
 
 ==============================================================================
 FORGET                                           *builtin-forget* *forget*
@@ -2425,23 +2435,31 @@ RAISE                                            *builtin-raise* *raise*
 
   Format specifiers ~                                       *raise-format*
 
-    The message can contain `%N` placeholders, where {N} is a digit
-    sequence. Each `%N` consumes the next argument and renders it in
-    the {N}th palette color. Multiple `%N` markers sharing the same
+    The message can contain `%({N})` placeholders, where {N} is a digit
+    sequence. Each `%({N})` consumes the next argument and renders it in
+    the {N}th palette color. Multiple `%({N})` markers sharing the same
     {N} share the same color, so values that are semantically related
     can be visually linked even when their textual values differ.
+
+    The parentheses are required. A bare `%1` is an error, because the
+    digits would otherwise be read as a field width.
+
+    Every argument is scanned for placeholders, not just the first, and
+    they all draw from one shared queue. So an argument consumed by a
+    `%({N})` is not itself scanned, and the next unconsumed argument
+    becomes the next format string.
 
     Use `%%` to insert a literal `%`. A trailing `%` with no following
     character is treated as a literal `%`.
 
     Examples (color shown as bracketed style):
 
-      ```raise "expected '%1', got '%2'" int string```
-                      `----      ----  --- ------`
+      ```raise "expected '%(1)', got '%(2)'" int string```
+                      `------      ------  --- ------`
                       `int` and `string` are different colors
 
-      ```raise "removing '%1', '%1', and '%1'" main dev prod```
-                      `----  ----      ----`
+      ```raise "removing '%(1)', '%(1)', and '%(1)'" main dev prod```
+                      `------  ------      ------`
                       `main`, `dev`, and `prod` all share a color
 
   Examples:
@@ -2461,11 +2479,11 @@ RAISE                                            *builtin-raise* *raise*
 
       ```validate_port() {
         local port="$1"
-        [ -i "$port" ] || raise "expected port, found '%1'" "$port"  # see |test-numeric|
+        [ -i "$port" ] || raise "expected port, found '%(1)'" "$port"  # see |test-numeric|
         if (( port < 1024 || port > 65535 )); then
           raise -k "bad port" \
                 -n "must be in range 1024..65535" \
-                "port '%1' is out of range" "$port"
+                "port '%(1)' is out of range" "$port"
         fi
       }```
 

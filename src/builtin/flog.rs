@@ -1,17 +1,76 @@
 use std::str::FromStr;
 
-use bstr::ByteSlice;
+use chrono::{DateTime, Local};
 
 use crate::{
-  expand::markers,
-  match_loop, opt, sherr,
+  opt, sherr,
   state::{Shed, vars::VarStr},
   try_var,
-  util::{self, error::ShResult, ui},
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+    strops::{self, ByteCursor, Field, FieldParams, SliceCursor, StrFmt},
+    ui,
+  },
   varstr,
 };
 
 use super::{argv, opt::OptSpec};
+
+struct FlogCtx {
+  level: log::Level,
+  source: VarStr,
+  line: usize,
+  col: usize,
+  now: DateTime<Local>,
+}
+
+enum FlogConv {
+  Level,
+  Source,
+  Line,
+  Col,
+  Time(VarStr),
+}
+
+struct LogFmt;
+impl StrFmt for LogFmt {
+  type Source = FlogCtx;
+  type Conv = FlogConv;
+  fn parse_conv(&self, cur: &mut SliceCursor) -> ShResult<Self::Conv> {
+    let Some(b) = cur.next_byte() else {
+      return Err(sherr!(ParseErr, "missing flog format specifier"));
+    };
+
+    Ok(match b {
+      b'L' => FlogConv::Level,
+      b'S' => FlogConv::Source,
+      b'l' => FlogConv::Line,
+      b'c' => FlogConv::Col,
+      b'(' => FlogConv::Time(util::strops::parse_paren_strftime(cur)?),
+      other => {
+        return Err(sherr!(ParseErr, "invalid flog format specifier: %{other}"));
+      }
+    })
+  }
+
+  fn render(
+    &self,
+    conv: &Self::Conv,
+    _field: &FieldParams,
+    src: &mut Self::Source,
+  ) -> ShResult<Field> {
+    Ok(match conv {
+      FlogConv::Level => Field::styled(ui::stylize_loglevel(src.level).into_bytes()),
+      FlogConv::Source => Field::string(src.source.clone().into_bytes()),
+      FlogConv::Line => Field::numeric(varstr!("{}", src.line).into_bytes(), None, None),
+      FlogConv::Col => Field::numeric(varstr!("{}", src.col).into_bytes(), None, None),
+      FlogConv::Time(fmt) => {
+        Field::string(util::strops::strftime(&src.now, &fmt.to_str_lossy())?.into_bytes())
+      }
+    })
+  }
+}
 
 pub(super) struct Flog;
 impl super::Builtin for Flog {
@@ -38,9 +97,7 @@ impl super::Builtin for Flog {
       return util::with_status(0);
     }
 
-    let level = ui::stylize_loglevel(level);
-
-    let mut prefix_fmt = try_var!("FLOG_FMT").unwrap_or_else(|| "[{level}]".into());
+    let mut prefix_fmt = try_var!("FLOG_FMT").unwrap_or_else(|| "[%L]".into());
 
     for opt in opts {
       if opt.key() == "prefix" {
@@ -48,64 +105,30 @@ impl super::Builtin for Flog {
       }
     }
 
-    let (rest, _) = argv::join_raw_args(arg_vec);
-    let formatted = Self::expand_prefix_fmt(
-      prefix_fmt.as_bytes(),
-      level.as_bytes(),
-      source.as_bytes(),
+    let (rest, arg_span) = argv::join_raw_args(arg_vec);
+    let mut buf = vec![];
+    let mut ctx = FlogCtx {
+      level,
+      source,
       line,
       col,
-    );
+      now: Local::now(),
+    };
+    strops::Formatter::parse(&LogFmt, prefix_fmt.as_bytes())
+      .and_then(|r| r.render(&mut ctx, &mut buf))
+      .promote_err(arg_span)?;
 
-    let out = format!("{formatted} {rest}");
+    let mut formatted = VarStr::from(buf);
+    formatted.push(b' ');
+    formatted.push_slice(rest);
 
-    Shed::post_system_msg(out);
+    Shed::post_system_msg(formatted.to_string());
 
     util::with_status(0)
   }
 }
 
 impl Flog {
-  fn expand_prefix_fmt(fmt: &[u8], level: &[u8], source: &[u8], line: usize, col: usize) -> VarStr {
-    let mut bytes = fmt.bytes();
-    let mut out = util::scratch_buf();
-    match_loop!(bytes.next() => b, {
-      b'\\' => {
-        out.push(b);
-        if let Some(next_ch) = bytes.next() {
-          out.push(next_ch);
-        }
-      }
-      b'{' => {
-        let mut fmt_arg = util::scratch_buf();
-
-        match_loop!(bytes.next() => b, {
-          b'}' => break,
-          _ => fmt_arg.push(b),
-        });
-
-        match fmt_arg.as_slice() {
-          b"level" => out.extend_from_slice(level),
-          b"line" => out.extend_from_slice(varstr!("{line}").as_bytes()),
-          b"col" => out.extend_from_slice(varstr!("{col}").as_bytes()),
-          b"source" => {
-            let source = source.replace(b"%", varstr!("{}",markers::ESCAPE).as_bytes());
-            out.extend_from_slice(source.as_bytes());
-          }
-          _ => out.extend_from_slice(&fmt_arg),
-        }
-      }
-      _ => out.push(b),
-    });
-
-    let out = chrono::Local::now()
-      .format(&out.to_str_lossy()) // alas, we must call to_str_lossy(). Sad!
-      .to_string()
-      .replace(markers::ESCAPE, "%");
-
-    VarStr::from(out)
-  }
-
   fn get_log_level() -> Option<log::Level> {
     let level = try_var!("FLOG_LEVEL")?.to_ascii_uppercase();
     String::from_utf8_lossy(&level).parse::<log::Level>().ok()
@@ -207,7 +230,7 @@ mod flog_execute_tests {
     Shed::vars_mut(|v| v.unset_var("FLOG_FMT").ok());
     test_input("flog INFO check_default_prefix").unwrap();
     let out = g.read_output();
-    // Default fmt is "[{level}] …" — at minimum the level name appears.
+    // Default fmt is "[%L] …" — at minimum the level name appears.
     assert!(out.contains("INFO"), "got: {out:?}");
     assert!(out.contains("check_default_prefix"), "got: {out:?}");
   }
