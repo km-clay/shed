@@ -191,7 +191,7 @@ impl LineBuf {
     let res = if is_edit {
       let policy = if is_undo_op {
         RecordPolicy::Skip
-      } else if is_char_insert || self.edit_stack.merging_undos() {
+      } else if is_char_insert || self.edit_stack.in_group() {
         RecordPolicy::Merge
       } else if starts_merge {
         RecordPolicy::Restart

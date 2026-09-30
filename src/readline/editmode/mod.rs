@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
+use crate::mode;
 use crate::state::terminal::CursorStyle;
 use crate::state::vars::VarStr;
 use crate::util::error::{ShErr, ShResult};
@@ -59,18 +60,19 @@ pub(crate) enum ModeReport {
 }
 
 impl ModeReport {
+  #[rustfmt::skip]
   pub(crate) fn as_edit_mode(self) -> Box<dyn EditMode> {
     match self {
-      ModeReport::Insert => Box::new(ViInsert::new()) as Box<dyn EditMode>,
-      ModeReport::Normal => Box::new(ViNormal::new()) as Box<dyn EditMode>,
-      ModeReport::Ex => Box::new(ViEx::default()) as Box<dyn EditMode>,
-      ModeReport::Visual => Box::new(ViVisual::new()) as Box<dyn EditMode>,
-      ModeReport::Replace => Box::new(ViReplace::new()) as Box<dyn EditMode>,
-      ModeReport::Verbatim => Box::new(ViVerbatim::new()) as Box<dyn EditMode>,
-      ModeReport::Emacs => Box::new(Emacs::new()) as Box<dyn EditMode>,
-      ModeReport::Remote => Box::new(RemoteMode) as Box<dyn EditMode>,
-      ModeReport::Search => Box::new(ViSearch::new(1)) as Box<dyn EditMode>,
-      ModeReport::RevSearch => Box::new(ViSearchRev::new(1)) as Box<dyn EditMode>,
+      ModeReport::Insert    => mode!(ViInsert),
+      ModeReport::Normal    => mode!(ViNormal),
+      ModeReport::Ex        => mode!(ViEx, false),
+      ModeReport::Visual    => mode!(ViVisual),
+      ModeReport::Replace   => mode!(ViReplace),
+      ModeReport::Verbatim  => mode!(ViVerbatim),
+      ModeReport::Emacs     => mode!(Emacs),
+      ModeReport::Search    => mode!(ViSearch, 1),
+      ModeReport::RevSearch => mode!(ViSearchRev, 1),
+      ModeReport::Remote    => Box::new(RemoteMode),
     }
   }
 }

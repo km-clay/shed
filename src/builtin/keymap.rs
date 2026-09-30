@@ -21,7 +21,7 @@ impl super::Builtin for KeyMapBuiltin {
       opt!("ex"         | b'x'),
       opt!("op-pending" | b'o'),
       opt!("replace"    | b'r'),
-      opt!("noremap"          ),
+      opt!("recursive"  | b'R'),
       opt!("remove"           ).argc(1),
     ]
   }
@@ -29,7 +29,7 @@ impl super::Builtin for KeyMapBuiltin {
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
     let remove = args.opt_value("remove");
-    let remap = !args.has_opt("noremap");
+    let remap = args.has_opt("recursive");
 
     let mut flags = KeyMapFlags::empty();
     flags.set(KeyMapFlags::NORMAL,     args.has_opt("normal"    ));

@@ -107,6 +107,17 @@ fn dec_map_depth() {
   KEYMAP_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
 }
 
+/// Convenience macro to create a boxed edit mode instance
+#[macro_export]
+macro_rules! mode {
+  ($mode:ident) => {
+    (Box::new($mode::new()) as Box<dyn EditMode>)
+  };
+  ($mode:ident, $arg:expr) => {
+    (Box::new($mode::new($arg)) as Box<dyn EditMode>)
+  };
+}
+
 /// A simple line editor with optional history
 ///
 /// Used for simpler text inputs like Ex mode and the help builtin's search bar
@@ -607,9 +618,9 @@ impl ShedLine {
       History::empty("ex_history", "main")
     };
     let mode = if shopt!(set.vi) {
-      Box::new(ViInsert::new()) as Box<dyn EditMode>
+      mode!(ViInsert)
     } else {
-      Box::new(Emacs::new()) as Box<dyn EditMode>
+      mode!(Emacs)
     };
     let mut new = Self {
       prompt,
@@ -657,6 +668,13 @@ impl ShedLine {
         .map(|s| s.replace('\n', "\\n")),
       mode: self.core.mode.report_mode().to_string(),
     }
+  }
+
+  pub(crate) fn with_undo_group<T, F: FnOnce(&mut Self) -> T>(&mut self, f: F) -> T {
+    self.core.editor.begin_undo_group();
+    let res = f(self);
+    self.core.editor.end_undo_group();
+    res
   }
 
   /// A mutable reference to the currently focused editor
@@ -724,9 +742,9 @@ impl ShedLine {
     })?;
 
     let mut mode = if shopt!(set.vi) {
-      Box::new(ViInsert::new()) as Box<dyn EditMode>
+      mode!(ViInsert)
     } else {
-      Box::new(Emacs::new()) as Box<dyn EditMode>
+      mode!(Emacs)
     };
     self.core.swap_mode(&mut mode);
     self.needs_redraw = true;
@@ -796,13 +814,9 @@ impl ShedLine {
   /// This method ensures that the editing mode (Vi or Emacs) matches the 'vi' option, and switches modes if necessary.
   pub(crate) fn fix_editing_mode(&mut self) {
     if shopt!(set.vi) && self.core.mode.report_mode() == ModeReport::Emacs {
-      self
-        .core
-        .swap_mode(&mut (Box::new(ViInsert::new()) as Box<dyn EditMode>));
+      self.core.swap_mode(&mut mode!(ViInsert));
     } else if !shopt!(set.vi) && self.core.mode.report_mode() != ModeReport::Emacs {
-      self
-        .core
-        .swap_mode(&mut (Box::new(Emacs::new()) as Box<dyn EditMode>));
+      self.core.swap_mode(&mut mode!(Emacs));
     }
   }
 
@@ -1653,13 +1667,14 @@ impl ShedLine {
         },
       };
 
-      self.core.editor.start_undo_merge();
-      if let Ok(Some(event)) = self.replay_keys(events, false) {
-        self.core.editor.stop_undo_merge();
-        return Ok(Some(event));
-      }
-      self.core.editor.stop_undo_merge();
-      return Ok(None);
+      return match self.with_undo_group(|this| this.replay_keys(events, false)) {
+        Err(e) if !e.kind().is_flow_control() => {
+          e.print_error();
+          self.old_layout = None;
+          Ok(None)
+        }
+        res => res,
+      };
     }
 
     let before = self.core.editor.to_string();
@@ -1768,34 +1783,25 @@ impl ShedLine {
       LineCmd::NormalSeq(line_nums, seq, bang) => {
         let keys = alias::expand_keymap(&seq);
 
-        self.core.editor.start_undo_merge();
-        for line in line_nums {
-          self
-            .core
-            .editor
-            .set_cursor(linebuf::Pos { row: line, col: 0 });
-          self
-            .core
-            .swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
+        self.with_undo_group(|this| -> ShResult<()> {
+          for line in line_nums {
+            this
+              .core
+              .editor
+              .set_cursor(linebuf::Pos { row: line, col: 0 });
+            this.core.swap_mode(&mut mode!(ViNormal));
 
-          if let Err(e) = self.replay_keys(keys.clone(), !bang) {
-            self.core.editor.stop_undo_merge();
-            return Err(e);
+            this.replay_keys(keys.clone(), !bang)?;
+            // Flush any trailing ambiguous mapping prefix left buffered by the
+            // replay, so it can't leak into the next addressed line (or, after the
+            // loop, the next keystroke). No-op for `normal!` (keymaps bypassed).
+            this.flush_pending_keymap()?;
           }
-          // Flush any trailing ambiguous mapping prefix left buffered by the
-          // replay, so it can't leak into the next addressed line (or, after the
-          // loop, the next keystroke). No-op for `normal!` (keymaps bypassed).
-          if let Err(e) = self.flush_pending_keymap() {
-            self.core.editor.stop_undo_merge();
-            return Err(e);
-          }
-        }
-        self.core.editor.stop_undo_merge();
+          Ok(())
+        })?;
 
         // just in case
-        self
-          .core
-          .swap_mode(&mut (Box::new(ViNormal::new()) as Box<dyn EditMode>));
+        self.core.swap_mode(&mut mode!(ViNormal));
 
         Ok(None)
       }

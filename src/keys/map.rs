@@ -92,9 +92,9 @@ impl Display for KeyMap {
     let action = escape::shell_quote(&self.action.to_str_lossy());
 
     if self.remap {
-      write!(f, "keymap {flags} {keys} {action}")
+      write!(f, "keymap --recursive {flags} {keys} {action}")
     } else {
-      write!(f, "keymap --noremap {flags} {keys} {action}")
+      write!(f, "keymap {flags} {keys} {action}")
     }
   }
 }

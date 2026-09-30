@@ -2408,3 +2408,54 @@ mod normal_command_mappings {
     );
   }
 }
+
+// Undo granularity after a `.` repeat. Each change -- the original and every
+// repeat -- is its own undo step, whether or not the repeated command begins
+// with a buffer-modifying verb.
+mod dot_repeat_undo {
+  use super::*;
+
+  fn after_undos(initial: &str, ops: &str, undos: usize) -> String {
+    let (mut vi, _g) = test_vi(initial);
+
+    Shed::term_mut(|t| t.feed_bytes(b"\x1b"));
+    let keys = Shed::term_mut(crate::state::terminal::Terminal::drain_keys);
+    vi.process_input(keys).unwrap();
+
+    let mut seq = ops.as_bytes().to_vec();
+    seq.extend(vec![b'u'; undos]);
+    for byte in seq {
+      Shed::term_mut(|t| t.feed_bytes(&[byte]));
+      let keys = Shed::term_mut(crate::state::terminal::Terminal::drain_keys);
+      vi.process_input(keys).unwrap();
+    }
+    vi.core.editor.to_string()
+  }
+
+  macro_rules! undo_ladder {
+    { $($name:ident: $initial:expr => $ops:expr => [$($step:expr),* $(,)?]);* $(;)? } => {
+      $(#[test]
+        fn $name() {
+          for (undos, want) in [$($step),*].iter().enumerate() {
+            assert_eq!(
+              &after_undos($initial, $ops, undos), want,
+              "{} after {} undo(s)", stringify!($name), undos
+            );
+          }
+        }
+      )*
+    };
+  }
+
+  undo_ladder! {
+    repeat_opens_insert_i    : "aa bb"    => "0iZZ\x1b."     => ["ZZZZaa bb", "ZZaa bb", "aa bb"];
+    repeat_opens_insert_a    : "aa bb"    => "0aZZ\x1b."     => ["aZZZZa bb", "aZZa bb", "aa bb"];
+    repeat_opens_insert_A    : "aa bb"    => "AZZ\x1b."      => ["aa bbZZZZ", "aa bbZZ", "aa bb"];
+    repeat_opens_change      : "aa bb"    => "0cwXX\x1bw."   => ["XX XX", "XX bb", "aa bb"];
+    repeat_opens_delete      : "aa bb cc" => "0dw."          => ["cc", "bb cc", "aa bb cc"];
+    repeat_opens_x           : "hello"    => "0x."           => ["llo", "ello", "hello"];
+    repeat_opens_tilde       : "aa bb"    => "0~."           => ["AA bb", "Aa bb", "aa bb"];
+    counted_repeat_one_step  : "aa"       => "0iZ\x1b3."     => ["ZZZZaa", "Zaa", "aa"];
+    repeated_dots_each_step  : "aa"       => "0iZ\x1b..."     => ["ZZZZaa", "ZZZaa", "ZZaa", "Zaa", "aa"];
+  }
+}

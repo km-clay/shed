@@ -388,9 +388,9 @@ impl super::LineBuf {
     // Pop the next non-empty step from the source stack (borrow released before
     // we mutate `self.lines`).
     let edit = if is_undo {
-      self.edit_stack.undo()
+      self.edit_stack.undo(&self.lines, self.cursor.pos)
     } else {
-      self.edit_stack.redo()
+      self.edit_stack.redo(&self.lines, self.cursor.pos)
     };
     let Some(edit) = edit else { return };
 

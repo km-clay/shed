@@ -1339,7 +1339,7 @@ KEYMAP                                           *builtin-keymap* *keymap*
 
   `keymap`
   `keymap {mode-flags}`
-  `keymap {mode-flags} [--noremap] {keys} {action}`
+  `keymap {mode-flags} [-R] {keys} {action}`
   `keymap {mode-flags} --remove {keys}`
 
   Define, remove, or list custom key bindings. {keys} and {action}
@@ -1356,19 +1356,18 @@ KEYMAP                                           *builtin-keymap* *keymap*
     `-x`    ex mode (vi)
 
   `--remove {keys}`   remove the binding for {keys} in the given modes
-  `--noremap`         do not let {action} trigger other keymaps
+  `-R`/`--recursive`  let {action} trigger other keymaps
 
   Recursive mappings ~
 
-    By default an {action} is scanned for keymaps as it runs, so one
-    binding can trigger another. `--noremap` turns that off for a single
-    binding: its {action} goes straight to the editor, and no keymap
-    can fire from it.
+    By default an {action} goes straight to the editor: no keymap can
+    fire from it. `-R` turns that on for a single binding, scanning its
+    {action} for keymaps as it runs, so one binding can trigger another.
 
     An example use-case:
 
         ```keymap -n '<space>f' 'iecho hello<cr>'```
-        ```keymap -i '<C-space>' '<C-o><space>'```
+        ```keymap -R -i '<C-space>' '<C-o><space>'```
 
     In this case, `Ctrl+Space` -> `f` would trigger the `iecho hello<cr>` keymap,
     because the `<C-space>` keymap would prime it. This allows you to reach your
@@ -1376,6 +1375,8 @@ KEYMAP                                           *builtin-keymap* *keymap*
 
     Recursion is capped at 100 levels. A binding that exceeds the cap is
     aborted with an error.
+
+    Coming from vim: the default matches `noremap`, and `-R` matches `map`.
 
   Listing ~
 

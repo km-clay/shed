@@ -82,6 +82,11 @@
             default = "";
             description = "The sequence of characters to send to the line editor when the keymap is triggered.";
           };
+          recursive = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Whether to allow this keymap to recursively trigger other keymaps";
+          };
         };
       });
       default = [];

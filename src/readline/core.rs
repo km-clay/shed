@@ -9,6 +9,7 @@ use super::editmode::{
 use super::linebuf::LineBuf;
 use super::register::RegisterName;
 
+use crate::mode;
 use crate::readline::editmode::ExNdRule;
 use crate::{
   autocmd, defer,
@@ -58,13 +59,13 @@ impl EditorCore {
   /// Construct a core seeded with `input`, starting in normal mode. Used by
   /// headless drivers (e.g. the `vicut` builtin).
   pub(crate) fn headless(input: &str) -> Self {
-    let mut core = Self::new(Box::new(ViNormal::new()));
+    let mut core = Self::new(mode!(ViNormal));
     core.editor = LineBuf::new().with_initial(input, 0);
     core
   }
 
   pub(crate) fn empty() -> Self {
-    Self::new(Box::new(ViNormal::new()))
+    Self::new(mode!(ViNormal))
   }
 
   pub(crate) fn set_buffer(&mut self, input: &str) {
@@ -195,21 +196,25 @@ impl EditorCore {
     }
   }
 
+  pub(crate) fn with_undo_group<T, F: FnOnce(&mut Self) -> T>(&mut self, f: F) -> T {
+    self.editor.begin_undo_group();
+    let res = f(self);
+    self.editor.end_undo_group();
+    res
+  }
+
   /// Run a `:normal` key sequence on each addressed line, in normal mode,
   /// folded into one undo step.
   fn run_normal_seq(&mut self, lines: &[usize], seq: &str) -> ShResult<()> {
     let keys = alias::expand_keymap(seq);
-    self.editor.start_undo_merge();
-    for &line in lines {
-      self.editor.set_cursor(Pos { row: line, col: 0 });
-      self.reset_mode(false)?;
-      if let Err(e) = self.feed_keys(keys.clone()) {
-        self.editor.stop_undo_merge();
-        return Err(e);
+    self.with_undo_group(|this| {
+      for &line in lines {
+        this.editor.set_cursor(Pos { row: line, col: 0 });
+        this.reset_mode(false)?;
+        this.feed_keys(keys.clone())?;
       }
-    }
-    self.editor.stop_undo_merge();
-    Ok(())
+      Ok(())
+    })
   }
 
   /// Finalize a pending command-line mode (Ex / Search / `RevSearch`) by feeding
@@ -229,7 +234,7 @@ impl EditorCore {
       self.submit_cmdline()?;
     }
 
-    let mut mode: Box<dyn EditMode> = Box::new(ViNormal::new());
+    let mut mode = mode!(ViNormal);
     self.swap_mode(&mut mode);
     Ok(())
   }
@@ -242,7 +247,7 @@ impl EditorCore {
     let mut is_insert_mode = false;
     let count = cmd.verb_count();
 
-    let mut mode: Box<dyn EditMode> = if matches!(
+    let mut mode = if matches!(
       self.mode.report_mode(),
       ModeReport::Ex | ModeReport::Verbatim
     ) && cmd.flags.contains(CmdFlags::EXIT_CUR_MODE)
@@ -252,11 +257,11 @@ impl EditorCore {
         && let ModeReport::Visual = mode.report_mode()
       {
         self.editor.stop_selecting();
-        Box::new(ViNormal::new())
+        mode!(ViNormal)
       } else if let Some(saved) = self.saved_mode.take() {
         saved
       } else {
-        Box::new(ViNormal::new())
+        mode!(ViNormal)
       }
     } else {
       match cmd.verb().unwrap().1 {
@@ -269,37 +274,37 @@ impl EditorCore {
           )
         }
 
-        Verb::ExMode => Box::new(ViEx::new(self.editor.is_selecting())),
+        Verb::ExMode => mode!(ViEx, self.editor.is_selecting()),
 
         Verb::VerbatimMode => {
           Shed::term_mut(|t| t.verbatim_single(true));
           Box::new(ViVerbatim::new().with_count(count as u16))
         }
 
-        Verb::NormalMode => Box::new(ViNormal::new()),
+        Verb::NormalMode => mode!(ViNormal),
 
-        Verb::ReplaceMode => Box::new(ViReplace::new()),
+        Verb::ReplaceMode => mode!(ViReplace),
 
         Verb::VisualModeSelectLast => {
           if self.mode.report_mode() != ModeReport::Visual {
             self.editor.start_char_select();
           }
-          let mut mode: Box<dyn EditMode> = Box::new(ViVisual::new());
+          let mut mode = mode!(ViVisual);
           self.swap_mode(&mut mode);
 
           return self.fire(&cmd);
         }
         Verb::VisualMode => {
           self.editor.start_char_select();
-          Box::new(ViVisual::new())
+          mode!(ViVisual)
         }
         Verb::VisualModeLine => {
           self.editor.start_line_select();
-          Box::new(ViVisual::new())
+          mode!(ViVisual)
         }
 
-        Verb::SearchMode => Box::new(ViSearch::new(count)),
-        Verb::RevSearchMode => Box::new(ViSearchRev::new(count)),
+        Verb::SearchMode => mode!(ViSearch, count),
+        Verb::RevSearchMode => mode!(ViSearchRev, count),
 
         _ => unreachable!(),
       }
@@ -310,7 +315,7 @@ impl EditorCore {
     self.swap_mode(&mut mode);
 
     if matches!(mode.report_mode(), ModeReport::Insert | ModeReport::Replace) {
-      self.editor.stop_undo_merge();
+      self.editor.break_undo_merge();
     }
 
     if matches!(
@@ -380,30 +385,33 @@ impl EditorCore {
 
         let old_mode = self.mode.report_mode();
 
-        for _ in 0..repeat {
-          let cmds = cmds.clone();
-          for (i, cmd) in cmds.iter().enumerate() {
-            self.exec_cmd(cmd.clone(), true)?;
-            if i == 0 {
-              self.editor.start_undo_merge();
+        self.with_undo_group(|this| {
+          let mut res = Ok(());
+          'repeat: for _ in 0..repeat {
+            for cmd in cmds.clone() {
+              if let Err(e) = this.exec_cmd(cmd, true) {
+                res = Err(e);
+                break 'repeat;
+              }
             }
-          }
-          self.editor.stop_undo_merge();
 
-          let old_mode_clone: Box<dyn EditMode> = match old_mode {
-            ModeReport::Normal => Box::new(ViNormal::new()),
-            ModeReport::Insert => Box::new(ViInsert::new()),
-            ModeReport::Visual => Box::new(ViVisual::new()),
-            ModeReport::Replace => Box::new(ViReplace::new()),
-            ModeReport::Verbatim => Box::new(ViVerbatim::new()),
-            ModeReport::Emacs => Box::new(Emacs::new()),
-            ModeReport::Remote => Box::new(RemoteMode),
-            ModeReport::Ex => Box::new(ViEx::new(self.editor.is_selecting())),
-            ModeReport::Search => Box::new(ViSearch::new(1)),
-            ModeReport::RevSearch => Box::new(ViSearchRev::new(1)),
-          };
-          self.mode = old_mode_clone;
-        }
+            #[rustfmt::skip]
+            let old_mode_clone = match old_mode {
+              ModeReport::Normal    => mode!(ViNormal),
+              ModeReport::Insert    => mode!(ViInsert),
+              ModeReport::Visual    => mode!(ViVisual),
+              ModeReport::Replace   => mode!(ViReplace),
+              ModeReport::Verbatim  => mode!(ViVerbatim),
+              ModeReport::Emacs     => mode!(Emacs),
+              ModeReport::Ex        => mode!(ViEx, this.editor.is_selecting()),
+              ModeReport::Search    => mode!(ViSearch, 1),
+              ModeReport::RevSearch => mode!(ViSearchRev, 1),
+              ModeReport::Remote    => Box::new(RemoteMode),
+            };
+            this.mode = old_mode_clone;
+          }
+          res
+        })?;
       }
       CmdReplay::Single(mut cmd) => {
         if count > 1 {
@@ -493,7 +501,7 @@ impl EditorCore {
     } else {
       if self.mode.report_mode() == ModeReport::Visual && self.editor.select_range().is_none() {
         self.editor.stop_selecting();
-        let mut mode: Box<dyn EditMode> = Box::new(ViNormal::new());
+        let mut mode = mode!(ViNormal);
         self.swap_mode(&mut mode);
       }
 
@@ -521,7 +529,7 @@ impl EditorCore {
           .is_some_and(|v| v.1.is_edit() || v.1 == Verb::Yank)
       {
         self.editor.stop_selecting();
-        let mut mode: Box<dyn EditMode> = Box::new(ViNormal::new());
+        let mut mode = mode!(ViNormal);
         self.swap_mode(&mut mode);
       }
 
@@ -530,17 +538,17 @@ impl EditorCore {
       }
 
       if cmd.flags.contains(CmdFlags::EXIT_CUR_MODE) {
-        let mut mode: Box<dyn EditMode> = if matches!(
+        let mut mode = if matches!(
           self.mode.report_mode(),
           ModeReport::Ex | ModeReport::Verbatim
         ) {
           if let Some(saved) = self.saved_mode.take() {
             saved
           } else {
-            Box::new(ViNormal::new())
+            mode!(ViNormal)
           }
         } else {
-          Box::new(ViNormal::new())
+          mode!(ViNormal)
         };
         self.swap_mode(&mut mode);
       }
