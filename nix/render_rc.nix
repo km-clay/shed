@@ -18,10 +18,11 @@ lib: cfg: let
     }'';
 
   mkKeymapCmd = cfg: let
-    flags = "-${lib.concatStrings cfg.modes}";
-    keys = "'${escape cfg.keys}'";
+    recursive = lib.optionalString cfg.recursive "--recursive ";
+    flags =  "-${lib.concatStrings cfg.modes}";
+    keys =   "'${escape cfg.keys}'";
     action = "'${escape cfg.command}'";
-  in "keymap ${flags} ${keys} ${action}";
+  in "keymap ${recursive}${flags} ${keys} ${action}";
 
   mkCompleteCmd = name: cfg: let
     flags = lib.concatStrings [
