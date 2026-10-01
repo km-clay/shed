@@ -14,7 +14,7 @@ The following builtins are available:
   `autoload`    load functions/completions lazily           |builtin-autoload|
   `bg`          resume a stopped job in the background      |builtin-bg|
   `cd`          change the working directory                |builtin-cd|
-  `chrono`      time-related operations (timers, spans)     |builtin-chrono|
+  `chrono`      timers, sleeps, time formatting, intervals  |builtin-chrono|
   `compadd`     register completion candidates              |builtin-compadd|
   `compgen`     emit completion candidates                  |builtin-compgen|
   `complete`    define custom tab completion rules          |builtin-complete|
@@ -441,6 +441,7 @@ CHRONO                                           *builtin-chrono* *chrono*
     `sleep`   pause for a duration, or until an instant
     `fmt`     render an instant or a duration through a format string
     `every`   run a command repeatedly on an interval
+    `zone`    list portable timezone names
 
 ==============================================================================
 CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
@@ -668,6 +669,15 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
     A time with no day means today. `5pm`, `5:00pm`, `5:00 PM`, `17:00`
     and `17:00:00` all name the same instant.
 
+    A written date may use `-`, `.` or `/`. A four-digit field is the
+    year wherever it appears; otherwise the separator says which order is
+    meant -- `-` is `Y-M-D`, `.` is `D.M.Y`, `/` is `M/D/Y` -- and an
+    order naming an impossible date is discarded, so `13/10/26` is read
+    day-first despite the slashes. Where both orders are possible the
+    separator decides: `10/12/26` is October 12th and `12.10.26` is the
+    same day written the other way. Two-digit years run 00-68 as 2000s
+    and 69-99 as 1900s.
+
     `@{seconds}` is a Unix timestamp, optionally fractional, and may be
     negative for a time before 1970. It anchors an expression like any
     other instant, so `2 hours after @0` is valid. The `@` is required --
@@ -761,6 +771,8 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
 
     Using either with `-d` is an error rather than a no-op: a duration is
     a length, not a position on a clock, so a zone cannot apply to one.
+
+    ```chrono zone``` can be used to list and filter compatible timezone names.
 
   Exit status ~
 
@@ -885,6 +897,39 @@ CHRONO EVERY                               *chrono-every* *builtin-chrono-every*
     arrives before the first tick.
 
     `2`   a missing or unusable {interval}, or an invalid option value
+
+==============================================================================
+CHRONO ZONE                                  *chrono-zone* *builtin-chrono-zone*
+
+  `chrono zone [-E] [pattern]`
+
+  List and filter portable timezone names. Names are printed one-per-line.
+  ```chrono fmt -z``` uses these names as possible targets.
+
+  Searching ~
+
+    {pattern} keeps the names containing it, ignoring case, which is the
+    useful default when you know the city but not the spelling:
+
+        ```chrono zone tokyo```             `Asia/Tokyo`
+        ```chrono zone new_york```          `America/New_York`
+
+    `-E` / `--regex` reads {pattern} as a regular expression instead. It
+    is case-sensitive; write `(?i)` for otherwise.
+
+        ```chrono zone -E '^Europe/[AB]'```
+        ```chrono zone -E '(?i)tokyo'```
+
+    Operands are joined with spaces, so a pattern containing one needs no
+    quoting -- though zone names use `_` rather than a space, so
+    ```chrono zone New York``` finds nothing while
+    ```chrono zone new_york``` finds it.
+
+  Exit status ~
+
+    `0`   at least one name matched
+    `1`   nothing matched, and nothing was printed
+    `2`   `-E` was given a pattern that is not a valid regular expression
 
 ==============================================================================
 COMMAND                                          *builtin-command* *command*

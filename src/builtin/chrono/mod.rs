@@ -22,6 +22,7 @@ mod every;
 mod format;
 mod sleep;
 mod timer;
+mod timezone;
 
 const NANOS_PER_SEC: i128 = 1_000_000_000;
 
@@ -130,9 +131,11 @@ enum Zone {
 impl Zone {
   fn parse(tz: Option<VarStr>, utc: bool) -> ShResult<Self> {
     let tz = if let Some(name) = tz {
-      let zone = name
-        .parse::<Tz>()
-        .ok_or_else(|| sherr!(ExecFail, "unknown timezone '{name}'").with_code(2))?;
+      let zone = name.parse::<Tz>().ok_or_else(|| {
+        sherr!(ExecFail, "unknown timezone '{name}'",)
+          .with_note("for a list of timezone names, run `chrono zone`".into())
+          .with_code(2)
+      })?;
       Zone::Named(zone)
     } else if utc {
       Zone::Utc
@@ -310,10 +313,11 @@ impl BuiltinRouter for Chrono {
   #[rustfmt::skip]
   fn sub_for(&self, word: &[u8]) -> Option<&'static dyn Builtin> {
     match word {
-      b"timer" => Some(&timer::Timer  ),
-      b"sleep" => Some(&sleep::Sleep  ),
-      b"fmt"   => Some(&format::Format),
-      b"every" => Some(&every::Every  ),
+      b"timer" => Some(&timer::Timer      ),
+      b"sleep" => Some(&sleep::Sleep      ),
+      b"fmt"   => Some(&format::Format    ),
+      b"every" => Some(&every::Every      ),
+      b"zone"  => Some(&timezone::Timezone),
       _ => None,
     }
   }

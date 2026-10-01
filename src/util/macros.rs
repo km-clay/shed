@@ -39,6 +39,7 @@ macro_rules! flush_term {
 macro_rules! exec_term {
   ($($ctl:expr),* $(,)?) => {'exec_term: {
     use ::std::io::Write;
+    use $crate::state::Shed;
     if let Err(e) = $crate::queue_term!($($ctl),*) {
       break 'exec_term Err(e);
     };
@@ -58,7 +59,7 @@ macro_rules! exec_term {
 macro_rules! queue_term {
   ($($ctl:expr),* $(,)?) => {'queue_term: {
     #[allow(unused_imports)]
-    use $crate::state::terminal::{
+    use $crate::state::{Shed, terminal::{
       CursorStyle::*,
       Toggle::*,
       TermCtl,
@@ -68,7 +69,7 @@ macro_rules! queue_term {
       Scroll,
       OscCtl::*,
       TermQuery::*
-    };
+    }};
 
     $(
       if let Err(e) = Shed::term_mut(|t| {

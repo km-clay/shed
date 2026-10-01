@@ -54,10 +54,6 @@ const CLOCK_FORMATS: [&str; 6] = [
   "%I:%M:%S %p", // 02:30:00 PM
 ];
 
-const DATE_FORMATS: [&str; 1] = [
-  "%Y-%m-%dT%H:%M:%S", // 2023-03-15T14:30:00
-];
-
 /// chrono's strftime rejects specifiers that glibc passes through untouched
 /// (`%N`, `%Q`, ...), and its `Display` impl signals that by failing, which
 /// `to_string()` turns into a panic. bash emits unknown specifiers literally,
@@ -532,11 +528,12 @@ impl<'a> TimeReader<'a> {
       return Self::parse_epoch(epoch);
     }
 
-    for fmt in DATE_FORMATS {
-      if let Ok(time) = NaiveDateTime::parse_from_str(self.orig, fmt) {
-        return local_to_utc(time);
-      }
+    // check this first, our parser can't represent it so lets just return early
+    // if it matches this format string
+    if let Ok(time) = NaiveDateTime::parse_from_str(self.orig, "%Y-%m-%dT%H:%M:%S") {
+      return local_to_utc(time);
     }
+
     for parser in [DateTime::parse_from_rfc2822, DateTime::parse_from_rfc3339] {
       if let Ok(time) = parser(self.orig) {
         return Ok(time.with_timezone(&Utc));
