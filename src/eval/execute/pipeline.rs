@@ -22,7 +22,7 @@ use crate::{
     lex::Span,
     parse::{NdFlags, Node, node},
   },
-  procio::{RedirSet, Sink, Sinks},
+  procio::{PipeFrames, RedirSet, Sink, Sinks},
   shopt, signal,
   state::{
     Shed,
@@ -38,6 +38,23 @@ use crate::{
 };
 
 use super::{Ast, NdRule, NodeId, classify};
+/// Pushes a pipeline's pipe-end frame for as long as the pipeline is running,
+/// so a stage that forks can see the ends of every enclosing pipeline too.
+struct PipeFrame;
+
+impl PipeFrame {
+  fn enter() -> Self {
+    Shed::pipe_frames_mut(PipeFrames::push_frame);
+    Self
+  }
+}
+
+impl Drop for PipeFrame {
+  fn drop(&mut self) {
+    Shed::pipe_frames_mut(PipeFrames::pop_frame);
+  }
+}
+
 impl super::Dispatcher {
   pub(super) fn exec_pipeline(&mut self, tree: &Ast, pipeline: NodeId) -> ShResult<()> {
     let pipeline = &tree[pipeline];
@@ -105,6 +122,8 @@ impl super::Dispatcher {
     // splice and pipefail blame after the forked prefix is waited on.
     let mut tail_status: Option<(i32, Span)> = None;
     let mut cmd_iter = cmds.iter().enumerate().peekable();
+
+    let _frame = PipeFrame::enter();
 
     let mut prev_read: Option<Arc<dyn Sink>> = None;
     let mut sinks: Vec<Weak<dyn Sink>> = vec![];
@@ -195,6 +214,10 @@ impl super::Dispatcher {
           // external -> external
           Sinks::os_pipes()?
         };
+        Shed::pipe_frames_mut(|f| {
+          f.record(&read);
+          f.record(&write);
+        });
         sinks.push(Arc::downgrade(&read));
         sinks.push(Arc::downgrade(&write));
         guard.apply_sink(1, write)?;

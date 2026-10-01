@@ -4,9 +4,9 @@ use nix::sys::signal::Signal;
 
 use crate::{
   eval::parse::ast::Ast,
-  procio::Sinks,
+  procio::{PipeFrames, Sinks},
   signal,
-  state::{logic::LogTab, scopes, shopt::ShOpts, vars::VarTab},
+  state::{logic::LogTab, scopes, shopt::ShOpts, timers::Timers, vars::VarTab},
   util::error::LabelBuilder,
 };
 
@@ -18,6 +18,7 @@ pub(crate) struct ForkSpec {
   status: i32,
   context: Vec<LabelBuilder>,
   logic: LogTab,
+  pipe_frames: PipeFrames,
 }
 
 #[derive(Debug)]
@@ -52,6 +53,7 @@ impl super::Shed {
       status: shed.status_code.load(Ordering::Relaxed),
       context: shed.call_context.borrow().clone(),
       logic: shed.logic.borrow().clone(),
+      pipe_frames: shed.pipe_frames.borrow().clone(),
     })
   }
   pub(crate) fn completion_spec() -> ForkSpec {
@@ -68,6 +70,7 @@ impl super::Shed {
       status,
       context,
       logic,
+      pipe_frames,
     } = spec;
     super::SHED.with(|shed| {
       *shed.var_scopes.borrow_mut() = scopes::ScopeStack::from_frame(frame);
@@ -75,6 +78,7 @@ impl super::Shed {
       *shed.shopts.borrow_mut() = shopts;
       *shed.call_context.borrow_mut() = context;
       *shed.logic.borrow_mut() = logic;
+      *shed.pipe_frames.borrow_mut() = pipe_frames;
       shed.status_code.store(status, Ordering::Relaxed);
     });
 

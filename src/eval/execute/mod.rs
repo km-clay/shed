@@ -40,7 +40,6 @@ use bstr::ByteSlice;
 use std::{
   cell::{Cell, RefCell},
   ffi::CString,
-  os::fd::RawFd,
   rc::Rc,
 };
 
@@ -325,10 +324,6 @@ pub(crate) struct Dispatcher {
   pub job_stack: JobStack,
   timer_stack: Vec<Option<CmdTimer>>,
   fg_job: bool,
-  /// A pipe fd a forked builtin/compound segment must close in its child (the
-  /// downstream read end it inherited but doesn't exec away). Set per-segment in
-  /// `exec_pipeline`, consumed in `run_fork`.
-  fork_close_fd: Option<RawFd>,
 }
 
 impl Dispatcher {
@@ -338,7 +333,6 @@ impl Dispatcher {
       job_stack: JobStack::new(),
       timer_stack: vec![],
       fg_job: true,
-      fork_close_fd: None,
     }
   }
   pub(crate) fn begin_dispatch(&mut self, tree: &Ast) -> ShResult<()> {
@@ -533,10 +527,17 @@ impl Dispatcher {
           lifecycle::exit_shed(true, 1);
         }
 
-        if let Some(fd) = self.fork_close_fd {
-          let _ = nix::unistd::close(fd);
+        // pipe ends belonging to sibling stages that came across the fork
+        // need to be closed in the child
+        let inherited = Shed::pipe_frames(procio::PipeFrames::live_fds);
+        if !inherited.is_empty() {
+          let owned = Shed::sinks(|s| s.owned_fds());
+          for fd in inherited {
+            if !owned.contains(&fd) {
+              let _ = nix::unistd::close(fd);
+            }
+          }
         }
-        Shed::sinks(|s| s.close_orphan_pipes());
         let _guard = Shed::term_mut(|t| t.interactive_guard(false));
         f(self);
 

@@ -26,7 +26,7 @@ use std::{
   os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
   path::Path,
   sync::{
-    Arc, Condvar, Mutex, OnceLock,
+    Arc, Condvar, Mutex, OnceLock, Weak,
     atomic::{AtomicBool, Ordering},
   },
 };
@@ -34,7 +34,7 @@ use std::{
 use bstr::ByteSlice;
 use nix::{
   errno::Errno,
-  fcntl::{self, FcntlArg, FdFlag, OFlag, fcntl},
+  fcntl::{self, FcntlArg, OFlag, fcntl},
   libc::{self, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
   poll::{PollFd, PollFlags, PollTimeout},
   sys::{
@@ -803,6 +803,45 @@ impl From<RedirSpec> for RedirSet {
 /// This trait is used by the [`Sinks`] struct, which is `shed`'s virtual FD table. Having a virtual
 /// fd table allows us to also do I/O redirection internally, and keep pipelines in-process if forking
 /// is unnecessary (e.g. a pipeline with only builtins)
+/// Pipe ends created by each enclosing pipeline, innermost frame last.
+///
+/// A forked stage inherits every descriptor in the process, including the pipe
+/// ends of sibling and enclosing stages, and must close the ones it does not
+/// own or their pipes never reach EOF. Ends are held weakly so that one dropped
+/// mid-pipeline cannot name a descriptor the kernel has since reused.
+#[derive(Default, Clone, Debug)]
+pub(crate) struct PipeFrames {
+  frames: Vec<Vec<Weak<dyn Sink>>>,
+}
+
+impl PipeFrames {
+  pub(crate) fn push_frame(&mut self) {
+    self.frames.push(Vec::new());
+  }
+
+  pub(crate) fn pop_frame(&mut self) {
+    self.frames.pop();
+  }
+
+  pub(crate) fn record(&mut self, sink: &Arc<dyn Sink>) {
+    if let Some(frame) = self.frames.last_mut() {
+      frame.push(Arc::downgrade(sink));
+    }
+  }
+
+  /// Live OS descriptors across every frame. Ends that have been dropped, and
+  /// `thread_pipes` ends that never had a descriptor, drop out here.
+  pub(crate) fn live_fds(&self) -> Vec<RawFd> {
+    self
+      .frames
+      .iter()
+      .flatten()
+      .filter_map(Weak::upgrade)
+      .filter_map(|s| s.as_os_fd().ok().map(|fd| fd.as_raw_fd()))
+      .collect()
+  }
+}
+
 pub(crate) trait Sink: Send + Sync {
   fn read(&self, buf: &mut [u8]) -> io::Result<usize>;
   fn write(&self, buf: &[u8]) -> io::Result<usize>;
@@ -1733,50 +1772,16 @@ impl Sinks {
     Ok(())
   }
 
-  /// Close inherited pipe leftovers by hand
-  pub(crate) fn close_orphan_pipes(&self) {
-    // Per-process fd directory: procfs on Linux, fdescfs on the BSDs/macOS.
-    #[cfg(linux_like)]
-    const FD_DIR: &str = "/proc/self/fd";
-    #[cfg(not(linux_like))]
-    const FD_DIR: &str = "/dev/fd";
-
-    let mut keep: HashSet<RawFd> = self
+  /// Raw fds this table owns, for deciding which inherited pipe ends a forked
+  /// child may close by hand.
+  pub(crate) fn owned_fds(&self) -> HashSet<RawFd> {
+    self
       .table
       .values()
       .filter_map(|s| s.as_os_fd().ok().map(|fd| fd.as_raw_fd()))
-      .collect();
-    // keep the wake fd alive
-    keep.insert(signal::wake_fd().as_raw_fd());
-
-    let Ok(entries) = std::fs::read_dir(FD_DIR) else {
-      return;
-    };
-    let orphans: Vec<RawFd> = entries
-      .filter_map(Result::ok)
-      .filter_map(|e| e.file_name().to_str()?.parse::<RawFd>().ok())
-      .filter(|fd| *fd >= MIN_INTERNAL_FD && !keep.contains(fd))
-      .collect();
-
-    for fd in orphans {
-      let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-
-      let cloexec = fcntl(borrowed, FcntlArg::F_GETFD)
-        .is_ok_and(|f| FdFlag::from_bits_truncate(f).contains(FdFlag::FD_CLOEXEC));
-      if !cloexec {
-        continue;
-      }
-
-      let mut st: libc::stat = unsafe { std::mem::zeroed() };
-      if unsafe { libc::fstat(fd, &raw mut st) } != 0 {
-        continue;
-      }
-
-      if st.st_mode & libc::S_IFMT == libc::S_IFIFO {
-        let _ = unistd::close(fd);
-      }
-    }
+      .collect()
   }
+
   pub(crate) fn get(&mut self, fd: RawFd) -> Option<Arc<dyn Sink>> {
     if let Some(s) = self.table.get(&fd) {
       return Some(s.clone());

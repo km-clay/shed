@@ -362,6 +362,7 @@ pub(super) struct Shed {
   meta: RefCell<meta::MetaTab>,
   /// Table for functions, aliases, etc
   logic: RefCell<logic::LogTab>,
+  pipe_frames: RefCell<crate::procio::PipeFrames>,
   /// The terminal state
   terminal: RefCell<terminal::Terminal>,
   /// The shell configuration options
@@ -405,6 +406,7 @@ impl Shed {
       var_scopes: RefCell::new(scopes::ScopeStack::new()),
       meta: RefCell::new(meta::MetaTab::new()),
       logic: RefCell::new(logic::LogTab::new()),
+      pipe_frames: RefCell::new(crate::procio::PipeFrames::default()),
       terminal: RefCell::new(terminal::Terminal::new()),
       shopts: RefCell::new(shopt::ShOpts::default()),
       status_code: AtomicI32::new(0),
@@ -531,6 +533,20 @@ impl Shed {
     F: FnOnce(&logic::LogTab) -> T,
   {
     access!(SHED, logic, f)
+  }
+  #[track_caller]
+  pub(crate) fn pipe_frames<T, F>(f: F) -> T
+  where
+    F: FnOnce(&crate::procio::PipeFrames) -> T,
+  {
+    access!(SHED, pipe_frames, f)
+  }
+
+  pub(crate) fn pipe_frames_mut<T, F>(f: F) -> T
+  where
+    F: FnOnce(&mut crate::procio::PipeFrames) -> T,
+  {
+    access_mut!(SHED, pipe_frames, f)
   }
   /// Mutate the logic table
   #[track_caller]
@@ -1013,6 +1029,7 @@ impl Shed {
       var_scopes: RefCell::new(self.var_scopes.borrow().clone()),
       meta: RefCell::new(self.meta.borrow().clone()),
       logic: RefCell::new(self.logic.borrow().clone()),
+      pipe_frames: RefCell::new(self.pipe_frames.borrow().clone()),
       shopts: RefCell::new(self.shopts.borrow().clone()),
       terminal: RefCell::new(self.terminal.borrow().clone()),
       status_msg_queue: RefCell::new(self.status_msg_queue.borrow().clone()),
