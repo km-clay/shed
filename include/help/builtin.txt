@@ -424,6 +424,7 @@ CHRONO                                           *builtin-chrono* *chrono*
 
     `timer`   measure elapsed time with named stopwatches
     `sleep`   pause for a duration, or until an instant
+    `fmt`     render an instant or a duration through a format string
 
 ==============================================================================
 CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
@@ -466,32 +467,47 @@ CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
     elapsed time however you like, in place of the default rendering.
     `chrono timer` accepts the same option when listing.
 
-    Lowercase specifiers are components, each one the remainder within
-    the next larger unit. Uppercase specifiers are totals, the whole
-    duration expressed in that unit.
+    Uppercase specifiers are components, each one the remainder within
+    the next larger unit, matching the strftime code of the same name.
+    Lowercase specifiers are totals, the whole duration expressed in
+    that unit.
 
-      `%d`    whole days
-      `%h`    hours within the day        `%H`    total hours
-      `%m`    minutes within the hour     `%M`    total minutes
-      `%s`    seconds within the minute   `%S`    total seconds
-      `%l`    milliseconds                `%L`    total milliseconds
-      `%u`    microseconds                `%U`    total microseconds
-      `%n`    nanoseconds                 `%N`    total nanoseconds
+      `%D`    whole days
+      `%H`    hours within the day        `%h`    total hours
+      `%M`    minutes within the hour     `%m`    total minutes
+      `%S`    seconds within the minute   `%s`    total seconds
+      `%L`    milliseconds                `%l`    total milliseconds
+      `%U`    microseconds                `%u`    total microseconds
+      `%N`    nanoseconds                 `%n`    total nanoseconds
       `%R`    `running` or `stopped`
       `%%`    a literal `%`
 
-    `%l`, `%u` and `%n` are all fractions of the *second*, at differing
-    precision -- they are alternatives, not digit groups, so `%s.%l`
-    is a sensible format and `%l%u%n` is not.
+    Days are the largest unit, so `%D` and `%d` are the same number.
+
+    A negative duration -- see |chrono-fmt-dur| -- prints its sign on the
+    totals only. A timer's elapsed time is never negative.
+
+    `%L`, `%U` and `%N` are all fractions of the *second*, at differing
+    precision -- they are alternatives, not digit groups, so `%S.%L`
+    is a sensible format and `%L%U%N` is not.
+
+    Components zero-pad to their full width by default -- `%H`, `%M`
+    and `%S` to two columns, `%L` to three, `%U` to six, `%N` to nine.
+    A component is a remainder, so a narrow one reads as the wrong
+    quantity: `%S.%L` of 1.005 seconds is `01.005`, not `1.5`. Totals
+    are never padded -- they have no upper bound, and a leading zero
+    would make them octal in shell arithmetic.
 
     Each specifier accepts the usual `%[flags][width][.precision]`
-    field parameters, so `%02m:%02s` zero-pads to two columns.
+    field parameters, and an explicit width replaces the default, so
+    `%1H` drops the padding and `%5H` widens it.
 
     An unrecognized specifier is an error.
 
-    Note these are *not* strftime codes; `%H` is total hours elapsed,
-    not the hour of the day. See |builtin-printf| for formatting an
-    instant rather than a duration.
+    `%H:%M:%S` reads the same way it does in strftime, but measures
+    elapsed time rather than a clock instant -- `%H` is hours into the
+    duration, not the hour of the day. See |builtin-printf| for
+    formatting an instant rather than a duration.
 
   Examples:
 
@@ -501,9 +517,9 @@ CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
       ```chrono timer resume```             continue where it left off
 
       ```chrono timer start 'build'```        a second, independent timer
-      ```chrono timer status 'build' -F '%02m:%02s'```
+      ```chrono timer status 'build' -F '%M:%S'```
                                         `01:04`
-      ```chrono timer status 'build' -F '%S'```
+      ```chrono timer status 'build' -F '%s'```
                                         total seconds, for arithmetic
 
       ```chrono timer```                    list every timer
@@ -572,6 +588,152 @@ CHRONO SLEEP                               *chrono-sleep* *builtin-chrono-sleep*
     overhead and scheduler latency rather than by the requested value.
     Asking for a shorter wait than that is not an error; it simply
     returns as soon as the system allows.
+
+==============================================================================
+CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
+
+  `chrono fmt [-f {format}] {instant}...`
+  `chrono fmt -d [-f {format}] {duration}...`
+
+  Perform conversions for a moment in time, or a length of time. Every
+  operand is joined with single spaces and read as one expression, so
+  quoting is optional.
+
+      ```chrono fmt tomorrow```
+      ```chrono fmt -f '%H:%M' 2 hours ago```
+
+  `-f {format}` / `--format {format}` selects the rendering. Which format
+  language it speaks depends on `-d`: without it, {format} is a `strftime`
+  format; with it, the |duration syntax|(chrono-timer-format) that
+  ```chrono timer``` uses.
+
+  With no `-f`, an instant prints the way ```date``` writes one, and a
+  duration prints in words:
+
+      ```chrono fmt now```          `Thu Oct  1 01:09:47 AM -04:00 2026`
+      ```chrono fmt -d 1h30m```     `1h 30m`
+      ```chrono fmt -d yesterday``` `-1 day 1h 9m 47s`
+
+  Durations ~
+
+    With `-d`, the operand is a duration, e.g. `5 hours`.
+
+    Written as `{instant} to {instant}`, it is the span between the two,
+    which is how you ask how long something lasted:
+
+        ```chrono fmt -d 9:00am to 5:00pm```        `8h`
+        ```chrono fmt -d october 5 2024 to october 10 2024```
+                                                `5 days`
+        ```chrono fmt -d 2 hours ago to now```      `2h`
+
+    The span is signed, so a backwards one reports as such rather than
+    silently flipping: ```chrono fmt -d 5:00pm to 9:00am``` is `-8h`.
+    Only a standalone `to` splits -- `today`, `tomorrow` and `october`
+    contain the word and are left alone.
+
+        ```chrono fmt -d -f '%n' "5 hours"```    5 hours in nanoseconds
+        ```chrono fmt -d -f '%H:%M:%S' "1h30m"```  `01:30:00`
+
+  Instants ~                                          *chrono-fmt-instant*
+
+    The accepted forms are the ones |hist|(builtin-hist) takes for
+    `--after` and `--before`: `HH:MM`, `HH:MM:SS`, `HH:MMam`/`pm`, full
+    dates and date-times, RFC 2822 and RFC 3339 timestamps, and relative
+    expressions built from a count, a unit, and a direction.
+
+        ```chrono fmt -f '%H:%M' now```
+        ```chrono fmt -f '%Y-%m-%d' tomorrow```
+        ```chrono fmt -f '%H:%M' 2 hours ago```
+        ```chrono fmt -f '%H:%M' '2026-12-25 09:00:00'```
+        ```chrono fmt -f '%Y-%m-%d' 3 days from now```
+        ```chrono fmt -f \
+             "%A, %b %d %Y %H:%M:%S" \
+             '5 days from 7 days from 2 months until 2 hours after october 5 2024'```
+
+    A bare time of day assumes that you mean *today*, whether or not that
+    time already passed. This differs from |chrono-sleep-until|, which rolls
+    forward to the next occurrence instead.
+
+    As with ```chrono sleep until```, a relative expression with no direction word
+    means *ago*, so ```chrono fmt -f '%H:%M' 5 minutes``` is five minutes
+    in the past. Write `5 minutes from now` for the other direction.
+
+    An unrecognized `strftime` specifier is passed through unchanged, the
+    way |printf|(builtin-printf) treats one, so |%Q| renders as `%Q`.
+
+  Durations ~                                             *chrono-fmt-dur*
+
+    `-d` reads the operand as a length of time rather than a point in
+    one, using the notation |chrono-sleep| accepts:
+
+      `us` `ms` `s` `m` `h` `d` `w` `mo` `y`
+
+    Several terms are summed, and every number needs a unit -- a bare
+    number is an error here, unlike `chrono sleep`.
+
+    `mo` is 30 days and `y` is 365 days, both here and in the words that
+    `-d` prints without `-f`, so ```chrono fmt -d 1y``` reads back as
+    `1 year` rather than drifting.
+
+    `A to B` is accepted anywhere a duration is, so |read|(builtin-read)
+    `--timeout`, |hist|(builtin-hist) `--longer-than` and `chrono sleep`
+    take one too. A negative span is an error where a length must be
+    positive, such as a timeout.
+
+        ```chrono fmt -d -f '%H:%M:%S' 1h30m```    `01:30:00`
+        ```chrono fmt -d -f '%s' 1h30m```          `5400`
+        ```chrono fmt -d -f '%S.%L' 1.005s```      `01.005`
+
+    An operand that is not a duration is read as an instant, and the
+    stretch of time between now and it is formatted instead. This is how
+    you ask how long is left until something, or how long since it was:
+
+        ```chrono fmt -d -f '%H:%M' 17:00```       until 5pm today
+        ```chrono fmt -d tomorrow```               until midnight
+        ```chrono fmt -d -f '%D' yesterday```      `-1`
+
+    The two readings never disagree: wherever an operand parses as both,
+    it names the same length, because a bare offset means *ago* and the
+    span back to it is that same offset.
+
+    A span into the past is negative. The sign prints on the totals,
+    which are what a script does arithmetic on; components are
+    magnitudes within a larger unit and print unsigned.
+
+    The specifiers, their padding, and the component/total split are
+    documented at |chrono-timer-format|. `%R` has no meaning here, since
+    a bare duration has no timer behind it.
+
+  Timezones ~                                         *chrono-fmt-timezone*
+
+    `-z {zone}`   render in {zone}, an IANA name such as `Asia/Tokyo`
+    `-u`          render in UTC
+
+    With neither, the zone comes from `$TZ` if it holds an IANA name,
+    and otherwise from the system's local offset. A `$TZ` that cannot be
+    read as a zone name -- a POSIX rule string such as `PST8PDT,M3.2.0`,
+    or a path -- is ignored rather than treated as an error.
+
+    In full, the first of these that applies wins:
+
+      `-z`, then `-u`, then `$TZ`, then the local offset.
+
+    An unknown `-z` zone is an error, because it was asked for directly.
+
+        ```chrono fmt -z Asia/Tokyo '%H:%M %Z' now```      `13:08 JST`
+        ```chrono fmt -u '%H:%M %Z' now```                 `04:08 UTC`
+
+    `%Z` names the zone only when one was resolved by name; the plain
+    local case has only an offset to show, and prints that instead.
+
+    Using either with `-d` is an error rather than a no-op: a duration is
+    a length, not a position on a clock, so a zone cannot apply to one.
+
+  Exit status ~
+
+    `0`   the time was formatted
+    `2`   a missing operand, an operand that is neither a duration nor an
+          instant, or an unknown `-z` zone
 
 ==============================================================================
 COMMAND                                          *builtin-command* *command*

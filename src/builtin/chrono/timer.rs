@@ -4,11 +4,11 @@
 
 use super::{
   super::opt::{OptSpec, Parsed},
-  Builtin, BuiltinArgs, BuiltinRouter,
+  Builtin, BuiltinArgs, BuiltinRouter, DurFmt,
 };
 use crate::{
   eval::lex::{Span, Tk},
-  opt, procio, sherr,
+  opt, procio,
   state::{
     Shed,
     timers::{StopWatch, TimerStatus, WatchName},
@@ -17,128 +17,10 @@ use crate::{
   util::{
     self,
     error::{ShResult, ShResultExt},
-    strops::{self, ByteCursor, Field, FieldParams, SliceCursor, StrFmt, VarStrDisplay},
+    strops,
   },
   varstr,
 };
-
-struct DurFmt;
-
-enum DurConv {
-  Status,
-
-  Days,
-  Hours,
-  TotalHours,
-  Mins,
-  TotalMins,
-  Secs,
-  TotalSecs,
-  Millis,
-  TotalMillis,
-  Micros,
-  TotalMicros,
-  Nanos,
-  TotalNanos,
-}
-
-impl StrFmt for DurFmt {
-  type Source = TimerStatus;
-  type Conv = DurConv;
-  fn parse_conv(&self, cur: &mut SliceCursor) -> ShResult<Self::Conv> {
-    let Some(b) = cur.next_byte() else {
-      return Err(sherr!(ParseErr, "incomplete format specifier"));
-    };
-    Ok(match b {
-      b'd' => DurConv::Days,
-      b'h' => DurConv::Hours,
-      b'H' => DurConv::TotalHours,
-      b'm' => DurConv::Mins,
-      b'M' => DurConv::TotalMins,
-      b's' => DurConv::Secs,
-      b'S' => DurConv::TotalSecs,
-      b'l' => DurConv::Millis,
-      b'L' => DurConv::TotalMillis,
-      b'u' => DurConv::Micros,
-      b'U' => DurConv::TotalMicros,
-      b'n' => DurConv::Nanos,
-      b'N' => DurConv::TotalNanos,
-      b'R' => DurConv::Status,
-      other => {
-        return Err(sherr!(
-          ParseErr,
-          "invalid format specifier: %{}",
-          other as char
-        ));
-      }
-    })
-  }
-
-  #[rustfmt::skip]
-  fn render(
-    &self,
-    conv: &Self::Conv,
-    _field: &FieldParams,
-    src: &mut Self::Source,
-  ) -> ShResult<Field> {
-    const NANOS_PER_MICRO: u128 = 1_000;
-    const NANOS_PER_MILLI: u128 = 1_000 * NANOS_PER_MICRO;
-    const NANOS_PER_SEC  : u128 = 1_000 * NANOS_PER_MILLI;
-    const NANOS_PER_MIN  : u128 = 60    * NANOS_PER_SEC;
-    const NANOS_PER_HOUR : u128 = 60    * NANOS_PER_MIN;
-    const NANOS_PER_DAY  : u128 = 24    * NANOS_PER_HOUR;
-
-    let elapsed = src.elapsed();
-    let nanos = elapsed.as_nanos();
-
-    let n = match conv {
-      DurConv::TotalHours  => nanos / NANOS_PER_HOUR,
-      DurConv::TotalMins   => nanos / NANOS_PER_MIN,
-      DurConv::TotalSecs   => nanos / NANOS_PER_SEC,
-      DurConv::TotalMillis => nanos / NANOS_PER_MILLI,
-      DurConv::TotalMicros => nanos / NANOS_PER_MICRO,
-      DurConv::TotalNanos  => nanos,
-
-      DurConv::Days   =>  nanos / NANOS_PER_DAY,
-      DurConv::Hours  => (nanos % NANOS_PER_DAY  ) / NANOS_PER_HOUR,
-      DurConv::Mins   => (nanos % NANOS_PER_HOUR ) / NANOS_PER_MIN,
-      DurConv::Secs   => (nanos % NANOS_PER_MIN  ) / NANOS_PER_SEC,
-
-      DurConv::Millis => u128::from(elapsed.subsec_millis()),
-      DurConv::Micros => u128::from(elapsed.subsec_micros()),
-      DurConv::Nanos  => u128::from(elapsed.subsec_nanos ()),
-
-      DurConv::Status => {
-        let status = if src.is_running() {
-          "running"
-        } else {
-          "stopped"
-        };
-
-        return Ok(Field::string(status.into()));
-      }
-    };
-
-    Ok(Field::numeric(varstr!("{n}").into_bytes(), None, None))
-  }
-}
-
-fn fmt_timer_status(status: &TimerStatus) -> VarStr {
-  let mut fmt = strops::format_time(status.elapsed()).to_var_str();
-  if fmt.is_empty() {
-    fmt.push_slice(b"0s");
-  }
-
-  fmt.push(b' ');
-
-  if status.is_running() {
-    fmt.push_slice(b"(running)");
-  } else {
-    fmt.push_slice(b"(stopped)");
-  }
-
-  fmt
-}
 
 pub(super) struct Timer;
 impl BuiltinRouter for Timer {
@@ -187,15 +69,18 @@ impl Builtin for List {
     });
 
     let fmt = args.opt_value("format");
-    for (name, mut status) in snapshot {
+    for (name, status) in snapshot {
       let rendered = if let Some(fmt) = &fmt {
         let mut buf = vec![];
-        strops::Formatter::parse(&DurFmt, fmt)
-          .and_then(|f| f.render(&mut status, &mut buf))
+        let dur_fmt = DurFmt {
+          running: Some(status.is_running()),
+        };
+        strops::Formatter::parse(&dur_fmt, fmt)
+          .and_then(|f| f.render(&mut strops::dur_delta(status.elapsed()), &mut buf))
           .promote_err(args.cmd_span())?;
         VarStr::from(buf)
       } else {
-        fmt_timer_status(&status)
+        super::fmt_timer_status(&status)
       };
       procio::outln_bytes(&varstr!("{name}: {rendered}"));
     }
@@ -279,7 +164,7 @@ impl Builtin for Status {
       .transpose()?;
     let fmt = args.opt_value("format");
 
-    let mut status = if let Some(name) = name {
+    let status = if let Some(name) = name {
       if !Shed::timers(|t| t.has_timer(&name)) {
         return util::with_status(1);
       }
@@ -290,13 +175,16 @@ impl Builtin for Status {
 
     let out = if let Some(fmt) = fmt {
       let mut buf = vec![];
-      strops::Formatter::parse(&DurFmt, &fmt)
-        .and_then(|f| f.render(&mut status, &mut buf))
+      let dur_fmt = DurFmt {
+        running: Some(status.is_running()),
+      };
+      strops::Formatter::parse(&dur_fmt, &fmt)
+        .and_then(|f| f.render(&mut strops::dur_delta(status.elapsed()), &mut buf))
         .promote_err(args.cmd_span())?;
 
       VarStr::from(buf)
     } else {
-      fmt_timer_status(&status)
+      super::fmt_timer_status(&status)
     };
 
     procio::outln_bytes(&out);
@@ -410,6 +298,31 @@ mod tests {
     let guard = TestGuard::new();
     test_input(input).ok();
     (guard.read_output(), Shed::get_status())
+  }
+
+  #[test]
+  fn fmt_zero_span_prints_a_duration_not_nothing() {
+    // `format_time` elides zero; `chrono fmt` must still print something.
+    let (out, status) = run("chrono fmt -d 0s");
+    assert_eq!(status, 0);
+    assert_eq!(out.trim(), "0s", "got {out:?}");
+
+    // a round trip telescopes to zero
+    let (out, _) = run("chrono fmt -d '9:00am to 5:00pm to 9:00am'");
+    assert_eq!(out.trim(), "0s", "got {out:?}");
+  }
+
+  #[test]
+  fn fmt_chained_spans_telescope() {
+    let (out, _) = run("chrono fmt -d '9:00am to 1:00pm to 5:00pm'");
+    assert_eq!(out.trim(), "8h", "got {out:?}");
+
+    let (out, _) = run("chrono fmt -d -f '%h' '9:00am to 11:00am to 2:00pm to 6:00pm'");
+    assert_eq!(out.trim(), "9", "got {out:?}");
+
+    // direction survives
+    let (out, _) = run("chrono fmt -d '5:00pm to 9:00am'");
+    assert_eq!(out.trim(), "-8h", "got {out:?}");
   }
 
   #[test]

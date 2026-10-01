@@ -259,7 +259,7 @@ fn runtime(formatted: bool, out: &mut String) {
     return;
   };
   if formatted {
-    let runtime_fmt = strops::format_time(runtime);
+    let runtime_fmt = strops::format_time(strops::dur_delta(runtime)).unwrap_or_default();
     out.push_str(&runtime_fmt);
   } else {
     let runtime_millis = runtime.as_millis().to_string();
@@ -437,31 +437,46 @@ mod tests {
   #[test]
   fn runtime_millis() {
     let dur = Duration::from_millis(500);
-    assert_eq!(strops::format_time(dur), "500ms");
+    assert_eq!(
+      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap()).unwrap_or_default(),
+      "500ms"
+    );
   }
 
   #[test]
   fn runtime_seconds() {
     let dur = Duration::from_secs(5);
-    assert_eq!(strops::format_time(dur), "5s");
+    assert_eq!(
+      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap()).unwrap_or_default(),
+      "5s"
+    );
   }
 
   #[test]
   fn runtime_minutes_and_seconds() {
     let dur = Duration::from_secs(125);
-    assert_eq!(strops::format_time(dur), "2m 5s");
+    assert_eq!(
+      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap()).unwrap_or_default(),
+      "2m 5s"
+    );
   }
 
   #[test]
   fn runtime_hours() {
     let dur = Duration::from_secs(3661);
-    assert_eq!(strops::format_time(dur), "1h 1m 1s");
+    assert_eq!(
+      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap()).unwrap_or_default(),
+      "1h 1m 1s"
+    );
   }
 
   #[test]
   fn runtime_micros() {
     let dur = Duration::from_micros(500);
-    assert_eq!(strops::format_time(dur), "500µs");
+    assert_eq!(
+      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap()).unwrap_or_default(),
+      "500µs"
+    );
   }
 
   // ===================== tokenize_prompt extra escapes =====================

@@ -99,6 +99,9 @@ impl super::Builtin for Read {
             let micros = strops::TimeReader::parse_dur(&t.to_str_lossy())
               .promote_err(span)
               .with_code(2)?;
+            if micros < 0 {
+              return Err(sherr!(ExecFail @ span, "timeout cannot be negative").with_code(2));
+            }
             Duration::from_micros(micros.cast_unsigned())
               .as_millis()
               .clamp(1, i32::MAX as u128) as i32

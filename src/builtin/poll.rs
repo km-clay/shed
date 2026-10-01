@@ -62,6 +62,9 @@ impl super::Builtin for Poll {
           let micros = strops::TimeReader::parse_dur(&t.to_str_lossy())
             .promote_err(span)
             .with_code(2)?;
+          if micros < 0 {
+            return Err(sherr!(ExecFail @ span, "timeout cannot be negative").with_code(2));
+          }
           let millis = Duration::from_micros(micros.cast_unsigned()).as_millis();
           // now we gotta do some weird casting stuff
           // to clamp overflows

@@ -1,8 +1,11 @@
 //! Human-readable parsing and formatting of durations, sizes, and file modes,
 //! plus the natural-language [`TimeReader`].
 
+use std::time::Duration;
+
 use chrono::{
-  DateTime, Datelike, Days, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc,
+  DateTime, Datelike, Days, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, TimeZone, Utc,
+  Weekday,
 };
 
 use crate::{
@@ -87,6 +90,10 @@ pub(crate) fn parse_paren_strftime(cur: &mut SliceCursor) -> ShResult<VarStr> {
   }
 }
 
+pub(crate) fn dur_delta(duration: Duration) -> TimeDelta {
+  TimeDelta::from_std(duration).unwrap_or(TimeDelta::MAX)
+}
+
 /// Format `dt` with a user-supplied strftime string.
 ///
 /// Tolerates specifiers chrono does not implement, and reports a genuine
@@ -103,17 +110,17 @@ where
   Ok(out)
 }
 
-pub(crate) fn format_time(dur: std::time::Duration) -> String {
+pub(crate) fn format_time(delta: TimeDelta) -> Option<String> {
   const ETERNITY: u128 = f32::INFINITY as u128;
-  let mut micros = dur.as_micros();
+  let signed =
+    i128::from(delta.num_seconds()) * 1_000_000 + i128::from(delta.subsec_nanos()) / 1_000;
+  let negative = signed < 0;
+  let mut micros = signed.unsigned_abs();
   let mut millis = 0;
   let mut seconds = 0;
   let mut minutes = 0;
   let mut hours = 0;
   let mut days = 0;
-  let mut weeks = 0;
-  let mut months = 0;
-  let mut years = 0;
   let mut decades = 0;
   let mut centuries = 0;
   let mut millennia = 0;
@@ -141,18 +148,15 @@ pub(crate) fn format_time(dur: std::time::Duration) -> String {
     days = hours / 24;
     hours %= 24;
   }
-  if days >= 7 {
-    weeks = days / 7;
-    days %= 7;
-  }
-  if weeks >= 4 {
-    months = weeks / 4;
-    weeks %= 4;
-  }
-  if months >= 12 {
-    years = months / 12;
-    months %= 12;
-  }
+  // Divided out of the day count rather than chained, because 30 is not a
+  // multiple of 7 and 365 is not a multiple of 30. These are the lengths
+  // `TimeReader::parse_dur` gives `mo` and `y`, so the two round-trip.
+  let mut years = days / 365;
+  days %= 365;
+  let months = days / 30;
+  days %= 30;
+  let weeks = days / 7;
+  days %= 7;
   if years >= 10 {
     decades = years / 10;
     years %= 10;
@@ -277,7 +281,14 @@ pub(crate) fn format_time(dur: std::time::Duration) -> String {
     result.push(string);
   }
 
-  result.join(" ")
+  let joined = result.join(" ");
+  if joined.is_empty() {
+    None
+  } else if negative {
+    Some(format!("-{joined}"))
+  } else {
+    Some(joined)
+  }
 }
 
 /// Parse human-readable size strings into raw byte number
@@ -395,6 +406,7 @@ pub(crate) struct TimeReader<'a> {
   anchor: Option<DateTime<Utc>>,
   dir: Option<Direction>,
   offset: Option<i64>,
+  pending: i64, // pending offset read
   upcoming: bool,
 }
 
@@ -407,6 +419,7 @@ impl<'a> TimeReader<'a> {
       anchor: None,
       dir: None,
       offset: None,
+      pending: 0,
       upcoming: false,
     }
   }
@@ -485,15 +498,16 @@ impl<'a> TimeReader<'a> {
       }
     }
 
+    if self.pending != 0 {
+      let dir = self.dir.unwrap_or(Direction::Backward);
+      self.commit(dir);
+    }
+
     let anchor = self.anchor.unwrap_or_else(Utc::now);
     let Some(micros) = self.offset else {
       return Ok(anchor);
     };
-    let delta = Duration::microseconds(micros);
-    Ok(match self.dir.unwrap_or(Direction::Backward) {
-      Direction::Backward => anchor - delta,
-      Direction::Forward => anchor + delta,
-    })
+    Ok(anchor + chrono::Duration::microseconds(micros))
   }
 
   fn read_offset(&mut self, n: f64) -> ShResult<()> {
@@ -505,8 +519,18 @@ impl<'a> TimeReader<'a> {
     };
     let scaled = Self::scale_f64(n, per)?;
 
-    self.offset = Some(self.offset.unwrap_or(0).saturating_add(scaled));
+    self.pending = self.pending.saturating_add(scaled);
     Ok(())
+  }
+
+  /// Fold the unsigned offset read so far into the running total.
+  fn commit(&mut self, dir: Direction) {
+    let signed = match dir {
+      Direction::Forward => self.pending,
+      Direction::Backward => self.pending.saturating_neg(),
+    };
+    self.offset = Some(self.offset.unwrap_or(0).saturating_add(signed));
+    self.pending = 0;
   }
 
   fn read_word(&mut self, word: &VarStr) -> ShResult<()> {
@@ -514,8 +538,9 @@ impl<'a> TimeReader<'a> {
       return self.read_named_date(word, month);
     }
     if let Some(dir) = Self::direction(word) {
+      self.commit(dir);
       self.dir = Some(dir);
-    } else if let Some(anchor) = Self::keyword_anchor(word)? {
+    } else if let Some(anchor) = Self::keyword_anchor(word, self.upcoming)? {
       self.anchor = Some(anchor);
     } else {
       return Err(sherr!(ParseErr, "unknown time expression '{word}'"));
@@ -541,10 +566,22 @@ impl<'a> TimeReader<'a> {
     Ok(())
   }
 
-  fn keyword_anchor(word: &VarStr) -> ShResult<Option<DateTime<Utc>>> {
+  #[rustfmt::skip]
+  fn keyword_anchor(word: &VarStr, upcoming: bool) -> ShResult<Option<DateTime<Utc>>> {
     let today = Local::now().date_naive();
-    let midnight =
-      |d: NaiveDate| -> ShResult<DateTime<Utc>> { local_to_utc(d.and_hms_opt(0, 0, 0).unwrap()) };
+    let midnight = |d: NaiveDate| -> ShResult<DateTime<Utc>> {
+      local_to_utc(d.and_hms_opt(0, 0, 0).unwrap())
+    };
+    if let Some(wd) = word.parse::<Weekday>() {
+      let delta = i64::from(wd.num_days_from_monday())
+                - i64::from(today.weekday().num_days_from_monday());
+      let mut when = midnight(today + TimeDelta::days(delta))?;
+      if upcoming && when <= Utc::now() {
+        when = midnight(today + TimeDelta::days(delta + 7))?;
+      }
+      return Ok(Some(when));
+    }
+
     Ok(match word.as_bytes() {
       b"now" => Some(Utc::now()),
       b"today" => Some(midnight(today)?),
@@ -647,10 +684,36 @@ impl<'a> TimeReader<'a> {
     }
     Ok(scaled.round() as i64)
   }
+  /// `A to B` where both sides name an instant. Matched as a whole word --
+  /// `october`, `today` and `tomorrow` all contain `to`.
+  fn split_span(s: &str) -> Option<(String, String)> {
+    let words: Vec<&str> = s.split_whitespace().collect();
+    let i = words.iter().position(|w| *w == "to")?;
+    if i == 0 || i + 1 == words.len() {
+      return None;
+    }
+    Some((words[..i].join(" "), words[i + 1..].join(" ")))
+  }
+
   /// Parse a duration like "1m 30s" or something
   ///
   /// Returns the duration as microseconds if it succeeds
   pub(crate) fn parse_dur(s: &str) -> ShResult<i64> {
+    if let Some((lhs, mut rhs)) = Self::split_span(s) {
+      let mut instants = vec![TimeReader::interpret(&lhs)?];
+      while let Some((sub_lhs, sub_rhs)) = Self::split_span(&rhs) {
+        instants.push(TimeReader::interpret(&sub_lhs)?);
+        rhs = sub_rhs;
+      }
+      instants.push(TimeReader::interpret(&rhs)?);
+
+      let total: TimeDelta = instants.windows(2).map(|w| w[1] - w[0]).sum();
+
+      return total
+        .num_microseconds()
+        .ok_or_else(|| sherr!(ParseErr, "span in '{s}' is too large"));
+    }
+
     let mut tks = Self::tokenize(s)?.into_iter().peekable();
     let mut total: i64 = 0;
     let mut saw_any = false;
@@ -686,10 +749,58 @@ impl<'a> TimeReader<'a> {
 
 #[cfg(test)]
 mod format_time_tests {
-  use super::format_time;
+  use chrono::TimeDelta;
+
+  /// Tests read better in `Duration`; the function takes a signed delta.
+  fn format_time(d: std::time::Duration) -> String {
+    super::format_time(TimeDelta::from_std(d).unwrap()).unwrap_or_default()
+  }
   use std::time::Duration;
 
   // ─── single-unit base cases ──────────────────────────────────────
+
+  #[test]
+  fn negative_delta_is_signed() {
+    assert_eq!(
+      super::format_time(TimeDelta::seconds(-90)).unwrap_or_default(),
+      "-1m 30s"
+    );
+    assert_eq!(
+      super::format_time(TimeDelta::days(-1)).unwrap_or_default(),
+      "-1 day"
+    );
+  }
+
+  #[test]
+  fn zero_is_unsigned_either_way() {
+    assert_eq!(
+      super::format_time(TimeDelta::zero()).unwrap_or_default(),
+      ""
+    );
+    assert_eq!(
+      super::format_time(TimeDelta::microseconds(-0)).unwrap_or_default(),
+      ""
+    );
+  }
+
+  #[test]
+  fn units_round_trip_with_parse_dur() {
+    // `mo` and `y` must mean the same length in both directions, or
+    // `chrono fmt -d 1y` humanises back as something other than "1 year".
+    for unit in ["1 week", "1mo", "1y", "3mo", "2y"] {
+      let micros = super::TimeReader::parse_dur(unit).unwrap();
+      let back = super::format_time(TimeDelta::microseconds(micros)).unwrap_or_default();
+      let expect = match unit {
+        "1 week" => "1 week",
+        "1mo" => "1 month",
+        "1y" => "1 year",
+        "3mo" => "3 months",
+        "2y" => "2 years",
+        _ => unreachable!(),
+      };
+      assert_eq!(back, expect, "{unit} did not round-trip");
+    }
+  }
 
   #[test]
   fn zero_duration_is_empty_string() {
@@ -734,23 +845,23 @@ mod format_time_tests {
   #[test]
   fn one_month() {
     // shed defines a month as 4 weeks (28 days).
-    assert_eq!(format_time(Duration::from_hours(672)), "1 month");
+    assert_eq!(format_time(Duration::from_hours(720)), "1 month");
   }
 
   #[test]
   fn one_year() {
     // ... and a year as 12 months.
-    assert_eq!(format_time(Duration::from_hours(8064)), "1 year");
+    assert_eq!(format_time(Duration::from_hours(8760)), "1 year");
   }
 
   #[test]
   fn one_decade() {
-    assert_eq!(format_time(Duration::from_hours(80640)), "1 decade");
+    assert_eq!(format_time(Duration::from_hours(87_600)), "1 decade");
   }
 
   #[test]
   fn one_century() {
-    assert_eq!(format_time(Duration::from_hours(806_400)), "1 century");
+    assert_eq!(format_time(Duration::from_hours(876_000)), "1 century");
   }
 
   // ─── singular vs plural ──────────────────────────────────────────
@@ -767,7 +878,7 @@ mod format_time_tests {
 
   #[test]
   fn plural_centuries() {
-    assert_eq!(format_time(Duration::from_hours(1_612_800)), "2 centuries");
+    assert_eq!(format_time(Duration::from_hours(1_752_000)), "2 centuries");
   }
 
   // ─── combined output ─────────────────────────────────────────────
@@ -811,13 +922,13 @@ mod format_time_tests {
   fn thirteen_months_carries_one_month_not_thirteen() {
     // Regression: `months %= 12;` was previously `weeks %= 12;`, which
     // left `months` un-modulo'd and produced "1 year 13 months" instead.
-    let dur = Duration::from_hours(8736);
+    let dur = Duration::from_hours(9480);
     assert_eq!(format_time(dur), "1 year 1 month");
   }
 
   #[test]
   fn singular_millennium_is_singular() {
-    let dur = Duration::from_hours(8_064_000);
+    let dur = Duration::from_hours(8_760_000);
     assert!(
       format_time(dur).contains("1 millennium"),
       "got {:?}",
@@ -827,7 +938,7 @@ mod format_time_tests {
 
   #[test]
   fn plural_millennia_is_plural() {
-    let dur = Duration::from_hours(16_128_000);
+    let dur = Duration::from_hours(17_520_000);
     assert!(
       format_time(dur).contains("2 millennia"),
       "got {:?}",
@@ -862,6 +973,38 @@ mod time_reader_tests {
       .unwrap()
       .and_hms_opt(h, mi, s)
       .unwrap()
+  }
+
+  // ─── parse_dur: spans between two instants ───────────────────────
+
+  #[test]
+  fn dur_span_between_instants() {
+    let hour = 3_600 * 1_000_000;
+    assert_eq!(TimeReader::parse_dur("9:00am to 5:00pm").unwrap(), 8 * hour);
+    assert_eq!(
+      TimeReader::parse_dur("october 5 2024 to october 10 2024").unwrap(),
+      5 * 24 * hour
+    );
+  }
+
+  #[test]
+  fn dur_span_is_signed() {
+    let hour = 3_600 * 1_000_000;
+    assert_eq!(
+      TimeReader::parse_dur("5:00pm to 9:00am").unwrap(),
+      -8 * hour
+    );
+  }
+
+  #[test]
+  fn dur_span_does_not_split_inside_words() {
+    // `october`, `today` and `tomorrow` all contain "to".
+    assert!(TimeReader::parse_dur("tomorrow").is_err());
+    assert!(TimeReader::interpret("tomorrow").is_ok());
+    assert!(TimeReader::interpret("october 5 2024").is_ok());
+    // a bare or edge-positioned `to` is not a span
+    assert!(TimeReader::parse_dur("to").is_err());
+    assert!(TimeReader::parse_dur("5 minutes to").is_err());
   }
 
   // ─── parse_dur: exact, deterministic ─────────────────────────────
@@ -908,6 +1051,31 @@ mod time_reader_tests {
     assert_ago("30 seconds ago", Duration::seconds(30));
     assert_ago("1h30m ago", Duration::minutes(90));
     assert_ago("5 days", Duration::days(5)); // bare offset defaults to the past
+  }
+
+  #[test]
+  fn interp_mixed_directions() {
+    // A direction word signs only the offset that preceded it, so the two
+    // halves of a mixed expression cancel instead of summing under one sign.
+    assert_ago("5 days before 7 days from now", Duration::days(-2));
+    assert_ago("5 days from now 3 days ago", Duration::days(-2));
+    assert_ago("1 hour from 30 minutes ago", Duration::minutes(-30));
+    assert_ago("3 days ago from now", Duration::days(3));
+  }
+
+  #[test]
+  fn interp_chained_same_direction() {
+    // Several segments agreeing on a direction still sum.
+    assert_ago("5 days from 7 days from now", Duration::days(-12));
+    assert_ago("2 hours ago 30 minutes ago", Duration::minutes(150));
+  }
+
+  #[test]
+  fn interp_trailing_offset_takes_last_direction() {
+    // An offset with no direction word after it follows the last one seen,
+    // falling back to the past when there was none.
+    assert_ago("from now 5 days", Duration::days(-5));
+    assert_ago("5 days", Duration::days(5));
   }
 
   #[test]

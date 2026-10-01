@@ -675,7 +675,11 @@ impl From<f64> for IdleTime {
 
 impl Display for IdleTime {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}", strops::format_time(self.0))
+    write!(
+      f,
+      "{}",
+      strops::format_time(strops::dur_delta(self.0)).unwrap_or_default()
+    )
   }
 }
 
