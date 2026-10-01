@@ -18,6 +18,7 @@ pub(crate) struct ForkSpec {
   status: i32,
   context: Vec<LabelBuilder>,
   logic: LogTab,
+  timers: Timers,
   pipe_frames: PipeFrames,
 }
 
@@ -53,6 +54,7 @@ impl super::Shed {
       status: shed.status_code.load(Ordering::Relaxed),
       context: shed.call_context.borrow().clone(),
       logic: shed.logic.borrow().clone(),
+      timers: shed.timers.borrow().clone(),
       pipe_frames: shed.pipe_frames.borrow().clone(),
     })
   }
@@ -70,6 +72,7 @@ impl super::Shed {
       status,
       context,
       logic,
+      timers,
       pipe_frames,
     } = spec;
     super::SHED.with(|shed| {
@@ -78,6 +81,7 @@ impl super::Shed {
       *shed.shopts.borrow_mut() = shopts;
       *shed.call_context.borrow_mut() = context;
       *shed.logic.borrow_mut() = logic;
+      *shed.timers.borrow_mut() = timers;
       *shed.pipe_frames.borrow_mut() = pipe_frames;
       shed.status_code.store(status, Ordering::Relaxed);
     });

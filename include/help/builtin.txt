@@ -14,6 +14,7 @@ The following builtins are available:
   `autoload`    load functions/completions lazily           |builtin-autoload|
   `bg`          resume a stopped job in the background      |builtin-bg|
   `cd`          change the working directory                |builtin-cd|
+  `chrono`      time-related operations (timers, spans)     |builtin-chrono|
   `compadd`     register completion candidates              |builtin-compadd|
   `compgen`     emit completion candidates                  |builtin-compgen|
   `complete`    define custom tab completion rules          |builtin-complete|
@@ -410,6 +411,167 @@ CD                                               *builtin-cd* *cd*
       ```cd /tmp```             absolute path
       ```cd -```                return to previous directory
       ```cd -P ~/link```        resolve symlink before changing
+
+==============================================================================
+CHRONO                                           *builtin-chrono* *chrono*
+
+  `chrono {subcommand} ...`
+
+  Time-related operations. `chrono` is a namespace; all work is done by
+  its subcommands. Running it with no subcommand is an error.
+
+  Subcommands ~
+
+    `timer`   measure elapsed time with named stopwatches
+    `sleep`   pause for a duration, or until an instant
+
+==============================================================================
+CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
+
+  `chrono timer [{name}]`
+  `chrono timer start|stop|resume|reset [{name}]`
+  `chrono timer status [{name}] [-F {format}]`
+
+  A stopwatch. Each timer accumulates the spans during which it was
+  running, so a timer may be stopped and resumed any number of times
+  and reports only the time it spent running.
+
+  Timers are identified by {name}. Omitting {name} uses the timer
+  called `default`, so `chrono timer start` and
+  `chrono timer start default` would refer to the same stopwatch --
+  for that reason `default` is reserved and cannot be passed as a
+  {name} explicitly.
+
+  Subcommands ~
+
+    `start [{name}]`    zero the timer and begin running. Creates the
+                        timer if it does not exist.
+    `stop [{name}]`     stop the timer, adding the span since it began
+                        to its total. Stopping a stopped timer does
+                        nothing.
+    `resume [{name}]`   start running again without zeroing the total.
+                        Resuming a running timer does nothing.
+    `reset [{name}]`    zero the total and stop the timer.
+    `status [{name}]`   report the timer's total and whether it is
+                        running.
+
+  With no subcommand, `chrono timer` lists every timer that exists.
+
+  Every subcommand except `start` fails with status 1 if the named
+  timer does not exist, and does not create it.
+
+  Format specifiers ~                                   *chrono-timer-format*
+
+    `status` takes `-F {format}` / `--format {format}` to print the
+    elapsed time however you like, in place of the default rendering.
+    `chrono timer` accepts the same option when listing.
+
+    Lowercase specifiers are components, each one the remainder within
+    the next larger unit. Uppercase specifiers are totals, the whole
+    duration expressed in that unit.
+
+      `%d`    whole days
+      `%h`    hours within the day        `%H`    total hours
+      `%m`    minutes within the hour     `%M`    total minutes
+      `%s`    seconds within the minute   `%S`    total seconds
+      `%l`    milliseconds                `%L`    total milliseconds
+      `%u`    microseconds                `%U`    total microseconds
+      `%n`    nanoseconds                 `%N`    total nanoseconds
+      `%R`    `running` or `stopped`
+      `%%`    a literal `%`
+
+    `%l`, `%u` and `%n` are all fractions of the *second*, at differing
+    precision -- they are alternatives, not digit groups, so `%s.%l`
+    is a sensible format and `%l%u%n` is not.
+
+    Each specifier accepts the usual `%[flags][width][.precision]`
+    field parameters, so `%02m:%02s` zero-pads to two columns.
+
+    An unrecognized specifier is an error.
+
+    Note these are *not* strftime codes; `%H` is total hours elapsed,
+    not the hour of the day. See |builtin-printf| for formatting an
+    instant rather than a duration.
+
+  Examples:
+
+      ```chrono timer start```              start the default timer
+      ```chrono timer status```             `1m 4s (running)`
+      ```chrono timer stop```               pause it
+      ```chrono timer resume```             continue where it left off
+
+      ```chrono timer start 'build'```        a second, independent timer
+      ```chrono timer status 'build' -F '%02m:%02s'```
+                                        `01:04`
+      ```chrono timer status 'build' -F '%S'```
+                                        total seconds, for arithmetic
+
+      ```chrono timer```                    list every timer
+
+==============================================================================
+CHRONO SLEEP                               *chrono-sleep* *builtin-chrono-sleep*
+
+  `chrono sleep {duration}...`
+  `chrono sleep until {instant}`
+
+  Pause the shell. Unlike the external `sleep`, the wait is interruptible:
+  a signal ends it immediately and any set signal traps run, so `Ctrl-C` behaves
+  the way it does for any other foreground command.
+
+  Durations ~
+
+    A bare number is seconds, and may be fractional. Otherwise the
+    duration uses the same notation as |read|(builtin-read) `--timeout` and
+    |hist|(builtin-hist) `--duration`:
+
+      `us` `ms` `s` `m` `h` `d` `w` `mo` `y`
+
+    Several operands are summed together, and a single
+    quoted argument may already contain several terms.
+
+        ```chrono sleep 5```            five seconds
+        ```chrono sleep 0.25```         a quarter second
+        ```chrono sleep 250ms```
+        ```chrono sleep 1m30s```        ninety seconds
+        ```chrono sleep 1m 30s```       the same, as two operands
+
+    `inf` waits forever, until interrupted.
+
+  Waiting until a specific time ~                 *chrono-sleep-until*
+
+    `until {instant}` waits until a point in time rather than for a
+    length of time. An instant that has already passed returns at once.
+
+    A time of day with no date means the next occurrence of that time:
+    if it has already passed today, it refers to tomorrow.
+
+        ```chrono sleep until 16:30```
+        ```chrono sleep until 4:30pm```
+        ```chrono sleep until '2026-12-25 09:00:00'```
+        ```chrono sleep until 'tomorrow'```
+        ```chrono sleep until '2 hours from now'```
+
+    The accepted forms are the same ones |hist|(builtin-hist) takes for
+    `--after` and `--before`: `HH:MM`, `HH:MM:SS`, `HH:MMam`/`pm`, full
+    dates and date-times, RFC 2822 and RFC 3339 timestamps, and relative
+    expressions built from a count, a unit, and a direction.
+
+    Note a relative expression with no direction word means *ago*, so
+    ```chrono sleep until '5 minutes'``` refers to the past and returns
+    immediately. Write `5 minutes from now` to wait (or just use
+    ```chrono sleep '5m'```).
+
+    Unlike `at`, this blocks in the current shell rather than scheduling
+    a detached job, so it composes with ordinary control flow:
+
+        ```chrono sleep until 4:30pm && deploy```
+
+  Precision ~
+
+    Waits are accurate to roughly a microsecond, bounded by system call
+    overhead and scheduler latency rather than by the requested value.
+    Asking for a shorter wait than that is not an error; it simply
+    returns as soon as the system allows.
 
 ==============================================================================
 COMMAND                                          *builtin-command* *command*

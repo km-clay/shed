@@ -59,6 +59,7 @@ pub(crate) mod shopt;
 pub(super) mod source;
 pub(super) mod terminal;
 pub(super) mod thread;
+pub(crate) mod timers;
 pub(super) mod vars;
 
 pub(crate) use source::{
@@ -362,6 +363,8 @@ pub(super) struct Shed {
   meta: RefCell<meta::MetaTab>,
   /// Table for functions, aliases, etc
   logic: RefCell<logic::LogTab>,
+  /// `chrono timer` stopwatches
+  timers: RefCell<timers::Timers>,
   pipe_frames: RefCell<crate::procio::PipeFrames>,
   /// The terminal state
   terminal: RefCell<terminal::Terminal>,
@@ -406,6 +409,7 @@ impl Shed {
       var_scopes: RefCell::new(scopes::ScopeStack::new()),
       meta: RefCell::new(meta::MetaTab::new()),
       logic: RefCell::new(logic::LogTab::new()),
+      timers: RefCell::new(timers::Timers::new()),
       pipe_frames: RefCell::new(crate::procio::PipeFrames::default()),
       terminal: RefCell::new(terminal::Terminal::new()),
       shopts: RefCell::new(shopt::ShOpts::default()),
@@ -534,6 +538,7 @@ impl Shed {
   {
     access!(SHED, logic, f)
   }
+  /// Read the `chrono timer` stopwatches
   #[track_caller]
   pub(crate) fn pipe_frames<T, F>(f: F) -> T
   where
@@ -547,6 +552,21 @@ impl Shed {
     F: FnOnce(&mut crate::procio::PipeFrames) -> T,
   {
     access_mut!(SHED, pipe_frames, f)
+  }
+
+  pub(crate) fn timers<T, F>(f: F) -> T
+  where
+    F: FnOnce(&timers::Timers) -> T,
+  {
+    access!(SHED, timers, f)
+  }
+  /// Mutate the `chrono timer` stopwatches
+  #[track_caller]
+  pub(crate) fn timers_mut<T, F>(f: F) -> T
+  where
+    F: FnOnce(&mut timers::Timers) -> T,
+  {
+    access_mut!(SHED, timers, f)
   }
   /// Mutate the logic table
   #[track_caller]
@@ -1029,6 +1049,7 @@ impl Shed {
       var_scopes: RefCell::new(self.var_scopes.borrow().clone()),
       meta: RefCell::new(self.meta.borrow().clone()),
       logic: RefCell::new(self.logic.borrow().clone()),
+      timers: RefCell::new(self.timers.borrow().clone()),
       pipe_frames: RefCell::new(self.pipe_frames.borrow().clone()),
       shopts: RefCell::new(self.shopts.borrow().clone()),
       terminal: RefCell::new(self.terminal.borrow().clone()),

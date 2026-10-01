@@ -1,7 +1,9 @@
 //! Human-readable parsing and formatting of durations, sizes, and file modes,
 //! plus the natural-language [`TimeReader`].
 
-use chrono::{DateTime, Datelike, Days, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{
+  DateTime, Datelike, Days, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc,
+};
 
 use crate::{
   sherr,
@@ -393,10 +395,11 @@ pub(crate) struct TimeReader<'a> {
   anchor: Option<DateTime<Utc>>,
   dir: Option<Direction>,
   offset: Option<i64>,
+  upcoming: bool,
 }
 
 impl<'a> TimeReader<'a> {
-  pub(crate) fn interpret(s: &'a str) -> ShResult<DateTime<Utc>> {
+  fn new(s: &'a str) -> Self {
     Self {
       orig: s,
       tks: vec![],
@@ -404,8 +407,25 @@ impl<'a> TimeReader<'a> {
       anchor: None,
       dir: None,
       offset: None,
+      upcoming: false,
     }
-    .parse()
+  }
+  pub(crate) fn interpret(s: &'a str) -> ShResult<DateTime<Utc>> {
+    Self::new(s).parse()
+  }
+
+  pub(crate) fn interpret_upcoming(s: &'a str) -> ShResult<DateTime<Utc>> {
+    // if a raw time is given like "5:30 pm", and it's 7 pm now,
+    // this decides if we are talking about 5:30 pm tomorrow, or earlier today
+    // in this case, we interpret it as "5:30 pm tomorrow"
+    Self::new(s).upcoming().parse()
+  }
+
+  fn upcoming(self) -> Self {
+    Self {
+      upcoming: true,
+      ..self
+    }
   }
 
   fn next_tk(&mut self) -> Option<TimeTk> {
@@ -419,7 +439,29 @@ impl<'a> TimeReader<'a> {
   }
 
   pub(crate) fn parse(&mut self) -> ShResult<DateTime<Utc>> {
-    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S"] {
+    const TIME_FORMATS: [&str; 4] = [
+      "%H:%M",    // 14:30
+      "%H:%M:%S", // 14:30:00
+      "%I:%M%p",  // 02:30PM
+      "%I:%M %p", // 02:30 PM
+    ];
+    const DATE_FORMATS: [&str; 3] = [
+      "%Y-%m-%d %H:%M:%S", // 2023-03-15 14:30:00
+      "%Y-%m-%d %H:%M",    // 2023-03-15 14:30
+      "%Y-%m-%dT%H:%M:%S", // 2023-03-15T14:30:00
+    ];
+    for fmt in TIME_FORMATS {
+      if let Ok(time) = NaiveTime::parse_from_str(self.orig, fmt) {
+        let today = Local::now().date_naive();
+        let mut when = today.and_time(time);
+        if self.upcoming && when < Local::now().naive_local() {
+          when += chrono::Duration::days(1);
+        }
+        return local_to_utc(when);
+      }
+    }
+
+    for fmt in DATE_FORMATS {
       if let Ok(time) = NaiveDateTime::parse_from_str(self.orig, fmt) {
         return local_to_utc(time);
       }
