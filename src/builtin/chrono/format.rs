@@ -1,11 +1,9 @@
 use chrono::{Local, TimeDelta, Utc};
-use chrono_tz::Tz;
 
 use crate::{
   builtin::opt::OptSpec,
   opt, procio, sherr,
   state::vars::VarStr,
-  try_var,
   util::{
     self,
     error::ShResultExt,
@@ -15,14 +13,8 @@ use crate::{
 
 use super::{
   super::{Builtin, BuiltinArgs, ShResult, argv},
-  DurFmt,
+  DurFmt, Zone,
 };
-
-enum Zone {
-  Utc,
-  Local,
-  Named(Tz),
-}
 
 pub(super) struct Format;
 impl Builtin for Format {
@@ -50,21 +42,7 @@ impl Builtin for Format {
     }
 
     // check timezone option, then TZ var, then default to local or UTC based on `-u`
-    let tz = if let Some(name) = args.opt_value("timezone") {
-      let zone = name.parse::<Tz>().ok_or_else(|| {
-        sherr!(ExecFail @ args.opt_span("timezone").unwrap_or(args.cmd_span()),
-        "unknown timezone '{name}'")
-        .with_code(2)
-      })?;
-      Zone::Named(zone)
-    } else if utc {
-      Zone::Utc
-    } else {
-      // an inherited TZ we cannot parse is not this command's problem
-      try_var!("TZ")
-        .and_then(|v| v.parse::<Tz>())
-        .map_or(Zone::Local, Zone::Named)
-    };
+    let tz = Zone::parse(args.opt_value("timezone"), utc)?;
 
     let fmt_string = args
       .opt_value("format")

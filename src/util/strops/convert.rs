@@ -16,6 +16,48 @@ use crate::{
 
 use super::{ByteCursor, SliceCursor};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CalFormat {
+  Iso,
+  Eu,
+  Us,
+}
+impl CalFormat {
+  fn format(self, fields: [u32; 3]) -> Option<NaiveDate> {
+    let (y, m, d) = match self {
+      Self::Iso => (fields[0], fields[1], fields[2]),
+      Self::Eu => (fields[2], fields[1], fields[0]),
+      Self::Us => (fields[2], fields[0], fields[1]),
+    };
+
+    NaiveDate::from_ymd_opt(widen_year(y), m, d)
+  }
+}
+
+/// Two-digit years follow the `strftime` convention
+///
+/// `00-68` are 2000s and `69-99` are 1900s.
+fn widen_year(n: u32) -> i32 {
+  match n {
+    0..=68 => 2000 + n as i32,
+    69..=99 => 1900 + n as i32,
+    _ => n as i32,
+  }
+}
+
+const CLOCK_FORMATS: [&str; 6] = [
+  "%H:%M",       // 14:30
+  "%H:%M:%S",    // 14:30:00
+  "%I:%M%p",     // 02:30PM
+  "%I:%M %p",    // 02:30 PM
+  "%I:%M:%S%p",  // 02:30:00PM
+  "%I:%M:%S %p", // 02:30:00 PM
+];
+
+const DATE_FORMATS: [&str; 1] = [
+  "%Y-%m-%dT%H:%M:%S", // 2023-03-15T14:30:00
+];
+
 /// chrono's strftime rejects specifiers that glibc passes through untouched
 /// (`%N`, `%Q`, ...), and its `Display` impl signals that by failing, which
 /// `to_string()` turns into a panic. bash emits unknown specifiers literally,
@@ -398,6 +440,8 @@ enum TimeTk {
   Num(f64),
   Word(VarStr),
   Epoch(DateTime<Utc>),
+  Clock(NaiveTime),
+  Date(NaiveDate),
 }
 
 pub(crate) struct TimeReader<'a> {
@@ -405,6 +449,7 @@ pub(crate) struct TimeReader<'a> {
   tks: Vec<TimeTk>,
   pos: usize,
   anchor: Option<DateTime<Utc>>,
+  clock: Option<NaiveTime>,
   dir: Option<Direction>,
   offset: Option<i64>,
   pending: i64, // pending offset read
@@ -418,6 +463,7 @@ impl<'a> TimeReader<'a> {
       tks: vec![],
       pos: 0,
       anchor: None,
+      clock: None,
       dir: None,
       offset: None,
       pending: 0,
@@ -482,41 +528,13 @@ impl<'a> TimeReader<'a> {
   }
 
   pub(crate) fn parse(&mut self) -> ShResult<DateTime<Utc>> {
-    const TIME_FORMATS: [&str; 4] = [
-      "%H:%M",    // 14:30
-      "%H:%M:%S", // 14:30:00
-      "%I:%M%p",  // 02:30PM
-      "%I:%M %p", // 02:30 PM
-    ];
-    const DATE_FORMATS: [&str; 3] = [
-      "%Y-%m-%d %H:%M:%S", // 2023-03-15 14:30:00
-      "%Y-%m-%d %H:%M",    // 2023-03-15 14:30
-      "%Y-%m-%dT%H:%M:%S", // 2023-03-15T14:30:00
-    ];
-
     if let Some(epoch) = self.orig.trim().strip_prefix('@') {
       return Self::parse_epoch(epoch);
-    }
-
-    for fmt in TIME_FORMATS {
-      if let Ok(time) = NaiveTime::parse_from_str(self.orig, fmt) {
-        let today = Local::now().date_naive();
-        let mut when = today.and_time(time);
-        if self.upcoming && when < Local::now().naive_local() {
-          when += chrono::Duration::days(1);
-        }
-        return local_to_utc(when);
-      }
     }
 
     for fmt in DATE_FORMATS {
       if let Ok(time) = NaiveDateTime::parse_from_str(self.orig, fmt) {
         return local_to_utc(time);
-      }
-    }
-    for sep in ["-", ".", "/"] {
-      if let Ok(date) = NaiveDate::parse_from_str(self.orig, &format!("%Y{sep}%m{sep}%d")) {
-        return local_to_utc(date.and_hms_opt(0, 0, 0).unwrap());
       }
     }
     for parser in [DateTime::parse_from_rfc2822, DateTime::parse_from_rfc3339] {
@@ -531,6 +549,9 @@ impl<'a> TimeReader<'a> {
         TimeTk::Num(n) => self.read_offset(n)?,
         TimeTk::Word(w) => self.read_word(&w)?,
         TimeTk::Epoch(dt) => self.anchor = Some(dt),
+        TimeTk::Clock(time) => self.clock = Some(time),
+        // a calendar date names a day, which is what an anchor is
+        TimeTk::Date(d) => self.anchor = Some(local_to_utc(d.and_hms_opt(0, 0, 0).unwrap())?),
       }
     }
 
@@ -539,11 +560,25 @@ impl<'a> TimeReader<'a> {
       self.commit(dir);
     }
 
-    let anchor = self.anchor.unwrap_or_else(Utc::now);
-    let Some(micros) = self.offset else {
-      return Ok(anchor);
+    let base = match (self.anchor, self.clock) {
+      (Some(a), Some(t)) => {
+        let date = a.with_timezone(&Local).date_naive();
+        local_to_utc(date.and_time(t))?
+      }
+      (None, Some(t)) => {
+        let mut when = Local::now().date_naive().and_time(t);
+        if self.upcoming && when < Local::now().naive_local() {
+          when += chrono::Duration::days(1);
+        }
+        local_to_utc(when)?
+      }
+      (Some(a), None) => a,
+      (None, None) => Utc::now(),
     };
-    Ok(anchor + chrono::Duration::microseconds(micros))
+    let Some(micros) = self.offset else {
+      return Ok(base);
+    };
+    Ok(base + chrono::Duration::microseconds(micros))
   }
 
   fn read_offset(&mut self, n: f64) -> ShResult<()> {
@@ -680,38 +715,146 @@ impl<'a> TimeReader<'a> {
       _                                                               => None,
     }
   }
+
+  /// A calendar date written with separators: `2026-10-13`, `10/13/26`,
+  /// `13.10.26`. Returns `None` when the text is not one, so the caller falls
+  /// back to reading a plain number.
+  ///
+  /// Field order differs by locale, so it is settled in three steps: a
+  /// four-digit field can only be a year; failing that the separator says
+  /// which convention is meant, `-` ISO, `.` European, `/` American; and an
+  /// ordering that names an impossible date is discarded, which is what
+  /// rescues `13/10/26` for writers who put the day first.
+  fn scan_calendar_date(s: &str, cur: &mut SliceCursor) -> Option<NaiveDate> {
+    fn digits(s: &str, cur: &mut SliceCursor) -> Option<(u32, usize)> {
+      let (start, end) = cur.bump_while_span(|b| b.is_ascii_digit());
+      if start == end {
+        return None;
+      }
+      s[start..end].parse().ok().map(|n| (n, end - start))
+    }
+
+    let (first, first_len) = digits(s, cur)?;
+    let sep = cur
+      .peek_byte()
+      .filter(|b| matches!(b, b'-' | b'.' | b'/'))?;
+    cur.bump();
+
+    let (second, _) = digits(s, cur)?;
+    if !cur.bump_if_eq(sep) {
+      return None; // the two separators must agree
+    }
+    let (third, third_len) = digits(s, cur)?;
+
+    // candidate (year, month, day) formats, best guess first
+    let orders: &[CalFormat] = if first_len == 4 {
+      &[CalFormat::Iso]
+    } else if third_len == 4 {
+      match sep {
+        b'.' => &[CalFormat::Eu],
+        _ => &[CalFormat::Us],
+      }
+    } else {
+      match sep {
+        b'.' => &[CalFormat::Eu, CalFormat::Us],
+        b'/' => &[CalFormat::Us, CalFormat::Eu],
+        _ => &[CalFormat::Iso, CalFormat::Us, CalFormat::Eu],
+      }
+    };
+
+    let fields = [first, second, third];
+    orders.iter().find_map(|order| order.format(fields))
+  }
+
+  fn scan_clock_time(s: &str, cur: &mut SliceCursor) -> Option<NaiveTime> {
+    let start = cur.pos();
+    if !cur.bump_if(|b| b.is_ascii_digit()) {
+      return None;
+    }
+    cur.bump_while(|b| b.is_ascii_digit());
+
+    let mut groups = 0;
+    while groups < 2 {
+      let res = cur.attempt(|cur| {
+        if !cur.bump_if_eq(b':') {
+          return false;
+        }
+
+        if !cur.bump_if(|b| b.is_ascii_digit()) {
+          return false;
+        }
+        cur.bump_while(|b| b.is_ascii_digit());
+
+        true
+      });
+
+      if res {
+        groups += 1;
+      } else {
+        break;
+      }
+    }
+
+    let digit_end = cur.pos();
+
+    let suffix = cur.attempt(|cur| {
+      cur.bump_while(|b| b.is_ascii_whitespace());
+      let (w_start, w_end) = cur.bump_while_span(|b| b.is_ascii_alphabetic());
+      s.get(w_start..w_end)
+        .is_some_and(|w| w.eq_ignore_ascii_case("am") || w.eq_ignore_ascii_case("pm"))
+    });
+
+    if groups == 0 && !suffix {
+      return None;
+    }
+
+    let end = cur.pos();
+
+    let text = if groups == 0 {
+      format!("{}:00{}", &s[start..digit_end], &s[digit_end..end])
+    } else {
+      s[start..end].to_string()
+    };
+
+    CLOCK_FORMATS
+      .iter()
+      .find_map(|f| NaiveTime::parse_from_str(&text, f).ok())
+  }
   fn tokenize(s: &str) -> ShResult<Vec<TimeTk>> {
     let mut cur = SliceCursor::new(s.as_bytes());
     let mut tks = vec![];
 
     loop {
-      cur.bump_while(|c| c == b' ');
+      cur.bump_while(|c| c.is_ascii_whitespace());
       match cur.peek_byte() {
         Some(c) if c.is_ascii_digit() => {
           let start = cur.pos();
-          cur.bump_while(|c| c.is_ascii_digit());
-          if cur.peek_byte() == Some(b'.') {
-            cur.bump();
+          if let Some(time) = cur.attempt_get(|cur| Self::scan_clock_time(s, cur)) {
+            tks.push(TimeTk::Clock(time));
+          } else if let Some(date) = cur.attempt_get(|cur| Self::scan_calendar_date(s, cur)) {
+            tks.push(TimeTk::Date(date));
+          } else {
             cur.bump_while(|c| c.is_ascii_digit());
-          }
+            if cur.bump_if_eq(b'.') {
+              cur.bump_while(|c| c.is_ascii_digit());
+            }
 
-          let n = s[start..cur.pos()]
-            .parse()
-            .map_err(|_| sherr!(ParseErr, "number too large in time expression"))?;
-          tks.push(TimeTk::Num(n));
+            let n = s[start..cur.pos()]
+              .parse()
+              .map_err(|_| sherr!(ParseErr, "number too large in time expression"))?;
+            tks.push(TimeTk::Num(n));
+          }
         }
         Some(b'@') => {
           cur.bump();
-          let start = cur.pos();
-          cur.bump_while(|c| c.is_ascii_digit() || c == b'-' || c == b'.');
-          let epoch_secs = Self::parse_epoch(&s[start..cur.pos()])?;
+          let (start, end) = cur.bump_while_span(|c| c.is_ascii_digit() || c == b'-' || c == b'.');
+          let epoch_secs = Self::parse_epoch(&s[start..end])?;
           let tk = TimeTk::Epoch(epoch_secs);
           tks.push(tk);
         }
         Some(c) if c.is_ascii_alphabetic() => {
-          let start = cur.pos();
-          cur.bump_while(|c| c.is_ascii_alphabetic());
-          let word = s[start..cur.pos()].to_ascii_lowercase();
+          let (start, end) = cur.bump_while_span(|c| c.is_ascii_alphabetic());
+          let word = s[start..end].to_ascii_lowercase();
           tks.push(TimeTk::Word(word.as_str().into()));
         }
         Some(_) => cur.bump(),
@@ -781,9 +924,9 @@ impl<'a> TimeReader<'a> {
           saw_any = true;
         }
         TimeTk::Word(w) => return Err(sherr!(ParseErr, "unexpected '{w}' in duration")),
-        TimeTk::Epoch(_) => {
-          return Err(sherr!(ParseErr, "a timestamp is not a duration"));
-        }
+        TimeTk::Clock(_) => return Err(sherr!(ParseErr, "a clock time is not a duration")),
+        TimeTk::Epoch(_) => return Err(sherr!(ParseErr, "a timestamp is not a duration")),
+        TimeTk::Date(_) => return Err(sherr!(ParseErr, "a date is not a duration")),
       }
     }
 
@@ -1015,11 +1158,127 @@ mod time_reader_tests {
     assert!(off < 2000, "{expr}: {off}ms off from expected");
   }
 
+  fn ymd(y: i32, mo: u32, d: u32) -> NaiveDate {
+    NaiveDate::from_ymd_opt(y, mo, d).unwrap()
+  }
+
   fn ymd_hms(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> NaiveDateTime {
     NaiveDate::from_ymd_opt(y, mo, d)
       .unwrap()
       .and_hms_opt(h, mi, s)
       .unwrap()
+  }
+
+  // ─── calendar dates ──────────────────────────────────────────────
+
+  #[test]
+  fn date_four_digit_field_is_the_year() {
+    // Unambiguous regardless of separator.
+    for src in ["2026-10-13", "2026/10/13", "2026.10.13"] {
+      assert_eq!(wall(src).date(), ymd(2026, 10, 13), "{src}");
+    }
+    // ... and a trailing four-digit year keeps the separator's convention
+    assert_eq!(wall("10/13/2026").date(), ymd(2026, 10, 13));
+    assert_eq!(wall("13.10.2026").date(), ymd(2026, 10, 13));
+  }
+
+  #[test]
+  fn date_separator_picks_the_convention() {
+    // The same day written each way. `/` is American, `.` European.
+    assert_eq!(wall("10/12/26").date(), ymd(2026, 10, 12));
+    assert_eq!(wall("12.10.26").date(), ymd(2026, 10, 12));
+  }
+
+  #[test]
+  fn date_impossible_month_forces_the_other_order() {
+    // 13 cannot be a month, so these are day-first whatever the separator.
+    assert_eq!(wall("13/10/26").date(), ymd(2026, 10, 13));
+    assert_eq!(wall("10-13-26").date(), ymd(2026, 10, 13));
+    // the old separator loop read this as the year 13
+    assert_eq!(wall("13.10.26").date(), ymd(2026, 10, 13));
+  }
+
+  #[test]
+  fn date_two_digit_years_follow_strftime() {
+    assert_eq!(wall("1/1/68").date(), ymd(2068, 1, 1));
+    assert_eq!(wall("1/1/69").date(), ymd(1969, 1, 1));
+  }
+
+  #[test]
+  fn date_composes_with_a_clock_in_either_order() {
+    let expect = ymd(2026, 10, 13).and_hms_opt(17, 0, 0).unwrap();
+    assert_eq!(wall("10/13/26 5:00pm"), expect);
+    assert_eq!(wall("5:00pm 10/13/26"), expect);
+    assert_eq!(wall("2026-10-13 09:00").date(), ymd(2026, 10, 13));
+  }
+
+  #[test]
+  fn date_scanner_leaves_other_things_alone() {
+    for src in ["1h30m", "5 minutes", "17:00", "2 hours ago"] {
+      let tks = TimeReader::tokenize(src).unwrap();
+      assert!(
+        !tks.iter().any(|t| matches!(t, super::TimeTk::Date(_))),
+        "{src} should contain no date token"
+      );
+    }
+  }
+
+  #[test]
+  fn date_rejects_mismatched_separators() {
+    assert!(TimeReader::interpret("2026-10/13").is_err());
+  }
+
+  // ─── tokenize: clock times ───────────────────────────────────────
+
+  #[test]
+  fn tokenize_clock_does_not_swallow_the_next_word() {
+    // The meridiem probe reads ahead; when what follows is not am/pm the
+    // cursor must go back so the word survives as its own token.
+    let tks = TimeReader::tokenize("17:00 tomorrow").unwrap();
+    assert_eq!(tks.len(), 2, "expected a clock and a word");
+    assert!(matches!(tks[0], super::TimeTk::Clock(_)));
+    match &tks[1] {
+      super::TimeTk::Word(w) => assert_eq!(w.to_str_lossy(), "tomorrow"),
+      _ => panic!("second token should be the word"),
+    }
+  }
+
+  #[test]
+  fn tokenize_clock_reads_every_spelling() {
+    use chrono::Timelike;
+    for (src, hour, min) in [
+      ("17:00", 17, 0),
+      ("17:00:30", 17, 0),
+      ("5:00pm", 17, 0),
+      ("5:00 pm", 17, 0),
+      ("5:00PM", 17, 0),
+      ("5:00:00pm", 17, 0),
+      ("5pm", 17, 0),
+      ("5 pm", 17, 0),
+      ("5PM", 17, 0),
+      ("9:30am", 9, 30),
+    ] {
+      let tks = TimeReader::tokenize(src).unwrap();
+      match tks.first() {
+        Some(super::TimeTk::Clock(t)) => {
+          assert_eq!((t.hour(), t.minute()), (hour, min), "{src}");
+        }
+        other => panic!("{src} did not tokenize as a clock: {}", other.is_some()),
+      }
+    }
+  }
+
+  #[test]
+  fn tokenize_leaves_plain_numbers_alone() {
+    // A bare run of digits is a count, and a colon that leads nowhere is not
+    // a time -- both must fall through rather than erroring.
+    for src in ["5 minutes", "5", "1h30m", "2 hours ago"] {
+      let tks = TimeReader::tokenize(src).unwrap();
+      assert!(
+        !tks.iter().any(|t| matches!(t, super::TimeTk::Clock(_))),
+        "{src} should contain no clock token"
+      );
+    }
   }
 
   // ─── interpret: epoch timestamps ─────────────────────────────────

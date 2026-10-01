@@ -195,6 +195,33 @@ impl<'a> SliceCursor<'a> {
   pub(crate) fn into_slice(self) -> &'a [u8] {
     &self.bytes[self.pos..]
   }
+
+  pub(crate) fn bump_while_span<F: Fn(u8) -> bool>(&mut self, f: F) -> (usize, usize) {
+    let start = self.pos;
+    self.bump_while(f);
+    let end = self.pos;
+    (start, end)
+  }
+
+  /// Attempt to run `f` on this cursor, rolling back the position if `f` returns `false`.
+  pub(crate) fn attempt<F: FnOnce(&mut Self) -> bool>(&mut self, f: F) -> bool {
+    let start = self.pos;
+    let res = f(self);
+    if !res {
+      self.pos = start;
+    }
+    res
+  }
+
+  /// Attempt to run `f` on this cursor, rolling back the position if `f` returns `false`.
+  pub(crate) fn attempt_get<T, F: FnOnce(&mut Self) -> Option<T>>(&mut self, f: F) -> Option<T> {
+    let start = self.pos;
+    let res = f(self);
+    if res.is_none() {
+      self.pos = start;
+    }
+    res
+  }
 }
 
 impl ByteCursor for SliceCursor<'_> {

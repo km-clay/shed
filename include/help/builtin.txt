@@ -420,11 +420,27 @@ CHRONO                                           *builtin-chrono* *chrono*
   Time-related operations. `chrono` is a namespace; all work is done by
   its subcommands. Running it with no subcommand is an error.
 
+  ```chrono```'s subcommands operate on two forms of time expressions:
+
+    {instants}  - a point in time, e.g. `now`, `tomorrow`, `2026-12-25 09:00:00`,
+                  `2 hours from now`
+
+    {durations} - a span of time. has two forms:
+                    raw durations: `5 hours`, `1h30m`, `2 days`
+                    span between instants: `9:00am to 5:00pm`,
+                    `october 5 2024 to october 10 2024`, `2 hours ago to now`
+
+                  Each side of a span is read on its own, so a bare time
+                  does not roll past midnight: `9:00pm to 5:00am` is
+                  -16h, not an overnight shift. Name the day to cross
+                  one -- `9:00pm to 5:00am tomorrow` is `8h`.
+
   Subcommands ~
 
     `timer`   measure elapsed time with named stopwatches
     `sleep`   pause for a duration, or until an instant
     `fmt`     render an instant or a duration through a format string
+    `every`   run a command repeatedly on an interval
 
 ==============================================================================
 CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
@@ -553,7 +569,7 @@ CHRONO SLEEP                               *chrono-sleep* *builtin-chrono-sleep*
 
     `inf` waits forever, until interrupted.
 
-  Waiting until a specific time ~                 *chrono-sleep-until*
+  Instants ~                 *chrono-sleep-until*
 
     `until {instant}` waits until a point in time rather than for a
     length of time. An instant that has already passed returns at once.
@@ -641,6 +657,16 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
     dates and date-times, RFC 2822 and RFC 3339 timestamps, weekday
     names, and relative expressions built from a count, a unit, and a
     direction.
+
+    A time of day may be paired with the day it belongs to, in either
+    order, and an offset may be applied to the result:
+
+        ```chrono fmt -f '%c' 5:00am tomorrow```
+        ```chrono fmt -f '%c' friday 17:00```
+        ```chrono fmt -f '%c' 2 hours after 5:00am friday```
+
+    A time with no day means today. `5pm`, `5:00pm`, `5:00 PM`, `17:00`
+    and `17:00:00` all name the same instant.
 
     `@{seconds}` is a Unix timestamp, optionally fractional, and may be
     negative for a time before 1970. It anchors an expression like any
@@ -741,6 +767,124 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
     `0`   the time was formatted
     `2`   a missing operand, an operand that is neither a duration nor an
           instant, or an unknown `-z` zone
+
+==============================================================================
+CHRONO EVERY                               *chrono-every* *builtin-chrono-every*
+
+  `chrono every {interval} {command}...`
+
+  Run {command} once every {interval}, until interrupted. The command is
+  shell input rather than a program name, the way |eval|(builtin-eval)
+  and |trap|(builtin-trap) take it, so pipelines, redirections, builtins,
+  and shell functions work:
+
+      ```chrono every 30s 'df -h | vice /dev/sda1'```
+
+  The first run happens one interval in; `--now` runs one straight away as
+  well. A signal ends the wait at once and runs any traps, so `Ctrl-C`
+  behaves as it does for any other foreground command.
+
+  Ticks are computed from an anchor instead of by adding the interval to
+  the previous run, so a slow command cannot make the schedule drift: the
+  nth run is always due at `anchor + n * interval`.
+
+  Scheduling ~                                      *chrono-every-schedule*
+
+    {interval} uses the notation |chrono-sleep| accepts -- `us` `ms` `s`
+    `m` `h` `d` `w` `mo` `y` -- and must not be zero. A span such as
+    ```chrono every '9am to 5pm' 'cmd'``` is accepted as its own length,
+    eight hours; direction is ignored, since a period has none.
+
+    `--starting {instant}` anchors the schedule to a point in time rather
+    than to when the command was launched. Ticks then land on that
+    instant plus whole multiples of the interval, which survives a
+    restart: relaunching with the same anchor resumes the original grid
+    instead of starting a new one.
+
+        ```chrono every 15m --starting 09:00 'poll'```
+                                          `:00`, `:15`, `:30`, `:45`
+
+    An anchor in the future is waited for; no run happens before it. An
+    anchor in the past only sets the phase -- see |chrono-every-queue| to
+    also run the ticks that were missed.
+
+    Without `--starting`, the schedule uses the monotonic clock, so
+    changing the system time does not shift it. With `--starting` the
+    anchor is a wall-clock instant, so the schedule follows the clock.
+
+    `--now` / `-N` runs the command once before waiting for anything. The
+    schedule is unaffected -- the run is an extra one, not the first tick
+    moved earlier -- so ```chrono every 1m --now 'cmd'``` runs at once and
+    then at every following minute boundary. It counts as a run for
+    `--times`, takes `--retry` attempts like any other, and is subject to
+    `--until`. With a `--starting` still in the future it runs now and then
+    waits for the anchor.
+
+  Missed ticks ~                                       *chrono-every-queue*
+
+    A tick comes due with nothing to run it when the previous command is
+    still going, or when `--starting` names a time already past. By
+    default those ticks are dropped and the schedule simply continues.
+
+    `--queue {count}` instead tracks missed intervals, and queues up
+    executions. `{count}` is the maximum number of executions
+    that can be queued at a time. A `{count}` of `-1` sets no limit.
+
+    `--catch-up` / `-C` extends this to the backlog implied by a
+    `--starting` in the past. It needs `--queue` as well, and the count
+    caps it:
+
+        ```chrono every 1m --starting 09:00 -C --queue 5 'sync'```
+
+    A stale anchor can owe a very large number of runs, which is why the
+    count is not optional; decide explicitly if you want an interval of one
+    minute starting half a year ago to owe over half a million executions.
+
+    While owed runs are draining the interval does not apply, so the
+    command runs back to back. That is harmless for a display and is not
+    for anything with side effects.
+
+    `--now` adds its run on top of the backlog rather than counting as
+    part of it, so `--catch-up --queue 2 --now` runs three times before
+    the first scheduled tick.
+
+  Retrying ~                                           *chrono-every-retry*
+
+    `--retry {count}` re-runs the command when it exits nonzero, up to
+    {count} extra attempts, before waiting for the next tick. `-1` retries
+    until it succeeds. A retry does not consume a tick, so boundaries
+    crossed while retrying are missed ticks like any other.
+
+        ```chrono every 5s --retry 3 'curl -sf health'```
+
+    A run and an attempt are not the same thing: `--retry` bounds the
+    attempts within one run, and |--times|(chrono-every-until) bounds the
+    runs. ```chrono every 5s --times 2 --retry 3``` allows two runs of up
+    to four attempts each, eight executions at the most.
+
+  Stopping ~                                           *chrono-every-until*
+
+    `--until {instant}` stops once that instant has passed. It gates every
+    execution, including owed ones, so a backlog cannot run past it.
+
+        ```chrono every 5m --until 17:00 'check'```
+
+    A tick landing exactly on the instant still runs.
+
+    `--times {count}` / `-T {count}` stops after {count} runs. Runs owed
+    by `--queue` count toward it, so a backlog can use the whole budget
+    before a scheduled tick arrives.
+
+    Without `--until` or `--times` the loop ends only on a signal, or if
+    the command is not valid shell input.
+
+  Exit status ~
+
+    The status of the last command run, or `0` if the loop ended before
+    running anything.
+    arrives before the first tick.
+
+    `2`   a missing or unusable {interval}, or an invalid option value
 
 ==============================================================================
 COMMAND                                          *builtin-command* *command*

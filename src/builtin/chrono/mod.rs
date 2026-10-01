@@ -1,9 +1,14 @@
-use chrono::TimeDelta;
+use std::time::Duration;
+
+use chrono::{DateTime, TimeDelta, Utc};
+use chrono_tz::Tz;
+use nix::libc;
 
 use crate::{
   eval::lex::{Span, Tk},
-  sherr,
+  sherr, signal,
   state::{timers::TimerStatus, vars::VarStr},
+  try_var,
   util::{
     error::ShResult,
     strops::{self, ByteCursor, Field, FieldParams, Sign, SliceCursor, StrFmt, VarStrDisplay},
@@ -13,9 +18,133 @@ use crate::{
 
 use super::{Builtin, BuiltinArgs, BuiltinRouter, opt::Parsed};
 
+mod every;
 mod format;
 mod sleep;
 mod timer;
+
+const NANOS_PER_SEC: i128 = 1_000_000_000;
+
+fn nanos_for(date: DateTime<Utc>) -> i128 {
+  let seconds = i128::from(date.timestamp());
+  let nanos = i128::from(date.timestamp_subsec_nanos());
+  seconds * NANOS_PER_SEC + nanos
+}
+
+fn nanos_of(ts: libc::timespec) -> i128 {
+  let seconds = i128::from(ts.tv_sec);
+  let nanos = i128::from(ts.tv_nsec);
+  seconds * NANOS_PER_SEC + nanos
+}
+
+fn nanos_now(clock: libc::clockid_t) -> i128 {
+  nanos_of(now(clock))
+}
+
+fn now(clock: libc::clockid_t) -> libc::timespec {
+  let mut ts: libc::timespec = unsafe { std::mem::zeroed() };
+  unsafe { libc::clock_gettime(clock, &raw mut ts) };
+  ts
+}
+
+fn timespec_for(date: DateTime<Utc>) -> libc::timespec {
+  timespec_for_nanos(nanos_for(date))
+}
+
+fn timespec_for_nanos(nanos: i128) -> libc::timespec {
+  let tv_sec = i64::try_from(nanos.div_euclid(NANOS_PER_SEC)).unwrap_or(i64::MAX);
+  let tv_nanos = nanos.rem_euclid(NANOS_PER_SEC) as i64;
+
+  libc::timespec {
+    tv_sec,
+    tv_nsec: tv_nanos,
+  }
+}
+
+/// `ts + dur`, saturating rather than wrapping so `Duration::MAX` gives a
+/// deadline that will not arrive.
+fn deadline_after(ts: libc::timespec, dur: Duration) -> libc::timespec {
+  let secs = i64::try_from(dur.as_secs()).unwrap_or(i64::MAX);
+  let nsec = ts.tv_nsec + i64::from(dur.subsec_nanos());
+
+  let tv_sec = ts
+    .tv_sec
+    .saturating_add(secs)
+    .saturating_add(nsec / NANOS_PER_SEC as i64);
+  let tv_nanos = nsec % NANOS_PER_SEC as i64;
+
+  libc::timespec {
+    tv_sec,
+    tv_nsec: tv_nanos,
+  }
+}
+
+/// Sleep until `deadline` on the monotonic clock. Returns 0 when the deadline
+/// arrived, or an errno. An absolute deadline means a signal-interrupted sleep
+/// resumes with no drift, because there is no remaining time to recompute.
+#[cfg(linux_like)]
+fn nap(clock: libc::clockid_t, deadline: &libc::timespec) -> i32 {
+  // clock_nanosleep reports failure by returning the error number directly.
+  unsafe { libc::clock_nanosleep(clock, libc::TIMER_ABSTIME, deadline, std::ptr::null_mut()) }
+}
+
+/// No `clock_nanosleep` outside Linux, so convert the absolute deadline back
+/// into a relative sleep each time round. A clock step during an
+/// `CLOCK_REALTIME` wait is therefore only noticed on the next interruption.
+#[cfg(not(linux_like))]
+fn nap(clock: libc::clockid_t, deadline: &libc::timespec) -> i32 {
+  // Work in nanoseconds and convert once: `tv_nsec` is `c_long`, whose width
+  // is per-target, so arithmetic against it does not port.
+  let remaining = nanos_of(*deadline) - nanos_now(clock);
+  if remaining <= 0 {
+    return 0;
+  }
+  let rem = timespec_for_nanos(remaining);
+  if unsafe { libc::nanosleep(&rem, std::ptr::null_mut()) } == 0 {
+    0
+  } else {
+    std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+  }
+}
+
+fn sleep_until(clock: libc::clockid_t, deadline: &libc::timespec) -> ShResult<()> {
+  loop {
+    match nap(clock, deadline) {
+      0 => break,
+      libc::EINTR => signal::check_signals()?,
+      e => {
+        let err = std::io::Error::from_raw_os_error(e);
+        return Err(sherr!(ExecFail, "sleep failed: {err}").with_code(1));
+      }
+    }
+  }
+
+  Ok(())
+}
+
+enum Zone {
+  Utc,
+  Local,
+  Named(Tz),
+}
+impl Zone {
+  fn parse(tz: Option<VarStr>, utc: bool) -> ShResult<Self> {
+    let tz = if let Some(name) = tz {
+      let zone = name
+        .parse::<Tz>()
+        .ok_or_else(|| sherr!(ExecFail, "unknown timezone '{name}'").with_code(2))?;
+      Zone::Named(zone)
+    } else if utc {
+      Zone::Utc
+    } else {
+      // an inherited TZ we cannot parse is not this command's problem
+      try_var!("TZ")
+        .and_then(|v| v.parse::<Tz>())
+        .map_or(Zone::Local, Zone::Named)
+    };
+    Ok(tz)
+  }
+}
 
 /// Renders a [`TimeDelta`]. `running` is the timer state behind `%R`, absent
 /// when the duration did not come from a timer. The delta is signed because a
@@ -112,8 +241,7 @@ impl StrFmt for DurFmt {
 
       DurConv::Status => {
         let Some(running) = self.running else {
-          // FIXME: this is a hack.
-          return Ok(Field::string("%R".into()));
+          return Err(sherr!(ExecFail, "timer status can only be formatted with `chrono timer`"))
         };
         let status = if running { "running" } else { "stopped" };
 
@@ -185,6 +313,7 @@ impl BuiltinRouter for Chrono {
       b"timer" => Some(&timer::Timer  ),
       b"sleep" => Some(&sleep::Sleep  ),
       b"fmt"   => Some(&format::Format),
+      b"every" => Some(&every::Every  ),
       _ => None,
     }
   }
