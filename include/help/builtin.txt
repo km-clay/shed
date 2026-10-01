@@ -638,13 +638,20 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
 
     The accepted forms are the ones |hist|(builtin-hist) takes for
     `--after` and `--before`: `HH:MM`, `HH:MM:SS`, `HH:MMam`/`pm`, full
-    dates and date-times, RFC 2822 and RFC 3339 timestamps, and relative
-    expressions built from a count, a unit, and a direction.
+    dates and date-times, RFC 2822 and RFC 3339 timestamps, weekday
+    names, and relative expressions built from a count, a unit, and a
+    direction.
+
+    `@{seconds}` is a Unix timestamp, optionally fractional, and may be
+    negative for a time before 1970. It anchors an expression like any
+    other instant, so `2 hours after @0` is valid. The `@` is required --
+    a bare number is a count still waiting for its unit.
 
         ```chrono fmt -f '%H:%M' now```
         ```chrono fmt -f '%Y-%m-%d' tomorrow```
         ```chrono fmt -f '%H:%M' 2 hours ago```
         ```chrono fmt -f '%H:%M' '2026-12-25 09:00:00'```
+        ```chrono fmt -f '%Y-%m-%d' @1759300000```
         ```chrono fmt -f '%Y-%m-%d' 3 days from now```
         ```chrono fmt -f \
              "%A, %b %d %Y %H:%M:%S" \

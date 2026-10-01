@@ -397,6 +397,7 @@ fn local_to_utc(ndt: NaiveDateTime) -> ShResult<DateTime<Utc>> {
 enum TimeTk {
   Num(f64),
   Word(VarStr),
+  Epoch(DateTime<Utc>),
 }
 
 pub(crate) struct TimeReader<'a> {
@@ -451,6 +452,35 @@ impl<'a> TimeReader<'a> {
     self.tks.get(self.pos)
   }
 
+  fn parse_epoch(s: &str) -> ShResult<DateTime<Utc>> {
+    let bad = || sherr!(ParseErr, "invalid epoch timestamp '@{s}'");
+    let (whole, frac) = s.split_once('.').map_or((s, None), |(a, b)| (a, Some(b)));
+
+    let secs: i64 = whole.parse().map_err(|_| bad())?;
+    let nanos: u32 = match frac {
+      None => 0,
+      Some(f) if f.is_empty() || !f.bytes().all(|b| b.is_ascii_digit()) => return Err(bad()),
+      Some(f) => {
+        let mut digits = f.as_bytes()[..f.len().min(9)].to_vec();
+        digits.resize(9, b'0');
+        String::from_utf8_lossy(&digits)
+          .parse()
+          .map_err(|_| bad())?
+      }
+    };
+
+    // A fraction counts away from the epoch, so for a negative timestamp it
+    // deepens the offset rather than easing it: `@-1.5` is 1.5s before 1970.
+    let (secs, nanos) = if secs < 0 && nanos > 0 {
+      (secs - 1, 1_000_000_000 - nanos)
+    } else {
+      (secs, nanos)
+    };
+
+    DateTime::from_timestamp(secs, nanos)
+      .ok_or_else(|| sherr!(ParseErr, "epoch timestamp '@{s}' is out of range"))
+  }
+
   pub(crate) fn parse(&mut self) -> ShResult<DateTime<Utc>> {
     const TIME_FORMATS: [&str; 4] = [
       "%H:%M",    // 14:30
@@ -463,6 +493,11 @@ impl<'a> TimeReader<'a> {
       "%Y-%m-%d %H:%M",    // 2023-03-15 14:30
       "%Y-%m-%dT%H:%M:%S", // 2023-03-15T14:30:00
     ];
+
+    if let Some(epoch) = self.orig.trim().strip_prefix('@') {
+      return Self::parse_epoch(epoch);
+    }
+
     for fmt in TIME_FORMATS {
       if let Ok(time) = NaiveTime::parse_from_str(self.orig, fmt) {
         let today = Local::now().date_naive();
@@ -495,6 +530,7 @@ impl<'a> TimeReader<'a> {
       match tk {
         TimeTk::Num(n) => self.read_offset(n)?,
         TimeTk::Word(w) => self.read_word(&w)?,
+        TimeTk::Epoch(dt) => self.anchor = Some(dt),
       }
     }
 
@@ -664,6 +700,14 @@ impl<'a> TimeReader<'a> {
             .map_err(|_| sherr!(ParseErr, "number too large in time expression"))?;
           tks.push(TimeTk::Num(n));
         }
+        Some(b'@') => {
+          cur.bump();
+          let start = cur.pos();
+          cur.bump_while(|c| c.is_ascii_digit() || c == b'-' || c == b'.');
+          let epoch_secs = Self::parse_epoch(&s[start..cur.pos()])?;
+          let tk = TimeTk::Epoch(epoch_secs);
+          tks.push(tk);
+        }
         Some(c) if c.is_ascii_alphabetic() => {
           let start = cur.pos();
           cur.bump_while(|c| c.is_ascii_alphabetic());
@@ -737,6 +781,9 @@ impl<'a> TimeReader<'a> {
           saw_any = true;
         }
         TimeTk::Word(w) => return Err(sherr!(ParseErr, "unexpected '{w}' in duration")),
+        TimeTk::Epoch(_) => {
+          return Err(sherr!(ParseErr, "a timestamp is not a duration"));
+        }
       }
     }
 
@@ -973,6 +1020,60 @@ mod time_reader_tests {
       .unwrap()
       .and_hms_opt(h, mi, s)
       .unwrap()
+  }
+
+  // ─── interpret: epoch timestamps ─────────────────────────────────
+
+  #[test]
+  fn interp_epoch() {
+    let at = |s: i64, n: u32| chrono::DateTime::from_timestamp(s, n).unwrap();
+    assert_eq!(TimeReader::interpret("@0").unwrap(), at(0, 0));
+    assert_eq!(
+      TimeReader::interpret("@1000000000").unwrap(),
+      at(1_000_000_000, 0)
+    );
+    assert_eq!(TimeReader::interpret("@-1").unwrap(), at(-1, 0));
+  }
+
+  #[test]
+  fn interp_epoch_fractional() {
+    let at = |s: i64, n: u32| chrono::DateTime::from_timestamp(s, n).unwrap();
+    assert_eq!(TimeReader::interpret("@1.5").unwrap(), at(1, 500_000_000));
+    assert_eq!(
+      TimeReader::interpret("@1.123456789").unwrap(),
+      at(1, 123_456_789)
+    );
+    // a fraction counts away from the epoch, so -1.5 is earlier than -1
+    assert_eq!(TimeReader::interpret("@-1.5").unwrap(), at(-2, 500_000_000));
+  }
+
+  #[test]
+  fn interp_epoch_is_an_anchor() {
+    // it composes with offsets like any other anchor
+    let at = |s: i64| chrono::DateTime::from_timestamp(s, 0).unwrap();
+    assert_eq!(
+      TimeReader::interpret("2 hours after @0").unwrap(),
+      at(7_200)
+    );
+    assert_eq!(
+      TimeReader::interpret("1 hour before @7200").unwrap(),
+      at(3_600)
+    );
+  }
+
+  #[test]
+  fn interp_epoch_rejects_garbage() {
+    for bad in ["@", "@abc", "@1.x", "@99999999999999999999"] {
+      assert!(
+        TimeReader::interpret(bad).is_err(),
+        "{bad} should not parse"
+      );
+    }
+  }
+
+  #[test]
+  fn dur_rejects_a_timestamp() {
+    assert!(TimeReader::parse_dur("@100").is_err());
   }
 
   // ─── parse_dur: spans between two instants ───────────────────────
