@@ -159,8 +159,9 @@ impl StrFmt for FsFmt {
     src: &mut Self::Source,
   ) -> ShResult<Field> {
     let mut body = String::new();
+    let name = src.path.clone();
     conv
-      .format(&mut body, "", src)
+      .format(&mut body, &name, src)
       .map_err(|e| sherr!(ExecFail, "stat: Failed to format field: {e}"))?;
     let body = body.into_bytes();
     Ok(if matches!(conv, FsConv::FileName | FsConv::FsType(_)) {
@@ -609,6 +610,8 @@ enum FsConv {
 }
 
 struct FsInfo {
+  /// The operand this was gathered for, which is what `%n` reports.
+  path: String,
   block_size: u64,
   fundamental_bs: u64,
   total_blks: u64,
@@ -630,6 +633,7 @@ impl FsInfo {
     let v = statvfs::statvfs(path)?;
     let (fs_type_id, fs_type_name) = fs_type_of(path);
     Ok(Self {
+      path: path.to_string(),
       block_size: v.block_size() as u64,
       fundamental_bs: v.fragment_size() as u64,
       total_blks: v.blocks() as u64,
@@ -850,7 +854,7 @@ impl super::Builtin for Stat {
 
 impl Stat {
   const DEFAULT_FILE_FMT: &str = "  File: %N\n  Size: %S\t\tBlocks: %b\tIO Block: %o\t%F\nDevice: %Hd,%Ld\tInode: %i\t\tLinks: %h\nAccess: (%a/%A)  Uid: (%u/%U)  Gid: (%g/%G)\nAccess: %x\nModify: %y\nChange: %z\n Birth: %w";
-  const DEFAULT_FS_FMT: &str = "  File: %N\n    ID: %i\tNamelen: %l\t Type: %t\nBlock size: %s\tFundamental block size: %S\nBlocks: Total: %b\tFree: %f\tAvailable: %a\nInodes: Total: %c\tFree: %d";
+  const DEFAULT_FS_FMT: &str = "  File: \"%n\"\n    ID: %i\tNamelen: %l\t Type: %T\nBlock size: %s\tFundamental block size: %S\nBlocks: Total: %b\tFree: %f\tAvailable: %a\nInodes: Total: %c\tFree: %d";
   const TERSE_FILE_FMT: &str = "%n %s %b %f %u %g %D %i %h %t %T %X %Y %Z %W %o";
   const TERSE_FS_FMT: &str = "%n %i %l %t %s %S %b %f %a %c %d";
 
