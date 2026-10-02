@@ -167,9 +167,8 @@ impl super::Dispatcher {
 
     let redirs = RedirSet::from(&tree[func.redirs]);
     let _guard = match Sinks::try_apply_set(&redirs, false) {
-      Ok(Some(g)) => g,
-      Ok(None) => return Ok(()),
-      Err(e) => return Err(e),
+      Ok(g) => g,
+      Err(e) => return e.report_or_propagate(tree.span_for(func_id)),
     };
 
     let mut frame = caller_contexts;

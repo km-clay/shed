@@ -221,13 +221,13 @@ enum Segment<C> {
 ///
 /// Made generic so that many builtins can re-use the same internal formatting logic
 /// Requires an implementor of [`StrFmt`] and a format string.
-/// [`Formatter::render()`] requires a source of values to format, which is also defined by the [`StrFmt`] implementor.
-pub(crate) struct Formatter<'s, S: StrFmt> {
+/// [`StrFormatter::render()`] requires a source of values to format, which is also defined by the [`StrFmt`] implementor.
+pub(crate) struct StrFormatter<'s, S: StrFmt> {
   set: &'s S,
   segments: Box<[Segment<S::Conv>]>,
 }
 
-impl<'s, S: StrFmt> Formatter<'s, S> {
+impl<'s, S: StrFmt> StrFormatter<'s, S> {
   pub(crate) fn parse(set: &'s S, fmt: &[u8]) -> ShResult<Self> {
     let mut cur = SliceCursor::new(fmt);
     let mut segments: Vec<Segment<S::Conv>> = Vec::new();

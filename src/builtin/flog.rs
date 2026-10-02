@@ -114,7 +114,7 @@ impl super::Builtin for Flog {
       col,
       now: Local::now(),
     };
-    strops::Formatter::parse(&LogFmt, prefix_fmt.as_bytes())
+    strops::StrFormatter::parse(&LogFmt, prefix_fmt.as_bytes())
       .and_then(|r| r.render(&mut ctx, &mut buf))
       .promote_err(arg_span)?;
 

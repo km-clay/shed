@@ -75,7 +75,7 @@ impl Builtin for List {
         let dur_fmt = DurFmt {
           running: Some(status.is_running()),
         };
-        strops::Formatter::parse(&dur_fmt, fmt)
+        strops::StrFormatter::parse(&dur_fmt, fmt)
           .and_then(|f| f.render(&mut strops::dur_delta(status.elapsed()), &mut buf))
           .promote_err(args.cmd_span())?;
         VarStr::from(buf)
@@ -178,7 +178,7 @@ impl Builtin for Status {
       let dur_fmt = DurFmt {
         running: Some(status.is_running()),
       };
-      strops::Formatter::parse(&dur_fmt, &fmt)
+      strops::StrFormatter::parse(&dur_fmt, &fmt)
         .and_then(|f| f.render(&mut strops::dur_delta(status.elapsed()), &mut buf))
         .promote_err(args.cmd_span())?;
 

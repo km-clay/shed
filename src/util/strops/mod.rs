@@ -15,7 +15,9 @@ pub(crate) use convert::{
   strftime,
 };
 pub(crate) use distance::{EDIT_WEIGHT, levenshtein};
-pub(crate) use format::{Base, Case, Count, Field, FieldParams, FmtFlags, Formatter, Sign, StrFmt};
+pub(crate) use format::{
+  Base, Case, Count, Field, FieldParams, FmtFlags, Sign, StrFmt, StrFormatter,
+};
 pub(crate) use num::{ParseRadix, VarStrDisplay};
 pub(crate) use quote::QuoteState;
 pub(crate) use scan::{

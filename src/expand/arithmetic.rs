@@ -1234,7 +1234,6 @@ fn strip_enclosing_parens(s: &[u8]) -> Option<&[u8]> {
 }
 
 #[cfg(test)]
-#[expect(clippy::float_cmp)]
 mod tests {
   use super::*;
   use crate::state::{Shed, vars::VarKind};

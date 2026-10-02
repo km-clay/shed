@@ -310,7 +310,7 @@ impl super::Builtin for Raise {
     };
 
     while let Some((fmt, span)) = ctx.args.next() {
-      let f = strops::Formatter::parse(&RaiseFmt, &fmt).promote_err(span)?;
+      let f = strops::StrFormatter::parse(&RaiseFmt, &fmt).promote_err(span)?;
       let mut buf = vec![];
       f.render(&mut ctx, &mut buf).promote_err(span)?;
       message_parts.push(buf);

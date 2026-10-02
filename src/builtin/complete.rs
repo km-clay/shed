@@ -543,7 +543,7 @@ mod tests {
     let guard = TestGuard::new();
     test_input("compgen -W 'foo bar baz' z").unwrap();
     let out = guard.read_output();
-    assert!(out.trim().is_empty());
+    assert_eq!(out.trim(), "");
   }
 
   #[test]

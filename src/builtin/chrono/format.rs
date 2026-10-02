@@ -70,7 +70,7 @@ impl Builtin for Format {
       if let Some(fmt_string) = fmt_string {
         let mut buf = vec![];
 
-        strops::Formatter::parse(&DurFmt { running: None }, &fmt_string)
+        strops::StrFormatter::parse(&DurFmt { running: None }, &fmt_string)
           .and_then(|f| f.render(&mut elapsed, &mut buf))
           .promote_err(span)
           .with_code(1)?;

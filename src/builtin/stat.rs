@@ -860,7 +860,7 @@ impl Stat {
     args: impl IntoIterator<Item = T>,
     mut make_src: impl FnMut(T) -> Option<S::Source>,
   ) -> ShResult<i32> {
-    let fmt = strops::Formatter::parse(set, format)?;
+    let fmt = strops::StrFormatter::parse(set, format)?;
     let mut buf = vec![];
     let mut status = 0;
 
@@ -891,7 +891,7 @@ mod tests {
   /// Build a `FileInfo` for `path` and render `fmt` against it.
   fn render(deref: bool, path: &str, fmt: &str) -> String {
     let mut info = FileInfo::new(deref, path.into()).unwrap();
-    let f = strops::Formatter::parse(&FileFmt, fmt.as_bytes()).unwrap();
+    let f = strops::StrFormatter::parse(&FileFmt, fmt.as_bytes()).unwrap();
     let mut out = vec![];
     f.render(&mut info, &mut out).unwrap();
     out.to_str_lossy().into_owned()
@@ -1004,7 +1004,7 @@ mod tests {
   #[test]
   fn unknown_and_incomplete_specifiers_error() {
     let _g = TestGuard::new();
-    assert!(strops::Formatter::parse(&FileFmt, b"%q").is_err());
+    assert!(strops::StrFormatter::parse(&FileFmt, b"%q").is_err());
   }
 
   #[test]

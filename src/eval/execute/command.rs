@@ -106,18 +106,18 @@ impl super::Dispatcher {
         }
       }
       match Sinks::try_apply_set(&tree[cmd.redirs].into(), false) {
-        Ok(Some(_)) => {
+        Ok(_) => {
           // command has only redirections: status 0 if it succeeded
           // then throw the guard away and return here
 
           if assignments.is_empty() {
             return with_status(0);
           }
+
           // keep status
           return Ok(());
         }
-        Ok(None) => return Ok(()),
-        Err(e) => return Err(e), // fatal error, propagate
+        Err(e) => return e.report_or_propagate(tree.span_for(cmd_id)),
       }
     }
     // argv is not empty. let's set this stuff here.
@@ -134,9 +134,8 @@ impl super::Dispatcher {
     let fatal = !Shed::term(Terminal::interactive)
       && builtin::lookup_builtin(cmd_name.as_bytes()).is_some_and(Builtin::is_special);
     let _guard = match Sinks::try_apply_set(&tree[cmd.redirs].into(), fatal) {
-      Ok(Some(g)) => g,
-      Ok(None) => return Ok(()),
-      Err(e) => return Err(e),
+      Ok(g) => g,
+      Err(e) => return e.report_or_propagate(tree.span_for(cmd_id)),
     };
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
 

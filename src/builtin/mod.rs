@@ -383,9 +383,8 @@ pub(super) trait Builtin: Sync {
     let redirs: RedirSet = RedirSet::from(&tree[node.redirs]);
     let fatal = self.is_special() && !Shed::term(Terminal::interactive);
     let guard = match Sinks::try_apply_set(&redirs, fatal) {
-      Ok(Some(g)) => g,
-      Ok(None) => return Ok(()), // non-fatal error, skip
-      Err(e) => return Err(e.promote(tree.span_for(node_id))), // fatal error, propagate
+      Ok(g) => g,
+      Err(e) => return e.report_or_propagate(tree.span_for(node_id)),
     };
 
     if fork_builtins {

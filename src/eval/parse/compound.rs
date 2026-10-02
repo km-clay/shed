@@ -31,9 +31,9 @@ impl ParseStream {
           span,
           "Expected function name after 'function' keyword"
         );
-      } else {
-        return Ok(None);
       }
+
+      return Ok(None);
     }
     let name_tk = self.next_tk().unwrap();
     extend_span!(span, name_tk.span);

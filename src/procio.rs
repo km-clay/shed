@@ -57,7 +57,7 @@ use crate::{
     Shed,
     shopt::ReadLimit,
     terminal::Terminal,
-    vars::{VarName, VarStr},
+    vars::{VarFlags, VarKind, VarName, VarStr},
   },
   util::{
     self,
@@ -297,6 +297,26 @@ fn read_brace_var(cur: &mut SliceCursor, bytes: &[u8]) -> Option<VarStr> {
     .then(|| VarStr::from(&bytes[start..end]))
 }
 
+/// Names the source of a raw fd
+///
+/// Existing - the fd existed before it was resolved
+/// New - the fd was allocated on resolution
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ResolvedFd {
+  Existing(RawFd),
+  New(RawFd),
+}
+
+impl ResolvedFd {
+  pub(crate) fn is_new(self) -> bool {
+    matches!(self, ResolvedFd::New(_))
+  }
+  pub(crate) fn get(self) -> RawFd {
+    let (ResolvedFd::Existing(fd) | ResolvedFd::New(fd)) = self;
+    fd
+  }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum FdSlot {
   Var(VarStr),
@@ -326,6 +346,19 @@ impl FdSlot {
     self
       .resolve_source()?
       .ok_or_else(|| sherr!(ParseErr, "redirection target cannot be '-'"))
+  }
+
+  /// The descriptor a redirection should open onto, and whether the shell
+  /// chose it.
+  fn resolve_or_alloc(&self) -> ShResult<ResolvedFd> {
+    let FdSlot::Var(name) = self else {
+      return Ok(ResolvedFd::Existing(self.resolve()?));
+    };
+
+    let fd = Shed::sinks(|s| s.free_high_fd())?;
+    let vn = VarName::parse(&name.to_str_lossy(), true)?;
+    Shed::vars_mut(|v| v.set_var(vn.name(), VarKind::Str(varstr!("{fd}")), VarFlags::empty()))?;
+    Ok(ResolvedFd::New(fd))
   }
 }
 
@@ -667,12 +700,16 @@ impl RedirSpec {
   pub(crate) fn buffer(fd: FdSlot, buf: VarStr, flags: TkFlags) -> Self {
     Self::Buffer { fd, buf, flags }
   }
-  pub(crate) fn target_fd(&self) -> ShResult<RawFd> {
+  /// The descriptor this redirection installs onto, allocating one for a
+  /// `{name}` slot on the operators that open a descriptor. The [`ResolvedFd`]
+  /// records whether the shell picked the number, which is what permits it to
+  /// sit above the hand-written range.
+  pub(crate) fn target_fd_origin(&self) -> ShResult<ResolvedFd> {
     match self {
-      RedirSpec::Dup { to, .. } => to.resolve(),
-      RedirSpec::File { fd, .. } | RedirSpec::Close { fd, .. } | RedirSpec::Buffer { fd, .. } => {
-        fd.resolve()
-      }
+      RedirSpec::Dup { to, .. } => to.resolve_or_alloc(),
+      RedirSpec::File { fd, .. } | RedirSpec::Buffer { fd, .. } => fd.resolve_or_alloc(),
+      // closing names a descriptor that already exists
+      RedirSpec::Close { fd, .. } => Ok(ResolvedFd::Existing(fd.resolve()?)),
     }
   }
   pub(crate) fn mode(&self) -> RedirType {
@@ -842,6 +879,10 @@ impl PipeFrames {
   }
 }
 
+/// A trait for abstracting over different types of I/O sinks (e.g., files, buffers, pipes)
+///
+/// Shed treats anything that implements this trait as a file, so on top of wrapping normal file
+/// descriptors with this, we can also create entire new types of files if we want to.
 pub(crate) trait Sink: Send + Sync {
   fn read(&self, buf: &mut [u8]) -> io::Result<usize>;
   fn write(&self, buf: &[u8]) -> io::Result<usize>;
@@ -1731,6 +1772,14 @@ impl Sinks {
 
     Self { table }
   }
+  /// Lowest descriptor at or above [`MIN_INTERNAL_FD`] that the table is not
+  /// already using, for `{name}` redirections.
+  pub(crate) fn free_high_fd(&self) -> ShResult<RawFd> {
+    (MIN_INTERNAL_FD..1024)
+      .find(|fd| !self.table.contains_key(fd))
+      .ok_or_else(|| sherr!(ExecFail, "no free file descriptor available").with_code(1))
+  }
+
   pub(crate) fn sink_pipes() -> (Arc<dyn Sink>, Arc<dyn Sink>) {
     let (read, write) = PipeSink::new();
     let read = Arc::new(read);
@@ -1804,7 +1853,7 @@ impl Sinks {
   pub(crate) fn apply_sink(sink: Arc<dyn Sink>, fd: RawFd) -> ShResult<RedirGuard> {
     RedirGuard::from_sink(sink, fd)
   }
-  pub(crate) fn try_apply_set(s: &RedirSet, fatal: bool) -> ShResult<Option<RedirGuard>> {
+  pub(crate) fn try_apply_set(s: &RedirSet, fatal: bool) -> ShResult<RedirGuard> {
     RedirGuard::try_from_redirs(s, fatal)
   }
   /// Point a [`RawFd`] at a specific instance of [`Sink`]
@@ -1845,17 +1894,6 @@ impl Sinks {
   }
 }
 
-enum RedirResult {
-  Success,
-  Fail,
-}
-
-impl RedirResult {
-  pub(crate) fn failed(&self) -> bool {
-    matches!(self, RedirResult::Fail)
-  }
-}
-
 pub(crate) struct RedirGuard {
   saved: Option<Vec<(RawFd, Arc<dyn Sink>)>>,
 }
@@ -1884,13 +1922,10 @@ impl RedirGuard {
     Ok(guard)
   }
 
-  fn try_from_redirs(redirs: &RedirSet, fatal: bool) -> ShResult<Option<Self>> {
+  fn try_from_redirs(redirs: &RedirSet, fatal: bool) -> ShResult<Self> {
     let mut guard = Self::new();
-    if guard.try_apply_set(redirs, fatal)?.failed() {
-      Ok(None)
-    } else {
-      Ok(Some(guard))
-    }
+    guard.try_apply_set(redirs, fatal)?;
+    Ok(guard)
   }
 
   pub(crate) fn try_save(&mut self, fd: RawFd, sink: Arc<dyn Sink>) {
@@ -1905,11 +1940,20 @@ impl RedirGuard {
   }
 
   pub(crate) fn apply_sink(&mut self, fd: RawFd, sink: Arc<dyn Sink>) -> ShResult<()> {
-    validate_fd(fd)?;
+    self.apply_sink_from(ResolvedFd::Existing(fd), sink)
+  }
+
+  /// A [`ResolvedFd::New`] descriptor is one this shell chose for a `{name}`
+  /// redirection; those live above the hand-written range by design, so the
+  /// reserved-range check does not apply.
+  fn apply_sink_from(&mut self, fd: ResolvedFd, sink: Arc<dyn Sink>) -> ShResult<()> {
+    validate_fd(fd.get())?;
+    let is_new = fd.is_new();
+    let fd = fd.get();
 
     // everything above 10 is off limits for new FDs
     // but closing them is fine
-    if fd >= MIN_INTERNAL_FD && sink.kind() != SinkKind::Close {
+    if !is_new && fd >= MIN_INTERNAL_FD && sink.kind() != SinkKind::Close {
       return Err(
         sherr!(
           ExecFail,
@@ -1932,23 +1976,19 @@ impl RedirGuard {
   /// Swaps the current sink for the target fd with the new sink specified by the redirection spec.
   /// Swaps it back on drop, unless [`RedirGuard::persist()`] is called.
   pub(crate) fn apply(&mut self, r: &RedirSpec) -> ShResult<()> {
-    let fd = r.target_fd()?;
+    let resolved = r.target_fd_origin()?;
 
     let sink = r.as_sink()?; // runs expansion. careful!
-    self.apply_sink(fd, sink)
+    self.apply_sink_from(resolved, sink)
   }
 
-  fn try_apply_set(&mut self, s: &RedirSet, fatal: bool) -> ShResult<RedirResult> {
-    if let Err(e) = self.apply_set(s) {
+  fn try_apply_set(&mut self, s: &RedirSet, fatal: bool) -> ShResult<()> {
+    if let Err(mut e) = self.apply_set(s) {
       self.restore_into();
-      if fatal {
-        return Err(e);
-      }
-      e.print_error();
-      Shed::set_status(1);
-      return Ok(RedirResult::Fail);
+      e = e.set_fatal(fatal);
+      return Err(e);
     }
-    Ok(RedirResult::Success)
+    Ok(())
   }
 
   pub(crate) fn apply_set(&mut self, s: &RedirSet) -> ShResult<()> {

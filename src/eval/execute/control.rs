@@ -237,9 +237,8 @@ impl super::Dispatcher {
 
     let redirs = RedirSet::from(redirs);
     let guard = match Sinks::try_apply_set(&redirs, false) {
-      Ok(Some(g)) => g,
-      Ok(None) => return Ok(()),
-      Err(e) => return Err(e),
+      Ok(g) => g,
+      Err(e) => return e.report_or_propagate(tree.span_for(node_id)),
     };
 
     if fork_builtins {
@@ -278,9 +277,8 @@ impl super::Dispatcher {
 
     let redirs = RedirSet::from(&tree[subsh.redirs]);
     let _guard = match Sinks::try_apply_set(&redirs, false) {
-      Ok(Some(g)) => g,
-      Ok(None) => return Ok(()),
-      Err(e) => return Err(e),
+      Ok(g) => g,
+      Err(e) => return e.report_or_propagate(tree.span_for(subsh_id)),
     };
 
     let body_raw = span.slice();

@@ -374,10 +374,16 @@ pub(crate) struct ShErr {
   notes: Vec<VarStr>,
   code: Option<i32>,
 
-  /// If we propagate through a redirect boundary, we take ownership of
-  /// the RedirGuard(s) so that redirections stay alive until the error
-  /// is printed.  Multiple guards can accumulate as the error bubbles
-  /// through nested redirect scopes.
+  /// Set by redirection errors in certain contexts.
+  /// This is load bearing for POSIX behavior, so don't use it
+  /// for anything else!!!!!!!!!!!!!!
+  fatal: bool,
+
+  /// Redirections held open until the error is printed.
+  ///
+  /// If stderr was redirected, it must stay that way while the error travels,
+  /// so the error takes ownership of the RAII guard. Several accumulate as it
+  /// bubbles through nested redirect scopes, which is why this is a `Vec`.
   io_guards: Vec<RedirGuard>,
 }
 
@@ -387,6 +393,7 @@ impl ShErr {
       kind,
       src_span: Some(span.upgrade()),
       code: None,
+      fatal: false,
       labels: vec![],
       notes: vec![],
       io_guards: vec![],
@@ -397,6 +404,7 @@ impl ShErr {
       kind,
       src_span: None,
       code: None,
+      fatal: false,
       labels: vec![],
       notes: vec![msg],
       io_guards: vec![],
@@ -405,6 +413,26 @@ impl ShErr {
   pub(crate) fn with_code(mut self, code: i32) -> Self {
     self.code = Some(code);
     self
+  }
+  pub(crate) fn set_fatal(mut self, fatal: bool) -> Self {
+    self.fatal = fatal;
+    self
+  }
+  pub(crate) fn is_fatal(&self) -> bool {
+    self.fatal
+  }
+  /// Attach `span`, then either propagate or report.
+  ///
+  /// A fatal error is handed back for the caller to propagate; a non-fatal one
+  /// is printed here and becomes exit status 1. Only redirection failures set
+  /// [`ShErr::is_fatal`], so this is that policy in a single place.
+  pub(crate) fn report_or_propagate(self, span: Span) -> ShResult<()> {
+    let err = self.promote(span);
+    if err.is_fatal() {
+      return Err(err);
+    }
+    err.print_error();
+    crate::util::with_status(1)
   }
   pub(crate) fn code(&self) -> Option<i32> {
     self.code.or_else(|| self.kind().code())

@@ -11,8 +11,8 @@ use crate::{
     self,
     error::ShResult,
     strops::{
-      self, Base, ByteCursor, Case, Count, Field, FieldParams, FmtFlags, Formatter, ParseRadix,
-      Sign, SliceCursor, StrFmt,
+      self, Base, ByteCursor, Case, Count, Field, FieldParams, FmtFlags, ParseRadix, Sign,
+      SliceCursor, StrFmt, StrFormatter,
     },
   },
   varstr,
@@ -124,9 +124,9 @@ impl StrFmt for PrintfFmt {
 /// a *present* argument that fails to parse yields `0` plus a
 /// [`PrintfErr::BadNumber`], so the caller still substitutes `0` and continues
 /// formatting while the run is flagged to exit non-zero.
-fn parse_num_arg<T: ParseRadix + Default>(arg: Option<Vec<u8>>) -> (T, Option<PrintfErr>) {
+fn parse_num_arg<T: ParseRadix + Default>(arg: Option<Vec<u8>>) -> Result<T, PrintfErr> {
   let Some(arg) = arg else {
-    return (T::default(), None);
+    return Ok(T::default());
   };
 
   // posix thing: if a char leads with a quote, we parse it
@@ -136,18 +136,13 @@ fn parse_num_arg<T: ParseRadix + Default>(arg: Option<Vec<u8>>) -> (T, Option<Pr
   {
     let byte = rest.first().copied().unwrap_or(0);
     let byte_s = varstr!("{byte}");
-    return (
-      ParseRadix::parse_radix(&byte_s.to_str_lossy()).unwrap_or_default(),
-      None,
-    );
+    let n = ParseRadix::parse_radix(&byte_s.to_str_lossy()).unwrap_or_default();
+    return Ok(n);
   }
 
   match ParseRadix::parse_radix(&arg.to_str_lossy()) {
-    Some(v) => (v, None),
-    None => (
-      T::default(),
-      Some(PrintfErr::BadNumber(arg.to_str_lossy().into())),
-    ),
+    Some(v) => Ok(v),
+    None => Err(PrintfErr::BadNumber(arg.to_str_lossy().into())),
   }
 }
 
@@ -206,8 +201,14 @@ fn prec_of(field: &FieldParams) -> Option<usize> {
 }
 
 fn render_int(src: &mut PrintfArgs, flags: Option<FmtFlags>, prec: Option<usize>) -> Field {
-  let (n, err): (i64, _) = parse_num_arg(src.args.next());
-  src.errors.extend(err);
+  let n: i64 = match parse_num_arg(src.args.next()) {
+    Ok(n) => n,
+    Err(e) => {
+      src.errors.push(e);
+      0
+    }
+  };
+
   let sign = flags.and_then(|f| sign_for(n.is_negative(), f));
 
   let mut digits = n.unsigned_abs().to_string();
@@ -227,8 +228,13 @@ fn render_unsigned(src: &mut PrintfArgs, prec: Option<usize>) -> Field {
 }
 
 fn render_octal(src: &mut PrintfArgs, flags: FmtFlags, prec: Option<usize>) -> Field {
-  let (n, err): (u64, _) = parse_num_arg(src.args.next());
-  src.errors.extend(err);
+  let n: i64 = match parse_num_arg(src.args.next()) {
+    Ok(n) => n,
+    Err(e) => {
+      src.errors.push(e);
+      0
+    }
+  };
 
   let mut digits = format!("{n:o}");
   if let Some(p) = prec {
@@ -242,8 +248,13 @@ fn render_octal(src: &mut PrintfArgs, flags: FmtFlags, prec: Option<usize>) -> F
 }
 
 fn render_hex(src: &mut PrintfArgs, flags: FmtFlags, prec: Option<usize>, case: Case) -> Field {
-  let (n, err): (u64, _) = parse_num_arg(src.args.next());
-  src.errors.extend(err);
+  let n: i64 = match parse_num_arg(src.args.next()) {
+    Ok(n) => n,
+    Err(e) => {
+      src.errors.push(e);
+      0
+    }
+  };
 
   let mut digits = match case {
     Case::Lower => format!("{n:x}"),
@@ -343,8 +354,13 @@ fn render_shortest(
 }
 
 fn render_human(src: &mut PrintfArgs) -> Field {
-  let (n, err): (u64, _) = parse_num_arg(src.args.next());
-  src.errors.extend(err);
+  let n: u64 = match parse_num_arg(src.args.next()) {
+    Ok(n) => n,
+    Err(e) => {
+      src.errors.push(e);
+      0
+    }
+  };
   let mut s = String::new();
   strops::format_size(n, &mut s).ok();
   Field::numeric_padded(s.into_bytes(), None, None, true)
@@ -509,7 +525,7 @@ impl super::Builtin for Printf {
     }
 
     let (format_str, _) = first;
-    let formatter = Formatter::parse(&PrintfFmt, format_str.as_bytes())?;
+    let formatter = StrFormatter::parse(&PrintfFmt, format_str.as_bytes())?;
     let remaining: Vec<Vec<u8>> = arg_iter.map(|(s, _)| s.as_bytes().to_vec()).collect();
 
     let mut src = PrintfArgs {
