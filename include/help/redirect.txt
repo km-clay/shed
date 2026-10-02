@@ -211,10 +211,66 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       1   stdout
       2   stderr
 
-  File descriptors 3 and above are available for general use with `exec`.
+  Descriptors 3 through 9 are yours to use. Ten and above are reserved:
+  the shell allocates from there for |redir-varfd|, and a written number
+  in that range is refused, so a script can never collide with one.
 
 ==============================================================================
-9. Combining Redirections                      *redir-combine*
+9. Allocated Descriptors                       *redir-varfd*
+
+  `{name}` in place of a descriptor number lets the shell pick one and
+  tells you which, rather than making you choose a number and hope
+  nothing else wants it.
+
+      ```exec {fd}< data.txt```
+      ```thru <&$fd```
+      ```exec {fd}<&-```
+
+  The descriptor it picked is assigned to {name} as an ordinary variable,
+  so everything afterwards refers to it as `$name`. Allocation takes the
+  lowest free descriptor at 10 or above -- outside the range a script
+  writes by hand, which is what makes a collision impossible.
+
+  Every operator that opens a descriptor allocates one:
+
+      `{v}< file`     `{v}> file`     `{v}>> file`    `{v}<> file`
+      `{v}>&1`        `{v}<&0`
+
+  Closing does not, because the descriptor already exists: `{v}>&-` reads
+  {name} and closes what it names.
+
+  Lifetime ~                                   *redir-varfd-lifetime*
+
+    An allocated descriptor lasts as long as the redirection that made
+    it, exactly like a numbered one. On `exec` that is the rest of the
+    shell; on any other command it is that command only:
+
+        ```exec {fd}< data.txt```     open until you close it
+        ```true {fd}< data.txt```     closed when `true` returns
+
+    The variable is not unset when the descriptor goes away, so after the
+    second line `$fd` still holds a number that no longer names anything.
+    Reading from it fails with `Bad file descriptor`.
+
+    This differs from `bash`, which leaves the descriptor open after the
+    command and relies on you to close it.
+
+  Examples ~
+
+      ```exec {lock}> /var/lock/mine```
+      ```flock -n $lock || return```
+
+      ```exec {log}>> run.log```
+      ```echo starting >&$log```
+      ```exec {log}>&-```
+
+    A compound command keeps the descriptor for its whole body, which is
+    where a non-`exec` allocation is useful:
+
+      ```{ echo a >&$w; echo b >&$w; } {w}> out.txt```
+
+==============================================================================
+10. Combining Redirections                     *redir-combine*
 
   Multiple redirections can appear on a single command, processed left
   to right:
