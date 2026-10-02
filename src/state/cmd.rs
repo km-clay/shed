@@ -88,10 +88,17 @@ pub(crate) fn list_util_names() -> HashSet<VarStr> {
 /// This calls [`list_util_names()`], which calls [`Shed::meta()`] internally.
 /// Calling this from inside of a [`Shed::meta()`] closure is a `RefCell` panic.
 pub(crate) fn check_typo(cmd: &[u8]) -> Vec<VarStr> {
+  check_typo_against(cmd, list_util_names())
+}
+
+pub(crate) fn check_typo_against(
+  cmd: &[u8],
+  cand: impl IntoIterator<Item = VarStr>,
+) -> Vec<VarStr> {
   let max_edits = (cmd.len() / 3).clamp(1, 2);
   let max_dist = max_edits * strops::EDIT_WEIGHT;
 
-  let mut matches = list_util_names()
+  let mut matches = cand
     .into_iter()
     .filter(|n| n.len().abs_diff(cmd.len()) <= max_dist) // cheap prune
     .filter_map(|n| {

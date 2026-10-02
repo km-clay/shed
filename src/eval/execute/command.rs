@@ -15,7 +15,6 @@ use std::{
   thread,
 };
 
-use itertools::Itertools;
 use nix::{
   errno::Errno,
   unistd::{self, ForkResult, Pid},
@@ -42,7 +41,6 @@ use crate::{
     error::{ShErr, ShResult},
     guards, posix, with_status,
   },
-  varstr,
 };
 
 use super::{AssignBehavior, Ast, NdRule, NodeId, classify};
@@ -250,21 +248,10 @@ impl super::Dispatcher {
       match e {
         Errno::ENOENT => {
           let suggestions = cmd::check_typo(cmd.as_bytes());
-          let note = match suggestions.as_slice() {
-            [] => None,
-            [one] => Some(varstr!("did you mean '{one}'?")),
-            many => {
-              let list = many.iter().map(|s| format!("'{s}'")).join(", ");
 
-              Some(varstr!("did you mean one of: {list}?"))
-            }
-          };
-
-          let mut err =
-            sherr!(NotFound @ span, "command not found").with_context(tree[*context].iter());
-          if let Some(note) = note {
-            err = err.with_note(note);
-          }
+          let err = sherr!(NotFound @ span, "command not found")
+            .with_context(tree[*context].iter())
+            .with_suggestions(&suggestions);
 
           print_error(err);
 

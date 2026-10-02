@@ -1,6 +1,7 @@
 //! The shell's error type (`ShErr` / `ShResult`) and its `ariadne`-rendered diagnostics.
 use ariadne::{Color, Label};
 use ariadne::{Report, ReportKind};
+use itertools::Itertools;
 use nix::errno::Errno;
 use std::cell::RefCell;
 use std::fmt::{self, Debug, Display};
@@ -578,6 +579,22 @@ impl ShErr {
   pub(crate) fn with_note(mut self, note: VarStr) -> Self {
     self.notes.push(note);
     self
+  }
+  pub(crate) fn with_suggestions(self, suggestions: &[VarStr]) -> Self {
+    if suggestions.is_empty() {
+      return self;
+    }
+
+    let note = match suggestions {
+      [one] => varstr!("did you mean '{one}'?"),
+      many => {
+        let list = many.iter().map(|s| format!("'{s}'")).join(", ");
+
+        varstr!("did you mean one of: {list}?")
+      }
+    };
+
+    self.with_note(note)
   }
   pub(crate) fn src_span(&self) -> Option<&Span> {
     self.src_span.as_deref()

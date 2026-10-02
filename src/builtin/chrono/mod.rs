@@ -7,7 +7,7 @@ use nix::libc;
 use crate::{
   eval::lex::{Span, Tk},
   sherr, signal,
-  state::{timers::TimerStatus, vars::VarStr},
+  state::{cmd, timers::TimerStatus, vars::VarStr},
   try_var,
   util::{
     error::ShResult,
@@ -335,14 +335,28 @@ impl Builtin for Chrono {
   }
 }
 
+impl Chrono {
+  fn subcommands() -> Vec<VarStr> {
+    vec![
+      VarStr::from("timer"),
+      VarStr::from("sleep"),
+      VarStr::from("fmt"),
+      VarStr::from("every"),
+      VarStr::from("zone"),
+    ]
+  }
+}
+
 struct ChronoError;
 impl Builtin for ChronoError {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     for (arg, span) in args.arguments() {
       if !arg.starts_with(b"-") {
-        return Err(
-          sherr!(ExecFail @ span, "unknown subcommand `{arg}` for `chrono`").with_code(2),
-        );
+        let suggestions = cmd::check_typo_against(arg.as_bytes(), Chrono::subcommands());
+        let err = sherr!(ExecFail @ span, "unknown subcommand `{arg}` for `chrono`")
+          .with_code(2)
+          .with_suggestions(&suggestions);
+        return Err(err);
       }
     }
     Err(sherr!(ExecFail @ args.cmd_span(), "no subcommand specified for `chrono`").with_code(2))
