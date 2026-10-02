@@ -188,6 +188,8 @@ impl super::Dispatcher {
 
       if let Some(pgid) = pgid {
         let _ = unistd::setpgid(Pid::from_raw(0), pgid);
+      } else if interactive {
+        let _ = unistd::setpgid(Pid::from_raw(0), Pid::from_raw(0));
       }
       // Apply the values resolved in the parent above (already `EXPORT`-flagged),
       // so `get_envp` picks them up for `execve`. No expansion happens here.

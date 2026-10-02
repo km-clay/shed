@@ -217,6 +217,9 @@ impl super::Builtin for Wait {
 
 pub(super) struct Disown;
 impl super::Builtin for Disown {
+  fn strict_opts(&self) -> bool {
+    true
+  }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       OptSpec::new_short("nohup", b'h'),
@@ -225,21 +228,8 @@ impl super::Builtin for Disown {
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let span = args.span();
-    let mut nohup = false;
-    let mut disown_all = false;
-
-    for opt in args.options() {
-      match opt.key() {
-        "nohup" => nohup = true,
-        "all" => disown_all = true,
-        _ => {
-          return Err(sherr!(
-            SyntaxErr @ span,
-            "Invalid flag in disown call",
-          ));
-        }
-      }
-    }
+    let nohup = args.has_opt("nohup");
+    let disown_all = args.has_opt("all");
 
     // -a operates on every job; explicit ids and the current-job
     // fallback are both irrelevant.
