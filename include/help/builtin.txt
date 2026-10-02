@@ -43,6 +43,7 @@ The following builtins are available:
   `kill`        send signals to processes                   |builtin-kill|
   `len`         print byte, character, or display length    |builtin-len|
   `listen`      create a listening socket on a descriptor   |builtin-listen|
+  `lock`        take an advisory lock on a descriptor        |builtin-lock|
   `local`       declare variables local to a function       |builtin-local|
   `msg`         post a message to the status bar            |builtin-msg|
   `nextd`       go forward in the directory history         |builtin-nextd|
@@ -2004,6 +2005,67 @@ LET                                              *builtin-let* *let*
       ```let x=2+3```              x is 5
       ```let "y = 4 * (1 + 2)"```  y is 12
       ```let a=1 b=a+1```          a is 1, b is 2
+
+==============================================================================
+LOCK                                               *builtin-lock* *lock*
+
+  `lock [-snu] {fd}`
+
+  Take or release an advisory lock on one of the shell's own file
+  descriptors. {fd} is a descriptor the shell holds -- a standard stream
+  or one opened with `exec`, usually an allocated one:
+
+      ```exec {fd}<> /run/user/1000/myjob.lock```
+      ```lock -n $fd || return```
+
+  The lock is held on the open file *description*, not the descriptor
+  number, so it survives `fork` and lasts until that description is
+  closed. A backgrounded job inherits it; releasing it is a matter of
+  closing the fd, or `-u`.
+
+  A path is not accepted. A lock whose file the shell did not keep open
+  would be released the moment the command returned, so the descriptor
+  comes first and `lock` takes it -- see |redir-varfd| for `{name}`.
+
+  Flags ~
+
+    `-n`, `--nonblock`   fail instead of waiting when another holder has
+                         the lock. Without it, `lock` waits, and a signal
+                         interrupts the wait and runs any traps.
+    `-s`, `--shared`     take a shared lock. Several holders may share
+                         one; an exclusive lock excludes them all.
+                         Exclusive is the default.
+    `-u`, `--unlock`     release the lock, leaving the descriptor open.
+                         `-s` and `-n` do not apply.
+
+  Only one descriptor may be given. `flock(2)` locks one at a time, so
+  taking several is several calls and cannot be made atomic -- what a
+  partial acquisition means is left to the caller, who is the only one
+  able to decide:
+
+      ```lock -n $a || return```
+      ```lock -n $b || { lock -u $a; return; }```
+
+  Exit status ~
+
+    `0`   the lock was taken, or released with `-u`
+    `1`   another holder has it, under `-n`; nothing is printed, as this
+          is an answer rather than a failure. Also a {fd} the shell does
+          not hold.
+    `2`   no {fd}, more than one, or one that is not a number
+
+  Examples ~
+
+    One daemon across every shell, whichever starts first:
+
+      ```exec {lk}<> "$XDG_RUNTIME_DIR"/shed/backup.lock```
+      ```lock -n $lk || return```
+      ```# ... only one shell reaches here ...```
+
+    Serialising writers while readers run concurrently:
+
+      ```lock -s $fd      # readers```
+      ```lock $fd         # writer, waits for the readers to finish```
 
 ==============================================================================
 LOCAL                                            *builtin-local* *local*

@@ -67,6 +67,7 @@ mod intro;
 mod jobctl;
 mod keymap;
 mod len;
+mod lock;
 mod msg;
 pub(crate) mod opt;
 mod pipe;
@@ -163,6 +164,7 @@ register_builtins! {
   b"let"      => self    ::Let,
   b"listen"   => sock    ::Listen,
   b"local"    => varcmds ::Local,
+  b"lock"     => lock    ::Lock,
   b"msg"      => msg     ::Msg,
   b"nextd"    => dirjump ::NextD,
   b"pipe"     => pipe    ::Pipe,
