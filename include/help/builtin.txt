@@ -33,6 +33,7 @@ The following builtins are available:
   `flog`        write a formatted log message               |builtin-flog|
   `fg`          bring a job to the foreground               |builtin-fg|
   `forget`      reset shell state to its launch baseline    |builtin-forget|
+  `fs`          filesystem operations (rename)              |builtin-fs|
   `genrc`       (re)generate the rc file from live state    |builtin-genrc|
   `getopts`     parse option flags in scripts               |builtin-getopts|
   `hash`        manage the command location cache           |builtin-hash|
@@ -1579,6 +1580,84 @@ FORGET                                           *builtin-forget* *forget*
       ```dump=$(genrc --vars)```         stash variables, wipe them, restore
       ```forget -x dump; eval "$dump"```
       ```forget; source ~/.shedrc```     reload configuration from scratch
+
+==============================================================================
+FS                                                       *builtin-fs* *fs*
+
+  `fs {subcommand} ...`
+
+  Filesystem operations. `fs` is a namespace; all work is done by its
+  subcommands. Running it with no subcommand is an error.
+
+  Each subcommand exposes one system call, so what it does is the kernel's
+  behaviour rather than a reimplementation of the familiar command that
+  shares its name. `fs rename` is `rename(2)`, not `mv`: it will not cross
+  filesystems and it will not copy. Where the two differ the coreutil is
+  still there, unshadowed -- `fs` puts a primitive beside it rather than
+  replacing it.
+
+  Subcommands ~
+
+    `rename`  atomically rename a file within one filesystem
+
+==============================================================================
+FS RENAME                                  *fs-rename* *builtin-fs-rename*
+
+  `fs rename {from} {to}`
+
+  Rename {from} to {to} with `rename(2)`. Exactly two paths are taken: the
+  call has one source and one destination, and on an operation that
+  replaces files, guessing which of three paths was meant as the
+  destination is not worth the risk.
+
+  The rename is atomic. Any observer sees {to} either as it was or as
+  {from}, never missing and never half-written, which is what makes the
+  write-then-rename idiom safe -- see the examples below.
+
+  An existing {to} is replaced silently. There is deliberately no prompt
+  and no flag to prevent it: refusing to overwrite is only race-free as
+  `renameat2`'s `RENAME_NOREPLACE`, which is absent on macOS and on musl
+  targets, and a check-then-rename standing in for it would be a race
+  dressed up as a guarantee.
+
+  Neither path is followed when it is a symlink; the link itself is
+  renamed. Renaming a symlink over the file it points at therefore leaves
+  the link where that file used to be.
+
+  Both operands are passed as raw bytes, so a filename that is not valid
+  UTF-8 is renamed exactly as it is.
+
+  Which combinations are legal is the kernel's decision, not `fs`'s:
+
+    - a file may replace a file
+    - a directory may replace an *empty* directory, which moves its whole
+      subtree in one operation
+    - a file may not replace a directory, nor a directory a file
+    - {from} and {to} naming the same existing file succeeds and changes
+      nothing, as POSIX requires
+
+  Exit status ~
+
+    `0`   the rename succeeded, or both paths named the same file
+    `1`   the rename failed; the message names the reason
+    `2`   fewer or more than two paths were given
+
+  Examples ~
+
+    Replacing a file with no instant at which it is absent or partial:
+
+      ```genrc > ~/.shedrc.new```
+      ```fs rename ~/.shedrc.new ~/.shedrc```
+
+    Rotating a log in one step:
+
+      ```fs rename app.log app.log.1```
+
+    A cross-filesystem rename fails rather than quietly copying:
+
+      ```fs rename ./data /mnt/backup/data```
+      ```# cannot rename `./data` to `/mnt/backup/data`: different```
+      ```# filesystems. use `mv` to copy instead```
 
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*
@@ -3688,8 +3767,8 @@ SOURCE                                           *builtin-source* *source*
 ==============================================================================
 STAT                                             *builtin-stat* *stat*
 
-  `stat [-L] [-t] [-c {format}] {file} ...`
-  `stat -f [-t] [-c {format}] {file} ...`
+  `stat [-Lht] [-c {format}] {file} ...`
+  `stat -f [-ht] [-c {format}] {file} ...`
 
   Display detailed status for each {file}, drawn from `lstat(2)` (or
   `statfs(2)` with `-f`). Without `-c`, a multi-line human-readable
@@ -3706,6 +3785,10 @@ STAT                                             *builtin-stat* *stat*
                             target file instead of the link
     `-f`, `--file-system`       report the status of the filesystem
                             containing {file}, not the file itself
+    `-h`, `--human`             render sizes in the default report as
+                            human-readable quantities. Only affects the
+                            default report; a {format} given with `-c`
+                            chooses its own specifiers
     `-t`, `--terse`             print a terse, single-line summary with
                             fields separated by spaces
     `-c`, `--format={format}`   render each file through {format}
@@ -3762,10 +3845,13 @@ STAT                                             *builtin-stat* *stat*
   Filesystem specifiers (with `-f`):
 
     `%a`    free blocks available to non-root
+    `%A`    free space available to non-root, human readable
     `%b`    total data blocks in the filesystem
+    `%B`    total size of the filesystem, human readable
     `%c`    total inodes in the filesystem
     `%d`    free inodes in the filesystem
     `%f`    free blocks in the filesystem
+    `%F`    free space in the filesystem, human readable
     `%i`    filesystem ID
     `%l`    maximum length of a file name
     `%n`    file name
@@ -3773,6 +3859,11 @@ STAT                                             *builtin-stat* *stat*
     `%S`    fundamental block size (for block counts)
     `%t`    filesystem type, in hexadecimal
     `%T`    filesystem type, in words (e.g. `ext2/ext3/ext4`, `tmpfs`)
+
+  The human-readable block counts are the block count multiplied by the
+  fundamental block size `%S`, which is the unit POSIX defines `%a`, `%b`
+  and `%f` in -- not the transfer hint `%s`. Inode counts stay raw under
+  `-h`, being counts rather than quantities of bytes.
 
   Human-readable times are formatted as `%Y-%m-%d %H:%M:%S`. Birth time
   is reported only when the underlying filesystem records it.
@@ -3789,6 +3880,9 @@ STAT                                             *builtin-stat* *stat*
 
       ```stat -f -c '%T %a/%b' .```
                                 filesystem type and free/total blocks
+
+      ```stat -f -c '%n: %A free of %B' .```
+                                a df-style line in human-readable units
 
   See also: |builtin-printf|
 

@@ -53,6 +53,7 @@ mod echo;
 mod evaluate;
 mod exec;
 mod fcntl;
+mod files;
 mod fixcmd;
 mod flog;
 mod flowctl;
@@ -152,6 +153,7 @@ register_builtins! {
   b"forget"   => forget  ::Forget,
   b"fpop"     => arrops  ::FrontPop,
   b"fpush"    => arrops  ::FrontPush,
+  b"fs"       => files   ::Fs,
   b"genrc"    => genrc   ::GenRc,
   b"getopts"  => getopts ::GetOpts,
   b"hash"     => hash    ::Hash,

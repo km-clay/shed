@@ -338,6 +338,13 @@ impl Builtin for Chrono {
 struct ChronoError;
 impl Builtin for ChronoError {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    Err(sherr!(ExecFail @ args.cmd_span(), "no subcommand specified for `chrono`"))
+    for (arg, span) in args.arguments() {
+      if !arg.starts_with(b"-") {
+        return Err(
+          sherr!(ExecFail @ span, "unknown subcommand `{arg}` for `chrono`").with_code(2),
+        );
+      }
+    }
+    Err(sherr!(ExecFail @ args.cmd_span(), "no subcommand specified for `chrono`").with_code(2))
   }
 }

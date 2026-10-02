@@ -130,11 +130,14 @@ impl StrFmt for FsFmt {
       return Err(sherr!(ExecFail, "stat: Incomplete format specifier"));
     };
     Ok(match b {
-      b'a' => FsConv::FreeBlocksForNonRoot,
-      b'b' => FsConv::TotalBlocks,
+      b'a' => FsConv::FreeBlocksForNonRoot(StatDisplay::Machine(Base::Decimal)),
+      b'A' => FsConv::FreeBlocksForNonRoot(StatDisplay::Human),
+      b'b' => FsConv::TotalBlocks(StatDisplay::Machine(Base::Decimal)),
+      b'B' => FsConv::TotalBlocks(StatDisplay::Human),
       b'c' => FsConv::TotalNodes,
       b'd' => FsConv::FreeNodes,
-      b'f' => FsConv::FreeBlocks,
+      b'f' => FsConv::FreeBlocks(StatDisplay::Machine(Base::Decimal)),
+      b'F' => FsConv::FreeBlocks(StatDisplay::Human),
       b'i' => FsConv::FsId,
       b'l' => FsConv::MaxNameLen,
       b'n' => FsConv::FileName,
@@ -367,20 +370,7 @@ impl FileInfo {
         Base::Octal => write!(f, "{size:o}"),
         Base::Hex => write!(f, "{size:x}"),
       },
-      StatDisplay::Human => {
-        let mut size = size as f64;
-        let units = ["B", "K", "M", "G", "T", "P", "E"];
-        let mut unit = 0;
-        while size >= 1024.0 && unit < units.len() - 1 {
-          size /= 1024.0;
-          unit += 1;
-        }
-        if unit == 0 {
-          write!(f, "{:.0}{}", size, units[unit])
-        } else {
-          write!(f, "{:.1}{}", size, units[unit])
-        }
-      }
+      StatDisplay::Human => strops::format_size(size as u64, f),
     }
   }
 
@@ -596,9 +586,9 @@ impl FileConv {
 }
 
 enum FsConv {
-  FreeBlocksForNonRoot,
-  FreeBlocks,
-  TotalBlocks,
+  FreeBlocksForNonRoot(StatDisplay),
+  FreeBlocks(StatDisplay),
+  TotalBlocks(StatDisplay),
   TotalNodes,
   FreeNodes,
   FsId,
@@ -687,18 +677,39 @@ fn fs_type_of(path: &str) -> (Option<u64>, Option<String>) {
 }
 
 impl FsConv {
+  #[rustfmt::skip]
   fn format(&self, f: &mut impl fmt::Write, name: &str, stat: &FsInfo) -> fmt::Result {
+    let FsInfo { block_size, fundamental_bs, total_nodes, free_nodes, fs_id, name_max, .. } = stat;
     match self {
       FsConv::FileName /*=======*/ => write!(f, "{name}"),
-      FsConv::FreeBlocksForNonRoot => write!(f, "{}", stat.avail_blks),
-      FsConv::FreeBlocks /*=====*/ => write!(f, "{}", stat.free_blks),
-      FsConv::TotalBlocks /*----*/ => write!(f, "{}", stat.total_blks),
-      FsConv::TotalNodes /*=====*/ => write!(f, "{}", stat.total_nodes),
-      FsConv::FreeNodes /*------*/ => write!(f, "{}", stat.free_nodes),
-      FsConv::FsId /*===========*/ => write!(f, "{}", stat.fs_id),
-      FsConv::MaxNameLen /*-----*/ => write!(f, "{}", stat.name_max),
-      FsConv::BlockSize /*------*/ => write!(f, "{}", stat.block_size),
-      FsConv::FundamentalBs /*==*/ => write!(f, "{}", stat.fundamental_bs),
+      FsConv::TotalNodes /*=====*/ => write!(f, "{total_nodes}"),
+      FsConv::FreeNodes /*------*/ => write!(f, "{free_nodes}"),
+      FsConv::FsId /*===========*/ => write!(f, "{fs_id}"),
+      FsConv::MaxNameLen /*-----*/ => write!(f, "{name_max}"),
+      FsConv::BlockSize /*------*/ => write!(f, "{block_size}"),
+      FsConv::FundamentalBs /*==*/ => write!(f, "{fundamental_bs}"),
+      FsConv::FreeBlocksForNonRoot(s) |
+      FsConv::TotalBlocks(s) /*----*/ |
+      FsConv::FreeBlocks(s) /*==*/ => {
+        let blocks = match self {
+          FsConv::TotalBlocks(_) => stat.total_blks,
+          FsConv::FreeBlocks(_) => stat.free_blks,
+          FsConv::FreeBlocksForNonRoot(_) => stat.avail_blks,
+          _ => unreachable!()
+        };
+        match s {
+          StatDisplay::Human => {
+            let bs = stat.fundamental_bs;
+            let size = blocks * bs;
+            strops::format_size(size, f)
+          }
+          StatDisplay::Machine(base) => match base {
+            Base::Decimal => write!(f, "{blocks}"),
+            Base::Octal => write!(f, "{blocks:o}"),
+            Base::Hex => write!(f, "{blocks:x}"),
+          }
+        }
+      }
       FsConv::FsType(stat_display) => stat.fmt_fs_type(f, *stat_display)
     }
   }
@@ -770,38 +781,30 @@ impl super::Builtin for Stat {
   fn strict_opts(&self) -> bool {
     true
   }
+  #[rustfmt::skip]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("dereference" | b'L'),
-      opt!("file-system" | b'f'),
-      opt!("terse" | b't'),
-      opt!("format" | b'c', 1),
+      opt!("dereference" | b'L'   ),
+      opt!("file-system" | b'f'   ),
+      opt!("human"       | b'h'   ),
+      opt!("terse"       | b't'   ),
+      opt!("format"      | b'c', 1),
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let mut deref = false;
-    let mut fs_stat = false;
-    let mut terse = false;
-    let mut format: Option<VarStr> = None;
+    let deref = args.has_opt("dereference");
+    let fs_stat = args.has_opt("file-system");
+    let terse = args.has_opt("terse");
+    let mut format = args.opt_value("format");
+    let human = args.has_opt("human");
 
-    let (arg_vec, opts) = args.take_argv();
+    let (arg_vec, _) = args.take_argv();
 
     if arg_vec.is_empty() {
       return Err(sherr!(ExecFail @ args.cmd_span(), "stat: Missing file operand").with_code(2));
     }
 
-    for opt in opts {
-      match opt.key() {
-        "format" => {
-          format = Some(opt.value()?);
-        }
-        "dereference" => deref = true,
-        "file-system" => fs_stat = true,
-        "terse" => terse = true,
-
-        _ => return Err(sherr!(ExecFail, "stat: Unsupported option '{opt}'")),
-      }
-    }
+    let using_default = format.is_none();
 
     if terse && format.is_none() {
       if fs_stat {
@@ -811,11 +814,27 @@ impl super::Builtin for Stat {
       }
     }
 
-    let format = if fs_stat {
-      format.unwrap_or_else(|| Self::DEFAULT_FS_FMT.into())
+    let mut format = if fs_stat {
+      format
+        .unwrap_or_else(|| Self::DEFAULT_FS_FMT.into())
+        .to_string()
     } else {
-      format.unwrap_or_else(|| Self::DEFAULT_FILE_FMT.into())
+      format
+        .unwrap_or_else(|| Self::DEFAULT_FILE_FMT.into())
+        .to_string()
     };
+
+    if human && using_default {
+      if fs_stat {
+        format = format
+          .replace("%a", "%A")
+          .replace("%b", "%B")
+          .replace("%f", "%F")
+          .replace("%t", "%T");
+      } else {
+        format = format.replace("%s", "%S");
+      }
+    }
 
     let status = if fs_stat {
       Self::render_all(
@@ -853,7 +872,7 @@ impl super::Builtin for Stat {
 }
 
 impl Stat {
-  const DEFAULT_FILE_FMT: &str = "  File: %N\n  Size: %S\t\tBlocks: %b\tIO Block: %o\t%F\nDevice: %Hd,%Ld\tInode: %i\t\tLinks: %h\nAccess: (%a/%A)  Uid: (%u/%U)  Gid: (%g/%G)\nAccess: %x\nModify: %y\nChange: %z\n Birth: %w";
+  const DEFAULT_FILE_FMT: &str = "  File: %N\n  Size: %s\t\tBlocks: %b\tIO Block: %o\t%F\nDevice: %Hd,%Ld\tInode: %i\t\tLinks: %h\nAccess: (%a/%A)  Uid: (%u/%U)  Gid: (%g/%G)\nAccess: %x\nModify: %y\nChange: %z\n Birth: %w";
   const DEFAULT_FS_FMT: &str = "  File: \"%n\"\n    ID: %i\tNamelen: %l\t Type: %T\nBlock size: %s\tFundamental block size: %S\nBlocks: Total: %b\tFree: %f\tAvailable: %a\nInodes: Total: %c\tFree: %d";
   const TERSE_FILE_FMT: &str = "%n %s %b %f %u %g %D %i %h %t %T %X %Y %Z %W %o";
   const TERSE_FS_FMT: &str = "%n %i %l %t %s %S %b %f %a %c %d";
