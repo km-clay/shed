@@ -1,5 +1,5 @@
 #![expect(clippy::unnecessary_cast)]
-use std::{fmt, mem, os::unix::fs::MetadataExt};
+use std::{fmt, mem, os::unix::fs::MetadataExt, path::Path};
 
 use bstr::ByteSlice;
 use nix::{
@@ -161,7 +161,7 @@ impl StrFmt for FsFmt {
     let mut body = String::new();
     let name = src.path.clone();
     conv
-      .format(&mut body, &name, src)
+      .format(&mut body, &name.to_str_lossy(), src)
       .map_err(|e| sherr!(ExecFail, "stat: Failed to format field: {e}"))?;
     let body = body.into_bytes();
     Ok(if matches!(conv, FsConv::FileName | FsConv::FsType(_)) {
@@ -261,9 +261,9 @@ struct FileInfo {
 impl FileInfo {
   fn new(deref: bool, name: VarStr) -> ShResult<Self> {
     let stat = if deref {
-      stat::stat(&*name.to_str_lossy())
+      stat::stat::<Path>(name.as_ref())
     } else {
-      stat::lstat(&*name.to_str_lossy())
+      stat::lstat::<Path>(name.as_ref())
     }
     .map_err(|e| {
       sherr!(
@@ -611,7 +611,7 @@ enum FsConv {
 
 struct FsInfo {
   /// The operand this was gathered for, which is what `%n` reports.
-  path: String,
+  path: VarStr,
   block_size: u64,
   fundamental_bs: u64,
   total_blks: u64,
@@ -622,18 +622,18 @@ struct FsInfo {
   fs_id: u64,
   name_max: u64,
   fs_type_id: Option<u64>,      // numeric magic; linux only
-  fs_type_name: Option<String>, // human-readable type, if resolvable
+  fs_type_name: Option<VarStr>, // human-readable type, if resolvable
 }
 
 impl FsInfo {
   /// Gather filesystem info for `path`. Numeric fields come from the
   /// portable `statvfs`; the filesystem type is resolved separately since
   /// that part is platform-specific.
-  fn for_path(path: &str) -> nix::Result<Self> {
-    let v = statvfs::statvfs(path)?;
+  fn for_path(path: &VarStr) -> nix::Result<Self> {
+    let v = statvfs::statvfs::<Path>(path.as_ref())?;
     let (fs_type_id, fs_type_name) = fs_type_of(path);
     Ok(Self {
-      path: path.to_string(),
+      path: path.clone(),
       block_size: v.block_size() as u64,
       fundamental_bs: v.fragment_size() as u64,
       total_blks: v.blocks() as u64,
@@ -668,11 +668,11 @@ impl FsInfo {
 
 /// Resolve the filesystem type at `path` into `(numeric magic, human name)`.
 #[cfg(linux_like)]
-fn fs_type_of(path: &str) -> (Option<u64>, Option<String>) {
-  match statfs::statfs(path) {
+fn fs_type_of(path: &VarStr) -> (Option<u64>, Option<VarStr>) {
+  match statfs::statfs::<Path>(path.as_ref()) {
     Ok(s) => {
       let ty = s.filesystem_type();
-      (Some(ty.0 as u64), Some(fs_type_readable(ty).to_string()))
+      (Some(ty.0 as u64), Some(fs_type_readable(ty).into()))
     }
     Err(_) => (None, None),
   }
@@ -822,7 +822,7 @@ impl super::Builtin for Stat {
         &FsFmt,
         format.as_bytes(),
         arg_vec,
-        |(arg, _span)| match FsInfo::for_path(&arg.to_str_lossy()) {
+        |(arg, _span)| match FsInfo::for_path(&arg) {
           Ok(s) => Some(s),
           Err(e) => {
             errln!(
