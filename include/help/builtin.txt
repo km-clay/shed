@@ -44,7 +44,7 @@ The following builtins are available:
   `kill`        send signals to processes                   |builtin-kill|
   `len`         print byte, character, or display length    |builtin-len|
   `listen`      create a listening socket on a descriptor   |builtin-listen|
-  `lock`        take an advisory lock on a descriptor        |builtin-lock|
+  `lock`        take an advisory lock on a descriptor       |builtin-lock|
   `local`       declare variables local to a function       |builtin-local|
   `msg`         post a message to the status bar            |builtin-msg|
   `nextd`       go forward in the directory history         |builtin-nextd|
