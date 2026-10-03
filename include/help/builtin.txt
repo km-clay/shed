@@ -1598,7 +1598,16 @@ FS                                                       *builtin-fs* *fs*
 
   Subcommands ~
 
-    `rename`  atomically rename a file within one filesystem
+    `rename`    atomically rename a file within one filesystem
+    `rmdir`     remove empty directories
+    `unlink`    remove files
+    `link`      create hard links to a file
+    `symlink`   create symbolic links to a path
+    `readlink`  print the target stored in a symbolic link
+
+  No subcommand takes options; an unrecognised one is an error rather
+  than a file name. A path that begins with `-` needs `--` before it, or
+  a `./` prefix.
 
 ==============================================================================
 FS RENAME                                  *fs-rename* *builtin-fs-rename*
@@ -1658,6 +1667,147 @@ FS RENAME                                  *fs-rename* *builtin-fs-rename*
       ```fs rename ./data /mnt/backup/data```
       ```# cannot rename `./data` to `/mnt/backup/data`: different```
       ```# filesystems. use `mv` to copy instead```
+
+==============================================================================
+FS RMDIR                                     *fs-rmdir* *builtin-fs-rmdir*
+
+  `fs rmdir {dir} ...`
+
+  Remove each {dir} with `rmdir(2)`. A directory must be empty: removing a
+  tree is a traversal, which is a program rather than a system call, so
+  there is no recursive flag. Use `rm -r` when that is what you want.
+
+  Each operand is attempted independently. One that fails reports the
+  reason and the rest are still removed, so a failure part-way through
+  does not hide the work that succeeded.
+
+  Exit status ~
+
+    `0`   every directory was removed
+    `1`   at least one could not be; each failure is reported
+    `2`   no operands were given
+
+  Examples ~
+
+      ```fs rmdir build```             remove it only if it is empty
+      ```fs rmdir a b c```             a failure does not stop the others
+      ```fs rmdir d || echo busy```    an exit status you can branch on
+
+==============================================================================
+FS UNLINK                                  *fs-unlink* *builtin-fs-unlink*
+
+  `fs unlink {file} ...`
+
+  Remove each {file} with `unlink(2)`. Directories are refused -- removing
+  one is `fs rmdir`, and removing a tree is neither.
+
+  A symbolic link is removed as itself; whatever it points at is left
+  alone. The file's data is released once the last name for it is gone
+  and no process still holds it open, so unlinking a file another process
+  has open frees nothing until that process closes it.
+
+  Operands are attempted independently, as with `fs rmdir`.
+
+  Exit status ~
+
+    `0`   every file was removed
+    `1`   at least one could not be; each failure is reported
+    `2`   no operands were given
+
+==============================================================================
+FS LINK                                        *fs-link* *builtin-fs-link*
+
+  `fs link {target} {link} ...`
+
+  Create each {link} as a hard link to {target}, using `link(2)`.
+
+  A hard link is not a reference to a name; it is another name for the
+  same file. Both names are equal -- there is no original -- and the file
+  survives until every name is gone. Writing through one name is visible
+  through the other, and so is every change to permissions, ownership or
+  timestamps, because there is only one file underneath. |fs-symlink| is
+  the other kind of link, and behaves almost oppositely.
+
+  Unlike |fs-rename|, an existing {link} is never replaced: the call
+  fails with `file exists`. The target must exist, must not be a
+  directory, and must live on the same filesystem as the link.
+
+  Neither path is followed when it is a symbolic link. Linking a symlink
+  creates a second name for that symlink, not for whatever it points at.
+
+  More than one {link} may be given and each is created separately, so
+  this is not `ln`, where trailing operands name a destination directory.
+
+  Exit status ~
+
+    `0`   every link was created
+    `1`   at least one could not be; each failure is reported
+    `2`   no {target}, or a {target} with no {link}
+
+  Examples ~
+
+      ```fs link data data.bak```       a second name for one file
+      ```fs link data d1 d2 d3```       three more names, created separately
+
+==============================================================================
+FS SYMLINK                               *fs-symlink* *builtin-fs-symlink*
+
+  `fs symlink {target} {link} ...`
+
+  Create each {link} as a symbolic link to {target}, using `symlink(2)`.
+
+  {target} is stored as text and is never examined. It need not exist --
+  a dangling link is legal and is sometimes the point -- it may be a
+  directory, it may be on another filesystem, and it is resolved afresh
+  every time the link is used, so a link may break or start working later
+  without being touched. |fs-link| makes the other kind of link, which
+  resolves once, at creation.
+
+  A relative {target} is resolved against the directory holding the
+  {link}, not against the current directory. This is the usual source of
+  broken links:
+
+      ```fs symlink data sub/mid```     sub/mid -> sub/data, correct
+      ```fs symlink sub/data sub/bad``` sub/bad -> sub/sub/data, broken
+
+  An existing {link} is never replaced. There is no atomic way to
+  repoint a symlink in place; create the new link under a temporary name
+  and move it over the old one with |fs-rename|, which is atomic:
+
+      ```fs symlink "$new" current.tmp```
+      ```fs rename current.tmp current```
+
+  Exit status ~
+
+    `0`   every link was created
+    `1`   at least one could not be; each failure is reported
+    `2`   no {target}, or a {target} with no {link}
+
+==============================================================================
+FS READLINK                            *fs-readlink* *builtin-fs-readlink*
+
+  `fs readlink {link}`
+
+  Print the target stored in {link}, using `readlink(2)`, followed by a
+  newline.
+
+  Exactly one {link} is read, and only one level: the stored text is
+  printed as it is, without being resolved. A relative target is printed
+  relative, and a target that no longer exists is printed anyway, because
+  `readlink(2)` reads the link rather than following it. Resolving a
+  chain of links means joining each relative target against its own
+  link's directory and detecting cycles, which is a different operation.
+
+  It is an error if {link} is not a symbolic link.
+
+  The target is written as the bytes the filesystem holds, so a target
+  that is not valid text is reproduced exactly.
+
+  Exit status ~
+
+    `0`   the target was printed
+    `1`   {link} is missing, unreadable, or not a symbolic link
+    `2`   no operand, or more than one
 
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*

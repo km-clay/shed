@@ -19,6 +19,7 @@ use crate::{
   varstr,
 };
 
+/// The shell's main result type.
 pub(crate) type ShResult<T> = Result<T, ShErr>;
 
 pub(crate) struct ColorRng {
