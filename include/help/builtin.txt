@@ -1604,10 +1604,11 @@ FS                                                       *builtin-fs* *fs*
     `link`      create hard links to a file
     `symlink`   create symbolic links to a path
     `readlink`  print the target stored in a symbolic link
+    `realpath`  resolve a path to its canonical absolute form
 
-  No subcommand takes options; an unrecognised one is an error rather
-  than a file name. A path that begins with `-` needs `--` before it, or
-  a `./` prefix.
+  Only `realpath` takes an option. Anywhere else an option is an error
+  rather than a file name, so a path that begins with `-` needs `--`
+  before it, or a `./` prefix.
 
 ==============================================================================
 FS RENAME                                  *fs-rename* *builtin-fs-rename*
@@ -1808,6 +1809,59 @@ FS READLINK                            *fs-readlink* *builtin-fs-readlink*
     `0`   the target was printed
     `1`   {link} is missing, unreadable, or not a symbolic link
     `2`   no operand, or more than one
+
+==============================================================================
+FS REALPATH                            *fs-realpath* *builtin-fs-realpath*
+
+  `fs realpath [-m] {path} ...`
+
+  Print the canonical absolute form of each {path}, one per line, using
+  `realpath(3)`. Every symbolic link along the way is followed, every `.`
+  and `..` is resolved, and the printed path contains neither -- so two
+  names for one file always print the same text.
+
+  This is the whole-chain counterpart to |fs-readlink|, which reads a
+  single link and resolves nothing. Resolving a chain by hand is not the
+  same operation: a relative target is read against its own link's
+  directory, and a cycle has to be detected rather than followed, both of
+  which `realpath(3)` handles.
+
+  By default every component of {path} must exist. Each operand is
+  resolved independently, so one that fails reports the reason and the
+  rest are still printed.
+
+  Options ~
+
+    `-m`, `--lenient`   resolve a {path} that does not exist, instead of
+                        failing. The missing part is resolved lexically
+                        and the result is still absolute. Only
+                        nonexistence is forgiven -- a symbolic link cycle
+                        or a directory that cannot be searched remains an
+                        error, so a wrong answer is never printed in
+                        place of a diagnosis.
+
+  Paths are read and written as bytes, so a name that is not valid text
+  is resolved and printed exactly as it is.
+
+  Exit status ~
+
+    `0`   every path was resolved and printed
+    `1`   at least one could not be; each failure is reported
+    `2`   no operands were given
+
+  Examples ~
+
+      ```fs realpath ./a/../a/b/f```    print the path without `.` or `..`
+      ```fs realpath "$link"```         where the link actually leads
+
+    Resolving a file about to be created, whose parent exists but whose
+    own name does not:
+
+      ```out=$(fs realpath -m "$dir/new.log")```
+
+    Telling whether two names are the same file:
+
+      ```[[ "$(fs realpath "$a")" == "$(fs realpath "$b")" ]]```
 
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*

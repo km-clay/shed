@@ -11,6 +11,7 @@ use super::opt::Parsed;
 
 mod link;
 mod readlink;
+mod realpath;
 mod rename;
 mod rmdir;
 mod symlink;
@@ -30,6 +31,7 @@ impl super::BuiltinRouter for Fs {
       b"link"     => Some(&link::Link        ),
       b"symlink"  => Some(&symlink::SymLink  ),
       b"readlink" => Some(&readlink::ReadLink),
+      b"realpath" => Some(&realpath::RealPath),
       _ => None,
     }
   }
@@ -55,6 +57,7 @@ impl Fs {
     ("link",     "<target> <link> ...", "create hard links to files"),
     ("symlink",  "<target> <link> ...", "create symbolic links to files"),
     ("readlink", "<link>",              "print the value of a symbolic link"),
+    ("realpath", "<file> ...",          "print the canonicalized absolute pathname"),
   ];
 
   fn subcommands() -> impl Iterator<Item = VarStr> {

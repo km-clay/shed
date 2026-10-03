@@ -208,7 +208,9 @@ pub(crate) fn is_executable_file(entry: &std::fs::DirEntry) -> bool {
   meta.is_file() && meta.permissions().mode() & 0o111 != 0
 }
 
-/// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
+/// Lexically normalize a path, removing `.` and `..` components
+///
+/// This is a pure function, it does not access the filesystem.
 pub(crate) fn lex_normalize_path(path: &Path) -> PathBuf {
   use std::path::Component;
   let mut out: Vec<Component> = Vec::new();

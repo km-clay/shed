@@ -727,6 +727,8 @@ fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
 pub(crate) type SubInfo = (&'static str, &'static str, &'static str);
 
 fn sub_usage(cmd: &str, subs: &[SubInfo]) -> String {
+  use std::fmt::Write;
+
   let width = subs
     .iter()
     .map(|(name, args, _)| name.len() + usize::from(!args.is_empty()) + args.len())
@@ -737,9 +739,9 @@ fn sub_usage(cmd: &str, subs: &[SubInfo]) -> String {
   for (name, args, desc) in subs {
     let sep = if args.is_empty() { "" } else { " " };
     let call = format!("{name}{sep}{args}");
-    out.push_str(&format!("\n  {call:<width$}   {desc}"));
+    write!(out, "\n  {call:<width$}   {desc}").ok();
   }
-  out.push_str(&format!("\n\nsee `help {cmd}` for details"));
+  write!(out, "\n\nsee `help {cmd}` for details").ok();
   out
 }
 
