@@ -5,7 +5,7 @@
 use super::{super::opt::Parsed, Builtin, BuiltinArgs, BuiltinRouter, DurFmt};
 use crate::{
   eval::lex::{Span, Tk},
-  procio,
+  procio, sherr,
   state::{
     Shed,
     timers::{StopWatch, TimerStatus, WatchName},
@@ -57,17 +57,20 @@ impl Builtin for List {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut arguments = args.arguments();
     let mut fmt = None;
+    let mut fmt_span = None;
 
     if let Some((arg, span)) = arguments.next()
       && WatchName::new(arg.clone()).promote_err(span)?.is_none()
     {
       fmt = Some(arg.clone());
+      fmt_span = Some(span);
     }
 
     if fmt.is_none()
-      && let Some((arg, _)) = arguments.next()
+      && let Some((arg, span)) = arguments.next()
     {
       fmt = Some(arg.clone());
+      fmt_span = Some(span);
     }
 
     // snapshot under the borrow, render and print outside it
@@ -88,6 +91,7 @@ impl Builtin for List {
         };
         strops::StrFormatter::parse(&dur_fmt, fmt)
           .and_then(|f| f.render(&mut strops::dur_delta(status.elapsed()), &mut buf))
+          .option_promote(fmt_span)
           .promote_err(args.cmd_span())?;
         VarStr::from(buf)
       } else {
@@ -109,7 +113,13 @@ trait TimerCmd {
     let name = args
       .arguments()
       .next()
-      .map(|(name, _)| WatchName::new(name.clone()).promote_err(args.cmd_span()))
+      .map(|(n, s)| {
+        if strops::has_unescaped(n, b"%") {
+          Err(sherr!(ParseErr @ s, "timer name cannot contain `%`"))
+        } else {
+          WatchName::new(n.clone()).promote_err(s)
+        }
+      })
       .transpose()?
       .flatten();
 
@@ -117,7 +127,7 @@ trait TimerCmd {
       if !Shed::timers(|t| t.has_timer(&name)) && !self.create() {
         return util::with_status(1);
       }
-      Shed::timers_mut(|t| self.timer_func(t.timer_mut(name)));
+      Shed::timers_mut(|t| self.timer_func(t.timer_mut(&name)));
     } else {
       Shed::timers_mut(|t| self.timer_func(t.default_mut()));
     }
@@ -176,23 +186,27 @@ impl Builtin for Status {
 
     let mut name = None;
     let mut fmt = None;
+    let mut fmt_span = None;
 
     if let Some((arg, span)) = arguments.next() {
       let watch_name = WatchName::new(arg.clone()).promote_err(span)?;
-      match watch_name {
-        Some(n) => name = Some(n),
-        None => fmt = Some(arg.clone()),
+      if let Some(n) = watch_name {
+        name = Some(n);
+      } else {
+        fmt = Some(arg.clone());
+        fmt_span = Some(span);
       }
     }
 
     if fmt.is_none()
-      && let Some((arg, _)) = arguments.next()
+      && let Some((arg, span)) = arguments.next()
     {
       fmt = Some(arg.clone());
+      fmt_span = Some(span);
     }
 
-    let status = if let Some(name) = name {
-      if !Shed::timers(|t| t.has_timer(&name)) {
+    let status = if let Some(name) = name.as_ref() {
+      if !Shed::timers(|t| t.has_timer(name)) {
         return util::with_status(1);
       }
       Shed::timers_mut(|t| t.timer_mut(name).status())
@@ -205,9 +219,18 @@ impl Builtin for Status {
       let dur_fmt = DurFmt {
         running: Some(status.is_running()),
       };
-      strops::StrFormatter::parse(&dur_fmt, &fmt)
-        .and_then(|f| f.render(&mut strops::dur_delta(status.elapsed()), &mut buf))
-        .promote_err(args.cmd_span())?;
+      let res = strops::StrFormatter::parse(&dur_fmt, &fmt)
+        .and_then(|f| f.render(&mut strops::dur_delta(status.elapsed()), &mut buf));
+
+      if let Err(e) = res {
+        let mut e = e.option_promote(fmt_span).promote(args.cmd_span());
+        if name.is_none() {
+          e = e.with_note(
+            "if this was meant to be a timer name, timer names cannot contain `%`".into(),
+          );
+        }
+        return Err(e);
+      }
 
       VarStr::from(buf)
     } else {

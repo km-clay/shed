@@ -137,11 +137,11 @@ impl Timers {
   }
 
   /// The named timer, created if absent.
-  pub(crate) fn timer_mut(&mut self, name: WatchName) -> &mut StopWatch {
-    if let Some(idx) = self.named.iter().position(|(n, _)| **n == *name) {
+  pub(crate) fn timer_mut(&mut self, name: &WatchName) -> &mut StopWatch {
+    if let Some(idx) = self.named.iter().position(|(n, _)| **n == **name) {
       &mut self.named[idx].1
     } else {
-      self.named.push((name, StopWatch::default()));
+      self.named.push((name.clone(), StopWatch::default()));
       &mut self.named.last_mut().expect("just pushed").1
     }
   }
