@@ -669,9 +669,9 @@ fn fs_type_of(path: &VarStr) -> (Option<u64>, Option<VarStr>) {
 }
 
 #[cfg(not(linux_like))]
-fn fs_type_of(path: &str) -> (Option<u64>, Option<String>) {
-  match statfs::statfs(path) {
-    Ok(s) => (None, Some(s.filesystem_type_name().to_string())),
+fn fs_type_of(path: &VarStr) -> (Option<u64>, Option<VarStr>) {
+  match statfs::statfs::<Path>(path.as_ref()) {
+    Ok(s) => (None, Some(s.filesystem_type_name().to_string().into())),
     Err(_) => (None, None),
   }
 }
