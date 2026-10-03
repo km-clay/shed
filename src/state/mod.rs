@@ -303,8 +303,8 @@ impl Message {
   }
   pub(crate) fn with_timestamp(&self) -> String {
     let time: DateTime<Local> = (self.when).into();
-    let formatted = time.format("[%H:%M:%S]").to_string();
-    let msg = self.what.trim().replace('\n', "\n\t\t"); // aligns multiline messages
+    let formatted = time.format("[%x %T]").to_string();
+    let msg = self.what.trim().replace('\n', "\n\t\t\t"); // aligns multiline messages
 
     format!("{formatted}\t{msg}")
   }
