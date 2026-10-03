@@ -6,7 +6,11 @@
 
 use std::time::{Duration, Instant};
 
-use crate::{sherr, state::vars::VarStr, util::error::ShResult};
+use crate::{
+  sherr,
+  state::vars::VarStr,
+  util::{error::ShResult, strops},
+};
 
 /// A timer's elapsed time plus whether the clock is still running.
 #[derive(Clone, Copy, Debug)]
@@ -31,11 +35,13 @@ impl TimerStatus {
 pub(crate) struct WatchName(VarStr);
 
 impl WatchName {
-  pub(crate) fn new(name: VarStr) -> ShResult<Self> {
+  pub(crate) fn new(name: VarStr) -> ShResult<Option<Self>> {
     if name == "default" {
       Err(sherr!(ParseErr, "timer name 'default' is reserved"))
+    } else if strops::has_unescaped(&name, b"%") {
+      Ok(None) // it's a format string
     } else {
-      Ok(Self(name))
+      Ok(Some(Self(name)))
     }
   }
 }

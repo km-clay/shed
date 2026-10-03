@@ -448,9 +448,9 @@ CHRONO                                           *builtin-chrono* *chrono*
 ==============================================================================
 CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
 
-  `chrono timer [{name}]`
+  `chrono timer [{format}]`
   `chrono timer start|stop|resume|reset [{name}]`
-  `chrono timer status [{name}] [-F {format}]`
+  `chrono timer status [{name}] [{format}]`
 
   A stopwatch. Each timer accumulates the spans during which it was
   running, so a timer may be stopped and resumed any number of times
@@ -472,19 +472,28 @@ CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
     `resume [{name}]`   start running again without zeroing the total.
                         Resuming a running timer does nothing.
     `reset [{name}]`    zero the total and stop the timer.
-    `status [{name}]`   report the timer's total and whether it is
+    `status [{name}] [{format}]`
+                        report the timer's total and whether it is
                         running.
 
-  With no subcommand, `chrono timer` lists every timer that exists.
+  With no subcommand, `chrono timer` lists every timer that exists,
+  optionally through a {format}.
+
+  A {format} always contains a `%`, and a {name} may never contain one,
+  so the two are told apart by position-independent inspection rather
+  than by a flag: `chrono timer status '%u'` reports the `default`
+  timer through `%u`, where `chrono timer status build` reports the
+  timer called `build` in the default rendering.
 
   Every subcommand except `start` fails with status 1 if the named
   timer does not exist, and does not create it.
 
   Format specifiers ~                                   *chrono-timer-format*
 
-    `status` takes `-F {format}` / `--format {format}` to print the
-    elapsed time however you like, in place of the default rendering.
-    `chrono timer` accepts the same option when listing.
+    `status` takes a {format} to print the elapsed time however you
+    like, in place of the default rendering. It follows the {name} when
+    one is given, and stands alone when one is not. `chrono timer`
+    takes the same {format} when listing, applying it to every timer.
 
     Uppercase specifiers are components, each one the remainder within
     the next larger unit, matching the strftime code of the same name.
@@ -536,12 +545,14 @@ CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
       ```chrono timer resume```             continue where it left off
 
       ```chrono timer start 'build'```        a second, independent timer
-      ```chrono timer status 'build' -F '%M:%S'```
+      ```chrono timer status 'build' '%M:%S'```
                                         `01:04`
-      ```chrono timer status 'build' -F '%s'```
+      ```chrono timer status 'build' '%s'```
                                         total seconds, for arithmetic
+      ```chrono timer status '%u'```        the default timer, in microseconds
 
       ```chrono timer```                    list every timer
+      ```chrono timer '%u'```               list them all in microseconds
 
 ==============================================================================
 CHRONO SLEEP                               *chrono-sleep* *builtin-chrono-sleep*

@@ -150,6 +150,7 @@ where
 
 pub(crate) fn format_time(delta: TimeDelta) -> Option<String> {
   const ETERNITY: u128 = f32::INFINITY as u128;
+  let show_subsecond = delta.num_seconds().abs() < 60;
   let signed =
     i128::from(delta.num_seconds()) * 1_000_000 + i128::from(delta.subsec_nanos()) / 1_000;
   let negative = signed < 0;
@@ -310,11 +311,11 @@ pub(crate) fn format_time(delta: TimeDelta) -> Option<String> {
     let string = format!("{seconds}s");
     result.push(string);
   }
-  if result.is_empty() && millis > 0 {
+  if show_subsecond && millis > 0 {
     let string = format!("{millis}ms");
     result.push(string);
   }
-  if result.is_empty() && micros > 0 {
+  if show_subsecond && micros > 0 {
     let string = format!("{micros}µs");
     result.push(string);
   }

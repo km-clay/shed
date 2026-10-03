@@ -2,13 +2,10 @@
 //!
 //! has its own subcommands: `start`, `stop`, `reset`, `status`, `resume`
 
-use super::{
-  super::opt::{OptSpec, Parsed},
-  Builtin, BuiltinArgs, BuiltinRouter, DurFmt,
-};
+use super::{super::opt::Parsed, Builtin, BuiltinArgs, BuiltinRouter, DurFmt};
 use crate::{
   eval::lex::{Span, Tk},
-  opt, procio,
+  procio,
   state::{
     Shed,
     timers::{StopWatch, TimerStatus, WatchName},
@@ -54,10 +51,25 @@ impl Builtin for Timer {
 
 struct List;
 impl Builtin for List {
-  fn opts(&self) -> Vec<OptSpec> {
-    vec![opt!("format" | b'F', 1)]
+  fn strict_opts(&self) -> bool {
+    true
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    let mut arguments = args.arguments();
+    let mut fmt = None;
+
+    if let Some((arg, span)) = arguments.next()
+      && WatchName::new(arg.clone()).promote_err(span)?.is_none()
+    {
+      fmt = Some(arg.clone());
+    }
+
+    if fmt.is_none()
+      && let Some((arg, _)) = arguments.next()
+    {
+      fmt = Some(arg.clone());
+    }
+
     // snapshot under the borrow, render and print outside it
     let snapshot: Vec<(VarStr, TimerStatus)> = Shed::timers(|t| {
       std::iter::once((VarStr::from("default"), t.default_timer().status()))
@@ -68,7 +80,6 @@ impl Builtin for List {
         .collect()
     });
 
-    let fmt = args.opt_value("format");
     for (name, status) in snapshot {
       let rendered = if let Some(fmt) = &fmt {
         let mut buf = vec![];
@@ -99,7 +110,8 @@ trait TimerCmd {
       .arguments()
       .next()
       .map(|(name, _)| WatchName::new(name.clone()).promote_err(args.cmd_span()))
-      .transpose()?;
+      .transpose()?
+      .flatten();
 
     if let Some(name) = name {
       if !Shed::timers(|t| t.has_timer(&name)) && !self.create() {
@@ -115,6 +127,9 @@ trait TimerCmd {
 }
 
 impl<T: TimerCmd + Sync> Builtin for T {
+  fn strict_opts(&self) -> bool {
+    true
+  }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     self.fire(args)
   }
@@ -153,16 +168,28 @@ impl TimerCmd for Reset {
 
 struct Status;
 impl Builtin for Status {
-  fn opts(&self) -> Vec<OptSpec> {
-    vec![opt!("format" | b'F', 1)]
+  fn strict_opts(&self) -> bool {
+    true
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let name = args
-      .arguments()
-      .next()
-      .map(|(name, _)| WatchName::new(name.clone()).promote_err(args.cmd_span()))
-      .transpose()?;
-    let fmt = args.opt_value("format");
+    let mut arguments = args.arguments();
+
+    let mut name = None;
+    let mut fmt = None;
+
+    if let Some((arg, span)) = arguments.next() {
+      let watch_name = WatchName::new(arg.clone()).promote_err(span)?;
+      match watch_name {
+        Some(n) => name = Some(n),
+        None => fmt = Some(arg.clone()),
+      }
+    }
+
+    if fmt.is_none()
+      && let Some((arg, _)) = arguments.next()
+    {
+      fmt = Some(arg.clone());
+    }
 
     let status = if let Some(name) = name {
       if !Shed::timers(|t| t.has_timer(&name)) {
