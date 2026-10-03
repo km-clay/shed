@@ -58,7 +58,8 @@ impl ParseStream {
         name.slice()
       )),
       span.unwrap_or_default(),
-    );
+    )
+    .at_definition();
 
     let mut redirs = vec![];
     self.parse_redir(&mut redirs, &mut span)?;

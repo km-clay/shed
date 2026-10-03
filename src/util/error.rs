@@ -285,6 +285,9 @@ pub(crate) struct LabelBuilder {
   span: StrongSpan,
   message: Option<LabelMsg>,
   color: Option<Color>,
+
+  /// marker for [`ShErr::collapse_context`]
+  definition: bool,
 }
 
 impl LabelBuilder {
@@ -293,7 +296,12 @@ impl LabelBuilder {
       span: span.upgrade(),
       message: None,
       color: None,
+      definition: false,
     }
+  }
+  pub(crate) fn at_definition(mut self) -> Self {
+    self.definition = true;
+    self
   }
   pub(crate) fn with_message(mut self, message: impl Into<LabelMsg>) -> Self {
     self.message = Some(message.into());
@@ -496,11 +504,17 @@ impl ShErr {
     let Self { labels, .. } = self;
 
     let LabelBuilder { message, color, .. } = labels.first().cloned().unwrap();
-    let LabelBuilder { span, .. } = labels.last().cloned().unwrap();
+    let anchor = labels
+      .iter()
+      .rfind(|label| !label.definition)
+      .or_else(|| labels.last())
+      .cloned()
+      .unwrap();
     let collapsed = LabelBuilder {
-      span,
+      span: anchor.span,
       message,
       color,
+      definition: false,
     };
 
     let labels = vec![collapsed];
