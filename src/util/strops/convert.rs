@@ -148,9 +148,9 @@ where
   Ok(out)
 }
 
-pub(crate) fn format_time(delta: TimeDelta) -> Option<String> {
+pub(crate) fn format_time(delta: TimeDelta, show_subsecond: bool) -> Option<String> {
   const ETERNITY: u128 = f32::INFINITY as u128;
-  let show_subsecond = delta.num_seconds().abs() < 60;
+  let show_subsecond = show_subsecond && delta.num_seconds().abs() < 60;
   let signed =
     i128::from(delta.num_seconds()) * 1_000_000 + i128::from(delta.subsec_nanos()) / 1_000;
   let negative = signed < 0;
@@ -223,6 +223,8 @@ pub(crate) fn format_time(delta: TimeDelta) -> Option<String> {
 
   // Format the result
   let mut result = Vec::new();
+  let should_show_subsecond = |res: &[String]| show_subsecond || res.is_empty();
+
   if eternities > 0 {
     let mut string = format!("{eternities} eternit");
     if eternities > 1 {
@@ -311,11 +313,11 @@ pub(crate) fn format_time(delta: TimeDelta) -> Option<String> {
     let string = format!("{seconds}s");
     result.push(string);
   }
-  if show_subsecond && millis > 0 {
+  if should_show_subsecond(&result) && millis > 0 {
     let string = format!("{millis}ms");
     result.push(string);
   }
-  if show_subsecond && micros > 0 {
+  if should_show_subsecond(&result) && micros > 0 {
     let string = format!("{micros}µs");
     result.push(string);
   }
@@ -1098,7 +1100,7 @@ mod format_time_tests {
 
   /// Tests read better in `Duration`; the function takes a signed delta.
   fn format_time(d: std::time::Duration) -> String {
-    super::format_time(TimeDelta::from_std(d).unwrap()).unwrap_or_default()
+    super::format_time(TimeDelta::from_std(d).unwrap(), true).unwrap_or_default()
   }
   use std::time::Duration;
 
@@ -1107,11 +1109,11 @@ mod format_time_tests {
   #[test]
   fn negative_delta_is_signed() {
     assert_eq!(
-      super::format_time(TimeDelta::seconds(-90)).unwrap_or_default(),
+      super::format_time(TimeDelta::seconds(-90), true).unwrap_or_default(),
       "-1m 30s"
     );
     assert_eq!(
-      super::format_time(TimeDelta::days(-1)).unwrap_or_default(),
+      super::format_time(TimeDelta::days(-1), true).unwrap_or_default(),
       "-1 day"
     );
   }
@@ -1119,11 +1121,11 @@ mod format_time_tests {
   #[test]
   fn zero_is_unsigned_either_way() {
     assert_eq!(
-      super::format_time(TimeDelta::zero()).unwrap_or_default(),
+      super::format_time(TimeDelta::zero(), true).unwrap_or_default(),
       ""
     );
     assert_eq!(
-      super::format_time(TimeDelta::microseconds(-0)).unwrap_or_default(),
+      super::format_time(TimeDelta::microseconds(-0), true).unwrap_or_default(),
       ""
     );
   }
@@ -1134,7 +1136,7 @@ mod format_time_tests {
     // `chrono fmt -d 1y` humanises back as something other than "1 year".
     for unit in ["1 week", "1mo", "1y", "3mo", "2y"] {
       let micros = super::TimeReader::parse_dur(unit).unwrap();
-      let back = super::format_time(TimeDelta::microseconds(micros)).unwrap_or_default();
+      let back = super::format_time(TimeDelta::microseconds(micros), true).unwrap_or_default();
       let expect = match unit {
         "1 week" => "1 week",
         "1mo" => "1 month",

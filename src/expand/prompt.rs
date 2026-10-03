@@ -259,7 +259,7 @@ fn runtime(formatted: bool, out: &mut String) {
     return;
   };
   if formatted {
-    let runtime_fmt = strops::format_time(strops::dur_delta(runtime)).unwrap_or_default();
+    let runtime_fmt = strops::format_time(strops::dur_delta(runtime), false).unwrap_or_default();
     out.push_str(&runtime_fmt);
   } else {
     let runtime_millis = runtime.as_millis().to_string();
@@ -438,7 +438,7 @@ mod tests {
   fn runtime_millis() {
     let dur = Duration::from_millis(500);
     assert_eq!(
-      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap()).unwrap_or_default(),
+      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap(), false).unwrap_or_default(),
       "500ms"
     );
   }
@@ -447,7 +447,7 @@ mod tests {
   fn runtime_seconds() {
     let dur = Duration::from_secs(5);
     assert_eq!(
-      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap()).unwrap_or_default(),
+      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap(), false).unwrap_or_default(),
       "5s"
     );
   }
@@ -456,7 +456,7 @@ mod tests {
   fn runtime_minutes_and_seconds() {
     let dur = Duration::from_secs(125);
     assert_eq!(
-      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap()).unwrap_or_default(),
+      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap(), false).unwrap_or_default(),
       "2m 5s"
     );
   }
@@ -465,7 +465,7 @@ mod tests {
   fn runtime_hours() {
     let dur = Duration::from_secs(3661);
     assert_eq!(
-      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap()).unwrap_or_default(),
+      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap(), false).unwrap_or_default(),
       "1h 1m 1s"
     );
   }
@@ -474,7 +474,7 @@ mod tests {
   fn runtime_micros() {
     let dur = Duration::from_micros(500);
     assert_eq!(
-      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap()).unwrap_or_default(),
+      strops::format_time(chrono::TimeDelta::from_std(dur).unwrap(), false).unwrap_or_default(),
       "500µs"
     );
   }

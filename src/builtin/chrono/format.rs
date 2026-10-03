@@ -77,7 +77,7 @@ impl Builtin for Format {
 
         VarStr::from(buf)
       } else {
-        strops::format_time(elapsed)
+        strops::format_time(elapsed, true)
           .unwrap_or_else(|| String::from("0s"))
           .to_var_str()
       }

@@ -678,7 +678,7 @@ impl Display for IdleTime {
     write!(
       f,
       "{}",
-      strops::format_time(strops::dur_delta(self.0)).unwrap_or_default()
+      strops::format_time(strops::dur_delta(self.0), true).unwrap_or_default()
     )
   }
 }

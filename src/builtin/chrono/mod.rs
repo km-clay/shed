@@ -291,7 +291,7 @@ impl StrFmt for DurFmt {
 }
 
 fn fmt_timer_status(status: &TimerStatus) -> VarStr {
-  let mut fmt = strops::format_time(strops::dur_delta(status.elapsed()))
+  let mut fmt = strops::format_time(strops::dur_delta(status.elapsed()), true)
     .unwrap_or_else(|| String::from("0s"))
     .to_var_str();
 
