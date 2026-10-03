@@ -1,4 +1,8 @@
-use std::{io, os::unix::fs::PermissionsExt, path::Path};
+use std::{
+  io::{self, ErrorKind as EK},
+  os::unix::fs::PermissionsExt,
+  path::Path,
+};
 
 use nix::libc;
 
@@ -92,28 +96,20 @@ impl Builtin for ChMod {
 
 fn handle_err(err: io::Error, file: &VarStr) -> ShErr {
   match err.kind() {
-    io::ErrorKind::NotFound => {
-      sherr!(
-        ExecFail,
-        "cannot change mode of `{file}`: no such file or directory"
-      )
-    }
-    io::ErrorKind::InvalidFilename => {
-      sherr!(ExecFail, "cannot change mode of `{file}`: invalid filename")
-    }
-    io::ErrorKind::NotADirectory => {
-      sherr!(
-        ExecFail,
-        "cannot change mode of `{file}`: path component is not a directory"
-      )
-    }
-    io::ErrorKind::ReadOnlyFilesystem => {
-      sherr!(
-        ExecFail,
-        "cannot change mode of `{file}`: read-only filesystem"
-      )
-    }
-    io::ErrorKind::PermissionDenied => match err.raw_os_error() {
+    EK::NotFound => sherr!(
+      ExecFail,
+      "cannot change mode of `{file}`: no such file or directory"
+    ),
+    EK::InvalidFilename => sherr!(ExecFail, "cannot change mode of `{file}`: invalid filename"),
+    EK::NotADirectory => sherr!(
+      ExecFail,
+      "cannot change mode of `{file}`: path component is not a directory"
+    ),
+    EK::ReadOnlyFilesystem => sherr!(
+      ExecFail,
+      "cannot change mode of `{file}`: read-only filesystem"
+    ),
+    EK::PermissionDenied => match err.raw_os_error() {
       Some(libc::EPERM) => sherr!(
         ExecFail,
         "cannot change mode of `{file}`: operation not permitted"
@@ -124,12 +120,15 @@ fn handle_err(err: io::Error, file: &VarStr) -> ShErr {
         "cannot change mode of `{file}`: permission denied"
       ),
     },
-    _ if err.raw_os_error() == Some(libc::ELOOP) => {
-      sherr!(
-        ExecFail,
-        "cannot change mode of `{file}`: too many levels of symbolic links"
-      )
+    _ => {
+      if err.raw_os_error() == Some(libc::ELOOP) {
+        sherr!(
+          ExecFail,
+          "cannot change mode of `{file}`: too many levels of symbolic links"
+        )
+      } else {
+        sherr!(ExecFail, "cannot change mode of `{file}`: {err}")
+      }
     }
-    _ => ShErr::from(err),
   }
 }

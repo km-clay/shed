@@ -1,4 +1,4 @@
-use std::{io, os::unix::fs, path::Path};
+use std::{io::ErrorKind as EK, os::unix::fs, path::Path};
 
 use bstr::ByteSlice;
 use nix::{
@@ -11,8 +11,9 @@ use crate::{
   opt, sherr,
   util::{
     self,
-    error::{ShErr, ShResult, ShResultExt},
+    error::{ShResult, ShResultExt},
   },
+  varstr,
 };
 
 use super::super::{Builtin, BuiltinArgs};
@@ -101,33 +102,30 @@ impl Builtin for ChOwn {
       };
 
       if let Err(e) = res {
+        let msg = varstr!("cannot change owner of `{file}`");
         let err = match e.kind() {
-          io::ErrorKind::NotFound => {
-            sherr!(ExecFail @ f_span, "cannot change owner of `{file}`: no such file or directory")
+          EK::NotFound => sherr!(ExecFail @ f_span, "{msg}: no such file or directory"),
+          EK::InvalidFilename => sherr!(ExecFail @ f_span, "{msg}: invalid filename"),
+          EK::ReadOnlyFilesystem => sherr!(ExecFail @ f_span, "{msg}: read-only filesystem"),
+          EK::NotADirectory => {
+            sherr!(ExecFail @ f_span, "{msg}: path component is not a directory")
           }
-          io::ErrorKind::InvalidFilename => {
-            sherr!(ExecFail @ f_span, "cannot change owner of `{file}`: invalid filename")
-          }
-          io::ErrorKind::NotADirectory => {
-            sherr!(ExecFail @ f_span, "cannot change owner of `{file}`: path component is not a directory")
-          }
-          io::ErrorKind::ReadOnlyFilesystem => {
-            sherr!(ExecFail @ f_span, "cannot change owner of `{file}`: read-only filesystem")
-          }
-          io::ErrorKind::PermissionDenied => match e.raw_os_error() {
-            Some(libc::EPERM) => {
-              sherr!(ExecFail @ f_span, "cannot change owner of `{file}`: operation not permitted")
-                .with_note(
-                  "only the superuser can change a file's user; a group must be one you belong to"
-                    .into(),
-                )
-            }
-            _ => sherr!(ExecFail @ f_span, "cannot change owner of `{file}`: permission denied"),
+          EK::PermissionDenied => match e.raw_os_error() {
+            Some(libc::EPERM) => sherr!(ExecFail @ f_span, "{msg}: operation not permitted")
+              .with_note(
+                "only the superuser can change a file's user; a group must be one you belong to"
+                  .into(),
+              ),
+            _ => sherr!(ExecFail @ f_span, "{msg}: permission denied"),
           },
-          _ if e.raw_os_error() == Some(libc::ELOOP) => {
-            sherr!(ExecFail @ f_span, "cannot change owner of `{file}`: too many levels of symbolic links")
+
+          _ => {
+            if e.raw_os_error() == Some(libc::ELOOP) {
+              sherr!(ExecFail @ f_span, "{msg}: too many levels of symbolic links")
+            } else {
+              sherr!(ExecFail @ f_span, "{msg}: {e}")
+            }
           }
-          _ => ShErr::from(e).promote(f_span),
         };
 
         err.print_error();

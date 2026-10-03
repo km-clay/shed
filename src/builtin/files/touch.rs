@@ -1,5 +1,5 @@
 use std::{
-  io::{self, ErrorKind as EKind},
+  io::{self, ErrorKind as EK},
   path::Path,
 };
 
@@ -14,11 +14,7 @@ use nix::{
 
 use crate::{
   opt, sherr,
-  util::{
-    self,
-    error::{ShErr, ShResultExt},
-    strops,
-  },
+  util::{self, error::ShResultExt, strops},
 };
 
 use super::super::{Builtin, BuiltinArgs, ShResult, opt::OptSpec};
@@ -84,27 +80,23 @@ impl Builtin for Touch {
       let Err(e) = res else { continue };
 
       let err = match e.kind() {
-        EKind::NotFound => {
-          sherr!(ExecFail @ f_span, "cannot touch `{file}`: no such file or directory")
-        },
-        EKind::NotADirectory => {
-          sherr!(ExecFail @ f_span, "cannot touch `{file}`: a component of the path is not a directory")
-        },
-        EKind::ReadOnlyFilesystem => {
-          sherr!(ExecFail @ f_span, "cannot touch `{file}`: read-only filesystem")
-        },
-        EKind::PermissionDenied => {
+        EK::NotFound           => sherr!(ExecFail @ f_span, "cannot touch `{file}`: no such file or directory"),
+        EK::NotADirectory      => sherr!(ExecFail @ f_span, "cannot touch `{file}`: component of path is not a directory"),
+        EK::ReadOnlyFilesystem => sherr!(ExecFail @ f_span, "cannot touch `{file}`: read-only filesystem"),
+        EK::PermissionDenied   => {
           let note = match (e.raw_os_error(), args.has_opt("time")) {
             (Some(libc::EPERM), _) => "setting a specific time requires owning the file",
-            (_, false) => "setting times to now requires write permission on the file",
-            (_, true) => "a component of the path could not be searched",
+            (_, false)             => "setting times to now requires write permission on the file",
+            (_, true)              => "a component of the path could not be searched",
           };
           sherr!(ExecFail @ f_span, "cannot touch `{file}`: permission denied").with_note(note.into())
         }
-        _ if e.raw_os_error() == Some(libc::ELOOP) => {
+
+        _ => if e.raw_os_error() == Some(libc::ELOOP) {
           sherr!(ExecFail @ f_span, "cannot touch `{file}`: too many symbolic links encountered")
-        },
-        _ => ShErr::from(e).promote(f_span),
+        } else {
+          sherr!(ExecFail @ f_span, "cannot touch `{file}`: {e}")
+        }
       };
 
       err.print_error();

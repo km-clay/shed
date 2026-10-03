@@ -1,4 +1,4 @@
-use std::{io, os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{io::ErrorKind as EK, os::unix::ffi::OsStrExt, path::PathBuf};
 
 use nix::libc;
 
@@ -41,29 +41,23 @@ impl Builtin for RealPath {
     for (arg, span) in args.arguments() {
       let target = PathBuf::from(arg);
 
+      #[rustfmt::skip]
       let resolved = match std::fs::canonicalize(&target) {
         Ok(p) => p,
-        Err(e)
-          if let Some(cwd) = &cwd
-            && e.kind() == io::ErrorKind::NotFound =>
-        {
+        Err(e) if let Some(cwd) = &cwd && e.kind() == EK::NotFound => {
           paths::lex_normalize_path(&cwd.join(&target))
         }
         Err(e) => {
           let err = match e.kind() {
-            io::ErrorKind::NotFound => {
-              sherr!(ExecFail @ span, "cannot resolve `{arg}`: no such file or directory")
-            }
-            io::ErrorKind::PermissionDenied => {
-              sherr!(ExecFail @ span, "cannot resolve `{arg}`: permission denied")
-            }
-            io::ErrorKind::NotADirectory => {
-              sherr!(ExecFail @ span, "cannot resolve `{arg}`: path component is not a directory")
-            }
-            _ if e.raw_os_error() == Some(libc::ELOOP) => {
+            EK::NotFound         => sherr!(ExecFail @ span, "cannot resolve `{arg}`: no such file or directory"),
+            EK::PermissionDenied => sherr!(ExecFail @ span, "cannot resolve `{arg}`: permission denied"),
+            EK::NotADirectory    => sherr!(ExecFail @ span, "cannot resolve `{arg}`: path component is not a directory"),
+
+            _ => if let Some(libc::ELOOP) = e.raw_os_error() {
               sherr!(ExecFail @ span, "cannot resolve `{arg}`: too many levels of symbolic links")
+            } else {
+              sherr!(ExecFail @ span, "cannot resolve `{arg}`: {e}")
             }
-            _ => ShErr::from(e).promote(span),
           };
 
           err.print_error();

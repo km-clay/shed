@@ -1,11 +1,8 @@
-use std::io;
+use std::io::ErrorKind as EK;
 
 use crate::{
   sherr,
-  util::{
-    self,
-    error::{ShErr, ShResult},
-  },
+  util::{self, error::ShResult},
 };
 
 use super::super::{Builtin, BuiltinArgs};
@@ -29,31 +26,31 @@ impl Builtin for RmDir {
         continue;
       };
       let err = match e.kind() {
-        io::ErrorKind::NotFound => {
+        EK::NotFound => {
           sherr!(ExecFail @ span, "cannot remove directory `{path}`: no such file or directory")
         }
-        io::ErrorKind::PermissionDenied => {
+        EK::PermissionDenied => {
           sherr!(ExecFail @ span, "cannot remove directory `{path}`: permission denied")
         }
-        io::ErrorKind::DirectoryNotEmpty => {
+        EK::DirectoryNotEmpty => {
           sherr!(ExecFail @ span, "cannot remove directory `{path}`: directory not empty")
         }
-        io::ErrorKind::NotADirectory => {
+        EK::NotADirectory => {
           sherr!(ExecFail @ span, "cannot remove directory `{path}`: not a directory")
         }
-        io::ErrorKind::ResourceBusy => {
+        EK::ResourceBusy => {
           sherr!(ExecFail @ span, "cannot remove directory `{path}`: directory is busy")
         }
-        io::ErrorKind::InvalidInput => {
+        EK::InvalidInput => {
           sherr!(ExecFail @ span, "cannot remove directory `{path}`: invalid path")
         }
-        io::ErrorKind::ReadOnlyFilesystem => {
+        EK::ReadOnlyFilesystem => {
           sherr!(ExecFail @ span, "cannot remove directory `{path}`: read-only filesystem")
         }
-        io::ErrorKind::InvalidFilename => {
+        EK::InvalidFilename => {
           sherr!(ExecFail @ span, "cannot remove directory `{path}`: invalid filename")
         }
-        _ => ShErr::from(e).promote(span),
+        _ => sherr!(ExecFail @ span, "cannot remove directory `{path}`: {e}"),
       };
 
       err.print_error();

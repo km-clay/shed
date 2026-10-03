@@ -1,13 +1,10 @@
-use std::io;
+use std::io::ErrorKind as EK;
 
 use nix::libc;
 
 use crate::{
   sherr,
-  util::{
-    self,
-    error::{ShErr, ShResult},
-  },
+  util::{self, error::ShResult},
 };
 
 use super::super::{Builtin, BuiltinArgs};
@@ -37,42 +34,23 @@ impl Builtin for Link {
       let Err(e) = std::fs::hard_link(target, link) else {
         continue;
       };
+      #[rustfmt::skip]
       let err = match e.kind() {
-        io::ErrorKind::AlreadyExists => {
-          sherr!(ExecFail @ l_span, "cannot create link `{link}`: file exists")
-        }
-        io::ErrorKind::CrossesDevices => {
-          sherr!(ExecFail @ l_span, "cannot create link `{link}`: cross-device link")
-        }
-        io::ErrorKind::NotFound => {
-          sherr!(ExecFail @ t_span, "cannot create link `{link}`: target `{target}` does not exist")
-        }
-        io::ErrorKind::TooManyLinks => {
-          sherr!(ExecFail @ l_span, "cannot create link `{link}`: too many links")
-        }
-        io::ErrorKind::StorageFull => {
-          sherr!(ExecFail @ l_span, "cannot create link `{link}`: storage full")
-        }
-        io::ErrorKind::ReadOnlyFilesystem => {
-          sherr!(ExecFail @ l_span, "cannot create link `{link}`: read-only filesystem")
-        }
-        io::ErrorKind::InvalidFilename => {
-          sherr!(ExecFail @ l_span, "cannot create link `{link}`: invalid filename")
-        }
-        io::ErrorKind::NotADirectory => {
-          sherr!(ExecFail @ l_span, "cannot create link `{link}`: path component is not a directory")
-        }
+        EK::AlreadyExists      => sherr!(ExecFail @ l_span, "cannot create link `{link}`: file exists"),
+        EK::CrossesDevices     => sherr!(ExecFail @ l_span, "cannot create link `{link}`: cross-device link"),
+        EK::NotFound           => sherr!(ExecFail @ t_span, "cannot create link `{link}`: target `{target}` does not exist"),
+        EK::TooManyLinks       => sherr!(ExecFail @ l_span, "cannot create link `{link}`: too many links"),
+        EK::StorageFull        => sherr!(ExecFail @ l_span, "cannot create link `{link}`: storage full"),
+        EK::ReadOnlyFilesystem => sherr!(ExecFail @ l_span, "cannot create link `{link}`: read-only filesystem"),
+        EK::InvalidFilename    => sherr!(ExecFail @ l_span, "cannot create link `{link}`: invalid filename"),
+        EK::NotADirectory      => sherr!(ExecFail @ l_span, "cannot create link `{link}`: path component is not a directory"),
 
-        io::ErrorKind::PermissionDenied | io::ErrorKind::IsADirectory => match e.raw_os_error() {
-          Some(libc::EPERM) => {
-            sherr!(ExecFail @ l_span, "cannot create link `{link}`: is a directory")
-          }
-          Some(libc::EACCES) => {
-            sherr!(ExecFail @ l_span, "cannot create link `{link}`: permission denied")
-          }
-          _ => ShErr::from(e).promote(l_span),
+        EK::PermissionDenied | EK::IsADirectory => match e.raw_os_error() {
+          Some(libc::EPERM)    => sherr!(ExecFail @ l_span, "cannot create link `{link}`: is a directory"),
+          Some(libc::EACCES)   => sherr!(ExecFail @ l_span, "cannot create link `{link}`: permission denied"),
+          _                    => sherr!(ExecFail @ l_span, "cannot create link `{link}`: {e}"),
         },
-        _ => ShErr::from(e).promote(l_span),
+        _                      => sherr!(ExecFail @ l_span, "cannot create link `{link}`: {e}"),
       };
 
       err.print_error();

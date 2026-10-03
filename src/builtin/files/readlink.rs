@@ -1,4 +1,4 @@
-use std::{os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{io::ErrorKind as EK, os::unix::ffi::OsStrExt, path::PathBuf};
 
 use crate::{
   builtin::BuiltinArgs,
@@ -36,17 +36,12 @@ impl Builtin for ReadLink {
         util::with_status(0)
       }
       Err(e) => {
+        #[rustfmt::skip]
         let err = match e.kind() {
-          std::io::ErrorKind::InvalidInput => {
-            sherr!(ExecFail @ t_span, "cannot readlink `{target}`: not a symbolic link")
-          }
-          std::io::ErrorKind::NotFound => {
-            sherr!(ExecFail @ t_span, "cannot readlink `{target}`: file does not exist")
-          }
-          std::io::ErrorKind::PermissionDenied => {
-            sherr!(ExecFail @ t_span, "cannot readlink `{target}`: permission denied")
-          }
-          _ => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: {e}"),
+          EK::InvalidInput     => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: not a symbolic link"),
+          EK::NotFound         => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: file does not exist"),
+          EK::PermissionDenied => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: permission denied"),
+          _                    => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: {e}"),
         };
         Err(err.with_code(1))
       }

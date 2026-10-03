@@ -1,20 +1,17 @@
-use std::{io, os::unix};
+use std::{io::ErrorKind as EK, os::unix};
 
 use crate::{
   sherr,
-  util::{
-    self,
-    error::{ShErr, ShResult},
-  },
+  util::{self, error::ShResult},
+  varstr,
 };
 
 use super::super::{Builtin, BuiltinArgs};
 
 pub(super) struct SymLink;
+#[rustfmt::skip]
 impl Builtin for SymLink {
-  fn strict_opts(&self) -> bool {
-    true
-  }
+  fn strict_opts(&self) -> bool { true }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut arguments = args.arguments().peekable();
     let Some((target, _)) = arguments.next() else {
@@ -35,26 +32,16 @@ impl Builtin for SymLink {
       let Err(e) = unix::fs::symlink(target, link) else {
         continue;
       };
+
+      let msg = varstr!("cannot create symlink `{link}`");
       let err = match e.kind() {
-        io::ErrorKind::AlreadyExists => {
-          sherr!(ExecFail @ l_span, "cannot create symlink `{link}`: file exists")
-        }
-        io::ErrorKind::NotADirectory => {
-          sherr!(ExecFail @ l_span, "cannot create symlink `{link}`: path component is not a directory")
-        }
-        io::ErrorKind::ReadOnlyFilesystem => {
-          sherr!(ExecFail @ l_span, "cannot create symlink `{link}`: read-only filesystem")
-        }
-        io::ErrorKind::InvalidFilename => {
-          sherr!(ExecFail @ l_span, "cannot create symlink `{link}`: invalid filename")
-        }
-        io::ErrorKind::StorageFull => {
-          sherr!(ExecFail @ l_span, "cannot create symlink `{link}`: storage full")
-        }
-        io::ErrorKind::PermissionDenied => {
-          sherr!(ExecFail @ l_span, "cannot create symlink `{link}`: permission denied")
-        }
-        _ => ShErr::from(e).promote(l_span),
+        EK::AlreadyExists      => sherr!(ExecFail @ l_span, "{msg}: file exists"),
+        EK::ReadOnlyFilesystem => sherr!(ExecFail @ l_span, "{msg}: read-only filesystem"),
+        EK::InvalidFilename    => sherr!(ExecFail @ l_span, "{msg}: invalid filename"),
+        EK::StorageFull        => sherr!(ExecFail @ l_span, "{msg}: storage full"),
+        EK::PermissionDenied   => sherr!(ExecFail @ l_span, "{msg}: permission denied"),
+        EK::NotADirectory      => sherr!(ExecFail @ l_span, "{msg}: path component is not a directory"),
+        _                      => sherr!(ExecFail @ l_span, "{msg}: {e}"),
       };
 
       err.print_error();
