@@ -414,16 +414,16 @@ mod tests {
 
   #[test]
   fn status_format_reaches_the_subcommand_options() {
-    let (out, _) = run("chrono timer start q; chrono timer status q -F '%R'");
+    let (out, _) = run("chrono timer start q; chrono timer status q '%R'");
     assert_eq!(out.trim(), "running");
 
-    let (out, _) = run("chrono timer start q; chrono timer stop q; chrono timer status q -F '%R'");
+    let (out, _) = run("chrono timer start q; chrono timer stop q; chrono timer status q '%R'");
     assert_eq!(out.trim(), "stopped");
   }
 
   #[test]
   fn bad_format_specifier_is_an_error() {
-    let (_, status) = run("chrono timer start q; chrono timer status q -F '%zzz'");
+    let (_, status) = run("chrono timer start q; chrono timer status q '%zzz'");
     assert_ne!(status, 0, "an unknown specifier should not succeed");
   }
 }

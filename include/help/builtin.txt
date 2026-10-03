@@ -1620,6 +1620,7 @@ FS                                                       *builtin-fs* *fs*
     `realpath`  resolve a path to its canonical absolute form
     `truncate`  set the length of files
     `chown`     change the user and/or group of files
+    `chmod`     change the permissions of files
 
   Only `realpath` takes an option. Anywhere else an option is an error
   rather than a file name, so a path that begins with `-` needs `--`
@@ -1986,6 +1987,93 @@ FS CHOWN                                     *fs-chown* *builtin-fs-chown*
       ```fs chown alice:staff file```      set both
       ```fs chown :staff file```           set only the group
       ```fs chown -h alice link```         the link, not its target
+
+==============================================================================
+FS CHMOD                                     *fs-chmod* *builtin-fs-chmod*
+
+  `fs chmod {mode} {file} ...`
+
+  Set the permissions of each {file}, using `chmod(2)`. {mode} may be
+  octal or symbolic.
+
+  Octal mode ~
+
+  An octal {mode} is the permissions outright, from `0000` to `7777`. A
+  leading `0` or `0o` is accepted and changes nothing -- `755`, `0755`
+  and `0o755` are the same mode. The fourth digit holds the setuid,
+  setgid and sticky bits:
+
+    `0755`    `rwxr-xr-x`
+    `4755`    setuid -- the file runs as its owner
+    `2755`    setgid -- on a directory, new entries inherit its group
+    `1777`    sticky -- in a shared directory, only an entry's owner may
+              remove it
+
+  Symbolic mode ~
+
+  A symbolic {mode} is one or more comma-separated clauses of
+  `[ugoa][+-=][rwxst]`:
+
+    `u` `g` `o`     the owner, the group, everyone else
+    `a`           all three; also what an omitted `who` means
+    `+`           grant the listed permissions, leaving the rest
+    `-`           withdraw them, leaving the rest
+    `=`           set the triple to exactly these, clearing the rest
+    `r` `w` `x`     read, write, execute
+    `s`           setuid under `u`, setgid under `g`
+    `t`           sticky
+
+  So `u+x` grants execute to the owner, `go-w` withdraws write from
+  everyone else, and `a=r` makes the file read-only for all. An empty
+  permission list clears: `o=` removes every permission for others.
+
+  `=` also clears the special bit belonging to each triple it names --
+  setuid for `u`, setgid for `g`, sticky for `o` -- so `u=rwx` drops a
+  setuid bit while leaving a sticky one alone.
+
+  A symbolic mode is relative to what the file already has, so each
+  {file} is read before it is written and `fs chmod u+x a b` can leave
+  the two with different modes. That read is a separate operation from
+  the write, so a mode changed by something else in between is lost
+  rather than merged. An octal {mode} has no such step.
+
+  `X` and the `g=u` copy form are not accepted. The first depends on the
+  file's type and existing bits, the second on a second triple; both are
+  decisions rather than translations.
+
+  Who may do this ~
+
+  Changing a file's mode requires *owning* it, or being the superuser.
+  Write permission is not enough, which is the usual surprise -- a file
+  you can edit is not necessarily one you can chmod, and the refusal is
+  reported as `operation not permitted`.
+
+  The kernel may also decline parts of a mode without failing: setgid on
+  a directory, or setuid for an unprivileged caller, can be dropped and
+  the call still reports success. A script that depends on those bits
+  should read the mode back with |builtin-stat| rather than trust the
+  exit status.
+
+  Each {file} is attempted independently, so one that fails reports the
+  reason and the rest are still set.
+
+  Exit status ~
+
+    `0`   every file was set
+    `1`   at least one could not be; each failure is reported
+    `2`   no {mode}, no {file}, or a {mode} that does not parse
+
+  Examples ~
+
+      ```fs chmod 755 script.sh```         octal, outright
+      ```fs chmod u+x script.sh```         grant execute to the owner only
+      ```fs chmod go-rwx private.key```    withdraw all access from others
+      ```fs chmod 1777 /tmp/shared```      sticky, so entries are owner-only
+      ```fs chmod u=rw,go=r *.conf```      two clauses, applied in order
+
+    Permissions are not inherited from a umask here -- |umask| masks the
+    mode a *new* file is created with, while `fs chmod` sets an existing
+    file's mode exactly as given.
 
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*

@@ -9,6 +9,7 @@ use crate::{
 
 use super::opt::Parsed;
 
+mod chmod;
 mod chown;
 mod link;
 mod readlink;
@@ -35,7 +36,8 @@ impl super::BuiltinRouter for Fs {
       b"readlink" => Some(&readlink::ReadLink),
       b"realpath" => Some(&realpath::RealPath),
       b"truncate" => Some(&truncate::Truncate),
-      b"chown"    => Some(&chown::Chown      ),
+      b"chown"    => Some(&chown::ChOwn      ),
+      b"chmod"    => Some(&chmod::ChMod      ),
       _ => None,
     }
   }
@@ -64,6 +66,7 @@ impl Fs {
     ("realpath", "<file> ...",                   "print the canonicalized absolute pathname"),
     ("truncate", "<size> <file> ...",            "truncate files to a specified size"),
     ("chown",    "<owner>[:<group>] <file> ...", "change the owner and/or group of files"),
+    ("chmod",    "<mode> <file> ...",            "change the permissions of files"),
   ];
 
   fn subcommands() -> impl Iterator<Item = VarStr> {

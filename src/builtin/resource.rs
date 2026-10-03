@@ -16,6 +16,7 @@ use crate::{
   util::{
     self,
     error::{ShResult, ShResultExt},
+    strops,
   },
 };
 
@@ -174,20 +175,6 @@ impl super::Builtin for ULimit {
   }
 }
 
-fn parse_rwx(bits: &str) -> stat::mode_t {
-  let mut n = 0;
-  if bits.contains('r') {
-    n |= 4;
-  }
-  if bits.contains('w') {
-    n |= 2;
-  }
-  if bits.contains('x') {
-    n |= 1;
-  }
-  n
-}
-
 #[cfg(linux_like)]
 fn ulimit_nproc(span: Span, procs: rlim_t) -> ShResult<()> {
   let (_, hard) = getrlimit(Resource::RLIMIT_NPROC).map_err(|e| {
@@ -211,56 +198,6 @@ fn ulimit_nproc(span: Span, _procs: rlim_t) -> ShResult<()> {
     ExecFail @ span,
     "ulimit -u (max user processes) is not supported on this platform",
   ))
-}
-
-fn apply_op(
-  old_bits: &mut stat::mode_t,
-  op: char,
-  new_bits: stat::mode_t,
-  shift: stat::mode_t,
-  mask: stat::mode_t,
-) {
-  match op {
-    '=' => {
-      *old_bits &= !mask;
-      *old_bits |= (!new_bits & 0o7) << shift;
-    }
-    '+' => {
-      *old_bits &= !((new_bits & 0o7) << shift);
-    }
-    '-' => {
-      *old_bits |= (new_bits << shift) & mask;
-    }
-    _ => unreachable!(),
-  }
-}
-
-fn apply_symbolic(
-  old_bits: &mut stat::mode_t,
-  who: &str,
-  op: char,
-  new_bits: stat::mode_t,
-  span: Span,
-) -> ShResult<()> {
-  for ch in who.chars() {
-    match ch {
-      'u' => apply_op(old_bits, op, new_bits, 6, 0o7 << 6),
-      'g' => apply_op(old_bits, op, new_bits, 3, 0o7 << 3),
-      'o' => apply_op(old_bits, op, new_bits, 0, 0o7),
-      'a' => {
-        for s in [0, 3, 6] {
-          apply_op(old_bits, op, new_bits, s, 0o7 << s);
-        }
-      }
-      _ => {
-        return Err(sherr!(
-          ParseErr @ span,
-          "invalid umask 'who' character: {ch}",
-        ));
-      }
-    }
-  }
-  Ok(())
 }
 
 fn format_symbolic(bits: stat::mode_t) -> String {
@@ -294,13 +231,14 @@ impl super::Builtin for UMask {
   fn opts(&self) -> Vec<OptSpec> {
     vec![OptSpec::new_short("symbolic", b'S')]
   }
+  #[expect(clippy::useless_conversion)]
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
     let symbolic = opts.iter().any(|o| o.key() == "symbolic");
 
     let old = umask(Mode::empty());
     umask(old);
-    let mut old_bits = old.bits();
+    let old_bits = old.bits();
 
     if let Some((raw, span)) = arg_vec.first() {
       let span = *span;
@@ -322,22 +260,9 @@ impl super::Builtin for UMask {
         change_umask(mode.bits());
       } else {
         // Symbolic mode: umask u=rwx,g=rx,o=
-        for part in raw.to_str_lossy().split(',') {
-          let (who, op, bits) = if let Some((w, b)) = part.split_once('=') {
-            (w, '=', b)
-          } else if let Some((w, b)) = part.split_once('+') {
-            (w, '+', b)
-          } else if let Some((w, b)) = part.split_once('-') {
-            (w, '-', b)
-          } else {
-            return Err(sherr!(
-              ParseErr @ span,
-              "invalid symbolic umask: {part}",
-            ));
-          };
-          apply_symbolic(&mut old_bits, who, op, parse_rwx(bits), span)?;
-        }
-        change_umask(old_bits);
+        let clauses = strops::parse_mode_clauses(&raw.to_str_lossy()).promote_err(span)?;
+        let allowed = strops::apply_mode_clauses(!u32::from(old_bits) & 0o777, &clauses);
+        change_umask((!allowed & 0o777) as stat::mode_t);
       }
     } else if symbolic {
       let symbolic = format_symbolic(old_bits);

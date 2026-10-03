@@ -50,8 +50,8 @@ fn resolve_gid(name: &str) -> ShResult<Gid> {
   }
 }
 
-pub(super) struct Chown;
-impl Builtin for Chown {
+pub(super) struct ChOwn;
+impl Builtin for ChOwn {
   fn strict_opts(&self) -> bool {
     true
   }

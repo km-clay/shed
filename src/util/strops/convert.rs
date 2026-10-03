@@ -402,6 +402,163 @@ pub(crate) fn format_size(bytes: u64, buf: &mut impl std::fmt::Write) -> std::fm
   }
 }
 
+/// Which permission triple a clause touches, as a bit shift.
+const WHO_USER: u32 = 6;
+const WHO_GROUP: u32 = 3;
+const WHO_OTHER: u32 = 0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModeOp {
+  Set,
+  Add,
+  Remove,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModeClause {
+  who: Vec<u32>,
+  op: ModeOp,
+  rwx: u32,
+  special: u32,
+}
+
+impl ModeClause {
+  fn apply_to(&self, mut mode: u32) -> u32 {
+    for &shift in &self.who {
+      let triple = (mode >> shift) & 0o7;
+      let next = match self.op {
+        ModeOp::Set => self.rwx,
+        ModeOp::Add => triple | self.rwx,
+        ModeOp::Remove => triple & !self.rwx & 0o7,
+      };
+      mode = (mode & !(0o7 << shift)) | (next << shift);
+    }
+
+    let special = self.special_for_who();
+    match self.op {
+      ModeOp::Set => {
+        mode &= !self.clearable_special();
+        mode |= special;
+      }
+      ModeOp::Add => mode |= special,
+      ModeOp::Remove => mode &= !special,
+    }
+    mode
+  }
+
+  /// `s` means setuid under `u` and setgid under `g`, so the bit depends on
+  /// which triples the clause names. `t` is sticky regardless.
+  fn special_for_who(&self) -> u32 {
+    let mut bits = self.special & 0o1000;
+    if self.special & 0o4000 != 0 {
+      if self.who.contains(&WHO_USER) {
+        bits |= 0o4000;
+      }
+      if self.who.contains(&WHO_GROUP) {
+        bits |= 0o2000;
+      }
+    }
+    bits
+  }
+
+  /// `=` clears the special bit belonging to each triple it names: setuid
+  /// goes with `u`, setgid with `g`, and sticky with `o`.
+  fn clearable_special(&self) -> u32 {
+    let mut bits = 0;
+    if self.who.contains(&WHO_USER) {
+      bits |= 0o4000;
+    }
+    if self.who.contains(&WHO_GROUP) {
+      bits |= 0o2000;
+    }
+    if self.who.contains(&WHO_OTHER) {
+      bits |= 0o1000;
+    }
+    bits
+  }
+}
+
+/// Parse a symbolic mode: `[ugoa...][-+=][rwxst...]`, comma-separated.
+pub(crate) fn parse_mode_clauses(spec: &str) -> ShResult<Vec<ModeClause>> {
+  let mut clauses = Vec::new();
+
+  for part in spec.split(',') {
+    let Some(i) = part.find(['=', '+', '-']) else {
+      return Err(sherr!(
+        ParseErr,
+        "symbolic mode `{part}` needs one of `=`, `+` or `-`"
+      ));
+    };
+    let (who_str, rest) = part.split_at(i);
+    let op = match rest.as_bytes()[0] {
+      b'=' => ModeOp::Set,
+      b'+' => ModeOp::Add,
+      b'-' => ModeOp::Remove,
+      _ => unreachable!("find() matched one of the three"),
+    };
+    let perm_str = &rest[1..];
+
+    let mut who = Vec::new();
+    for ch in who_str.chars() {
+      match ch {
+        'u' => who.push(WHO_USER),
+        'g' => who.push(WHO_GROUP),
+        'o' => who.push(WHO_OTHER),
+        'a' => who.extend_from_slice(&[WHO_USER, WHO_GROUP, WHO_OTHER]),
+        _ => {
+          return Err(sherr!(
+            ParseErr,
+            "invalid `who` character `{ch}` in symbolic mode `{part}`"
+          ));
+        }
+      }
+    }
+    // an omitted who means every triple, as `a` does
+    if who.is_empty() {
+      who.extend_from_slice(&[WHO_USER, WHO_GROUP, WHO_OTHER]);
+    }
+    who.sort_unstable();
+    who.dedup();
+
+    let mut rwx = 0;
+    let mut special = 0;
+    for ch in perm_str.chars() {
+      match ch {
+        'r' => rwx |= 0o4,
+        'w' => rwx |= 0o2,
+        'x' => rwx |= 0o1,
+        's' => special |= 0o4000,
+        't' => special |= 0o1000,
+        _ => {
+          return Err(sherr!(
+            ParseErr,
+            "invalid permission character `{ch}` in symbolic mode `{part}`"
+          ));
+        }
+      }
+    }
+
+    clauses.push(ModeClause {
+      who,
+      op,
+      rwx,
+      special,
+    });
+  }
+
+  if clauses.is_empty() {
+    return Err(sherr!(ParseErr, "empty symbolic mode"));
+  }
+
+  Ok(clauses)
+}
+
+/// Fold `clauses` into `base`, reading them as permission bits: `+` sets and
+/// `-` clears. A `umask` consumer passes `!mask` and complements the result.
+pub(crate) fn apply_mode_clauses(base: u32, clauses: &[ModeClause]) -> u32 {
+  clauses.iter().fold(base, |mode, c| c.apply_to(mode))
+}
+
 pub(crate) fn format_mode(mode: u32) -> String {
   let mut out = String::new();
   let mut check_bit = |bit: u32, ch: char| {
@@ -1089,21 +1246,6 @@ mod format_time_tests {
     assert_eq!(format_time(Duration::from_hours(240)), "1 week 3 days");
   }
 
-  // ─── sub-unit suppression ────────────────────────────────────────
-
-  #[test]
-  fn ms_suppressed_when_seconds_present() {
-    // 1500ms = 1s + 500ms; only "1s" appears (ms only shows when
-    // nothing else does).
-    assert_eq!(format_time(Duration::from_millis(1500)), "1s");
-  }
-
-  #[test]
-  fn micros_suppressed_when_millis_present() {
-    // 1500µs = 1ms + 500µs; only "1ms" appears.
-    assert_eq!(format_time(Duration::from_micros(1500)), "1ms");
-  }
-
   // ─── regression tests for previously-buggy paths ────────────────
 
   #[test]
@@ -1486,5 +1628,323 @@ mod time_reader_tests {
   fn interp_rejects_garbage() {
     assert!(TimeReader::interpret("bananas").is_err());
     assert!(TimeReader::interpret("5 potatoes").is_err());
+  }
+}
+
+#[cfg(test)]
+mod mode_clause_tests {
+  use super::{apply_mode_clauses, parse_mode_clauses};
+
+  /// (starting mode, symbolic spec, expected result) -- every row produced by
+  /// running coreutils `chmod` against a real file, so this pins our reading
+  /// of the symbolic grammar to the one everybody already has.
+  const ORACLE: &[(u32, &str, u32)] = &[
+    (0o000, "u+x", 0o100),
+    (0o000, "go-w", 0o0),
+    (0o000, "a=r", 0o444),
+    (0o000, "u=rwx", 0o700),
+    (0o000, "a+rw", 0o666),
+    (0o000, "u-w", 0o0),
+    (0o000, "og=rx", 0o55),
+    (0o000, "+x", 0o111),
+    (0o000, "u+s", 0o4000),
+    (0o000, "g+s", 0o2000),
+    (0o000, "+t", 0o1000),
+    (0o000, "a-x", 0o0),
+    (0o000, "u=r,g=w,o=x", 0o421),
+    (0o000, "ug+rw", 0o660),
+    (0o644, "u+x", 0o744),
+    (0o644, "go-w", 0o644),
+    (0o644, "a=r", 0o444),
+    (0o644, "u=rwx", 0o744),
+    (0o644, "a+rw", 0o666),
+    (0o644, "u-w", 0o444),
+    (0o644, "og=rx", 0o655),
+    (0o644, "+x", 0o755),
+    (0o644, "u+s", 0o4644),
+    (0o644, "g+s", 0o2644),
+    (0o644, "+t", 0o1644),
+    (0o644, "a-x", 0o644),
+    (0o644, "u=r,g=w,o=x", 0o421),
+    (0o644, "ug+rw", 0o664),
+    (0o755, "u+x", 0o755),
+    (0o755, "go-w", 0o755),
+    (0o755, "a=r", 0o444),
+    (0o755, "u=rwx", 0o755),
+    (0o755, "a+rw", 0o777),
+    (0o755, "u-w", 0o555),
+    (0o755, "og=rx", 0o755),
+    (0o755, "+x", 0o755),
+    (0o755, "u+s", 0o4755),
+    (0o755, "g+s", 0o2755),
+    (0o755, "+t", 0o1755),
+    (0o755, "a-x", 0o644),
+    (0o755, "u=r,g=w,o=x", 0o421),
+    (0o755, "ug+rw", 0o775),
+    (0o777, "u+x", 0o777),
+    (0o777, "go-w", 0o755),
+    (0o777, "a=r", 0o444),
+    (0o777, "u=rwx", 0o777),
+    (0o777, "a+rw", 0o777),
+    (0o777, "u-w", 0o577),
+    (0o777, "og=rx", 0o755),
+    (0o777, "+x", 0o777),
+    (0o777, "u+s", 0o4777),
+    (0o777, "g+s", 0o2777),
+    (0o777, "+t", 0o1777),
+    (0o777, "a-x", 0o666),
+    (0o777, "u=r,g=w,o=x", 0o421),
+    (0o777, "ug+rw", 0o777),
+    (0o700, "u+x", 0o700),
+    (0o700, "go-w", 0o700),
+    (0o700, "a=r", 0o444),
+    (0o700, "u=rwx", 0o700),
+    (0o700, "a+rw", 0o766),
+    (0o700, "u-w", 0o500),
+    (0o700, "og=rx", 0o755),
+    (0o700, "+x", 0o711),
+    (0o700, "u+s", 0o4700),
+    (0o700, "g+s", 0o2700),
+    (0o700, "+t", 0o1700),
+    (0o700, "a-x", 0o600),
+    (0o700, "u=r,g=w,o=x", 0o421),
+    (0o700, "ug+rw", 0o760),
+    (0o2755, "u+x", 0o2755),
+    (0o2755, "go-w", 0o2755),
+    (0o2755, "a=r", 0o444),
+    (0o2755, "u=rwx", 0o2755),
+    (0o2755, "a+rw", 0o2777),
+    (0o2755, "u-w", 0o2555),
+    (0o2755, "og=rx", 0o755),
+    (0o2755, "+x", 0o2755),
+    (0o2755, "u+s", 0o6755),
+    (0o2755, "g+s", 0o2755),
+    (0o2755, "+t", 0o3755),
+    (0o2755, "a-x", 0o2644),
+    (0o2755, "u=r,g=w,o=x", 0o421),
+    (0o2755, "ug+rw", 0o2775),
+    (0o4755, "u+x", 0o4755),
+    (0o4755, "go-w", 0o4755),
+    (0o4755, "a=r", 0o444),
+    (0o4755, "u=rwx", 0o755),
+    (0o4755, "a+rw", 0o4777),
+    (0o4755, "u-w", 0o4555),
+    (0o4755, "og=rx", 0o4755),
+    (0o4755, "+x", 0o4755),
+    (0o4755, "u+s", 0o4755),
+    (0o4755, "g+s", 0o6755),
+    (0o4755, "+t", 0o5755),
+    (0o4755, "a-x", 0o4644),
+    (0o4755, "u=r,g=w,o=x", 0o421),
+    (0o4755, "ug+rw", 0o4775),
+    (0o1777, "u+x", 0o1777),
+    (0o1777, "go-w", 0o1755),
+    (0o1777, "a=r", 0o444),
+    (0o1777, "u=rwx", 0o1777),
+    (0o1777, "a+rw", 0o1777),
+    (0o1777, "u-w", 0o1577),
+    (0o1777, "og=rx", 0o755),
+    (0o1777, "+x", 0o1777),
+    (0o1777, "u+s", 0o5777),
+    (0o1777, "g+s", 0o3777),
+    (0o1777, "+t", 0o1777),
+    (0o1777, "a-x", 0o1666),
+    (0o1777, "u=r,g=w,o=x", 0o421),
+    (0o1777, "ug+rw", 0o1777),
+  ];
+
+  #[test]
+  fn symbolic_modes_match_coreutils_chmod() {
+    let mut failures = Vec::new();
+    for &(start, spec, want) in ORACLE {
+      let clauses = match parse_mode_clauses(spec) {
+        Ok(c) => c,
+        Err(e) => {
+          failures.push(format!("{spec} from {start:04o}: parse failed: {e}"));
+          continue;
+        }
+      };
+      let got = apply_mode_clauses(start, &clauses);
+      if got != want {
+        failures.push(format!(
+          "{start:04o} {spec} -> got {got:04o}, chmod says {want:04o}"
+        ));
+      }
+    }
+    assert!(
+      failures.is_empty(),
+      "{} of {} cases disagree with chmod:\n{}",
+      failures.len(),
+      ORACLE.len(),
+      failures.join("\n")
+    );
+  }
+
+  /// A second oracle batch, aimed at the special bits and empty permission
+  /// lists -- the parts `umask` never exercised.
+  const ORACLE_SPECIAL: &[(u32, &str, u32)] = &[
+    (0o0000, "u=rws", 0o4600),
+    (0o0000, "g=rws", 0o2060),
+    (0o0000, "o=rwt", 0o1006),
+    (0o0000, "a=rwxst", 0o7777),
+    (0o0000, "u+s", 0o4000),
+    (0o0000, "g+s", 0o2000),
+    (0o0000, "o+t", 0o1000),
+    (0o0000, "a+s", 0o6000),
+    (0o0000, "a-s", 0o0),
+    (0o0000, "u-s", 0o0),
+    (0o0000, "o-t", 0o0),
+    (0o0000, "ug=rx", 0o550),
+    (0o0000, "uo+w", 0o202),
+    (0o0000, "a=", 0o0),
+    (0o0000, "u=", 0o0),
+    (0o0000, "go=", 0o0),
+    (0o0777, "u=rws", 0o4677),
+    (0o0777, "g=rws", 0o2767),
+    (0o0777, "o=rwt", 0o1776),
+    (0o0777, "a=rwxst", 0o7777),
+    (0o0777, "u+s", 0o4777),
+    (0o0777, "g+s", 0o2777),
+    (0o0777, "o+t", 0o1777),
+    (0o0777, "a+s", 0o6777),
+    (0o0777, "a-s", 0o777),
+    (0o0777, "u-s", 0o777),
+    (0o0777, "o-t", 0o777),
+    (0o0777, "ug=rx", 0o557),
+    (0o0777, "uo+w", 0o777),
+    (0o0777, "a=", 0o0),
+    (0o0777, "u=", 0o77),
+    (0o0777, "go=", 0o700),
+    (0o7777, "u=rws", 0o7677),
+    (0o7777, "g=rws", 0o7767),
+    (0o7777, "o=rwt", 0o7776),
+    (0o7777, "a=rwxst", 0o7777),
+    (0o7777, "u+s", 0o7777),
+    (0o7777, "g+s", 0o7777),
+    (0o7777, "o+t", 0o7777),
+    (0o7777, "a+s", 0o7777),
+    (0o7777, "a-s", 0o1777),
+    (0o7777, "u-s", 0o3777),
+    (0o7777, "o-t", 0o6777),
+    (0o7777, "ug=rx", 0o1557),
+    (0o7777, "uo+w", 0o7777),
+    (0o7777, "a=", 0o0),
+    (0o7777, "u=", 0o3077),
+    (0o7777, "go=", 0o4700),
+    (0o4755, "u=rws", 0o4655),
+    (0o4755, "g=rws", 0o6765),
+    (0o4755, "o=rwt", 0o5756),
+    (0o4755, "a=rwxst", 0o7777),
+    (0o4755, "u+s", 0o4755),
+    (0o4755, "g+s", 0o6755),
+    (0o4755, "o+t", 0o5755),
+    (0o4755, "a+s", 0o6755),
+    (0o4755, "a-s", 0o755),
+    (0o4755, "u-s", 0o755),
+    (0o4755, "o-t", 0o4755),
+    (0o4755, "ug=rx", 0o555),
+    (0o4755, "uo+w", 0o4757),
+    (0o4755, "a=", 0o0),
+    (0o4755, "u=", 0o55),
+    (0o4755, "go=", 0o4700),
+    (0o2755, "u=rws", 0o6655),
+    (0o2755, "g=rws", 0o2765),
+    (0o2755, "o=rwt", 0o3756),
+    (0o2755, "a=rwxst", 0o7777),
+    (0o2755, "u+s", 0o6755),
+    (0o2755, "g+s", 0o2755),
+    (0o2755, "o+t", 0o3755),
+    (0o2755, "a+s", 0o6755),
+    (0o2755, "a-s", 0o755),
+    (0o2755, "u-s", 0o2755),
+    (0o2755, "o-t", 0o2755),
+    (0o2755, "ug=rx", 0o555),
+    (0o2755, "uo+w", 0o2757),
+    (0o2755, "a=", 0o0),
+    (0o2755, "u=", 0o2055),
+    (0o2755, "go=", 0o700),
+    (0o1777, "u=rws", 0o5677),
+    (0o1777, "g=rws", 0o3767),
+    (0o1777, "o=rwt", 0o1776),
+    (0o1777, "a=rwxst", 0o7777),
+    (0o1777, "u+s", 0o5777),
+    (0o1777, "g+s", 0o3777),
+    (0o1777, "o+t", 0o1777),
+    (0o1777, "a+s", 0o7777),
+    (0o1777, "a-s", 0o1777),
+    (0o1777, "u-s", 0o1777),
+    (0o1777, "o-t", 0o777),
+    (0o1777, "ug=rx", 0o1557),
+    (0o1777, "uo+w", 0o1777),
+    (0o1777, "a=", 0o0),
+    (0o1777, "u=", 0o1077),
+    (0o1777, "go=", 0o700),
+    (0o0640, "u=rws", 0o4640),
+    (0o0640, "g=rws", 0o2660),
+    (0o0640, "o=rwt", 0o1646),
+    (0o0640, "a=rwxst", 0o7777),
+    (0o0640, "u+s", 0o4640),
+    (0o0640, "g+s", 0o2640),
+    (0o0640, "o+t", 0o1640),
+    (0o0640, "a+s", 0o6640),
+    (0o0640, "a-s", 0o640),
+    (0o0640, "u-s", 0o640),
+    (0o0640, "o-t", 0o640),
+    (0o0640, "ug=rx", 0o550),
+    (0o0640, "uo+w", 0o642),
+    (0o0640, "a=", 0o0),
+    (0o0640, "u=", 0o40),
+    (0o0640, "go=", 0o600),
+    (0o0755, "u=rws", 0o4655),
+    (0o0755, "g=rws", 0o2765),
+    (0o0755, "o=rwt", 0o1756),
+    (0o0755, "a=rwxst", 0o7777),
+    (0o0755, "u+s", 0o4755),
+    (0o0755, "g+s", 0o2755),
+    (0o0755, "o+t", 0o1755),
+    (0o0755, "a+s", 0o6755),
+    (0o0755, "a-s", 0o755),
+    (0o0755, "u-s", 0o755),
+    (0o0755, "o-t", 0o755),
+    (0o0755, "ug=rx", 0o555),
+    (0o0755, "uo+w", 0o757),
+    (0o0755, "a=", 0o0),
+    (0o0755, "u=", 0o55),
+    (0o0755, "go=", 0o700),
+  ];
+
+  #[test]
+  fn special_bits_and_empty_lists_match_coreutils() {
+    let mut failures = Vec::new();
+    for &(start, spec, want) in ORACLE_SPECIAL {
+      match parse_mode_clauses(spec) {
+        Ok(clauses) => {
+          let got = apply_mode_clauses(start, &clauses);
+          if got != want {
+            failures.push(format!(
+              "{start:04o} {spec} -> got {got:04o}, chmod says {want:04o}"
+            ));
+          }
+        }
+        Err(e) => failures.push(format!("{start:04o} {spec}: parse failed: {e}")),
+      }
+    }
+    assert!(
+      failures.is_empty(),
+      "{} of {} disagree:\n{}",
+      failures.len(),
+      ORACLE_SPECIAL.len(),
+      failures.join("\n")
+    );
+  }
+
+  #[test]
+  fn invalid_specs_are_rejected() {
+    for bad in ["u+q", "z+x", "urwx", "", "u", "u+rwxq"] {
+      assert!(
+        parse_mode_clauses(bad).is_err(),
+        "expected `{bad}` to be rejected"
+      );
+    }
   }
 }

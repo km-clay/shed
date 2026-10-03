@@ -11,8 +11,8 @@ mod quote;
 mod scan;
 
 pub(crate) use convert::{
-  TimeReader, dur_delta, format_mode, format_size, format_time, parse_paren_strftime, parse_size,
-  strftime,
+  TimeReader, apply_mode_clauses, dur_delta, format_mode, format_size, format_time,
+  parse_mode_clauses, parse_paren_strftime, parse_size, strftime,
 };
 pub(crate) use distance::{EDIT_WEIGHT, levenshtein};
 pub(crate) use format::{
