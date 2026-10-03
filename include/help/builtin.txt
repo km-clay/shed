@@ -439,11 +439,11 @@ CHRONO                                           *builtin-chrono* *chrono*
 
   Subcommands ~
 
-    `timer`   measure elapsed time with named stopwatches
-    `sleep`   pause for a duration, or until an instant
-    `fmt`     render an instant or a duration through a format string
-    `every`   run a command repeatedly on an interval
-    `zone`    list portable timezone names
+    |timer|(chrono-timer)   measure elapsed time with named stopwatches
+    |sleep|(chrono-sleep)   pause for a duration, or until an instant
+    |fmt|(chrono-fmt)     render an instant or a duration through a format string
+    |every|(chrono-every)   run a command repeatedly on an interval
+    |zone|(chrono-zone)    list portable timezone names
 
 ==============================================================================
 CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
@@ -1611,16 +1611,16 @@ FS                                                       *builtin-fs* *fs*
 
   Subcommands ~
 
-    `rename`    atomically rename a file within one filesystem
-    `rmdir`     remove empty directories
-    `unlink`    remove files
-    `link`      create hard links to a file
-    `symlink`   create symbolic links to a path
-    `readlink`  print the target stored in a symbolic link
-    `realpath`  resolve a path to its canonical absolute form
-    `truncate`  set the length of files
-    `chown`     change the user and/or group of files
-    `chmod`     change the permissions of files
+    |rename|(fs-rename)    atomically rename a file within one filesystem
+    |rmdir|(fs-rmdir)     remove empty directories
+    |unlink|(fs-unlink)    remove files
+    |link|(fs-link)      create hard links to a file
+    |symlink|(fs-symlink)   create symbolic links to a path
+    |readlink|(fs-readlink)  print the target stored in a symbolic link
+    |realpath|(fs-realpath)  resolve a path to its canonical absolute form
+    |truncate|(fs-truncate)  set the length of files
+    |chown|(fs-chown)     change the user and/or group of files
+    |chmod|(fs-chmod)     change the permissions of files
 
   Only `realpath` takes an option. Anywhere else an option is an error
   rather than a file name, so a path that begins with `-` needs `--`
