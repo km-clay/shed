@@ -1626,8 +1626,9 @@ FS                                                       *builtin-fs* *fs*
     |chown|(fs-chown)     change the user and/or group of files
     |chmod|(fs-chmod)     change the permissions of files
     |touch|(fs-touch)     set the access and modification times of files
+    |mkdir|(fs-mkdir)     create directories
 
-  Only `realpath`, `chown` and `touch` take options. Anywhere else an
+  Only `realpath`, `chown`, `touch` and `mkdir` take options. Anywhere else an
   option is an error rather than a file name, so a path that begins with
   `-` needs `--` before it, or a `./` prefix.
 
@@ -2158,6 +2159,62 @@ FS TOUCH                                     *fs-touch* *builtin-fs-touch*
 
       ```fs touch -t '1960-05-05 12:34:56' old```
       ```stat old -c %Y```                `-304759504`
+
+==============================================================================
+FS MKDIR                                     *fs-mkdir* *builtin-fs-mkdir*
+
+  `fs mkdir [-m {mode}] {dir} ...`
+
+  Create each {dir}, using `mkdir(2)`.
+
+  Only the named directory is created. A {dir} whose parent does not
+  exist is an error, not an invitation to create the parent: building a
+  chain of directories is a loop rather than a system call, so there is
+  no `-p`. Name the parents in order, or use `mkdir -p` when that is
+  what is wanted.
+
+  Each {dir} is attempted independently, so one that fails reports the
+  reason and the rest are still created.
+
+  Mode ~
+
+  Without `-m`, a new directory gets `0777` with the shell's |umask|
+  removed, which is why the usual `umask 022` yields `755`. This is the
+  one place in `fs` where the result depends on shell state.
+
+  `-m {mode}` sets the mode exactly, with the umask ignored -- so
+  ```fs mkdir -m 777 d``` is `777` whatever the umask says. {mode} may be
+  octal or symbolic, read the same way |fs-chmod| reads it, with one
+  difference: a symbolic {mode} has no existing mode to build on, so it
+  starts from `a=rwx`. That makes `-m -w` yield `555` and `-m go-rwx`
+  yield `700`.
+
+  The directory is created with the requested mode and then set to it,
+  so it is never more permissive than asked for, even briefly. If the
+  second step fails the directory still exists, carrying the default
+  mode; the diagnostic says so.
+
+  Exit status ~
+
+    `0`   every directory was created
+    `1`   at least one could not be; each failure is reported
+    `2`   no {dir}, or a {mode} that does not parse
+
+  Examples ~
+
+      ```fs mkdir build```                 one directory
+      ```fs mkdir a b c```                 three, independently
+      ```fs mkdir -m 700 ~/.secrets```     exactly 0700, umask or not
+      ```fs mkdir -m go-rwx private```     the same, said symbolically
+
+    Building a chain, which `-p` would otherwise hide:
+
+      ```fs mkdir a a/b a/b/c```
+
+    A directory that already exists is an error, so a script that wants
+    "make sure it exists" should test first:
+
+      ```[[ -d "$d" ]] || fs mkdir "$d"```
 
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*

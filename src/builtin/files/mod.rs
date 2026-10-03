@@ -12,6 +12,7 @@ use super::opt::Parsed;
 mod chmod;
 mod chown;
 mod link;
+mod mkdir;
 mod readlink;
 mod realpath;
 mod rename;
@@ -40,6 +41,7 @@ impl super::BuiltinRouter for Fs {
       b"chown"    => Some(&chown::ChOwn      ),
       b"chmod"    => Some(&chmod::ChMod      ),
       b"touch"    => Some(&touch::Touch      ),
+      b"mkdir"    => Some(&mkdir::MkDir      ),
       _ => None,
     }
   }
@@ -70,6 +72,7 @@ impl Fs {
     ("chown",    "<owner>[:<group>] <file> ...", "change the owner and/or group of files"),
     ("chmod",    "<mode> <file> ...",            "change the permissions of files"),
     ("touch",    "<file> ...",                   "update the access and modification times of files"),
+    ("mkdir",    "<dir> ...",                    "create directories"),
   ];
 
   fn subcommands() -> impl Iterator<Item = VarStr> {

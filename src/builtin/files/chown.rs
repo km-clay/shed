@@ -59,6 +59,7 @@ impl Builtin for ChOwn {
   fn opts(&self) -> Vec<OptSpec> {
     vec![opt!("no-deref" | b'h')]
   }
+  #[rustfmt::skip]
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut status = 0;
     let mut arguments = args.arguments().peekable();
@@ -104,19 +105,14 @@ impl Builtin for ChOwn {
       if let Err(e) = res {
         let msg = varstr!("cannot change owner of `{file}`");
         let err = match e.kind() {
-          EK::NotFound => sherr!(ExecFail @ f_span, "{msg}: no such file or directory"),
-          EK::InvalidFilename => sherr!(ExecFail @ f_span, "{msg}: invalid filename"),
+          EK::NotFound           => sherr!(ExecFail @ f_span, "{msg}: no such file or directory"),
+          EK::InvalidFilename    => sherr!(ExecFail @ f_span, "{msg}: invalid filename"),
           EK::ReadOnlyFilesystem => sherr!(ExecFail @ f_span, "{msg}: read-only filesystem"),
-          EK::NotADirectory => {
-            sherr!(ExecFail @ f_span, "{msg}: path component is not a directory")
-          }
-          EK::PermissionDenied => match e.raw_os_error() {
-            Some(libc::EPERM) => sherr!(ExecFail @ f_span, "{msg}: operation not permitted")
-              .with_note(
-                "only the superuser can change a file's user; a group must be one you belong to"
-                  .into(),
-              ),
-            _ => sherr!(ExecFail @ f_span, "{msg}: permission denied"),
+          EK::NotADirectory      => sherr!(ExecFail @ f_span, "{msg}: path component is not a directory"),
+          EK::PermissionDenied   => match e.raw_os_error() {
+            Some(libc::EPERM)    => sherr!(ExecFail @ f_span, "{msg}: operation not permitted")
+              .with_note("only the superuser can change a file's user; a group must be one you belong to".into()),
+            _                    => sherr!(ExecFail @ f_span, "{msg}: permission denied"),
           },
 
           _ => {
