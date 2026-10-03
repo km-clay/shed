@@ -1605,6 +1605,7 @@ FS                                                       *builtin-fs* *fs*
     `symlink`   create symbolic links to a path
     `readlink`  print the target stored in a symbolic link
     `realpath`  resolve a path to its canonical absolute form
+    `truncate`  set the length of files
 
   Only `realpath` takes an option. Anywhere else an option is an error
   rather than a file name, so a path that begins with `-` needs `--`
@@ -1862,6 +1863,67 @@ FS REALPATH                            *fs-realpath* *builtin-fs-realpath*
     Telling whether two names are the same file:
 
       ```[[ "$(fs realpath "$a")" == "$(fs realpath "$b")" ]]```
+
+==============================================================================
+FS TRUNCATE                            *fs-truncate* *builtin-fs-truncate*
+
+  `fs truncate {size} {file} ...`
+
+  Set each {file} to {size} bytes, using `truncate(2)`. The size comes
+  first because it applies to every {file}, so one call can level a
+  whole set: ```fs truncate 0 *.log```.
+
+  Shrinking discards the bytes past {size} immediately and they are not
+  recoverable. Extending does not write zeros -- it leaves a hole, so the
+  file reports the larger length while occupying no extra space until
+  something writes into the gap. A 1 MiB extension of an empty file uses
+  no blocks at all.
+
+  Unlike `truncate(1)`, a {file} that does not exist is an error rather
+  than something to create: `truncate(2)` has no such behaviour, and the
+  coreutil only creates because it opens the file first. Use a
+  redirection if you want the file brought into being.
+
+  Only regular files have a length to set. A directory, a FIFO, a socket
+  or a device is refused.
+
+  Each {file} is attempted independently, so one that fails reports the
+  reason and the rest are still set.
+
+  Size ~
+
+  {size} is a byte count, optionally suffixed. Binary suffixes are
+  powers of 1024 and decimal ones are powers of 1000:
+
+    `1024`        bare numbers are bytes
+    `1k 1kb`      1000 bytes
+    `1kib`        1024 bytes
+    `1m 1mb`      1000000 bytes
+    `1mib`        1048576 bytes
+
+  and likewise for `g`/`gib`, `t`/`tib`, `p`/`pib` and `e`/`eib`.
+  Suffixes are case-insensitive, so `1K` is 1000 bytes, *not* 1024 as in
+  `truncate(1)` -- name the binary suffix when that is what is wanted.
+
+  Truncating File Descriptors ~
+
+  Open file descriptors can be truncated by prepending `/dev/fd/` to the
+  fd number, e.g. `/dev/fd/5`, `/dev/fd/$fd`, etc. This is the same pattern
+  as teeing to an open fd using ```thru -t /dev/fd/$fd```.
+
+  Exit status ~
+
+    `0`   every file was set to {size}
+    `1`   at least one could not be; each failure is reported
+    `2`   no {size}, no {file}, an unreadable {size}, or one too large
+          to express as a file offset
+
+  Examples ~
+
+      ```fs truncate 0 debug.log```        empty a file, keeping it open-able
+      ```fs truncate 0 *.log```            level a whole set
+      ```fs truncate 10mib sparse.img```   a 10 MiB file occupying no space
+      ```fs truncate 0 /dev/fd/6```        truncate an open fd, e.g. a log pipe
 
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*

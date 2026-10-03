@@ -363,25 +363,25 @@ pub(crate) fn parse_size(s: &str) -> ShResult<u64> {
         Ok(n) if n < 0.0 => {
           return Err(sherr!(
             ParseErr,
-            "Size number cannot be negative: {num_str}",
+            "size number cannot be negative: {num_str}",
           ));
         }
         Ok(n) => {
           let bytes = n * multiplier;
           if bytes > u64::MAX as f64 {
-            return Err(sherr!(ParseErr, "Size number too large: {num_str}{unit}",));
+            return Err(sherr!(ParseErr, "size number too large: {num_str}{unit}",));
           }
           return Ok(bytes.round() as u64);
         }
-        Err(_) => return Err(sherr!(ParseErr, "Invalid size number: {num_str}",)),
+        Err(_) => return Err(sherr!(ParseErr, "invalid size number: {num_str}",)),
       }
     }
   }
 
-  // If no unit suffix found, interpret as raw sector count
+  // If no unit suffix found, interpret as raw byte count
   match s.parse::<i64>() {
-    Err(_) => Err(sherr!(ParseErr, "Invalid size number: {s}",)),
-    Ok(n) if n < 0 => Err(sherr!(ParseErr, "Size number cannot be negative: {s}",)),
+    Err(_) => Err(sherr!(ParseErr, "invalid size number: {s}",)),
+    Ok(n) if n < 0 => Err(sherr!(ParseErr, "size number cannot be negative: {s}",)),
     Ok(n) => Ok(n as u64),
   }
 }

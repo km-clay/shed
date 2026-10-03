@@ -56,12 +56,13 @@ impl Builtin for Link {
         io::ErrorKind::ReadOnlyFilesystem => {
           sherr!(ExecFail @ l_span, "cannot create link `{link}`: read-only filesystem")
         }
-        io::ErrorKind::NotADirectory => {
-          sherr!(ExecFail @ l_span, "cannot create link `{link}`: path component is not a directory")
-        }
         io::ErrorKind::InvalidFilename => {
           sherr!(ExecFail @ l_span, "cannot create link `{link}`: invalid filename")
         }
+        io::ErrorKind::NotADirectory => {
+          sherr!(ExecFail @ l_span, "cannot create link `{link}`: path component is not a directory")
+        }
+
         io::ErrorKind::PermissionDenied | io::ErrorKind::IsADirectory => match e.raw_os_error() {
           Some(libc::EPERM) => {
             sherr!(ExecFail @ l_span, "cannot create link `{link}`: is a directory")

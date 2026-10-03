@@ -15,6 +15,7 @@ mod realpath;
 mod rename;
 mod rmdir;
 mod symlink;
+mod truncate;
 mod unlink;
 
 pub(super) struct Fs;
@@ -32,6 +33,7 @@ impl super::BuiltinRouter for Fs {
       b"symlink"  => Some(&symlink::SymLink  ),
       b"readlink" => Some(&readlink::ReadLink),
       b"realpath" => Some(&realpath::RealPath),
+      b"truncate" => Some(&truncate::Truncate),
       _ => None,
     }
   }
@@ -58,6 +60,7 @@ impl Fs {
     ("symlink",  "<target> <link> ...", "create symbolic links to files"),
     ("readlink", "<link>",              "print the value of a symbolic link"),
     ("realpath", "<file> ...",          "print the canonicalized absolute pathname"),
+    ("truncate", "<size> <file> ...",   "truncate files to a specified size"),
   ];
 
   fn subcommands() -> impl Iterator<Item = VarStr> {
