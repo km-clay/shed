@@ -12,6 +12,9 @@ use super::super::{Builtin, BuiltinArgs, argv};
 
 pub(super) struct Rename;
 impl Builtin for Rename {
+  fn strict_opts(&self) -> bool {
+    true
+  }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut paths = args.arguments();
 

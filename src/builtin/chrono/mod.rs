@@ -5,11 +5,13 @@ use chrono_tz::Tz;
 use nix::libc;
 
 use crate::{
+  errln,
   eval::lex::{Span, Tk},
   sherr, signal,
   state::{cmd, timers::TimerStatus, vars::VarStr},
   try_var,
   util::{
+    self,
     error::ShResult,
     strops::{self, ByteCursor, Field, FieldParams, Sign, SliceCursor, StrFmt, VarStrDisplay},
   },
@@ -336,14 +338,19 @@ impl Builtin for Chrono {
 }
 
 impl Chrono {
-  fn subcommands() -> Vec<VarStr> {
-    vec![
-      VarStr::from("timer"),
-      VarStr::from("sleep"),
-      VarStr::from("fmt"),
-      VarStr::from("every"),
-      VarStr::from("zone"),
-    ]
+  #[rustfmt::skip]
+  const SUBCOMMANDS: &[super::SubInfo] = &[
+    ("timer", "<name>",     "measure elapsed time with named stopwatches"),
+    ("sleep", "<duration>", "pause for a duration, or until an instant"),
+    ("fmt",   "<time>",     "render an instant or duration through a format"),
+    ("every", "<interval> <command>", "run a command repeatedly on an interval"),
+    ("zone",  "",           "list portable timezone names"),
+  ];
+
+  fn subcommands() -> impl Iterator<Item = VarStr> {
+    Self::SUBCOMMANDS
+      .iter()
+      .map(|(name, ..)| VarStr::from(*name))
   }
 }
 
@@ -359,6 +366,10 @@ impl Builtin for ChronoError {
         return Err(err);
       }
     }
-    Err(sherr!(ExecFail @ args.cmd_span(), "no subcommand specified for `chrono`").with_code(2))
+    errln!(
+      "chrono: no subcommand specified\n{}",
+      super::sub_usage("chrono", Chrono::SUBCOMMANDS)
+    );
+    util::with_status(2)
   }
 }

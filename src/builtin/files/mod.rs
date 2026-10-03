@@ -9,8 +9,12 @@ use crate::{
 
 use super::opt::Parsed;
 
+mod link;
+mod readlink;
 mod rename;
 mod rmdir;
+mod symlink;
+mod unlink;
 
 pub(super) struct Fs;
 impl super::BuiltinRouter for Fs {
@@ -20,8 +24,12 @@ impl super::BuiltinRouter for Fs {
   #[rustfmt::skip]
   fn sub_for(&self, word: &[u8]) -> Option<&'static dyn super::Builtin> {
     match word {
-      b"rename" => Some(&rename::Rename),
-      b"rmdir"  => Some(&rmdir::RmDir  ),
+      b"rename"   => Some(&rename::Rename    ),
+      b"rmdir"    => Some(&rmdir::RmDir      ),
+      b"unlink"   => Some(&unlink::Unlink    ),
+      b"link"     => Some(&link::Link        ),
+      b"symlink"  => Some(&symlink::SymLink  ),
+      b"readlink" => Some(&readlink::ReadLink),
       _ => None,
     }
   }
@@ -39,8 +47,20 @@ impl super::Builtin for Fs {
 }
 
 impl Fs {
-  fn subcommands() -> Vec<VarStr> {
-    vec![VarStr::from("rename"), VarStr::from("rmdir")]
+  #[rustfmt::skip]
+  const SUBCOMMANDS: &[super::SubInfo] = &[
+    ("rename",   "<from> <to>",         "rename a file within one filesystem, atomically"),
+    ("rmdir",    "<dir> ...",           "remove empty directories"),
+    ("unlink",   "<file> ...",          "remove files"),
+    ("link",     "<target> <link> ...", "create hard links to files"),
+    ("symlink",  "<target> <link> ...", "create symbolic links to files"),
+    ("readlink", "<link>",              "print the value of a symbolic link"),
+  ];
+
+  fn subcommands() -> impl Iterator<Item = VarStr> {
+    Self::SUBCOMMANDS
+      .iter()
+      .map(|(name, ..)| VarStr::from(*name))
   }
 }
 
@@ -53,14 +73,13 @@ impl super::Builtin for FsErr {
         let err = sherr!(ExecFail @ span, "unknown subcommand `{arg}` for `fs`")
           .with_code(2)
           .with_suggestions(&suggestions);
+
         return Err(err);
       }
     }
     errln!(
-      "fs: missing subcommand\nusage: fs <subcommand> ...\n\
-       \n  rename <from> <to>   rename a file within one filesystem, atomically\
-       \n  rmdir <dir> ...      remove empty directories\n\
-       \nsee `help fs` for details"
+      "fs: missing subcommand\n{}",
+      super::sub_usage("fs", Fs::SUBCOMMANDS)
     );
     util::with_status(2)
   }

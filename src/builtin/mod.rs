@@ -723,6 +723,26 @@ fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
   Ok(out)
 }
 
+/// A `{name}`, `{args}`, `{description}` row for each subcommand a router accepts.
+pub(crate) type SubInfo = (&'static str, &'static str, &'static str);
+
+fn sub_usage(cmd: &str, subs: &[SubInfo]) -> String {
+  let width = subs
+    .iter()
+    .map(|(name, args, _)| name.len() + usize::from(!args.is_empty()) + args.len())
+    .max()
+    .unwrap_or(0);
+
+  let mut out = format!("usage: {cmd} <subcommand> ...\n");
+  for (name, args, desc) in subs {
+    let sep = if args.is_empty() { "" } else { " " };
+    let call = format!("{name}{sep}{args}");
+    out.push_str(&format!("\n  {call:<width$}   {desc}"));
+  }
+  out.push_str(&format!("\n\nsee `help {cmd}` for details"));
+  out
+}
+
 /// The `command` builtin, which runs a command while bypassing any shell functions or aliases that may shadow it.
 ///
 /// This is a special builtin that always forks, because it needs to run the command in a new process to avoid shadowing.
