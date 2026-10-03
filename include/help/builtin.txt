@@ -515,7 +515,7 @@ CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
     A negative duration -- see |chrono-fmt-dur| -- prints its sign on the
     totals only. A timer's elapsed time is never negative.
 
-    `%L`, `%U` and `%N` are all fractions of the *second*, at differing
+    `%L`, `%U` and `%N` are all fractions of the {second}, at differing
     precision -- they are alternatives, not digit groups, so `%S.%L`
     is a sensible format and `%L%U%N` is not.
 
@@ -602,7 +602,7 @@ CHRONO SLEEP                               *chrono-sleep* *builtin-chrono-sleep*
     dates and date-times, RFC 2822 and RFC 3339 timestamps, and relative
     expressions built from a count, a unit, and a direction.
 
-    Note a relative expression with no direction word means *ago*, so
+    Note a relative expression with no direction word means {ago}, so
     ```chrono sleep until '5 minutes'``` refers to the past and returns
     immediately. Write `5 minutes from now` to wait (or just use
     ```chrono sleep '5m'```).
@@ -706,12 +706,12 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
              "%A, %b %d %Y %H:%M:%S" \
              '5 days from 7 days from 2 months until 2 hours after october 5 2024'```
 
-    A bare time of day assumes that you mean *today*, whether or not that
+    A bare time of day assumes that you mean {today}, whether or not that
     time already passed. This differs from |chrono-sleep-until|, which rolls
     forward to the next occurrence instead.
 
     As with ```chrono sleep until```, a relative expression with no direction word
-    means *ago*, so ```chrono fmt -f '%H:%M' 5 minutes``` is five minutes
+    means {ago}, so ```chrono fmt -f '%H:%M' 5 minutes``` is five minutes
     in the past. Write `5 minutes from now` for the other direction.
 
     An unrecognized `strftime` specifier is passed through unchanged, the
@@ -749,7 +749,7 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
         ```chrono fmt -d -f '%D' yesterday```      `-1`
 
     The two readings never disagree: wherever an operand parses as both,
-    it names the same length, because a bare offset means *ago* and the
+    it names the same length, because a bare offset means {ago} and the
     span back to it is that same offset.
 
     A span into the past is negative. The sign prints on the totals,
@@ -1574,7 +1574,7 @@ FORGET                                           *builtin-forget* *forget*
   `-d`/`--deferred`    Pending |defer|red commands in the current scope
 
   `--except`           Invert the category flags: forget everything
-                     *except* the listed categories.
+                     {except} the listed categories.
   `-x`/`--exclude` <name>
                      Preserve variable _name_ (keeping its current
                      value) while forgetting the rest. Repeat to
@@ -1606,8 +1606,12 @@ FS                                                       *builtin-fs* *fs*
 
   Despite their similarity, there {are} some meaningful differences between
   these commands and the similar coreutils. For instance, `fs rename` is similar
-  to `mv`, but will refuse to rename a file if it gets moved to another filesystem,
-  where `mv` would silently copy it instead, matching the behavior of `rename(2)`.
+  to `mv`, but will refuse to rename a file if it gets moved to another filesystem
+  (matching the behavior of `rename(2)`), where `mv` would silently copy it instead.
+
+  Additionally, the lack of fork overhead makes these utilities very powerful
+  for batch operations. A loop over `fs rename` is significantly faster than
+  a loop over `mv`.
 
   Subcommands ~
 
@@ -1621,10 +1625,11 @@ FS                                                       *builtin-fs* *fs*
     |truncate|(fs-truncate)  set the length of files
     |chown|(fs-chown)     change the user and/or group of files
     |chmod|(fs-chmod)     change the permissions of files
+    |touch|(fs-touch)     set the access and modification times of files
 
-  Only `realpath` takes an option. Anywhere else an option is an error
-  rather than a file name, so a path that begins with `-` needs `--`
-  before it, or a `./` prefix.
+  Only `realpath`, `chown` and `touch` take options. Anywhere else an
+  option is an error rather than a file name, so a path that begins with
+  `-` needs `--` before it, or a `./` prefix.
 
 ==============================================================================
 FS RENAME                                  *fs-rename* *builtin-fs-rename*
@@ -1651,7 +1656,7 @@ FS RENAME                                  *fs-rename* *builtin-fs-rename*
   Which combinations are legal is the kernel's decision, not `fs`'s:
 
     - a file may replace a file
-    - a directory may replace an *empty* directory, which moves its whole
+    - a directory may replace an {empty} directory, which moves its whole
       subtree in one operation
     - a file may not replace a directory, nor a directory a file
     - {from} and {to} naming the same existing file succeeds and changes
@@ -1908,7 +1913,7 @@ FS TRUNCATE                            *fs-truncate* *builtin-fs-truncate*
     `1mib`        1048576 bytes
 
   and likewise for `g`/`gib`, `t`/`tib`, `p`/`pib` and `e`/`eib`.
-  Suffixes are case-insensitive, so `1K` is 1000 bytes, *not* 1024 as in
+  Suffixes are case-insensitive, so `1K` is 1000 bytes, {not} 1024 as in
   `truncate(1)` -- name the binary suffix when that is what is wanted.
 
   Truncating File Descriptors ~
@@ -1957,9 +1962,9 @@ FS CHOWN                                     *fs-chown* *builtin-fs-chown*
 
   Who may do this ~
 
-  Changing a file's *user* is reserved to the superuser: handing a file
+  Changing a file's {user} is reserved to the superuser: handing a file
   to someone else would let a quota or a permission be sidestepped. A
-  file's *group* may be changed by its owner, but only to a group the
+  file's {group} may be changed by its owner, but only to a group the
   owner belongs to. Both refusals are reported as `operation not permitted`.
 
   Options ~
@@ -2043,7 +2048,7 @@ FS CHMOD                                     *fs-chmod* *builtin-fs-chmod*
 
   Who may do this ~
 
-  Changing a file's mode requires *owning* it, or being the superuser.
+  Changing a file's mode requires {owning} it, or being the superuser.
   Write permission is not enough, which is the usual surprise -- a file
   you can edit is not necessarily one you can chmod, and the refusal is
   reported as `operation not permitted`.
@@ -2072,8 +2077,87 @@ FS CHMOD                                     *fs-chmod* *builtin-fs-chmod*
       ```fs chmod u=rw,go=r *.conf```      two clauses, applied in order
 
     Permissions are not inherited from a umask here -- |umask| masks the
-    mode a *new* file is created with, while `fs chmod` sets an existing
+    mode a {new} file is created with, while `fs chmod` sets an existing
     file's mode exactly as given.
+
+==============================================================================
+FS TOUCH                                     *fs-touch* *builtin-fs-touch*
+
+  `fs touch [-amh] [-t {time}] {file} ...`
+
+  Set the access and modification times of each {file}, using
+  `utimensat(2)`. With no options both are set to the current time.
+
+  A file carries four timestamps, and only two of them can be set:
+
+    `access`    when it was last read
+    `modify`    when its contents last changed
+    `change`    when its metadata last changed -- the kernel maintains
+                this and setting the others updates it as a side effect,
+                so it cannot be backdated
+    `birth`     when it was created; never settable
+
+  |stat|(builtin-stat) prints all four, as `%x`, `%y`, `%z` and `%w`.
+
+  Unlike `touch(1)`, a {file} that does not exist is an error rather than
+  something to create: `utimensat(2)` has no such behaviour, and the
+  coreutil only creates because it opens the file first. The shell
+  already does that part, and more precisely:
+
+    ```> file```      creates it, truncating any existing file
+    ```>> file```     creates it if missing, leaving any contents alone
+
+  Options ~
+
+    `-a`, `--atime`      set only the access time, leaving modify alone
+    `-m`, `--mtime`      set only the modification time, leaving access
+                     alone. Giving both `-a` and `-m` is the default.
+    `-h`, `--no-deref`   set the times on a symbolic link itself rather
+                     than on what it points at
+    `-t`, `--time {time}`
+                     set the times to {time} rather than to now. {time}
+                     is any instant |chrono| accepts, so `yesterday`,
+                     `2 hours ago` and `2026-12-25 09:00:00` all work --
+                     see |chrono-fmt-instant|.
+
+  Who may do this ~
+
+  The two cases need different privileges, which is why the same file can
+  accept one and refuse the other:
+
+    setting times to {now} needs write permission on the file
+    setting them to a {given} time needs owning it, or being root
+
+  So `fs touch f` can succeed where `fs touch -t yesterday f` fails. Both
+  refusals are reported as `permission denied`, with a note naming which
+  rule applied.
+
+  Each {file} is attempted independently, so one that fails reports the
+  reason and the rest are still set.
+
+  Exit status ~
+
+    `0`   every file's times were set
+    `1`   at least one could not be; each failure is reported
+    `2`   no {file}, or a {time} that cannot be read
+
+  Examples ~
+
+      ```fs touch build.stamp```           mark it as of now
+      ```fs touch -m src/main.rs```        modify time only, leaving access
+      ```fs touch -t 'yesterday' f```      backdate both times
+      ```fs touch -t '2 hours ago' f```
+      ```fs touch -h link```               the link, not its target
+
+    Rebuilding when a source is newer than its product, without `make`:
+
+      ```[[ src/main.rs -nt build.stamp ]] && build && fs touch build.stamp```
+
+    Times before 1970 are fine, and are stored as negative seconds since
+    the epoch:
+
+      ```fs touch -t '1960-05-05 12:34:56' old```
+      ```stat old -c %Y```                `-304759504`
 
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*
@@ -2084,7 +2168,7 @@ GENRC                                            *builtin-genrc* *genrc*
   for regenerating `~/.shedrc`, or for inspecting the live configuration
   in a re-sourceable form.
 
-  By default, `genrc` dumps the *live* state: current `shopt` values,
+  By default, `genrc` dumps the {live} state: current `shopt` values,
   registered aliases, defined functions, registered autocmds, keymaps,
   and completion specs. Each output line is a shell command that, when
   sourced, would re-establish the corresponding piece of configuration.
@@ -2513,7 +2597,7 @@ LOCK                                               *builtin-lock* *lock*
       ```exec {fd}<> /run/user/1000/myjob.lock```
       ```lock -n $fd || return```
 
-  The lock is held on the open file *description*, not the descriptor
+  The lock is held on the open file {description}, not the descriptor
   number, so it survives `fork` and lasts until that description is
   closed. A backgrounded job inherits it; releasing it is a matter of
   closing the fd, or `-u`.
@@ -3246,7 +3330,7 @@ READ                                             *builtin-read* *read*
     `-r` is given, escape-processed. Use it for "read at most {count}
     bytes of the current line".
 
-    `-N {count}` reads *exactly* {count} bytes and treats them as opaque
+    `-N {count}` reads {exactly} `count` bytes and treats them as opaque
     data. The delimiter is ignored (a newline in the middle is just
     another byte), no `$IFS` splitting is done, and no escape processing
     happens. The raw bytes are assigned verbatim to the first {name}
@@ -3302,7 +3386,7 @@ READINT                                          *builtin-readint* *readint*
 
   Flags ~
 
-    `-w {bits}`, `--width {bits}`   width in *bits*: `8`, `16`, `32`,
+    `-w {bits}`, `--width {bits}`   width in {bits}: `8`, `16`, `32`,
                                     `64`, or `128`. The value is spaced,
                                     not attached: `-w 16`, not `-w16`.
     `-s`, `--signed`               decode as a signed (two's-complement)
@@ -3722,10 +3806,10 @@ STASH                                            *builtin-stash* *stash*
 
   Save and recall command snippets. Stash operates in two modes:
 
-  *Unnamed (stack)* - temporary storage with push/pop semantics.
+  {Unnamed (stack)} - temporary storage with push/pop semantics.
   Push a command to save it, pop to restore and remove it.
 
-  *Named* - persistent snippets recalled by name. Saving with an
+  {Named} - persistent snippets recalled by name. Saving with an
   existing name overwrites the previous entry.
 
   `stash`                                        *stash-list*
@@ -4207,7 +4291,7 @@ STAT                                             *builtin-stat* *stat*
                             chooses its own specifiers
     `-t`, `--terse`             print a terse, single-line summary with
                             fields separated by spaces
-    `-c`, `--format={format}`   render each file through {format}
+    `-c`, `--format {format}`   render each file through {format}
 
   Format specifiers ~
 

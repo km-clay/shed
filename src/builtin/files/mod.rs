@@ -17,6 +17,7 @@ mod realpath;
 mod rename;
 mod rmdir;
 mod symlink;
+mod touch;
 mod truncate;
 mod unlink;
 
@@ -38,6 +39,7 @@ impl super::BuiltinRouter for Fs {
       b"truncate" => Some(&truncate::Truncate),
       b"chown"    => Some(&chown::ChOwn      ),
       b"chmod"    => Some(&chmod::ChMod      ),
+      b"touch"    => Some(&touch::Touch      ),
       _ => None,
     }
   }
@@ -67,6 +69,7 @@ impl Fs {
     ("truncate", "<size> <file> ...",            "truncate files to a specified size"),
     ("chown",    "<owner>[:<group>] <file> ...", "change the owner and/or group of files"),
     ("chmod",    "<mode> <file> ...",            "change the permissions of files"),
+    ("touch",    "<file> ...",                   "update the access and modification times of files"),
   ];
 
   fn subcommands() -> impl Iterator<Item = VarStr> {
