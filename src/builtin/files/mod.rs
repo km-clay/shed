@@ -9,6 +9,7 @@ use crate::{
 
 use super::opt::Parsed;
 
+mod chown;
 mod link;
 mod readlink;
 mod realpath;
@@ -34,6 +35,7 @@ impl super::BuiltinRouter for Fs {
       b"readlink" => Some(&readlink::ReadLink),
       b"realpath" => Some(&realpath::RealPath),
       b"truncate" => Some(&truncate::Truncate),
+      b"chown"    => Some(&chown::Chown      ),
       _ => None,
     }
   }
@@ -53,14 +55,15 @@ impl super::Builtin for Fs {
 impl Fs {
   #[rustfmt::skip]
   const SUBCOMMANDS: &[super::SubInfo] = &[
-    ("rename",   "<from> <to>",         "rename a file within one filesystem, atomically"),
-    ("rmdir",    "<dir> ...",           "remove empty directories"),
-    ("unlink",   "<file> ...",          "remove files"),
-    ("link",     "<target> <link> ...", "create hard links to files"),
-    ("symlink",  "<target> <link> ...", "create symbolic links to files"),
-    ("readlink", "<link>",              "print the value of a symbolic link"),
-    ("realpath", "<file> ...",          "print the canonicalized absolute pathname"),
-    ("truncate", "<size> <file> ...",   "truncate files to a specified size"),
+    ("rename",   "<from> <to>",                  "rename a file within one filesystem, atomically"),
+    ("rmdir",    "<dir> ...",                    "remove empty directories"),
+    ("unlink",   "<file> ...",                   "remove files"),
+    ("link",     "<target> <link> ...",          "create hard links to files"),
+    ("symlink",  "<target> <link> ...",          "create symbolic links to files"),
+    ("readlink", "<link>",                       "print the value of a symbolic link"),
+    ("realpath", "<file> ...",                   "print the canonicalized absolute pathname"),
+    ("truncate", "<size> <file> ...",            "truncate files to a specified size"),
+    ("chown",    "<owner>[:<group>] <file> ...", "change the owner and/or group of files"),
   ];
 
   fn subcommands() -> impl Iterator<Item = VarStr> {

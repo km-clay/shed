@@ -202,6 +202,7 @@ pub(crate) trait ShResultExt {
   fn try_blame(self, span: Span) -> Self;
   /// If the value is `Err()`, attach a span to it
   fn promote_err(self, span: Span) -> Self;
+  fn option_promote(self, span: Option<Span>) -> Self;
   fn with_code(self, code: i32) -> Self;
 }
 
@@ -212,6 +213,9 @@ impl<T> ShResultExt for Result<T, ShErr> {
   }
   fn promote_err(self, span: Span) -> Self {
     self.map_err(|e| e.promote(span))
+  }
+  fn option_promote(self, span: Option<Span>) -> Self {
+    self.map_err(|e| e.option_promote(span))
   }
   fn with_code(self, code: i32) -> Self {
     self.map_err(|e| e.with_code(code))

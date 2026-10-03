@@ -1589,12 +1589,14 @@ FS                                                       *builtin-fs* *fs*
   Filesystem operations. `fs` is a namespace; all work is done by its
   subcommands. Running it with no subcommand is an error.
 
-  Each subcommand exposes one system call, so what it does is the kernel's
-  behaviour rather than a reimplementation of the familiar command that
-  shares its name. `fs rename` is `rename(2)`, not `mv`: it will not cross
-  filesystems and it will not copy. Where the two differ the coreutil is
-  still there, unshadowed -- `fs` puts a primitive beside it rather than
-  replacing it.
+  Each subcommand exposes one system call, with little or no extra logic.
+  Provides an unambiguous and unopinionated interface to the kernel's filesystem
+  operations.
+
+  Despite their similarity, there {are} some meaningful differences between
+  these commands and the similar coreutils. For instance, `fs rename` is similar
+  to `mv`, but will refuse to rename a file if it gets moved to another filesystem,
+  where `mv` would silently copy it instead, matching the behavior of `rename(2)`.
 
   Subcommands ~
 
@@ -1606,6 +1608,7 @@ FS                                                       *builtin-fs* *fs*
     `readlink`  print the target stored in a symbolic link
     `realpath`  resolve a path to its canonical absolute form
     `truncate`  set the length of files
+    `chown`     change the user and/or group of files
 
   Only `realpath` takes an option. Anywhere else an option is an error
   rather than a file name, so a path that begins with `-` needs `--`
@@ -1617,19 +1620,14 @@ FS RENAME                                  *fs-rename* *builtin-fs-rename*
   `fs rename {from} {to}`
 
   Rename {from} to {to} with `rename(2)`. Exactly two paths are taken: the
-  call has one source and one destination, and on an operation that
-  replaces files, guessing which of three paths was meant as the
-  destination is not worth the risk.
+  call has one source and one destination.
 
   The rename is atomic. Any observer sees {to} either as it was or as
-  {from}, never missing and never half-written, which is what makes the
-  write-then-rename idiom safe -- see the examples below.
+  {from}, never missing and never half-written, which is what makes
+  write-then-rename safe -- see the examples below.
 
-  An existing {to} is replaced silently. There is deliberately no prompt
-  and no flag to prevent it: refusing to overwrite is only race-free as
-  `renameat2`'s `RENAME_NOREPLACE`, which is absent on macOS and on musl
-  targets, and a check-then-rename standing in for it would be a race
-  dressed up as a guarantee.
+  An existing {to} is replaced silently. Be sure to check for existence
+  if you wish to leave existing files unclobbered.
 
   Neither path is followed when it is a symlink; the link itself is
   renamed. Renaming a symlink over the file it points at therefore leaves
@@ -1645,7 +1643,7 @@ FS RENAME                                  *fs-rename* *builtin-fs-rename*
       subtree in one operation
     - a file may not replace a directory, nor a directory a file
     - {from} and {to} naming the same existing file succeeds and changes
-      nothing, as POSIX requires
+      nothing
 
   Exit status ~
 
@@ -1664,20 +1662,12 @@ FS RENAME                                  *fs-rename* *builtin-fs-rename*
 
       ```fs rename app.log app.log.1```
 
-    A cross-filesystem rename fails rather than quietly copying:
-
-      ```fs rename ./data /mnt/backup/data```
-      ```# cannot rename `./data` to `/mnt/backup/data`: different```
-      ```# filesystems. use `mv` to copy instead```
-
 ==============================================================================
 FS RMDIR                                     *fs-rmdir* *builtin-fs-rmdir*
 
   `fs rmdir {dir} ...`
 
-  Remove each {dir} with `rmdir(2)`. A directory must be empty: removing a
-  tree is a traversal, which is a program rather than a system call, so
-  there is no recursive flag. Use `rm -r` when that is what you want.
+  Remove each {dir} using `rmdir(2)`. Each target directory must be empty.
 
   Each operand is attempted independently. One that fails reports the
   reason and the rest are still removed, so a failure part-way through
@@ -1701,7 +1691,12 @@ FS UNLINK                                  *fs-unlink* *builtin-fs-unlink*
   `fs unlink {file} ...`
 
   Remove each {file} with `unlink(2)`. Directories are refused -- removing
-  one is `fs rmdir`, and removing a tree is neither.
+  a directory is `fs rmdir`.
+
+  Unlinking a file is not the same as deleting it. The name is removed from
+  the filesystem, but if there are other existing hard links to it, or if a
+  process has the file open, the file's data remains. A file's data will only
+  be released when the last link to it is removed and no process has it open.
 
   A symbolic link is removed as itself; whatever it points at is left
   alone. The file's data is released once the last name for it is gone
@@ -1758,12 +1753,11 @@ FS SYMLINK                               *fs-symlink* *builtin-fs-symlink*
 
   Create each {link} as a symbolic link to {target}, using `symlink(2)`.
 
-  {target} is stored as text and is never examined. It need not exist --
-  a dangling link is legal and is sometimes the point -- it may be a
-  directory, it may be on another filesystem, and it is resolved afresh
-  every time the link is used, so a link may break or start working later
-  without being touched. |fs-link| makes the other kind of link, which
-  resolves once, at creation.
+  {target} is stored as simple text that is read when the link is accessed.
+  A dangling link is legal, and is sometimes even the point. The target may
+  be a directory or a file, it can be on another filesystem, and it is resolved
+  again every time the link is used. See |fs-link| for the other kind of
+  file linking.
 
   A relative {target} is resolved against the directory holding the
   {link}, not against the current directory. This is the usual source of
@@ -1874,10 +1868,10 @@ FS TRUNCATE                            *fs-truncate* *builtin-fs-truncate*
   whole set: ```fs truncate 0 *.log```.
 
   Shrinking discards the bytes past {size} immediately and they are not
-  recoverable. Extending does not write zeros -- it leaves a hole, so the
-  file reports the larger length while occupying no extra space until
-  something writes into the gap. A 1 MiB extension of an empty file uses
-  no blocks at all.
+  recoverable. {Be careful!} Extending does not write zeros -- it leaves a
+  hole, so the file reports the larger length while occupying no extra
+  space until something writes into the gap. A 1 MiB extension of an empty
+  file uses no blocks at all.
 
   Unlike `truncate(1)`, a {file} that does not exist is an error rather
   than something to create: `truncate(2)` has no such behaviour, and the
@@ -1924,6 +1918,63 @@ FS TRUNCATE                            *fs-truncate* *builtin-fs-truncate*
       ```fs truncate 0 *.log```            level a whole set
       ```fs truncate 10mib sparse.img```   a 10 MiB file occupying no space
       ```fs truncate 0 /dev/fd/6```        truncate an open fd, e.g. a log pipe
+
+==============================================================================
+FS CHOWN                                     *fs-chown* *builtin-fs-chown*
+
+  `fs chown [-h] {owner} {file} ...`
+
+  Change the user and/or group of each {file}, using `chown(2)`.
+
+  {owner} names what to set and is read up to its first `:`. Either side
+  may be left out, and a side left out is left alone:
+
+    `user`          set the user, leave the group
+    `user:group`    set both
+    `:group`        set the group, leave the user -- this is `chgrp`
+    `user:`         set the user, leave the group
+
+  Each side may be a name or a numeric id. A name is looked up first, so
+  a user literally named `1000` resolves as that user rather than as uid
+  1000. A numeric id need not exist: the kernel does not require an id to
+  appear in the user or group database, which is what makes ownership
+  meaningful inside containers and chroots.
+
+  Giving neither side -- a bare `:` -- is an error rather than a silent
+  no-op.
+
+  Who may do this ~
+
+  Changing a file's *user* is reserved to the superuser: handing a file
+  to someone else would let a quota or a permission be sidestepped. A
+  file's *group* may be changed by its owner, but only to a group the
+  owner belongs to. Both refusals are reported as `operation not permitted`.
+
+  Options ~
+
+    `-h`, `--no-deref`   change the symbolic link itself rather than what
+                         it points at. Without it `chown` follows the
+                         link and leaves the link's own ownership alone,
+                         which is the one place this namespace follows
+                         links by default -- |fs-rename|, |fs-unlink| and
+                         |fs-link| never do.
+
+  Each {file} is attempted independently, so one that fails reports the
+  reason and the rest are still changed.
+
+  Exit status ~
+
+    `0`   every file was changed
+    `1`   at least one could not be; each failure is reported
+    `2`   no {owner}, no {file}, an empty {owner}, or a name that does
+          not resolve
+
+  Examples ~
+
+      ```fs chown alice file```            set the user
+      ```fs chown alice:staff file```      set both
+      ```fs chown :staff file```           set only the group
+      ```fs chown -h alice link```         the link, not its target
 
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*
