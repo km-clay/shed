@@ -43,11 +43,10 @@ use crate::{
 };
 
 use super::{
-  ShResult, Shed,
+  ShResult, Shed, errln,
   meta::CmdTimer,
   sherr,
   signal::{disable_reaping, enable_reaping},
-  system_msg,
   vars::ShellParam,
 };
 
@@ -1123,7 +1122,10 @@ impl JobTab {
         .as_ref()
         .unwrap()
         .display(&order, JobCmdFlags::INIT);
-      system_msg!("{msg}");
+      // written now rather than queued: this fires while a command is running,
+      // so no prompt is drawn to clobber, and a queued copy would render the
+      // job's state as it was at dispatch even if it has since finished
+      errln!("{msg}");
     }
 
     if let Some(pid) = last_pid {

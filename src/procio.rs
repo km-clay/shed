@@ -18,11 +18,12 @@
 //! * Redirection must be materialized before it can be used, via [`Sinks::commit_redirects()`], which is another thing to remember when forking processes.
 
 use std::{
+  cell::RefCell,
   collections::VecDeque,
   fmt::Debug,
   fs::{File, OpenOptions},
   io::{self, Cursor, IsTerminal, Read, Seek, Write},
-  ops::Deref,
+  ops::{Deref, DerefMut},
   os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
   path::Path,
   sync::{
@@ -78,6 +79,121 @@ pub(crate) const SINK_TRUNCATED_STATUS: i32 = 122;
 // FIONREAD reports how many bytes are available to read on an fd. Unlike
 // `poll`, it distinguishes "data present" (n > 0) from "empty or EOF" (n == 0).
 nix::ioctl_read_bad!(fionread, nix::libc::FIONREAD, nix::libc::c_int);
+
+thread_local! {
+  static SCRATCH_BUF: RefCell<Option<ScratchSlot>> = const { RefCell::new(None) };
+}
+#[derive(Debug, Default)]
+pub(crate) enum ScratchSlot {
+  #[default]
+  Taken,
+  Available(Vec<u8>),
+}
+
+/// Take a scratch buffer for temporary use.
+///
+/// Returns a guard that releases the buffer when dropped.
+///
+/// If the global scratch buffer is available, that will be used
+/// instead of allocating a new buffer.
+///
+/// If it is taken, a new temporary buffer will be allocated.
+pub(crate) fn take_scratch() -> ScratchGuard {
+  ScratchGuard::take_scratch()
+}
+
+impl ScratchSlot {
+  fn take(&mut self) -> Self {
+    std::mem::take(self)
+  }
+}
+
+pub(crate) enum Scratch {
+  Global(Vec<u8>),
+  Local(Vec<u8>),
+}
+
+impl Scratch {
+  const LOCAL_SCRATCH_BUF_SIZE: usize = 64 * 1024;
+  const GLOBAL_SCRATCH_BUF_SIZE: usize = 256 * 1024;
+  fn new_global() -> Self {
+    Scratch::Global(vec![0; Self::GLOBAL_SCRATCH_BUF_SIZE])
+  }
+  fn new_local() -> Self {
+    Scratch::Local(vec![0; Self::LOCAL_SCRATCH_BUF_SIZE])
+  }
+}
+
+impl Deref for Scratch {
+  type Target = [u8];
+  fn deref(&self) -> &Self::Target {
+    let (Scratch::Global(buf) | Scratch::Local(buf)) = self;
+    buf
+  }
+}
+
+impl DerefMut for Scratch {
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    let (Scratch::Global(buf) | Scratch::Local(buf)) = self;
+    buf
+  }
+}
+
+pub(crate) struct ScratchGuard(Option<Scratch>);
+
+impl ScratchGuard {
+  pub(crate) fn take_scratch() -> Self {
+    let scratch = SCRATCH_BUF.with(|b| {
+      let mut buf = b.borrow_mut();
+      if let Some(slot) = buf.as_mut() {
+        Some(slot.take())
+      } else {
+        *buf = Some(ScratchSlot::Taken);
+        None
+      }
+    });
+
+    match scratch {
+      Some(mut slot) => match slot.take() {
+        ScratchSlot::Available(buf) => Self(Some(Scratch::Global(buf))),
+        ScratchSlot::Taken => Self(Some(Scratch::new_local())),
+      },
+      None => Self(Some(Scratch::new_global())),
+    }
+  }
+}
+
+impl Deref for ScratchGuard {
+  type Target = [u8];
+  fn deref(&self) -> &Self::Target {
+    let scratch = self
+      .0
+      .as_ref()
+      .expect("only None right before getting dropped");
+    scratch.deref()
+  }
+}
+
+impl DerefMut for ScratchGuard {
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    let scratch = self
+      .0
+      .as_mut()
+      .expect("only None right before getting dropped");
+    scratch.deref_mut()
+  }
+}
+
+impl Drop for ScratchGuard {
+  fn drop(&mut self) {
+    if let Some(Scratch::Global(buf)) = self.0.take() {
+      SCRATCH_BUF.with(|b| {
+        let mut b = b.borrow_mut();
+        *b = Some(ScratchSlot::Available(buf));
+      });
+    }
+  }
+}
 
 pub(crate) fn ebadf() -> io::Error {
   io::Error::from_raw_os_error(libc::EBADF)
@@ -1711,7 +1827,7 @@ impl SinkLines {
         return Ok(Some(std::mem::take(&mut self.overflow)));
       }
 
-      let mut chunk = [0u8; 8192];
+      let mut chunk = take_scratch();
       match self.sink.read(&mut chunk) {
         Ok(0) => self.eof = true,
         Ok(n) => self.overflow.extend_from_slice(&chunk[..n]),
@@ -2095,7 +2211,7 @@ pub(crate) fn read_capped(fd: BorrowedFd) -> ShResult<CappedRead> {
   let limit = shopt!(core.max_read_limit);
 
   let mut buf = Vec::new();
-  let mut tmp_buf = [0u8; 8192];
+  let mut tmp_buf = take_scratch();
   let mut remaining = *limit as usize;
   let mut was_truncated = false;
 
@@ -2160,7 +2276,7 @@ pub(crate) fn stream_to_sink(fd: BorrowedFd) -> ShResult<()> {
   let Some(out) = Shed::sinks(Sinks::get_stdout) else {
     return Ok(());
   };
-  let mut buf = [0u8; 8192]; // 8 KiB
+  let mut buf = take_scratch(); // 8 KiB
   let mut sink = SinkIo(out);
 
   loop {
@@ -2422,6 +2538,118 @@ pub(super) fn read_input() -> ShResult<Vec<u8>> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+  use super::{Scratch, ScratchGuard};
+
+  /// The whole design rests on a re-entrant caller getting its *own* buffer
+  /// rather than sharing the pooled one.
+  #[test]
+  fn nested_scratch_guards_do_not_share_a_buffer() {
+    let mut outer = ScratchGuard::take_scratch();
+    let outer_ptr = outer.as_mut_ptr();
+    assert!(
+      matches!(outer.0, Some(Scratch::Global(_))),
+      "the first guard on a thread should hold the pooled buffer"
+    );
+
+    let mut inner = ScratchGuard::take_scratch();
+    assert!(
+      matches!(inner.0, Some(Scratch::Local(_))),
+      "a nested guard must allocate its own buffer, not claim the pool again"
+    );
+    assert_ne!(
+      outer_ptr,
+      inner.as_mut_ptr(),
+      "nested guards must not alias the same allocation"
+    );
+  }
+
+  /// The pooled buffer must come back, or every later caller silently
+  /// allocates and the pool does nothing.
+  #[test]
+  fn dropping_a_guard_returns_the_buffer_to_the_pool() {
+    let ptr = {
+      let mut g = ScratchGuard::take_scratch();
+      g.as_mut_ptr()
+    };
+
+    let mut again = ScratchGuard::take_scratch();
+    assert!(
+      matches!(again.0, Some(Scratch::Global(_))),
+      "the slot should be Available again once the guard is dropped"
+    );
+    assert_eq!(
+      ptr,
+      again.as_mut_ptr(),
+      "the same allocation should be reused, not a fresh one"
+    );
+  }
+
+  /// A nested guard allocates its own buffer; letting it drop must not
+  /// install that buffer over the pooled one.
+  #[test]
+  fn a_nested_guard_does_not_overwrite_the_pooled_buffer() {
+    let mut outer = ScratchGuard::take_scratch();
+    let pooled = outer.as_mut_ptr();
+
+    {
+      let mut inner = ScratchGuard::take_scratch();
+      assert!(matches!(inner.0, Some(Scratch::Local(_))));
+      let _ = inner.as_mut_ptr();
+    } // inner drops here -- its Local buffer must be discarded, not pooled
+
+    drop(outer);
+
+    let mut after = ScratchGuard::take_scratch();
+    assert_eq!(
+      pooled,
+      after.as_mut_ptr(),
+      "the outer guard's buffer should be the pooled one, not the nested guard's"
+    );
+  }
+
+  /// Each thread keeps its own pool, so two threads must never hand out the
+  /// same allocation. Both guards have to be alive at once -- a thread's
+  /// buffer is freed when it exits, and the allocator will happily hand the
+  /// same address to the next thread.
+  #[test]
+  fn each_thread_has_its_own_scratch() {
+    use std::sync::{Arc, Barrier};
+
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = (0..2)
+      .map(|_| {
+        let barrier = Arc::clone(&barrier);
+        std::thread::spawn(move || {
+          let mut g = ScratchGuard::take_scratch();
+          let ptr = g.as_mut_ptr() as usize;
+          barrier.wait(); // both threads hold a guard past this point
+          ptr
+        })
+      })
+      .collect();
+
+    let ptrs: Vec<usize> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert_ne!(ptrs[0], ptrs[1], "threads must not share a scratch buffer");
+  }
+
+  /// The buffer is handed out at its full size, and writes through the guard
+  /// land in the buffer that gets pooled.
+  #[test]
+  fn scratch_is_full_size_and_writable() {
+    let mut g = ScratchGuard::take_scratch();
+    assert_eq!(g.len(), super::Scratch::GLOBAL_SCRATCH_BUF_SIZE);
+
+    g[0] = 0xAB;
+    g[super::Scratch::GLOBAL_SCRATCH_BUF_SIZE - 1] = 0xCD;
+    assert_eq!(g[0], 0xAB);
+    assert_eq!(g[super::Scratch::GLOBAL_SCRATCH_BUF_SIZE - 1], 0xCD);
+    drop(g);
+
+    // the pooled buffer is reused as-is; callers must not assume it is zeroed
+    let g2 = ScratchGuard::take_scratch();
+    assert_eq!(g2.len(), super::Scratch::GLOBAL_SCRATCH_BUF_SIZE);
+  }
+
   use crate::tests::testutil::{TestGuard, has_cmd, has_cmds, test_input};
   use pretty_assertions::assert_eq;
 

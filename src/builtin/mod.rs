@@ -327,7 +327,7 @@ pub(super) trait Builtin: Sync {
       return None;
     }
     let mut buf = Vec::new();
-    let mut chunk = [0u8; 8192];
+    let mut chunk = procio::take_scratch();
     let mut sink = SinkIo(stdin);
 
     loop {

@@ -37,7 +37,7 @@ use super::{
   autocmd, builtin, errln, eval, expand, keys, match_loop, procio, readline, sherr,
   shopt as shopt_macro, signal, socket,
   state::vars::{VarFlags, VarKind},
-  system_msg, try_var, two_way_display,
+  try_var, two_way_display,
   util::{
     error::{LabelBuilder, ShErr, ShErrKind, ShResult},
     pos::Pos,

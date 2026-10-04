@@ -123,7 +123,7 @@ impl super::Builtin for Thru {
       };
       let span = src.map(|(_, s)| s);
 
-      let mut buf = [0u8; 16384];
+      let mut buf = procio::take_scratch();
       loop {
         let window = match take {
           Some(l) => skip.saturating_add(l),
