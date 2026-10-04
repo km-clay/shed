@@ -35,13 +35,13 @@ impl Builtin for SymLink {
 
       let msg = varstr!("cannot create symlink `{link}`");
       let err = match e.kind() {
-        EK::AlreadyExists      => sherr!(ExecFail @ l_span, "{msg}: file exists"),
-        EK::ReadOnlyFilesystem => sherr!(ExecFail @ l_span, "{msg}: read-only filesystem"),
-        EK::InvalidFilename    => sherr!(ExecFail @ l_span, "{msg}: invalid filename"),
-        EK::StorageFull        => sherr!(ExecFail @ l_span, "{msg}: storage full"),
-        EK::PermissionDenied   => sherr!(ExecFail @ l_span, "{msg}: permission denied"),
+        EK::AlreadyExists      => sherr!(ExecFail @ l_span, "{msg}: file exists"                      ),
+        EK::ReadOnlyFilesystem => sherr!(ExecFail @ l_span, "{msg}: read-only filesystem"             ),
+        EK::InvalidFilename    => sherr!(ExecFail @ l_span, "{msg}: invalid filename"                 ),
+        EK::StorageFull        => sherr!(ExecFail @ l_span, "{msg}: storage full"                     ),
+        EK::PermissionDenied   => sherr!(ExecFail @ l_span, "{msg}: permission denied"                ),
         EK::NotADirectory      => sherr!(ExecFail @ l_span, "{msg}: path component is not a directory"),
-        _                      => sherr!(ExecFail @ l_span, "{msg}: {e}"),
+        _                      => sherr!(ExecFail @ l_span, "{msg}: {e}"                              ),
       };
 
       err.print_error();

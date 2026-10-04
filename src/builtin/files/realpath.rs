@@ -49,8 +49,8 @@ impl Builtin for RealPath {
         }
         Err(e) => {
           let err = match e.kind() {
-            EK::NotFound         => sherr!(ExecFail @ span, "cannot resolve `{arg}`: no such file or directory"),
-            EK::PermissionDenied => sherr!(ExecFail @ span, "cannot resolve `{arg}`: permission denied"),
+            EK::NotFound         => sherr!(ExecFail @ span, "cannot resolve `{arg}`: no such file or directory"        ),
+            EK::PermissionDenied => sherr!(ExecFail @ span, "cannot resolve `{arg}`: permission denied"                ),
             EK::NotADirectory    => sherr!(ExecFail @ span, "cannot resolve `{arg}`: path component is not a directory"),
 
             _ => if let Some(libc::ELOOP) = e.raw_os_error() {

@@ -49,14 +49,14 @@ impl super::super::Builtin for Truncate {
       if let Err(e) = unistd::truncate(path, size) {
         let io_err = io::Error::from_raw_os_error(e as i32);
         let err = match io_err.kind() {
-          EK::NotFound           => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: file does not exist"),
-          EK::IsADirectory       => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: is a directory"),
-          EK::PermissionDenied   => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: permission denied"),
+          EK::NotFound           => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: file does not exist" ),
+          EK::IsADirectory       => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: is a directory"      ),
+          EK::PermissionDenied   => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: permission denied"   ),
           EK::ReadOnlyFilesystem => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: read-only filesystem"),
-          EK::FileTooLarge       => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: file too large"),
-          EK::InvalidInput       => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: not a regular file")
+          EK::FileTooLarge       => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: file too large"      ),
+          EK::InvalidInput       => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: not a regular file"  )
             .with_note("FIFOs, sockets, char devices, etc. cannot be truncated".into()),
-          _                      => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: {io_err}"),
+          _                      => sherr!(ExecFail @ f_span, "cannot truncate `{file}`: {io_err}"            ),
         };
 
         err.print_error();

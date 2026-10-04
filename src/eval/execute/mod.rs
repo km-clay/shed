@@ -474,10 +474,10 @@ impl Dispatcher {
 
     if fork_builtins {
       self.run_fork(cmd_name, ForkKind::Builtin, tree, cmd_id, |s| {
-        catch_exit(|| builtin.setup_builtin(tree, cmd_id, s), exit_with);
+        catch_exit(|| builtin::setup(builtin, tree, cmd_id, s), exit_with);
       })?;
       Ok(())
-    } else if let Err(e) = builtin.setup_builtin(tree, cmd_id, self) {
+    } else if let Err(e) = builtin::setup(builtin, tree, cmd_id, self) {
       let is_flow_ctl = matches!(
         e.kind(),
         ShErrKind::CleanExit(_)

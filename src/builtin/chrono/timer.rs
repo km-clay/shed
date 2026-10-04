@@ -2,15 +2,15 @@
 //!
 //! has its own subcommands: `start`, `stop`, `reset`, `status`, `resume`
 
-use super::{super::opt::Parsed, Builtin, BuiltinArgs, BuiltinRouter, DurFmt};
+use super::{super::SubCommand, Builtin, BuiltinArgs, BuiltinRouter, DurFmt};
 use crate::{
-  eval::lex::{Span, Tk},
   procio, sherr,
   state::{
     Shed,
     timers::{StopWatch, TimerStatus, WatchName},
     vars::VarStr,
   },
+  sub_command,
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -21,31 +21,22 @@ use crate::{
 
 pub(super) struct Timer;
 impl BuiltinRouter for Timer {
-  fn default_sub(&self) -> &'static dyn Builtin {
-    &List
+  fn name(&self) -> &'static str {
+    "chrono timer"
+  }
+  fn default_sub(&self) -> Option<&'static dyn Builtin> {
+    Some(&List)
   }
 
-  fn sub_for(&self, word: &[u8]) -> Option<&'static dyn Builtin> {
-    match word {
-      b"start" => Some(&Start),
-      b"stop" => Some(&Stop),
-      b"reset" => Some(&Reset),
-      b"resume" => Some(&Resume),
-      b"status" => Some(&Status),
-      _ => None,
-    }
-  }
-}
-
-impl Builtin for Timer {
-  fn as_router(&self) -> Option<&dyn BuiltinRouter> {
-    Some(self)
-  }
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
-    self.route_parse(cmd_span, argv, no_split)
-  }
-  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    self.dispatch_sub(args)
+  fn sub_commands(&self) -> &'static [SubCommand] {
+    const SUB_COMMANDS: &[SubCommand] = &[
+      sub_command!(&Start, "start", "start a timer"),
+      sub_command!(&Stop, "stop", "stop a timer"),
+      sub_command!(&Reset, "reset", "reset a timer to zero"),
+      sub_command!(&Resume, "resume", "resume a stopped timer"),
+      sub_command!(&Status, "status", "print the status of a timer"),
+    ];
+    SUB_COMMANDS
   }
 }
 
@@ -136,14 +127,22 @@ trait TimerCmd {
   }
 }
 
-impl<T: TimerCmd + Sync> Builtin for T {
-  fn strict_opts(&self) -> bool {
-    true
-  }
-  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    self.fire(args)
-  }
+macro_rules! timer_cmd {
+  ($($cmd:ty),+ $(,)?) => {
+    $(
+      impl Builtin for $cmd {
+        fn strict_opts(&self) -> bool {
+          true
+        }
+        fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+          self.fire(args)
+        }
+      }
+    )+
+  };
 }
+
+timer_cmd!(Start, Stop, Resume, Reset);
 
 struct Start;
 impl TimerCmd for Start {

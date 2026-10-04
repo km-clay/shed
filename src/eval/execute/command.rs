@@ -22,8 +22,7 @@ use nix::{
 
 use crate::state::ForkKind;
 use crate::{
-  HashSet, autocmd,
-  builtin::{self, Builtin},
+  HashSet, autocmd, builtin,
   eval::parse::NdFlags,
   lifecycle,
   procio::{self, Sinks},
@@ -129,8 +128,8 @@ impl super::Dispatcher {
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
 
     // POSIX 2.8.1: a redirection failure on an ordinary command is non-fatal
-    let fatal = !Shed::term(Terminal::interactive)
-      && builtin::lookup_builtin(cmd_name.as_bytes()).is_some_and(Builtin::is_special);
+    let fatal =
+      !Shed::term(Terminal::interactive) && builtin::is_special_builtin(cmd_name.as_bytes());
     let _guard = match Sinks::try_apply_set(&tree[cmd.redirs].into(), fatal) {
       Ok(g) => g,
       Err(e) => return e.report_or_propagate(tree.span_for(cmd_id)),

@@ -14,7 +14,7 @@ use crate::{
   HashSet,
   builtin::{BuiltinArgs, BuiltinRouter, opt::Opt},
   errln,
-  eval::lex::{Span, Tk},
+  eval::lex::Span,
   expand::escape,
   opt, outln,
   procio::{self, OsSink, Sink, SinkIo},
@@ -24,7 +24,7 @@ use crate::{
   },
   sherr,
   state::{Shed, db, paths, vars::VarStr},
-  status_msg,
+  status_msg, sub_command,
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -33,7 +33,7 @@ use crate::{
   },
 };
 
-use super::opt::{OptSpec, Parsed};
+use super::{Builtin, SubCommand, opt::OptSpec};
 
 fn open_history(span: Span, ex: bool, needs_mutable: bool) -> ShResult<History> {
   let (table, branch) = if ex {
@@ -440,33 +440,59 @@ impl HistQuery {
 }
 
 pub(super) struct Hist;
-impl super::BuiltinRouter for Hist {
-  fn default_sub(&self) -> &'static dyn super::Builtin {
-    &HistList
+impl BuiltinRouter for Hist {
+  fn name(&self) -> &'static str {
+    "hist"
   }
-  fn sub_for(&self, word: &[u8]) -> Option<&'static dyn super::Builtin> {
-    match word {
-      b"pull" => Some(&HistPull),
-      b"branch" => Some(&HistBranch),
-      b"checkout" | b"switch" => Some(&HistCheckout),
-      b"merge" => Some(&HistMerge),
-      b"export" => Some(&HistExport),
-      b"import" => Some(&HistImport),
-      _ => None,
-    }
+  fn default_sub(&self) -> Option<&'static dyn Builtin> {
+    Some(&HistList)
   }
-}
-impl super::Builtin for Hist {
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
-    self.route_parse(cmd_span, argv, no_split)
-  }
-  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    self.dispatch_sub(args)
-  }
-}
+  fn sub_commands(&self) -> &'static [SubCommand] {
+    const SUB_COMMANDS: &[SubCommand] = &[
+      sub_command!(&HistList, "list", "[<options>]", "list history entries"),
+      sub_command!(
+        &HistImport,
+        "import",
+        "[<file>|bash|zsh|fish]",
+        "import history from a file or shell"
+      ),
+      sub_command!(
+        &HistExport,
+        "export",
+        "[<file>]",
+        "export history to a file"
+      ),
+      sub_command!(
+        &HistCheckout,
+        "checkout",
+        "<branch>",
+        "switch to a different history branch"
+      ),
+      sub_command!(
+        &HistMerge,
+        "merge",
+        "<branch>",
+        "merge a history branch into the current branch"
+      ),
+      sub_command!(
+        &HistBranch,
+        "branch",
+        "[<subcommand>]",
+        "manage history branches"
+      ),
+      sub_command!(
+        &HistPull,
+        "pull",
+        "[<options>]",
+        "pull new history entries from the shell"
+      ),
+    ];
 
+    SUB_COMMANDS
+  }
+}
 struct HistImport;
-impl super::Builtin for HistImport {
+impl Builtin for HistImport {
   fn opts(&self) -> Vec<OptSpec> {
     vec![OptSpec::new_short("force", b'f')]
   }
@@ -636,7 +662,7 @@ impl HistImport {
 }
 
 struct HistExport;
-impl super::Builtin for HistExport {
+impl Builtin for HistExport {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let hist = open_history(args.span(), false, false)?;
     let HistDump {
@@ -714,7 +740,7 @@ impl super::Builtin for HistExport {
 }
 
 struct HistCheckout;
-impl super::Builtin for HistCheckout {
+impl Builtin for HistCheckout {
   fn opts(&self) -> Vec<OptSpec> {
     vec![OptSpec::new_short("branch", b'b'), opt!("orphan")]
   }
@@ -754,7 +780,7 @@ impl super::Builtin for HistCheckout {
 }
 
 struct HistMerge;
-impl super::Builtin for HistMerge {
+impl Builtin for HistMerge {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let Some((name, span)) = args.arguments().next() else {
       return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name").with_code(2));
@@ -781,7 +807,7 @@ impl super::Builtin for HistMerge {
 }
 
 struct HistBranch;
-impl super::Builtin for HistBranch {
+impl Builtin for HistBranch {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       OptSpec::new_short("delete", b'd'),
@@ -822,7 +848,7 @@ impl super::Builtin for HistBranch {
 }
 
 struct HistPull;
-impl super::Builtin for HistPull {
+impl Builtin for HistPull {
   fn opts(&self) -> Vec<OptSpec> {
     vec![opt!("ex")]
   }
@@ -844,7 +870,7 @@ impl super::Builtin for HistPull {
 }
 
 struct HistList;
-impl super::Builtin for HistList {
+impl Builtin for HistList {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       OptSpec::new_short("no-numbers", b'n'),

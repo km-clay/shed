@@ -5,20 +5,17 @@ use chrono_tz::Tz;
 use nix::libc;
 
 use crate::{
-  errln,
-  eval::lex::{Span, Tk},
   sherr, signal,
-  state::{cmd, timers::TimerStatus, vars::VarStr},
-  try_var,
+  state::{timers::TimerStatus, vars::VarStr},
+  sub_command, try_var,
   util::{
-    self,
     error::ShResult,
     strops::{self, ByteCursor, Field, FieldParams, Sign, SliceCursor, StrFmt, VarStrDisplay},
   },
   varstr,
 };
 
-use super::{Builtin, BuiltinArgs, BuiltinRouter, opt::Parsed};
+use super::{Builtin, BuiltinArgs, BuiltinRouter, SubCommand};
 
 mod every;
 mod format;
@@ -308,68 +305,42 @@ fn fmt_timer_status(status: &TimerStatus) -> VarStr {
 
 pub(super) struct Chrono;
 impl BuiltinRouter for Chrono {
-  fn default_sub(&self) -> &'static dyn Builtin {
-    &ChronoError
+  fn name(&self) -> &'static str {
+    "chrono"
   }
-
-  #[rustfmt::skip]
-  fn sub_for(&self, word: &[u8]) -> Option<&'static dyn Builtin> {
-    match word {
-      b"timer" => Some(&timer::Timer      ),
-      b"sleep" => Some(&sleep::Sleep      ),
-      b"fmt"   => Some(&format::Format    ),
-      b"every" => Some(&every::Every      ),
-      b"zone"  => Some(&timezone::Timezone),
-      _ => None,
-    }
-  }
-}
-
-impl Builtin for Chrono {
-  fn as_router(&self) -> Option<&dyn BuiltinRouter> {
-    Some(self)
-  }
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
-    self.route_parse(cmd_span, argv, no_split)
-  }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    self.dispatch_sub(args)
-  }
-}
-
-impl Chrono {
-  #[rustfmt::skip]
-  const SUBCOMMANDS: &[super::SubInfo] = &[
-    ("timer", "<name>",     "measure elapsed time with named stopwatches"),
-    ("sleep", "<duration>", "pause for a duration, or until an instant"),
-    ("fmt",   "<time>",     "render an instant or duration through a format"),
-    ("every", "<interval> <command>", "run a command repeatedly on an interval"),
-    ("zone",  "",           "list portable timezone names"),
-  ];
-
-  fn subcommands() -> impl Iterator<Item = VarStr> {
-    Self::SUBCOMMANDS
-      .iter()
-      .map(|(name, ..)| VarStr::from(*name))
-  }
-}
-
-struct ChronoError;
-impl Builtin for ChronoError {
-  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    for (arg, span) in args.arguments() {
-      if !arg.starts_with(b"-") {
-        let suggestions = cmd::check_typo_against(arg.as_bytes(), Chrono::subcommands());
-        let err = sherr!(ExecFail @ span, "unknown subcommand `{arg}` for `chrono`")
-          .with_code(2)
-          .with_suggestions(&suggestions);
-        return Err(err);
-      }
-    }
-    errln!(
-      "chrono: no subcommand specified\n{}",
-      super::sub_usage("chrono", Chrono::SUBCOMMANDS)
-    );
-    util::with_status(2)
+  fn sub_commands(&self) -> &'static [SubCommand] {
+    const SUB_COMMANDS: &[SubCommand] = &[
+      sub_command!(
+        &timer::Timer,
+        "timer",
+        "[subcommand]",
+        "manage timers for measuring elapsed time"
+      ),
+      sub_command!(
+        &sleep::Sleep,
+        "sleep",
+        "[<duration>|until <instant>]",
+        "sleep for a specified duration"
+      ),
+      sub_command!(
+        &format::Format,
+        "fmt",
+        "<format> [timestamp]",
+        "format a timestamp or duration"
+      ),
+      sub_command!(
+        &every::Every,
+        "every",
+        "<interval> <command>",
+        "run a command repeatedly at a specified interval"
+      ),
+      sub_command!(
+        &timezone::Timezone,
+        "tz",
+        "[timezone]",
+        "print portable timezone names"
+      ),
+    ];
+    SUB_COMMANDS
   }
 }

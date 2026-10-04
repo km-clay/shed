@@ -80,9 +80,9 @@ impl Builtin for Touch {
       let Err(e) = res else { continue };
 
       let err = match e.kind() {
-        EK::NotFound           => sherr!(ExecFail @ f_span, "cannot touch `{file}`: no such file or directory"),
+        EK::NotFound           => sherr!(ExecFail @ f_span, "cannot touch `{file}`: no such file or directory"           ),
         EK::NotADirectory      => sherr!(ExecFail @ f_span, "cannot touch `{file}`: component of path is not a directory"),
-        EK::ReadOnlyFilesystem => sherr!(ExecFail @ f_span, "cannot touch `{file}`: read-only filesystem"),
+        EK::ReadOnlyFilesystem => sherr!(ExecFail @ f_span, "cannot touch `{file}`: read-only filesystem"                ),
         EK::PermissionDenied   => {
           let note = match (e.raw_os_error(), args.has_opt("time")) {
             (Some(libc::EPERM), _) => "setting a specific time requires owning the file",

@@ -97,14 +97,14 @@ impl Builtin for ChMod {
 #[rustfmt::skip]
 pub(super) fn handle_err(err: io::Error, file: &VarStr) -> ShErr {
   match err.kind() {
-    EK::NotFound           => sherr!(ExecFail, "cannot set mode of `{file}`: no such file or directory"),
-    EK::InvalidFilename    => sherr!(ExecFail, "cannot set mode of `{file}`: invalid filename"),
+    EK::NotFound           => sherr!(ExecFail, "cannot set mode of `{file}`: no such file or directory"        ),
+    EK::InvalidFilename    => sherr!(ExecFail, "cannot set mode of `{file}`: invalid filename"                 ),
     EK::NotADirectory      => sherr!(ExecFail, "cannot set mode of `{file}`: path component is not a directory"),
-    EK::ReadOnlyFilesystem => sherr!(ExecFail, "cannot set mode of `{file}`: read-only filesystem"),
+    EK::ReadOnlyFilesystem => sherr!(ExecFail, "cannot set mode of `{file}`: read-only filesystem"             ),
     EK::PermissionDenied   => match err.raw_os_error() {
-      Some(libc::EPERM)    => sherr!(ExecFail, "cannot set mode of `{file}`: operation not permitted")
+      Some(libc::EPERM)    => sherr!(ExecFail, "cannot set mode of `{file}`: operation not permitted"          )
         .with_note("only the file's owner or the superuser can change its mode".into()),
-      _                    => sherr!(ExecFail, "cannot set mode of `{file}`: permission denied"),
+      _                    => sherr!(ExecFail, "cannot set mode of `{file}`: permission denied"                ),
     },
     _ => {
       if err.raw_os_error() == Some(libc::ELOOP) {

@@ -40,8 +40,8 @@ impl Builtin for ReadLink {
         let err = match e.kind() {
           EK::InvalidInput     => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: not a symbolic link"),
           EK::NotFound         => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: file does not exist"),
-          EK::PermissionDenied => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: permission denied"),
-          _                    => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: {e}"),
+          EK::PermissionDenied => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: permission denied"  ),
+          _                    => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: {e}"                ),
         };
         Err(err.with_code(1))
       }

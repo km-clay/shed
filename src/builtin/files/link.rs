@@ -36,21 +36,21 @@ impl Builtin for Link {
       };
       #[rustfmt::skip]
       let err = match e.kind() {
-        EK::AlreadyExists      => sherr!(ExecFail @ l_span, "cannot create link `{link}`: file exists"),
-        EK::CrossesDevices     => sherr!(ExecFail @ l_span, "cannot create link `{link}`: cross-device link"),
-        EK::NotFound           => sherr!(ExecFail @ t_span, "cannot create link `{link}`: target `{target}` does not exist"),
-        EK::TooManyLinks       => sherr!(ExecFail @ l_span, "cannot create link `{link}`: too many links"),
-        EK::StorageFull        => sherr!(ExecFail @ l_span, "cannot create link `{link}`: storage full"),
-        EK::ReadOnlyFilesystem => sherr!(ExecFail @ l_span, "cannot create link `{link}`: read-only filesystem"),
-        EK::InvalidFilename    => sherr!(ExecFail @ l_span, "cannot create link `{link}`: invalid filename"),
+        EK::AlreadyExists      => sherr!(ExecFail @ l_span, "cannot create link `{link}`: file exists"                      ),
+        EK::CrossesDevices     => sherr!(ExecFail @ l_span, "cannot create link `{link}`: cross-device link"                ),
+        EK::NotFound           => sherr!(ExecFail @ t_span, "cannot create link `{link}`: target `{target}` does not exist" ),
+        EK::TooManyLinks       => sherr!(ExecFail @ l_span, "cannot create link `{link}`: too many links"                   ),
+        EK::StorageFull        => sherr!(ExecFail @ l_span, "cannot create link `{link}`: storage full"                     ),
+        EK::ReadOnlyFilesystem => sherr!(ExecFail @ l_span, "cannot create link `{link}`: read-only filesystem"             ),
+        EK::InvalidFilename    => sherr!(ExecFail @ l_span, "cannot create link `{link}`: invalid filename"                 ),
         EK::NotADirectory      => sherr!(ExecFail @ l_span, "cannot create link `{link}`: path component is not a directory"),
 
         EK::PermissionDenied | EK::IsADirectory => match e.raw_os_error() {
-          Some(libc::EPERM)    => sherr!(ExecFail @ l_span, "cannot create link `{link}`: is a directory"),
-          Some(libc::EACCES)   => sherr!(ExecFail @ l_span, "cannot create link `{link}`: permission denied"),
-          _                    => sherr!(ExecFail @ l_span, "cannot create link `{link}`: {e}"),
+          Some(libc::EPERM)    => sherr!(ExecFail @ l_span, "cannot create link `{link}`: is a directory"                   ),
+          Some(libc::EACCES)   => sherr!(ExecFail @ l_span, "cannot create link `{link}`: permission denied"                ),
+          _                    => sherr!(ExecFail @ l_span, "cannot create link `{link}`: {e}"                              ),
         },
-        _                      => sherr!(ExecFail @ l_span, "cannot create link `{link}`: {e}"),
+        _                      => sherr!(ExecFail @ l_span, "cannot create link `{link}`: {e}"                              ),
       };
 
       err.print_error();

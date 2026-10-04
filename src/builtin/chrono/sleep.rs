@@ -4,37 +4,31 @@ use bstr::ByteSlice;
 use nix::libc;
 
 use crate::{
-  builtin::opt::Parsed,
-  eval::lex::{Span, Tk},
-  sherr,
+  sherr, sub_command,
   util::{self, error::ShResultExt, strops},
 };
 
-use super::super::{Builtin, BuiltinArgs, BuiltinRouter, ShResult, argv};
+use super::{
+  super::{Builtin, BuiltinArgs, BuiltinRouter, ShResult, argv},
+  SubCommand,
+};
 
 pub(super) struct Sleep;
 impl BuiltinRouter for Sleep {
-  fn default_sub(&self) -> &'static dyn Builtin {
-    &SleepDuration
+  fn default_sub(&self) -> Option<&'static dyn Builtin> {
+    Some(&SleepDuration)
   }
-
-  fn sub_for(&self, word: &[u8]) -> Option<&'static dyn Builtin> {
-    match word {
-      b"until" => Some(&Until),
-      _ => None,
-    }
+  fn name(&self) -> &'static str {
+    "sleep"
   }
-}
-
-impl Builtin for Sleep {
-  fn as_router(&self) -> Option<&dyn BuiltinRouter> {
-    Some(self)
-  }
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
-    self.route_parse(cmd_span, argv, no_split)
-  }
-  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    self.dispatch_sub(args)
+  fn sub_commands(&self) -> &'static [SubCommand] {
+    const SUB_COMMANDS: &[SubCommand] = &[sub_command!(
+      &Until,
+      "until",
+      "<instant>",
+      "sleep until the given instant"
+    )];
+    SUB_COMMANDS
   }
 }
 

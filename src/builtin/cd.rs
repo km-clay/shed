@@ -11,19 +11,17 @@ use std::{
 use bstr::ByteSlice;
 
 use crate::{
-  builtin::BuiltinRouter,
-  eval::lex::{Span, Tk},
   expand::escape,
   opt, outln, procio,
   readline::{self, Candidate, FuzzyBuilder},
   sherr,
   state::{Shed, cwd, db, paths, terminal::Terminal},
-  try_var,
+  sub_command, try_var,
   util::{self, error::ShResult},
   var,
 };
 
-use super::opt::{OptSpec, Parsed};
+use super::{SubCommand, opt::OptSpec};
 
 pub(super) struct Cd;
 impl super::Builtin for Cd {
@@ -145,28 +143,35 @@ enum SortKind {
 }
 
 pub(super) struct Zd;
+#[rustfmt::skip]
 impl super::BuiltinRouter for Zd {
-  fn default_sub(&self) -> &'static dyn super::Builtin {
-    &ZdJump
-  }
+  fn name(&self) -> &'static str { "zd" }
 
-  fn sub_for(&self, word: &[u8]) -> Option<&'static dyn super::Builtin> {
-    match word {
-      b"add" => Some(&ZdAdd),
-      b"remove" => Some(&ZdRemove),
-      b"clean" => Some(&ZdClean),
-      b"list" => Some(&ZdList),
-      _ => None,
-    }
+  fn default_sub(&self) -> Option<&'static dyn super::Builtin> {
+    Some(&ZdJump)
   }
-}
-
-impl super::Builtin for Zd {
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
-    self.route_parse(cmd_span, argv, no_split)
-  }
-  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    self.dispatch_sub(args)
+  fn sub_commands(&self) -> &'static [SubCommand] {
+    const SUB_COMMANDS: &[SubCommand] = &[
+      sub_command!(
+        &ZdAdd, "add",
+        "[-r] <dirs...>",
+        "add directories to dir history database"
+      ),
+      sub_command!(
+        &ZdRemove, "remove",
+        "[-r] <dirs...>",
+        "remove specific directories from dir history database"
+      ),
+      sub_command!(
+        &ZdClean, "clean",
+        "prune dead directories from dir history database"
+      ),
+      sub_command!(
+        &ZdList, "list", "[--json|--quoted] [--reverse] [--sort <kind>] [<query>]",
+        "list entries from the dir history database"
+      ),
+    ];
+    SUB_COMMANDS
   }
 }
 

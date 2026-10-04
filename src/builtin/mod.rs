@@ -36,7 +36,9 @@ use crate::{
     self,
     error::{ShErrKind, ShResult, ShResultExt},
     guards,
+    strops::VarStrDisplay,
   },
+  varstr,
 };
 
 mod alias;
@@ -224,6 +226,19 @@ pub(super) fn lookup_builtin(name: &[u8]) -> Option<&'static dyn Builtin> {
     .map(|idx| BUILTIN_TABLE[idx].1 as &dyn Builtin)
 }
 
+pub(crate) fn is_special_builtin(name: &[u8]) -> bool {
+  lookup_builtin(name).is_some_and(Builtin::is_special)
+}
+
+pub(crate) fn setup(
+  builtin: &dyn Builtin,
+  tree: &Ast,
+  node_id: NodeId,
+  dispatcher: &mut Dispatcher,
+) -> ShResult<()> {
+  builtin.setup_builtin(tree, node_id, dispatcher)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ForkBehavior {
   Never,
@@ -239,7 +254,7 @@ pub(crate) fn fork_behavior_for(name: &[u8]) -> Option<ForkBehavior> {
 ///
 /// Has exactly one required member: `execute()`, which is called to run the builtin.
 /// All other members have default implementations.
-pub(super) trait Builtin: Sync {
+pub(crate) trait Builtin: Sync {
   /// The actual logic of the builtin. The only required member of `Builtin`.
   fn execute(&self, args: BuiltinArgs) -> ShResult<()>;
 
@@ -493,6 +508,68 @@ pub(super) trait Builtin: Sync {
   }
 }
 
+pub(crate) struct Usage {
+  args: Option<&'static str>,
+  description: &'static str,
+}
+
+impl Usage {
+  pub(crate) fn args(&self) -> Option<&'static str> {
+    self.args
+  }
+  pub(crate) fn description(&self) -> &'static str {
+    self.description
+  }
+}
+
+#[macro_export]
+macro_rules! sub_command {
+  ($handler:expr, $name:literal, $args:literal, $desc:literal) => {
+    SubCommand::new($name, $handler).with_usage(Some($args), $desc)
+  };
+  ($handler:expr, $name:literal, $desc:literal) => {
+    SubCommand::new($name, $handler).with_usage(None, $desc)
+  };
+  ($handler:expr, $name:literal) => {
+    SubCommand::new($name, $handler)
+  };
+}
+
+pub(crate) struct SubCommand {
+  name: &'static str,
+  handler: &'static dyn Builtin,
+  usage: Option<Usage>,
+}
+
+impl SubCommand {
+  pub(crate) const fn new(name: &'static str, handler: &'static dyn Builtin) -> Self {
+    Self {
+      name,
+      handler,
+      usage: None,
+    }
+  }
+
+  pub(crate) const fn with_usage(
+    mut self,
+    args: Option<&'static str>,
+    description: &'static str,
+  ) -> Self {
+    self.usage = Some(Usage { args, description });
+    self
+  }
+
+  pub(crate) fn name(&self) -> &'static str {
+    self.name
+  }
+  pub(crate) fn handler(&self) -> &'static dyn Builtin {
+    self.handler
+  }
+  pub(crate) fn usage(&self) -> Option<&Usage> {
+    self.usage.as_ref()
+  }
+}
+
 /// A trait implemented by builtins with subcommands.
 ///
 /// This allows subcommands to be first class in the sense that they get their own option parsing and dispatch,
@@ -501,14 +578,14 @@ pub(super) trait Builtin: Sync {
 /// Structs implementing this trait should also implement Builtin, and delegate like this:
 /// [`Builtin::get_argv_and_opts`] -> [`BuiltinRouter::route_parse`]
 /// [`Builtin::execute`] -> [`BuiltinRouter::dispatch_sub`]
-pub(crate) trait BuiltinRouter {
+pub(super) trait BuiltinRouter {
   fn sub_from_args(&self, args: &BuiltinArgs) -> Option<&'static dyn Builtin> {
     match args.argv().first() {
       Some(Word::Arg(word, _)) => self.sub_for(word.as_bytes()),
       _ => None,
     }
   }
-  fn route_parse(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed>
+  fn route_parse(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed>
   where
     Self: Sized,
   {
@@ -528,8 +605,15 @@ pub(crate) trait BuiltinRouter {
       .get(arg_idx)
       .filter(|tk| !tk.slice().starts_with_str("-"))
       .and_then(|tk| router.sub_for(&tk.slice()))
-      .unwrap_or_else(|| router.default_sub());
+      .or_else(|| router.default_sub());
 
+    let Some(sub) = sub else {
+      return Ok(
+        execute::prepare_argv_with(argv, no_split)
+          .promote_err(cmd_span)?
+          .into(),
+      );
+    };
     let parsed = opt::parse_opts_with(
       argv,
       &sub.opts(),
@@ -547,14 +631,103 @@ pub(crate) trait BuiltinRouter {
       // strip the verb word before handing the rest to the subcommand
       words.remove(0);
     }
-    let sub = sub.unwrap_or_else(|| self.default_sub());
+    let Some(sub) = sub.or_else(|| self.default_sub()) else {
+      return self.sub_not_found(BuiltinArgs::new(words, span, cmd_span));
+    };
 
     sub.execute(BuiltinArgs::new(words, span, cmd_span))
   }
   /// The default subcommand to run if no subcommand is specified.
-  fn default_sub(&self) -> &'static dyn Builtin;
+  fn default_sub(&self) -> Option<&'static dyn Builtin> {
+    None
+  }
   /// Lookup a subcommand by name. Returns `None` if the subcommand does not exist.
-  fn sub_for(&self, word: &[u8]) -> Option<&'static dyn Builtin>;
+  fn sub_for(&self, word: &[u8]) -> Option<&'static dyn Builtin> {
+    let subs = self.sub_commands();
+
+    for command in subs {
+      if command.name().as_bytes() == word {
+        return Some(command.handler());
+      }
+    }
+
+    None
+  }
+
+  fn sub_commands(&self) -> &'static [SubCommand];
+  fn name(&self) -> &'static str;
+
+  fn sub_not_found(&self, args: BuiltinArgs) -> ShResult<()> {
+    let name = self.name();
+    let sub_cmd_names = self
+      .sub_commands()
+      .iter()
+      .map(|s| s.name().to_var_str())
+      .collect::<Vec<_>>();
+
+    for (arg, span) in args.arguments() {
+      if !arg.starts_with(b"-") {
+        let suggestions = cmd::check_typo_against(arg.as_bytes(), sub_cmd_names);
+        let err = sherr!(ExecFail @ span, "unknown subcommand `{arg}` for `{name}`")
+          .with_code(2)
+          .with_suggestions(&suggestions);
+        return Err(err);
+      }
+    }
+
+    let usage = self.sub_usage();
+    errln!("{name}: no subcommand specified\n{usage}");
+    util::with_status(2)
+  }
+  fn sub_usage(&self) -> String {
+    use std::fmt::Write;
+    let subs = self.sub_commands();
+    let cmd = self.name();
+
+    let width = subs
+      .iter()
+      .map(|s| {
+        let name = s.name();
+        let args = s.usage().and_then(Usage::args).map(|u| varstr!(" {u}"));
+        name.len() + args.map_or(0, |a| a.len())
+      })
+      .max()
+      .unwrap_or(0);
+
+    let mut out = format!("usage: {cmd} <subcommand> ...\n");
+    for sub in subs {
+      let name = sub.name();
+      let mut call = varstr!("{name}");
+
+      let usage = sub.usage();
+      let args = usage.and_then(Usage::args);
+      let desc = usage.map(Usage::description);
+
+      if let Some(args) = args {
+        call = varstr!("{call} {args}");
+      }
+
+      if let Some(desc) = desc {
+        call = varstr!("{call:<width$}   {desc}");
+      }
+
+      write!(out, "\n  {call}").ok();
+    }
+    write!(out, "\n\nsee `help {cmd}` for details").ok();
+    out
+  }
+}
+
+impl<T: BuiltinRouter + Sync> Builtin for T {
+  fn as_router(&self) -> Option<&dyn BuiltinRouter> {
+    Some(self)
+  }
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+    self.route_parse(cmd_span, argv, no_split)
+  }
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    self.dispatch_sub(args)
+  }
 }
 
 // The easy ones
@@ -721,28 +894,6 @@ fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
     }
   }
   Ok(out)
-}
-
-/// A `{name}`, `{args}`, `{description}` row for each subcommand a router accepts.
-pub(crate) type SubInfo = (&'static str, &'static str, &'static str);
-
-fn sub_usage(cmd: &str, subs: &[SubInfo]) -> String {
-  use std::fmt::Write;
-
-  let width = subs
-    .iter()
-    .map(|(name, args, _)| name.len() + usize::from(!args.is_empty()) + args.len())
-    .max()
-    .unwrap_or(0);
-
-  let mut out = format!("usage: {cmd} <subcommand> ...\n");
-  for (name, args, desc) in subs {
-    let sep = if args.is_empty() { "" } else { " " };
-    let call = format!("{name}{sep}{args}");
-    write!(out, "\n  {call:<width$}   {desc}").ok();
-  }
-  write!(out, "\n\nsee `help {cmd}` for details").ok();
-  out
 }
 
 /// The `command` builtin, which runs a command while bypassing any shell functions or aliases that may shadow it.

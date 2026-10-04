@@ -33,14 +33,14 @@ impl super::super::Builtin for Unlink {
         let io_err = io::Error::from_raw_os_error(e as i32);
 
         let err = match io_err.kind() {
-          EK::IsADirectory       => sherr!(ExecFail @ span, "cannot unlink `{link}`: is a directory"),
-          EK::NotFound           => sherr!(ExecFail @ span, "cannot unlink `{link}`: no such file or directory"),
+          EK::IsADirectory       => sherr!(ExecFail @ span, "cannot unlink `{link}`: is a directory"                   ),
+          EK::NotFound           => sherr!(ExecFail @ span, "cannot unlink `{link}`: no such file or directory"        ),
           EK::NotADirectory      => sherr!(ExecFail @ span, "cannot unlink `{link}`: path component is not a directory"),
-          EK::ReadOnlyFilesystem => sherr!(ExecFail @ span, "cannot unlink `{link}`: read-only file system"),
+          EK::ReadOnlyFilesystem => sherr!(ExecFail @ span, "cannot unlink `{link}`: read-only file system"            ),
           EK::PermissionDenied   => match io_err.raw_os_error() {
-            Some(libc::EACCES)   => sherr!(ExecFail @ span, "cannot unlink `{link}`: unsearchable directory in path"),
-            Some(libc::EPERM)    => sherr!(ExecFail @ span, "cannot unlink `{link}`: operation not permitted"),
-            _                    => sherr!(ExecFail @ span, "cannot unlink `{link}`: {io_err}"),
+            Some(libc::EACCES)   => sherr!(ExecFail @ span, "cannot unlink `{link}`: unsearchable directory in path"   ),
+            Some(libc::EPERM)    => sherr!(ExecFail @ span, "cannot unlink `{link}`: operation not permitted"          ),
+            _                    => sherr!(ExecFail @ span, "cannot unlink `{link}`: {io_err}"                         ),
           }
           _ => if io_err.raw_os_error() == Some(libc::ELOOP) {
             sherr!(ExecFail @ span, "failed to unlink `{link}`: too many levels of symbolic links")
