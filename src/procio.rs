@@ -139,6 +139,15 @@ impl DerefMut for Scratch {
   }
 }
 
+/// An RAII guard that lets you take the shared global scratch buffer
+///
+/// On drop, places the scratch buffer back in its slot, making it
+/// available for use elsewhere
+///
+/// Note: it wraps an `Option<Scratch>`, but the Option is only None right
+/// before the guard is dropped, so you can safely deref it without checking for None
+///
+/// Other note: don't use this in signal handlers.
 pub(crate) struct ScratchGuard(Option<Scratch>);
 
 impl ScratchGuard {
@@ -1056,7 +1065,7 @@ pub(crate) trait Sink: Send + Sync {
 
 /// Drain an fd, discarding the bytes it contains
 pub(crate) fn drain_fd(fd: BorrowedFd) {
-  let mut tmp = [0u8; 256];
+  let mut tmp = take_scratch();
   loop {
     match unistd::read(fd, &mut tmp) {
       Ok(0) => break,
@@ -2515,7 +2524,7 @@ pub(super) fn read_input() -> ShResult<Vec<u8>> {
   let sink = stdin_sink()?;
 
   let mut input = vec![];
-  let mut read_buf = [0u8; 4096];
+  let mut read_buf = take_scratch();
 
   loop {
     match sink.read(&mut read_buf) {

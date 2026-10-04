@@ -15,7 +15,7 @@ use std::{
     Arc,
     atomic::{AtomicI32, Ordering},
   },
-  time::SystemTime,
+  time::{Duration, SystemTime},
 };
 
 use crate::{
@@ -28,6 +28,7 @@ use crate::{
       node,
     },
   },
+  socket::SocketRequest,
   state::{jobs::Outcome, source::StrongSpan},
   util::error,
   varstr,
@@ -777,7 +778,7 @@ impl Shed {
     SHED.with(|shed| shed.socket.borrow().clone())
   }
   /// Read all pending requests from the IPC socket, returning a vector of (connection, request) tuples.
-  pub(crate) fn read_socket() -> Vec<(UnixStream, socket::SocketRequest)> {
+  pub(crate) fn read_socket() -> Vec<(UnixStream, SocketRequest)> {
     let mut requests = vec![];
     let Some(listener) = Self::get_socket() else {
       return requests;
@@ -791,7 +792,7 @@ impl Shed {
 
     requests
   }
-  pub(crate) fn read_request(conn: &UnixStream) -> Option<socket::SocketRequest> {
+  pub(crate) fn read_request(conn: &UnixStream) -> Option<SocketRequest> {
     use nix::{
       errno::Errno,
       unistd::{read, write},
@@ -803,7 +804,7 @@ impl Shed {
     let mut bytes = vec![];
     let mut idle_iters = 0;
     loop {
-      let mut buffer = [0u8; 1024];
+      let mut buffer = procio::take_scratch();
       match read(conn, &mut buffer) {
         Ok(0) => break,
         Ok(n) => {
@@ -815,7 +816,7 @@ impl Shed {
           if idle_iters >= MAX_IDLE_ITERS {
             break;
           }
-          std::thread::sleep(std::time::Duration::from_millis(1));
+          std::thread::sleep(Duration::from_millis(1));
         }
         Err(Errno::EINTR) => (),
         Err(e) => {
@@ -829,7 +830,7 @@ impl Shed {
       bytes.pop();
     }
 
-    let request = match socket::SocketRequest::parse_request(&bytes) {
+    let request = match SocketRequest::parse_request(&bytes) {
       Ok(req) => req,
       Err(e) => {
         write(
