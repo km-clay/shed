@@ -258,7 +258,9 @@ fn read_subsh(stream: &mut SegCursor, out: &mut SegStream) {
     rest.push(b);
   }
 
-  if let Some(close) = lex::scan_cmd_sub_body(&rest) {
+  if !rest.starts_with(b"(")
+    && let Some(close) = lex::scan_cmd_sub_body(&rest)
+  {
     out.push_bytes(&rest[..close]);
     out.push_marker(Marker::Subshell);
     for _ in 0..=close {
