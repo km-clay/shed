@@ -3,7 +3,9 @@ use std::{fs, io, sync::Arc};
 
 use crate::{
   builtin::{BuiltinArgs, opt::OptSpec},
-  errln, opt,
+  errln,
+  eval::lex::Span,
+  opt,
   procio::{self, OsSink, Sink},
   set_var, sherr, signal,
   state::vars::VarStr,
@@ -84,12 +86,11 @@ impl super::Builtin for Thru {
       .ok()
       .flatten();
 
-    let mut sources: Vec<Option<VarStr>> = args
+    let mut sources: Vec<Option<(VarStr, Span)>> = args
       .arguments()
-      .map(|(a, _)| (a.to_str_lossy() != "-").then(|| a.clone()))
+      .map(|(a, s)| (a.to_str_lossy() != "-").then(|| (a.clone(), s)))
       .collect();
     if sources.is_empty() {
-      // no source operands → read stdin
       sources.push(None);
     }
 
@@ -105,22 +106,22 @@ impl super::Builtin for Thru {
       }
 
       let reader: Arc<dyn Sink> = match &src {
-        Some(path) => match fs::File::open(path) {
+        Some((path, p_span)) => match fs::File::open(path) {
           Ok(f) => Arc::new(OsSink::new(f.into())),
           Err(e) => {
-            errln!("thru: {path}: {e}");
+            sherr!(ExecFail @ *p_span, "{e}").print_error();
             continue;
           }
         },
         None => match procio::stdin_sink() {
           Ok(s) => s,
           Err(e) => {
-            errln!("thru: stdin: {e}");
+            sherr!(ExecFail @ args.cmd_span(), "{e}").print_error();
             continue;
           }
         },
       };
-      let path = src.unwrap_or_else(|| "stdin".into());
+      let span = src.map(|(_, s)| s);
 
       let mut buf = [0u8; 16384];
       loop {
@@ -154,7 +155,9 @@ impl super::Builtin for Thru {
               continue;
             }
             _ => {
-              errln!("thru: {path}: error reading input: {e}");
+              sherr!(IoErr(e.kind()), "error reading input: {e}")
+                .option_promote(span)
+                .print_error();
               break;
             }
           },
