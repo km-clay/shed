@@ -28,20 +28,24 @@ qtable() {
 		left=0
 	fi
 
+  # draw a row, taking a left, middle, and right separator character
+  # e.g. `draw_separator '├' '┼' '┤'`
 	draw_separator() {
 		local left="$1"
 		local middle="$2"
 		local right="$3"
 
-		echo -n "$left"
+		printf '%s' "$left"
 
 		for ((i=0; i<${#widths[@]}; i++)); do
 			cell=$(( "${widths[i]}" + 2 ))
 
+      # shed extension - 'r' repeats the character {width} times
+      # In this case, "$cell" is used for the width, and '─' is repeated that many times.
 			printf '%*r' "$cell" '─'
 
 			if (( i < ${#widths[@]} - 1 )); then
-				echo -n "$middle"
+				printf '%s' "$middle"
 			fi
 		done
 
@@ -110,7 +114,6 @@ qtable() {
 		draw_separator '├' '┼' '┤'
 	fi
 
-	local record_no=0
 	for record in "${records[@]}"; do
 		unquote -a fields "$record"
 		draw_row "${fields[@]}"
