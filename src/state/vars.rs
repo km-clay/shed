@@ -1575,7 +1575,7 @@ impl VarTab {
     self.vars.remove(var_name);
     Ok(())
   }
-  pub(crate) fn set_index(&mut self, var_name: &str, idx: ArrIndex, val: String) -> ShResult<()> {
+  pub(crate) fn set_index(&mut self, var_name: &str, idx: ArrIndex, val: VarStr) -> ShResult<()> {
     // 'idx' must already be resolved at this point
     if self.var_exists(var_name)
       && let Some(var) = self.vars_mut().get_mut(var_name)
@@ -1605,7 +1605,7 @@ impl VarTab {
           if idx >= items.len() {
             items.resize(idx + 1, VarStr::default());
           }
-          items[idx] = val.into();
+          items[idx] = val;
           return Ok(());
         }
         VarKind::AssocArr(items) => {
@@ -1619,11 +1619,11 @@ impl VarTab {
           };
           for (k, v) in items.iter_mut() {
             if k == &key {
-              *v = val.into();
+              *v = val;
               return Ok(());
             }
           }
-          items.push((key.into(), val.into()));
+          items.push((key, val));
           return Ok(());
         }
         _ => {
@@ -1631,7 +1631,30 @@ impl VarTab {
         }
       }
     }
-    Ok(())
+
+    let kind = match idx {
+      ArrIndex::Literal(n) => {
+        let mut items: VecDeque<VarStr> = VecDeque::with_capacity(n + 1);
+        items.resize(n, VarStr::default());
+        items.push_back(val);
+        VarKind::Arr(items)
+      }
+      ArrIndex::Key(key) => VarKind::AssocArr(vec![(key, val)]),
+      ArrIndex::FromBack(n) => {
+        return Err(sherr!(
+          ExecFail,
+          "Index {n} out of bounds for array '{var_name}'"
+        ));
+      }
+      _ => {
+        return Err(sherr!(
+          ExecFail,
+          "Cannot index all elements of array '{var_name}'"
+        ));
+      }
+    };
+
+    self.set_var(var_name, kind, VarFlags::empty())
   }
   pub(crate) fn unset_index(&mut self, var_name: &str, idx: ArrIndex) -> ShResult<()> {
     let Some(var) = self.vars.get_mut(var_name) else {
@@ -2097,15 +2120,48 @@ mod set_index_tests {
   }
 
   #[test]
-  fn missing_var_is_silent_ok() {
-    // var_exists guard at the top is false → function returns Ok
-    // without creating anything.
+  fn missing_var_literal_index_creates_array() {
     let _g = TestGuard::new();
     let mut tab = VarTab::new();
     tab
       .set_index("never_existed", ArrIndex::Literal(0), "x".into())
       .unwrap();
-    assert!(!tab.vars.contains_key("never_existed"));
+    assert_eq!(arr_items(&tab, "never_existed"), vec!["x"]);
+  }
+
+  #[test]
+  fn missing_var_sparse_index_pads_with_empties() {
+    let _g = TestGuard::new();
+    let mut tab = VarTab::new();
+    tab
+      .set_index("sparse", ArrIndex::Literal(3), "v".into())
+      .unwrap();
+    assert_eq!(arr_items(&tab, "sparse"), vec!["", "", "", "v"]);
+  }
+
+  #[test]
+  fn missing_var_key_index_creates_assoc() {
+    let _g = TestGuard::new();
+    let mut tab = VarTab::new();
+    tab
+      .set_index("fresh", ArrIndex::Key("k".into()), "v".into())
+      .unwrap();
+    assert_eq!(
+      assoc_items(&tab, "fresh"),
+      vec![(VarStr::from("k"), VarStr::from("v"))]
+    );
+  }
+
+  #[test]
+  fn missing_var_from_back_index_errors() {
+    let _g = TestGuard::new();
+    let mut tab = VarTab::new();
+    let res = tab.set_index("fresh", ArrIndex::FromBack(1), "v".into());
+    assert!(
+      res.is_err(),
+      "counting back from an absent array has no length"
+    );
+    assert!(!tab.vars.contains_key("fresh"));
   }
 
   #[test]
