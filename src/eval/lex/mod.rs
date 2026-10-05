@@ -843,15 +843,13 @@ impl<'a> LexStream<'a> {
       Some(())
     };
 
-    let read_varname = |this: &mut Self| {
-      if !this.bump_if(|b| b.is_ascii_alphabetic() || b == b'_') {
-        return None;
-      }
-      this.bump_while(|b| b.is_ascii_alphanumeric() || b == b'_');
-      if this.bump_if_eq(b'[') && !scan_brackets(this, 1) {
-        return None;
-      }
-      Some(())
+    // The name after `@` is read as an ordinary word, so quoting, escapes and
+    // expansions all behave as they do in any other redirection target. What
+    // it expands to is validated when the redirection is applied.
+    let read_varname = |this: &mut Self| -> ShResult<bool> {
+      let before = this.cursor;
+      this.read_string()?;
+      Ok(this.cursor > before)
     };
 
     self.attempt(|this| {
@@ -886,8 +884,10 @@ impl<'a> LexStream<'a> {
             }
             Some(b'@') => {
               this.bump();
-              if read_varname(this).is_none() {
-                return Some(varname_err);
+              match read_varname(this) {
+                Err(e) => return Some(Err(e)),
+                Ok(false) => return Some(varname_err),
+                Ok(true) => {}
               }
 
               let tk = this.get_token(start..this.cursor, TkRule::Redir);
@@ -908,8 +908,10 @@ impl<'a> LexStream<'a> {
           match this.peek_byte() {
             Some(b'@') => {
               this.bump();
-              if read_varname(this).is_none() {
-                return Some(varname_err);
+              match read_varname(this) {
+                Err(e) => return Some(Err(e)),
+                Ok(false) => return Some(varname_err),
+                Ok(true) => {}
               }
 
               let tk = this.get_token(start..this.cursor, TkRule::Redir);

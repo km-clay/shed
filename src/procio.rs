@@ -618,12 +618,13 @@ impl RedirBldr {
     // throaway macro for reading variable names in '>@var' redirs
     macro_rules! read_name {
       ($ty:path) => {
-        let Some(name) = read_var_ref(&mut cur, bytes) else {
+        let name = VarStr::from(&bytes[cur.pos()..]);
+        if name.is_empty() {
           return Err(sherr!(
             ParseErr,
             "expected a variable name after '@' in redirection"
           ));
-        };
+        }
         redir = redir.with_target(RedirTarget::Var(name)).with_class($ty);
       };
     }
@@ -917,13 +918,13 @@ impl RedirSpec {
     let sink: Arc<dyn Sink> = match self {
       RedirSpec::Var { name, mode, .. } => match mode {
         RedirType::ReadVar => {
-          let vn = VarName::parse(&name.to_str_lossy(), true)?;
+          let vn = expand_var_target(name)?;
           let var = Shed::vars(|v| v.resolve_var(&vn).unwrap_or_default());
 
           Arc::new(BufSink::from_bytes(var.as_bytes()))
         }
         kind @ (RedirType::WriteVar | RedirType::AppendVar) => {
-          let vn = VarName::parse(&name.to_str_lossy(), true)?;
+          let vn = expand_var_target(name)?;
           let content = if matches!(kind, RedirType::AppendVar) {
             Shed::vars(|v| v.resolve_var(&vn).unwrap_or_default())
           } else {
@@ -2055,25 +2056,23 @@ impl SinkLines {
   }
 }
 
-enum VarSink {
-  Local {
-    name: VarName,
-    buf: Mutex<Vec<u8>>,
-    creator_pid: Pid,
-  },
-  External {
-    name: VarName,
-    write: Arc<dyn Sink>,
-    read: Arc<dyn Sink>,
-    buf: Mutex<Vec<u8>>,
-    creator_pid: Pid,
-  },
+struct VarSinkPipes {
+  write: Arc<dyn Sink>,
+  read: Arc<dyn Sink>,
+}
+
+struct VarSink {
+  name: VarName,
+  pipes: OnceLock<VarSinkPipes>,
+  buf: Mutex<Vec<u8>>,
+  creator_pid: Pid,
 }
 
 impl VarSink {
   pub(crate) fn new_local(name: VarName, buf: Vec<u8>) -> Self {
-    Self::Local {
+    Self {
       name,
+      pipes: OnceLock::new(),
       buf: Mutex::new(buf),
       creator_pid: Pid::this(),
     }
@@ -2081,58 +2080,57 @@ impl VarSink {
 
   pub(crate) fn new_external(name: VarName, buf: Vec<u8>) -> ShResult<Self> {
     let (read, write) = OsPipe::pipes()?;
+    let pipes = OnceLock::new();
+    let _ = pipes.set(VarSinkPipes { write, read });
 
-    Ok(Self::External {
+    Ok(Self {
       name,
-      write,
-      read,
+      pipes,
       buf: Mutex::new(buf),
       creator_pid: Pid::this(),
     })
   }
 
   fn creator_pid(&self) -> Pid {
-    match self {
-      Self::Local { creator_pid, .. } | Self::External { creator_pid, .. } => *creator_pid,
-    }
+    self.creator_pid
   }
 
   fn lock_buf(&self) -> std::sync::MutexGuard<'_, Vec<u8>> {
-    match self {
-      Self::Local { buf, .. } | Self::External { buf, .. } => buf.lock().unwrap(),
+    self.buf.lock().unwrap()
+  }
+
+  fn pipes(&self) -> io::Result<&VarSinkPipes> {
+    if let Some(pipes) = self.pipes.get() {
+      return Ok(pipes);
     }
+
+    let (read, write) = OsPipe::pipes()?;
+    let _ = self.pipes.set(VarSinkPipes { write, read });
+    Ok(self.pipes.get().expect("just set"))
   }
 
   fn take(&mut self) -> (VarName, Vec<u8>) {
-    match self {
-      Self::External {
-        name,
-        write,
-        read,
-        buf,
-        ..
-      } => {
-        *write = Arc::new(NullSink::new());
+    let mut buf = std::mem::take(self.lock_buf().deref_mut());
 
-        let mut acc = std::mem::take(buf.get_mut().unwrap());
+    if let Some(VarSinkPipes { write, read }) = self.pipes.take() {
+      // drop our write end first, or the read below never sees EOF
+      std::mem::drop(write);
 
-        if let Ok(fd) = read.as_os_fd()
-          && let Ok(capped) = read_capped(fd)
-        {
-          if capped.was_truncated() {
-            // raw stderr: this runs inside a `Shed::sinks` borrow
-            eprintln!(
-              "shed: variable capture truncated (exceeded {})",
-              capped.limit()
-            );
-          }
-          acc.extend_from_slice(&capped);
+      if let Ok(fd) = read.as_os_fd()
+        && let Ok(capped) = read_capped(fd)
+      {
+        if capped.was_truncated() {
+          // raw stderr: this runs inside a `Shed::sinks` borrow
+          eprintln!(
+            "shed: variable capture truncated (exceeded {})",
+            capped.limit()
+          );
         }
-
-        (name.clone(), acc)
+        buf.extend_from_slice(&capped);
       }
-      Self::Local { name, buf, .. } => (name.clone(), std::mem::take(buf.get_mut().unwrap())),
     }
+
+    (self.name.clone(), buf)
   }
 }
 
@@ -2150,13 +2148,7 @@ impl Sink for VarSink {
   }
 
   fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
-    match self {
-      VarSink::External { write, .. } => write.as_os_fd(),
-      VarSink::Local { .. } => Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "local variable sinks do not have an OS-level file descriptor",
-      )),
-    }
+    self.pipes()?.write.as_os_fd()
   }
 
   fn kind(&self) -> SinkKind {
@@ -2210,6 +2202,43 @@ pub(crate) fn apply_stage_var_writes(writes: Vec<(VarName, VarStr)>) {
       eprintln!("shed: error committing variable {name}: {e}");
     });
   }
+}
+
+/// Expand a `>@name` target and check it names a variable.
+///
+/// The lexer reads the name as an ordinary word, so expansion and quoting are
+/// handled here rather than during the scan. Splitting and globbing are off: a
+/// target has to resolve to exactly one name, and a `*` in a name would
+/// otherwise be matched against the filesystem.
+fn expand_var_target(raw: &VarStr) -> ShResult<VarName> {
+  let expanded: Vec<u8> = Expander::from_raw(raw.as_bytes(), TkFlags::empty())
+    .no_glob()
+    .no_split()
+    .expand_no_split()?
+    .into();
+  let expanded = VarStr::from(expanded);
+
+  let base = expanded
+    .as_bytes()
+    .split(|b| *b == b'[')
+    .next()
+    .unwrap_or_default();
+
+  let valid = base
+    .first()
+    .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_')
+    && base[1..]
+      .iter()
+      .all(|b| b.is_ascii_alphanumeric() || *b == b'_');
+
+  if !valid {
+    return Err(sherr!(
+      ParseErr,
+      "'{expanded}' is not a valid variable name in a redirection"
+    ));
+  }
+
+  VarName::parse(&expanded.to_str_lossy(), true)
 }
 
 fn commit_var(name: &VarName, bytes: &[u8]) -> ShResult<()> {
@@ -3128,6 +3157,59 @@ pub(crate) mod tests {
     var_pipe_builtin_mid_persists   : "printf x | thru >@v | thru > /dev/null; printf '%s' \"$v\"" => "x";
     var_pipe_builtin_first_persists : "printf x >@v | thru > /dev/null; printf '%s' \"$v\"" => "x";
     var_pipe_external_mid_persists  : "printf x | cat >@v | cat > /dev/null; printf '%s' \"$v\"" => "x", needs "cat";
+  }
+
+  // The name after `@` is an ordinary word, so it can be produced by an
+  // expansion. That is what lets a helper take its output variable as an
+  // argument, which five builtins previously each hand-rolled as `-v`.
+  run_output! {
+    var_indirect_write     : "t=dest; echo a >@$t; printf '%s' \"$dest\"" => "a\n";
+    var_indirect_braced    : "t=dest; echo a >@${t}; printf '%s' \"$dest\"" => "a\n";
+    var_indirect_append    : "t=ap; ap=x; printf y >>@$t; printf '%s' \"$ap\"" => "xy";
+    var_indirect_subscript : "declare -a arr; an=arr; printf z >@$an[1]; printf '%s' \"${arr[*]}\"" => " z";
+    var_indirect_helper    : "f() { thru >@$1; }; printf p | f cap; printf '%s' \"$cap\"" => "p";
+    var_indirect_read      : "v=hello; s=v; cat <@$s" => "hello", needs "cat";
+  }
+
+  // Validation moved out of the lexer when the name became a word, so these
+  // have to fail at redirect-application time instead.
+  #[test]
+  fn var_indirect_multiword_errors() {
+    let _g = TestGuard::new();
+
+    test_input(r#"t="a b"; echo hi >@$t"#).ok();
+    assert_ne!(
+      crate::state::Shed::get_status(),
+      0,
+      "a target expanding to two words must not silently take the first"
+    );
+  }
+
+  #[test]
+  fn var_target_invalid_name_errors() {
+    let _g = TestGuard::new();
+
+    test_input("echo hi >@1bad").ok();
+    assert_ne!(crate::state::Shed::get_status(), 0);
+  }
+
+  // A quoted subscript used to reach `VarName::parse` with its quotes intact,
+  // so the redirect wrote to a key that literally contained them -- a second,
+  // silent entry alongside the one the script meant to write.
+  #[test]
+  fn var_assoc_quoted_subscript() {
+    let g = TestGuard::new();
+    test_input(r#"declare -A m; printf v >@m["two words"]; printf '%s' "${m["two words"]}""#)
+      .unwrap();
+    assert_eq!(g.read_output(), "v");
+  }
+
+  #[test]
+  fn var_assoc_quoted_subscript_from_var() {
+    let g = TestGuard::new();
+    test_input(r#"declare -A n; k="my key"; printf v >@n["$k"]; printf '%s' "${n["$k"]}""#)
+      .unwrap();
+    assert_eq!(g.read_output(), "v");
   }
 
   // The commit is deferred past the pipeline's wait. Before that it raced the

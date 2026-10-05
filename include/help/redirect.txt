@@ -309,6 +309,11 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       ```command >@out 2>@err```   captures both the stdout and stderr
                                    of `command` into separate variables
 
+  There is no read-write form. A write-opened variable commits when its
+  descriptor closes, so a handle that is both would have no coherent point
+  at which to do so; `<>@name` is a syntax error rather than a silent
+  half-measure.
+
   Byte transparency ~
 
     Command substitution strips trailing newlines, and in other POSIX
@@ -353,15 +358,56 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       ```echo captured >&7```
       ```exec 7>&-              # $out is set now```
 
+    Nothing lands in the variable before that close, and the commit
+    overwrites whatever is there at the time. An assignment made while the
+    descriptor is open is discarded:
+
+      ```v=original```
+      ```exec 7>@v```
+      ```echo written >&7```
+      ```v=assigned             # lost```
+      ```exec 7>&-              # $v is `written````
+
+    |defer| is a tidy way to guarantee the close, and with
+    it the commit.
+
+  Holding a descriptor ~
+
+    `<@name` builds a fresh reader each time it is evaluated, starting at
+    the beginning of the variable. In a loop body that means every
+    iteration re-reads the first record, and never finishes:
+
+      ```while thru -U $'\n' >@line <@rec; do ...; done   # loops forever```
+
+    Open the variable once instead and read from that descriptor. It
+    carries a position, so successive reads advance and the loop ends at
+    the last record:
+
+      ```exec 5<@rec```
+      ```while thru -U $'\n' >@line <&5; do ...; done```
+      ```exec 5<&-```
+
+    A held descriptor also seeks, which makes a variable usable as a
+    random-access byte buffer rather than only a stream:
+
+      ```seek -e 5 0            # size of the variable```
+      ```seek 5 0               # rewind, then read it again```
+
   Limits ~
 
     A capture is bounded by the `core.max_read_limit` |shopt|. Output
     past the limit is discarded and a warning is printed; the command's
     exit status is not changed.
 
-  The variable name ends at the first character that cannot appear in a
-  name, so `>@a-b` captures into `a` and passes `-b` to the command as
-  an argument.
+  The name is read as an ordinary word, so it can be quoted or come from an
+  expansion. `>@$target` captures into whatever variable `$target` names,
+  which is what makes reusable helpers possible:
+
+      ```slurp() { thru >@$1; }```
+
+  Whatever it expands to has to be a single valid name. Splitting and
+  globbing are off, so a `$target` holding two words is an error rather
+  than a silent first-word pick, and so is `>@a-b`.
 
   A capture made inside the body of a compound command or function cannot
   travel back out if that body runs in a forked process. A body forks when
