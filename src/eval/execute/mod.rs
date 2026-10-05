@@ -69,6 +69,7 @@ thread_local! {
 
 pub(crate) fn traced_fork(span: Span, kind: ForkKind) -> ShResult<ForkResult> {
   Shed::record_fork(span, kind);
+  Shed::sinks(|s| s.materialize_buffers());
 
   Ok(unsafe { nix::unistd::fork()? })
 }

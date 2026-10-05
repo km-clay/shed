@@ -1268,62 +1268,95 @@ pub(crate) fn drain_sink(sink: &dyn Sink) -> io::Result<Vec<u8>> {
 }
 
 pub(crate) struct BufSink {
-  buf: Mutex<Cursor<Vec<u8>>>,
-
-  /// If this buffer ever needs to be used across a fork/exec boundary, we can
-  /// lazily create an OS-level fd for it and cache it in this field.
+  cursor: Mutex<Cursor<Vec<u8>>>,
   os_fd: OnceLock<OwnedFd>,
 }
 
 impl BufSink {
   pub(crate) fn from_bytes(bytes: &[u8]) -> Self {
     Self {
-      buf: Mutex::new(Cursor::new(bytes.to_vec())),
+      cursor: Mutex::new(Cursor::new(bytes.to_vec())),
       os_fd: OnceLock::new(),
     }
   }
+
+  fn materialize(&self) -> io::Result<&OwnedFd> {
+    if let Some(fd) = self.os_fd.get() {
+      return Ok(fd);
+    }
+
+    let fd = {
+      let cur = self.cursor.lock().unwrap();
+      let fd = scratch_fd()?;
+      write_all_to_fd(fd.as_fd(), cur.get_ref());
+      unistd::lseek(fd.as_fd(), cur.position() as i64, unistd::Whence::SeekSet)?;
+      fd
+    };
+
+    let _ = self.os_fd.set(fd);
+    Ok(self.os_fd.get().expect("just set"))
+  }
+
+  fn fd_remaining(fd: BorrowedFd) -> io::Result<u64> {
+    let pos = unistd::lseek(fd, 0, unistd::Whence::SeekCur)?;
+    let end = unistd::lseek(fd, 0, unistd::Whence::SeekEnd)?;
+    unistd::lseek(fd, pos, unistd::Whence::SeekSet)?;
+    Ok(end.saturating_sub(pos) as u64)
+  }
 }
 
+#[rustfmt::skip]
+#[expect(clippy::single_match_else)]
 impl Sink for BufSink {
   fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-    self.buf.lock().unwrap().read(buf)
-  }
-  fn write(&self, buf: &[u8]) -> io::Result<usize> {
-    self.buf.lock().unwrap().write(buf)
-  }
-  fn flush(&self) -> io::Result<()> {
-    self.buf.lock().unwrap().flush()
-  }
-  fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
-    // BufSink is a fixed-size buffer, so we don't use the timeout here.
-    // It either has data or it doesn't, it won't receive any more.
-    let cur = self.buf.lock().unwrap();
-    Ok(cur.get_ref().len().saturating_sub(cur.position() as usize))
-  }
-  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
     match self.os_fd.get() {
-      None => {
-        let fd = {
-          let cur = self.buf.lock().unwrap();
-          let remaining = &cur.get_ref()[cur.position() as usize..];
-          let fd = scratch_fd()?;
-          write_all_to_fd(fd.as_fd(), remaining);
-          unistd::lseek(fd.as_fd(), 0, unistd::Whence::SeekSet)?;
-          fd
-        };
-        self.os_fd.set(fd).expect("we just checked that it's None");
-
-        self.as_os_fd() // try again
-      }
-      Some(fd) => Ok(fd.as_fd()),
+      Some(fd) => unistd::read(fd.as_fd(), buf).map_err(io::Error::from),
+      None => self.cursor.lock().unwrap().read(buf),
     }
   }
+  fn write(&self, buf: &[u8]) -> io::Result<usize> {
+    match self.os_fd.get() {
+      Some(fd) => unistd::write(fd.as_fd(), buf).map_err(io::Error::from),
+      None => self.cursor.lock().unwrap().write(buf),
+    }
+  }
+  fn flush(&self) -> io::Result<()> {
+    match self.os_fd.get() {
+      Some(fd) => unistd::fsync(fd.as_fd()).map_err(io::Error::from),
+      None => Ok(()),
+    }
+  }
+  fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
+    // Fixed content either way: it has bytes left or it does not, and no
+    // amount of waiting will produce more.
+    match self.os_fd.get() {
+      Some(fd) => Ok(Self::fd_remaining(fd.as_fd())? as usize),
+      None => {
+        let cur = self.cursor.lock().unwrap();
+        Ok(cur.get_ref().len().saturating_sub(cur.position() as usize))
+      }
+    }
+  }
+  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
+    self.materialize().map(|fd| fd.as_fd())
+  }
   fn seek(&self, pos: io::SeekFrom) -> io::Result<u64> {
-    self.buf.lock().unwrap().seek(pos)
+    let Some(fd) = self.os_fd.get() else {
+      return self.cursor.lock().unwrap().seek(pos);
+    };
+
+    let (off, whence) = match pos {
+      io::SeekFrom::Start(s)   => (s as i64, unistd::Whence::SeekSet),
+      io::SeekFrom::End(e)     => (e, unistd::Whence::SeekEnd),
+      io::SeekFrom::Current(c) => (c, unistd::Whence::SeekCur),
+    };
+
+    unistd::lseek(fd.as_fd(), off, whence)
+      .map(|p| p as u64)
+      .map_err(io::Error::from)
   }
   fn has_data(&self) -> bool {
-    let cur = self.buf.lock().unwrap();
-    (cur.position() as usize) < cur.get_ref().len()
+    self.poll(None).is_ok_and(|n| n > 0)
   }
   fn kind(&self) -> SinkKind {
     SinkKind::Buffer
@@ -2274,6 +2307,19 @@ impl Sinks {
   pub(crate) fn redir_scope() -> RedirGuard {
     RedirGuard::new()
   }
+
+  /// Give every buffered sink a real descriptor before a fork, so the parent
+  /// and its children share one file offset. Without this each child
+  /// materializes its own copy from the parent's cursor, so neither side sees
+  /// the other's reads -- and the work is repeated per child.
+  pub(crate) fn materialize_buffers(&self) {
+    for sink in self.table.values() {
+      if sink.kind() == SinkKind::Buffer {
+        let _ = sink.as_os_fd();
+      }
+    }
+  }
+
   /// Applies the stored redirections to the shell process' kernel fd table.
   ///
   /// This is called after a child is forked, so that the child inherits the redirected fds.
