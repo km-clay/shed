@@ -946,6 +946,20 @@ impl<'a> LexStream<'a> {
             }
             Some(b'>') => {
               this.bump();
+
+              if this.peek_byte() == Some(b'@') {
+                return Some(Err(
+                  lex_err!(
+                    this,
+                    this.cursor..this.cursor + 1,
+                    "variables cannot be opened for reading and writing",
+                  )
+                  .with_note(
+                    "accepted forms are `<@var` to read and `>@var` or `>>@var` to write".into(),
+                  ),
+                ));
+              }
+
               let tk = this.get_token(start..this.cursor, TkRule::Redir);
               return Some(Ok(tk));
             }
