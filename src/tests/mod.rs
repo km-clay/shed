@@ -306,7 +306,7 @@ fn quote_emits_ansi_c_for_non_utf8_arg() {
 fn arrops_pop_emits_raw_bytes() {
   let guard = TestGuard::new();
   test_input("push arr \"$(printf 'x\\377y')\"; pop arr").unwrap();
-  assert_eq!(guard.read_output_bytes(), b"x\xffy\n");
+  assert_eq!(guard.read_output_bytes(), b"x\xffy");
 }
 
 #[test]

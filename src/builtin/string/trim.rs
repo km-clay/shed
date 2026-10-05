@@ -1,6 +1,6 @@
 use bstr::ByteSlice;
 
-use crate::{HashSet, out, procio, set_var, state::vars::VarStr};
+use crate::{HashSet, out, procio, state::vars::VarStr};
 
 use super::{Builtin, BuiltinArgs, ShResult, argv, mod_opt::OptSpec, opt, util};
 
@@ -37,7 +37,6 @@ pub(super) struct Trim;
         opt!("end-matches"   | b'E', 1),
         opt!("start-matches" | b'S', 1),
         opt!("matches"       | b'm', 1),
-        opt!("var"           | b'v', 1),
       ]
     }
     fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
@@ -79,12 +78,10 @@ pub(super) struct Trim;
       let end_matches   = end.then(||   join(e_spec));
       let start_matches = start.then(|| join(s_spec));
 
-      let var = args.opt_value("var");
-
       if is_ascii {
-        Self::trim_raw(&string, end_matches, start_matches, var)
+        Self::trim_raw(&string, end_matches, start_matches)
       } else {
-        Self::trim(&string, end_matches, start_matches, var)
+        Self::trim(&string, end_matches, start_matches)
       }
     }
   }
@@ -94,7 +91,6 @@ impl Trim {
     string: &VarStr,
     end_matches: Option<VarStr>,
     start_matches: Option<VarStr>,
-    var: Option<VarStr>,
   ) -> ShResult<()> {
     let input = string.to_string();
     let end_matches = end_matches.map(|s| s.to_string());
@@ -112,12 +108,7 @@ impl Trim {
       out = out.trim_start_matches(|c| set.contains(c));
     }
 
-    match var {
-      Some(name) => {
-        set_var!(&name.to_str_lossy(), string(VarStr::from(out)))?;
-      }
-      None => out!("{out}"),
-    }
+    out!("{out}");
 
     util::with_status(0)
   }
@@ -125,7 +116,6 @@ impl Trim {
     string: &VarStr,
     end_matches: Option<VarStr>,
     start_matches: Option<VarStr>,
-    var: Option<VarStr>,
   ) -> ShResult<()> {
     let mut out = string.as_bytes();
     let mut set = [false; 256]; // all possible byte values
@@ -158,12 +148,7 @@ impl Trim {
       out = &out[start..];
     }
 
-    match var {
-      Some(name) => {
-        set_var!(&name.to_str_lossy(), string(VarStr::from(out)))?;
-      }
-      None => procio::out_bytes(out),
-    }
+    procio::out_bytes(out);
 
     util::with_status(0)
   }

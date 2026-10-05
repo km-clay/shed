@@ -173,8 +173,6 @@ ARROPS                                           *builtin-arrops* *arrops*
   share a common set of options:
 
     `-c {n}`     perform the operation {n} times (default: 1)
-    `-v {var}`   store the result in {var} instead of printing to stdout
-                 (pop/fpop only)
     `-r`         reverse direction (rotate only)
 
   PUSH                                           *builtin-push* *push*
@@ -220,22 +218,22 @@ ARROPS                                           *builtin-arrops* *arrops*
 
   POP                                            *builtin-pop* *pop*
 
-  `pop [-c {n}] [-v {var}] {array}`
+  `pop [-c {n}] {array}`
 
-      Remove and print the last element of {array}. With `-c`, removes
-      that many elements from the back, printing each on its own line.
-      With `-v`, stores the popped value in {var} instead of printing.
+      Remove and print the last element of {array}, exactly as stored and
+      with no trailing newline. With `-c`, removes that many elements from
+      the back, printing each on its own line so they stay distinct.
 
       Sets exit status 1 if the array is empty or does not exist.
 
       Examples:
           ```pop myarr```            print and remove last element
           ```pop -c 2 myarr```       remove and print last 2 elements
-          ```pop -v x myarr```       store last element in $x
+          ```pop myarr >@x```        store last element in $x
 
   FPOP                                           *builtin-fpop* *fpop*
 
-  `fpop [-c {n}] [-v {var}] {array}`
+  `fpop [-c {n}] {array}`
 
       Remove and print the first element of {array}. Equivalent to
       ```pop``` but operates on the front of the array.
@@ -243,7 +241,7 @@ ARROPS                                           *builtin-arrops* *arrops*
       Examples:
           ```fpop myarr```           print and remove first element
           ```fpop -c 2 myarr```      remove and print first 2 elements
-          ```fpop -v x myarr```      store first element in $x
+          ```fpop myarr >@x```       store first element in $x
 
   ROTATE                                         *builtin-rotate* *rotate*
 
@@ -4550,7 +4548,7 @@ STR                                                    *builtin-str* *str*
 ==============================================================================
 STR TRIM                                     *str-trim* *builtin-str-trim*
 
-  `str trim [-e|-s] [-m {set}] [-E {set}] [-S {set}] [-v {var}] [{string}...]`
+  `str trim [-e|-s] [-m {set}] [-E {set}] [-S {set}] [{string}...]`
 
   Remove leading and trailing characters from {string}, or from standard
   input when no operands are given. With no options, whitespace -- space,
@@ -4561,7 +4559,6 @@ STR TRIM                                     *str-trim* *builtin-str-trim*
     `-m`  `--matches` {set}           trim {set} from both ends
     `-S`  `--start-matches` {set}     trim {set} from the start
     `-E`  `--end-matches` {set}       trim {set} from the end
-    `-v`  `--var` {var}               write the result to {var}
 
   Every option turns on the end it names, so one that names a single end
   leaves the other untouched: `str trim -e` removes trailing whitespace and
@@ -4575,11 +4572,10 @@ STR TRIM                                     *str-trim* *builtin-str-trim*
   An empty set is honoured as written, not treated as absent: ```-E ''```
   removes nothing from the end.
 
-  `-v` writes the result to a variable instead of standard output, sparing
-  the caller a command substitution. ```str trim -v out "$s"``` is several
-  times quicker than ```out=$(str trim "$s")```, because ```$(...)``` builds
-  a pipe and re-parses its text on every call. |thru|(builtin-thru) uses the
-  same convention.
+  Capture the result with a variable redirection rather than a command
+  substitution. ```str trim "$s" >@out``` is several times quicker than
+  ```out=$(str trim "$s")```, because ```$(...)``` builds a pipe and
+  re-parses its text on every call. See |redir-var|.
 
   {set} is a set of characters, not a substring: ```-E ab``` removes any
   trailing `a` or `b` in any order, never the sequence `ab`. Removal of
@@ -4625,7 +4621,7 @@ STR TRIM                                     *str-trim* *builtin-str-trim*
 ==============================================================================
 THRU                                             *builtin-thru* *thru*
 
-  `thru [-c] [-a] [-t {dest}] [-v {var}] [-S {n}] [-T {n}] [-F {byte}]`
+  `thru [-c] [-a] [-t {dest}] [-S {n}] [-T {n}] [-F {byte}]`
   `     [-U {byte}] [{file} ...]`
 
   Pass input to standard output unchanged: a fork-free `cat`, with a few
@@ -4635,7 +4631,7 @@ THRU                                             *builtin-thru* *thru*
 
     - Reading file(s) without forking an external `cat`: `thru config.toml`.
     - Capturing input into a variable byte-exactly, without a subshell:
-      ```thru -v var``` instead of `var=$(cat)` (no trailing-newline stripping,
+      ```thru >@var``` instead of `var=$(cat)` (no trailing-newline stripping,
       and NUL bytes survive).
     - Counting raw byte throughput using `-c`
     - Controlling exact byte flow: `-S`/`-T` slice by position, `-F`/`-U`
@@ -4657,14 +4653,6 @@ THRU                                             *builtin-thru* *thru*
     `-a`, `--append`
                   Append to the tee destination instead of truncating it.
                   Only meaningful when `-t` is also given.
-
-    `-v {var}`, `--var {var}`
-                  Capture the output into shell variable {var} instead of
-                  writing to stdout, byte-for-byte: no trailing-newline
-                  stripping, and NUL bytes are preserved, unlike `$(...)`.
-                  The window flags apply first, so `-S`/`-T`/`-F`/`-U` slice
-                  straight into {var}. The whole captured range is buffered
-                  in memory; bound large streams with `-T`.
 
     `-c`, `--count`
                   After draining the input, write the total number of bytes
@@ -4746,7 +4734,7 @@ THRU                                             *builtin-thru* *thru*
       ```stamp=$(thru ~/.local/share/shed/last_run)```
                                 read a file into a variable
 
-      ```thru -v var```
+      ```thru >@var```
                                 slurp stdin into `$var` byte-exact — no
                                 subshell, no trailing-newline stripping
 

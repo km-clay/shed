@@ -7,7 +7,7 @@ use crate::{
   eval::lex::Span,
   opt,
   procio::{self, OsSink, Sink},
-  set_var, sherr, signal,
+  sherr, signal,
   state::vars::VarStr,
   util::{self, error::ShResult},
 };
@@ -16,7 +16,6 @@ struct ThruOpts {
   count: bool,
   append: bool,
   tee: Option<VarStr>,
-  var: Option<VarStr>,
   take: Option<usize>,
   skip: Option<usize>,
   from: Option<u8>,
@@ -43,7 +42,6 @@ impl super::Builtin for Thru {
       opt!("skip"       | b'S', 1),
       opt!("from"       | b'F', 1),
       opt!("until"      | b'U', 1),
-      opt!("var"        | b'v', 1),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
@@ -59,7 +57,6 @@ impl super::Builtin for Thru {
     let ThruOpts {
       count,
       append,
-      var,
       tee,
       skip,
       mut take,
@@ -96,10 +93,6 @@ impl super::Builtin for Thru {
 
     let mut byte_count = 0;
     let mut skip = skip.unwrap_or(0);
-    let mut var_sink = var
-      .is_some()
-      .then(|| Vec::with_capacity(take.unwrap_or(0).min(1 << 20)));
-
     'sources: for src in sources {
       if take == Some(0) {
         break;
@@ -187,11 +180,7 @@ impl super::Builtin for Thru {
           emit = &emit[..emit.len().min(l)];
         }
 
-        if let Some(var_sink) = var_sink.as_mut() {
-          var_sink.extend_from_slice(emit);
-        } else {
-          procio::out_bytes(emit);
-        }
+        procio::out_bytes(emit);
 
         if let Some(t) = tee_file.as_mut() {
           t.write_all(emit).ok();
@@ -202,13 +191,6 @@ impl super::Builtin for Thru {
           *l -= emit.len();
         }
       }
-    }
-
-    if let Some(sink) = var_sink
-      && let Some(name) = var
-    {
-      let sink = VarStr::from(sink);
-      set_var!(&name.to_str_lossy(), string(sink))?;
     }
 
     if count {
@@ -249,7 +231,6 @@ impl Thru {
     let count = args.has_opt("count");
     let append = args.has_opt("append");
     let tee = args.opt_value("tee");
-    let var = args.opt_value("var");
     let take = args
       .opt_value("take")
       .or_else(|| args.opt_value("limit"))
@@ -295,7 +276,6 @@ impl Thru {
       count,
       append,
       tee,
-      var,
       take,
       skip,
       from,

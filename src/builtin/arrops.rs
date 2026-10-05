@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 use crate::{
   builtin::Builtin,
   eval::lex::Span,
-  opt, procio, set_var, sherr,
+  opt, procio, sherr,
   state::{
     Shed,
     scopes::ScopeStack,
@@ -58,7 +58,6 @@ trait ArrOp: Builtin {
   fn arr_opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("count"    | b'c', 1),
-      opt!("variable" | b'v', 1),
       opt!("delim"    | b'd', 1),
       opt!("reverse"  | b'r'),
     ]
@@ -138,7 +137,6 @@ trait ArrOp: Builtin {
     let end = self.direction();
     let mut popped = VecDeque::new();
     let mut count = 1;
-    let mut var = None;
 
     for opt in args.options() {
       match opt.key() {
@@ -149,7 +147,6 @@ trait ArrOp: Builtin {
             .parse::<usize>()
             .map_err(|_| sherr!(ParseErr @ opt.span(), "invalid count: {c}"))?;
         }
-        "variable" => var = opt.value().ok(),
         "reverse" => { /* no-op */ }
         _ => {
           return Err(sherr!(ParseErr @ opt.span(), "invalid option: '{opt}'").with_code(2));
@@ -176,13 +173,9 @@ trait ArrOp: Builtin {
       }
     }
 
-    if let Some(var) = var {
-      if popped.len() == 1 {
-        let val = popped.pop_back().unwrap();
-        set_var!(&var.to_str_lossy(), Str(val))?;
-      } else {
-        set_var!(&var.to_str_lossy(), arr(popped))?;
-      }
+    // a lone value prints exactly; several need a separator to stay distinct
+    if popped.len() == 1 {
+      procio::out_bytes(popped[0].as_bytes());
     } else {
       for val in popped {
         procio::outln_bytes(val.as_bytes());
@@ -418,7 +411,7 @@ mod tests {
 
     test_input("pop arr").unwrap();
     let out = guard.read_output();
-    assert_eq!(out, "c\n");
+    assert_eq!(out, "c");
     assert_eq!(get_arr("arr"), vec!["a", "b"]);
   }
 
@@ -438,7 +431,7 @@ mod tests {
     let _guard = TestGuard::new();
     set_arr("arr", &["x", "y", "z"]);
 
-    test_input("pop -v result arr").unwrap();
+    test_input("pop arr >@result").unwrap();
     let val = var!("result");
     assert_eq!(val, "z");
     assert_eq!(get_arr("arr"), vec!["x", "y"]);
@@ -470,7 +463,7 @@ mod tests {
 
     test_input("fpop arr").unwrap();
     let out = guard.read_output();
-    assert_eq!(out, "a\n");
+    assert_eq!(out, "a");
     assert_eq!(get_arr("arr"), vec!["b", "c"]);
   }
 
@@ -490,7 +483,7 @@ mod tests {
     let _guard = TestGuard::new();
     set_arr("arr", &["first", "second"]);
 
-    test_input("fpop -v result arr").unwrap();
+    test_input("fpop arr >@result").unwrap();
     let val = var!("result");
     assert_eq!(val, "first");
     assert_eq!(get_arr("arr"), vec!["second"]);
@@ -563,7 +556,7 @@ mod tests {
     test_input("push arr b").unwrap();
     test_input("pop arr").unwrap();
     let out = guard.read_output();
-    assert_eq!(out, "b\n");
+    assert_eq!(out, "b");
     assert_eq!(get_arr("arr"), vec!["a"]);
   }
 
@@ -575,7 +568,7 @@ mod tests {
     test_input("fpush arr z").unwrap();
     test_input("fpop arr").unwrap();
     let out = guard.read_output();
-    assert_eq!(out, "z\n");
+    assert_eq!(out, "z");
     assert_eq!(get_arr("arr"), vec!["a"]);
   }
 

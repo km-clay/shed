@@ -30,7 +30,7 @@ impl BuiltinRouter for Str {
 
 mod clip {
   use crate::{
-    out, set_var, sherr,
+    out, sherr,
     state::vars::VarStr,
     util::ui::{self, Justify},
   };
@@ -41,7 +41,6 @@ mod clip {
     width: usize,
     marker: VarStr,
     justify: Justify,
-    var: Option<VarStr>,
   }
 
   impl ClipSpec {
@@ -75,13 +74,10 @@ mod clip {
         .transpose()?
         .unwrap_or(Justify::Left);
 
-      let var = args.opt_value("var");
-
       Ok(Self {
         width,
         marker,
         justify,
-        var,
       })
     }
   }
@@ -93,7 +89,6 @@ mod clip {
       vec![
         opt!("justify" | b'j', 1),
         opt!("marker"  | b'm', 1),
-        opt!("var"     | b'v', 1),
       ]
     }
     fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
@@ -101,7 +96,7 @@ mod clip {
         .get_input_with(&mut args, |a| a.arguments().count() <= 1)
         .map_or_else(|| argv::join_raw_arg_iter(args.arguments().skip(1)).0, VarStr::from);
 
-      let ClipSpec { width, marker, justify, var } = ClipSpec::parse_args(&mut args)?;
+      let ClipSpec { width, marker, justify } = ClipSpec::parse_args(&mut args)?;
 
       let out = ui::truncate_with_marker(
         &string.to_str_lossy(),
@@ -110,12 +105,7 @@ mod clip {
         justify,
       );
 
-      match var {
-        Some(name) => {
-          set_var!(&name.to_str_lossy(), string(VarStr::from(out)))?;
-        }
-        None => out!("{out}"),
-      }
+      out!("{out}");
 
       util::with_status(0)
     }
