@@ -8,7 +8,7 @@ use crate::{
   match_loop, sherr,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarFlags, VarKind, VarKindTag, VarName, VarStr},
   },
   try_var,
   util::{
@@ -188,7 +188,12 @@ impl Drop for DepthGuard {
 /// (`b="a+1"`) resolves transitively. Unset/empty resolves to 0; cyclic
 /// references are cut off by [`MAX_ARITH_DEPTH`].
 fn resolve_var_num(name: &str) -> ShResult<i64> {
-  let val = try_var!(name).unwrap_or_default();
+  let val = if name.contains('[') {
+    let vn = VarName::parse(name, true)?;
+    Shed::vars(|v| v.resolve_var(&vn)).unwrap_or_default()
+  } else {
+    try_var!(name).unwrap_or_default()
+  };
   let trimmed = val.trim();
   if trimmed.is_empty() {
     return Ok(0);
@@ -241,56 +246,28 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
     ArithOp::Assign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
-      Shed::vars_mut(|v| {
-        v.set_var(
-          &lhs,
-          VarKind::string(rhs.to_string().into()),
-          VarFlags::empty(),
-        )
-      })
-      .unwrap();
+      assign_var(&lhs, rhs)?;
       stack.push(StackVal::Num(rhs));
     }
     ArithOp::PlusAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)? + rhs;
-      Shed::vars_mut(|v| {
-        v.set_var(
-          &lhs,
-          VarKind::string(new_val.to_string().into()),
-          VarFlags::empty(),
-        )
-      })
-      .unwrap();
+      assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::MinusAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)? - rhs;
-      Shed::vars_mut(|v| {
-        v.set_var(
-          &lhs,
-          VarKind::string(new_val.to_string().into()),
-          VarFlags::empty(),
-        )
-      })
-      .unwrap();
+      assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::MulAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)? * rhs;
-      Shed::vars_mut(|v| {
-        v.set_var(
-          &lhs,
-          VarKind::string(new_val.to_string().into()),
-          VarFlags::empty(),
-        )
-      })
-      .unwrap();
+      assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::DivAssign => {
@@ -300,14 +277,7 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
       }
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)? / rhs;
-      Shed::vars_mut(|v| {
-        v.set_var(
-          &lhs,
-          VarKind::string(new_val.to_string().into()),
-          VarFlags::empty(),
-        )
-      })
-      .unwrap();
+      assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::ModAssign => {
@@ -317,14 +287,7 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
       }
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)? % rhs;
-      Shed::vars_mut(|v| {
-        v.set_var(
-          &lhs,
-          VarKind::string(new_val.to_string().into()),
-          VarFlags::empty(),
-        )
-      })
-      .unwrap();
+      assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
 
@@ -442,60 +405,61 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
       let rhs = pop_num!();
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)? & rhs;
-      Shed::vars_mut(|v| {
-        v.set_var(
-          &lhs,
-          VarKind::string(new_val.to_string().into()),
-          VarFlags::empty(),
-        )
-      })
-      .unwrap();
+      assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::BitOrAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)? | rhs;
-      Shed::vars_mut(|v| {
-        v.set_var(
-          &lhs,
-          VarKind::string(new_val.to_string().into()),
-          VarFlags::empty(),
-        )
-      })
-      .unwrap();
+      assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::BitXorAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)? ^ rhs;
-      Shed::vars_mut(|v| {
-        v.set_var(
-          &lhs,
-          VarKind::string(new_val.to_string().into()),
-          VarFlags::empty(),
-        )
-      })
-      .unwrap();
+      assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::ShiftLAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)?.wrapping_shl(rhs as u32);
-      set_var!(&lhs, VarKind::Int(new_val as i32)).unwrap();
+      assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::ShiftRAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
       let new_val = read_var_as_i64(&lhs)?.wrapping_shr(rhs as u32);
-      set_var!(&lhs, VarKind::Int(new_val as i32)).unwrap();
+      assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
   }
   Ok(())
+}
+
+/// Assign `val` to `name`, honouring an array subscript if the name carries one.
+fn assign_var(name: &str, val: i64) -> ShResult<()> {
+  let vn = VarName::parse(name, true)?;
+  if let Some(idx) = vn.index() {
+    // `Raw` indexes defer resolution until the target's kind is known: a key
+    // for an assoc array, an arithmetic subscript otherwise. That evaluation
+    // can re-enter the variable table, so it happens outside both borrows.
+    let tag = Shed::vars(|v| v.try_get_var_kind_tag(vn.name())).unwrap_or(VarKindTag::Arr);
+    let idx = idx.clone().resolve_for(tag)?;
+    return Shed::vars_mut(|v| {
+      v.set_var_indexed(vn.name(), idx, val.to_string(), VarFlags::empty())
+    });
+  }
+  Shed::vars_mut(|v| {
+    v.set_var(
+      name,
+      VarKind::string(val.to_string().into()),
+      VarFlags::empty(),
+    )
+  })
 }
 
 fn read_var_as_i64(name: &str) -> ShResult<i64> {
@@ -785,6 +749,17 @@ impl ArithTk {
             break;
           }
         }
+        if cur.peek_byte() == Some(b'[') {
+          let sub_start = cur.pos();
+          cur.next_byte();
+          if !strops::scan_brackets(&mut cur, 1) {
+            return Err(sherr!(
+              ParseErr,
+              "unterminated subscript in arithmetic expression"
+            ));
+          }
+          var_name.push_str(&String::from_utf8_lossy(&raw[sub_start..cur.pos()]));
+        }
         tokens.push(Self::Var(var_name));
         last_was_operand = true;
       }
@@ -929,7 +904,7 @@ impl ArithTk {
           let op = tokens.next().unwrap();
           let val = read_var_as_i64(var)?;
           let delta: i64 = if matches!(op, ArithTk::Inc) { 1 } else { -1 };
-          set_var!(var, VarKind::string((val + delta).to_string().into())).unwrap();
+          assign_var(var, val + delta)?;
           output.push(ArithTk::Num(val)); // push old value (postfix)
         } else {
           output.push(token); // keep as Var, may be assignment target
@@ -948,7 +923,7 @@ impl ArithTk {
         let val = read_var_as_i64(&var)?;
         let delta: i64 = if matches!(op, ArithTk::Inc) { 1 } else { -1 };
         let new_val = val + delta;
-        set_var!(&var, VarKind::string(new_val.to_string().into())).unwrap();
+        assign_var(&var, new_val)?;
         output.push(ArithTk::Num(new_val)); // push new value (prefix)
       }
 
