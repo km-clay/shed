@@ -55,6 +55,14 @@ impl super::Builtin for Seek {
       );
     };
 
+    if let Some((extra, extra_span)) = arg_iter.next() {
+      return Err(
+        sherr!(ExecFail @ extra_span, "lseek: unexpected argument: '{extra}'")
+          .with_note("the seek origin is set with `-c` or `-e`, not a positional".into())
+          .with_code(2),
+      );
+    }
+
     let seek_from = if cursor_rel {
       io::SeekFrom::Current(offset)
     } else if end_rel {
@@ -211,6 +219,17 @@ mod tests {
     let _g = TestGuard::new();
 
     test_input("seek 99 0").ok();
+    assert_ne!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn seek_surplus_positional_errors() {
+    let _g = TestGuard::new();
+
+    test_input("exec 9<> /dev/null").unwrap();
+    // `end` looks like a whence but the origin is a flag, so it must not be
+    // silently dropped -- that reads as a successful seek to offset 0.
+    test_input("seek 9 0 end").ok();
     assert_ne!(state::Shed::get_status(), 0);
   }
 
