@@ -1,6 +1,5 @@
 use std::{
   collections::VecDeque,
-  ops::Index,
   os::unix::ffi::OsStrExt,
   path::{Path, PathBuf},
   rc::Rc,
@@ -8,7 +7,7 @@ use std::{
 
 use bstr::ByteSlice;
 
-use crate::{match_loop, shopt, state::paths};
+use crate::{match_loop, shopt, state::paths, util::StateSet};
 
 /// A matcher representing a single byte
 #[derive(Debug, Clone)]
@@ -112,65 +111,6 @@ impl SweepMode {
   }
   fn is_longest(self) -> bool {
     matches!(self, SweepMode::Longest(_))
-  }
-}
-
-/// For atom sets under 64 items, this uses a bitset fast path
-enum StateSet {
-  Bitset(u64),
-  Vector(Vec<bool>),
-}
-
-impl StateSet {
-  pub(crate) fn new(len: usize) -> Self {
-    if len < 64 {
-      Self::Bitset(0)
-    } else {
-      Self::Vector(vec![false; len])
-    }
-  }
-  pub(crate) fn get(&self, idx: usize) -> Option<bool> {
-    match self {
-      StateSet::Bitset(set) => (idx < 64).then(|| set & (1 << idx) != 0),
-      StateSet::Vector(set) => set.get(idx).copied(),
-    }
-  }
-  pub(crate) fn set(&mut self, idx: usize, val: bool) {
-    match self {
-      StateSet::Bitset(set) => {
-        if idx < 64 {
-          if val {
-            *set |= 1 << idx;
-          } else {
-            *set &= !(1 << idx);
-          }
-        }
-      }
-      StateSet::Vector(set) => {
-        if let Some(slot) = set.get_mut(idx) {
-          *slot = val;
-        }
-      }
-    }
-  }
-  pub(crate) fn fill(&mut self, val: bool) {
-    match self {
-      StateSet::Bitset(set) => {
-        *set = if val { u64::MAX } else { 0 };
-      }
-      StateSet::Vector(set) => set.fill(val),
-    }
-  }
-}
-
-impl Index<usize> for StateSet {
-  type Output = bool;
-  fn index(&self, index: usize) -> &Self::Output {
-    if self.get(index).unwrap_or(false) {
-      &true
-    } else {
-      &false
-    }
   }
 }
 

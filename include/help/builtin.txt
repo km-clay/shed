@@ -71,6 +71,7 @@ The following builtins are available:
   `sock`        open a client socket on a file descriptor   |builtin-sock|
   `source`      execute a file in the current shell         |builtin-source|
   `stat`        display file or filesystem status           |builtin-stat|
+  `str`         string operations                           |builtin-str|
   `[[`          evaluate conditional expressions            |builtin-test|
   `thru`        pass stdin to stdout, optionally tee/limit  |builtin-thru|
   `times`       print shell and child CPU times             |builtin-times|
@@ -4525,6 +4526,101 @@ STAT                                             *builtin-stat* *stat*
       ```[[ -z $reply ]] && echo "empty"```
       ```[[ -i $port ]] || raise "port must be an integer"```
       ```[[ -F $ratio && -F $threshold ]] || raise "expected numeric inputs"```
+
+==============================================================================
+STR                                                    *builtin-str* *str*
+
+  `str {subcommand} ...`
+
+  String operations. `str` is a namespace; all work is done by its
+  subcommands. Running it with no subcommand is an error.
+
+  `str` stays deliberately lean. Parameter expansion already covers
+  substrings, replacement, case, and character-set trimming with POSIX
+  classes, and when the text is already held in a variable it is the
+  faster choice, since no command substitution is needed to capture it.
+
+  What these subcommands add is composition: they are filters, so they
+  belong in a pipeline, where an expansion cannot reach.
+
+  Subcommands ~
+
+    |trim|(str-trim)   remove leading and trailing characters
+
+==============================================================================
+STR TRIM                                     *str-trim* *builtin-str-trim*
+
+  `str trim [-e|-s] [-m {set}] [-E {set}] [-S {set}] [-v {var}] [{string}...]`
+
+  Remove leading and trailing characters from {string}, or from standard
+  input when no operands are given. With no options, whitespace -- space,
+  tab, newline and carriage return -- is removed from both ends.
+
+    `-s`  `--start`                 trim the start
+    `-e`  `--end`                   trim the end
+    `-m`  `--matches` {set}           trim {set} from both ends
+    `-S`  `--start-matches` {set}     trim {set} from the start
+    `-E`  `--end-matches` {set}       trim {set} from the end
+    `-v`  `--var` {var}               write the result to {var}
+
+  Every option turns on the end it names, so one that names a single end
+  leaves the other untouched: `str trim -e` removes trailing whitespace and
+  nothing else. They accumulate rather than override, so ```-e -S ab```
+  trims both ends -- whitespace from the end, `a` or `b` from the start.
+
+  An end's set is whatever `-E` or `-S` gives it combined with `-m`, or the
+  whitespace default when it is given neither. So ```-E foo -S bar -m biz```
+  takes `foobiz` off the end and `barbiz` off the start.
+
+  An empty set is honoured as written, not treated as absent: ```-E ''```
+  removes nothing from the end.
+
+  `-v` writes the result to a variable instead of standard output, sparing
+  the caller a command substitution. ```str trim -v out "$s"``` is several
+  times quicker than ```out=$(str trim "$s")```, because ```$(...)``` builds
+  a pipe and re-parses its text on every call. |thru|(builtin-thru) uses the
+  same convention.
+
+  {set} is a set of characters, not a substring: ```-E ab``` removes any
+  trailing `a` or `b` in any order, never the sequence `ab`. Removal of
+  {sequences} can be expressed using |parameter expansion|(param).
+
+  Several operands are joined with a space and trimmed as one string,
+  rather than trimmed individually. The output carries no trailing newline.
+
+  Text and bytes ~
+
+    When every {set} in play is ASCII, including the whitespace default,
+    the input is treated as bytes and whatever it contains survives
+    unchanged. This is safe because a UTF-8 sequence never contains an
+    ASCII byte, so an ASCII set cannot match inside a character.
+
+    A {set} holding any non-ASCII character switches to character
+    semantics instead, so a multi-byte character is matched whole rather
+    than byte by byte.
+
+  Exit status ~
+
+    `0`   always; finding nothing to trim is not an error
+
+  Examples ~
+
+      ```str trim "  hi  "```               hi
+      ```str trim -e "  hi  "```            leading spaces are kept
+      ```str trim -E 0 1.2300```            1.23
+      ```str trim -m / //a/b//```            a/b
+      ```printf "  x  " | str trim```       reads standard input
+      ```str trim -S "(" -E ")" "(x)"```    a different set at each end
+
+  When the text is already held in a variable, parameter expansion does
+  the same job without a command substitution, and faster:
+
+      ```v="${v#"${v%%[![:space:]]*}"}"```     trim the start
+      ```v="${v%"${v##*[![:space:]]}"}"```     trim the end
+
+  (Kind of hideous to look at though)
+
+  See also: |len|(builtin-len)
 
 ==============================================================================
 THRU                                             *builtin-thru* *thru*

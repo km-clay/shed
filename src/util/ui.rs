@@ -2,12 +2,13 @@
 //!
 //! color/decoration parsing, ANSI rendering, box-drawing glyphs, and display-width ([`calc_str_width`] / [`truncate_visual`]).
 
-use std::fmt::Write;
 use std::sync::OnceLock;
+use std::{fmt::Write, str::FromStr};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 use yansi::{Paint, Painted, Style};
 
+use crate::util::error::ShErr;
 use crate::{
   match_loop, sherr,
   state::{Shed, terminal::Terminal},
@@ -528,11 +529,36 @@ pub(crate) fn calc_str_width(s: &str) -> usize {
   s.graphemes(true).map(|g| width(g, &mut esc_seq)).sum()
 }
 
-pub(crate) fn truncate_visual(s: &str, max_width: usize) -> String {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Justify {
+  Left,
+  Center,
+  Right,
+}
+
+impl FromStr for Justify {
+  type Err = ShErr;
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    match s.to_lowercase().as_str() {
+      "left" => Ok(Justify::Left),
+      "center" => Ok(Justify::Center),
+      "right" => Ok(Justify::Right),
+      _ => Err(sherr!(ParseErr, "invalid justification '{s}'")),
+    }
+  }
+}
+
+pub(crate) fn truncate_visual(s: &str, max_width: usize, justify: Justify) -> String {
+  match justify {
+    Justify::Left | Justify::Center => keep_left(s, max_width),
+    Justify::Right => keep_right(s, max_width),
+  }
+}
+
+pub(crate) fn keep_left(s: &str, max_width: usize) -> String {
   let mut out = String::new();
   let mut visible = 0;
   let mut esc_seq = 0u8;
-  let mut wrote_anything_visible = false;
 
   for g in s.graphemes(true) {
     let w = width(g, &mut esc_seq);
@@ -541,28 +567,82 @@ pub(crate) fn truncate_visual(s: &str, max_width: usize) -> String {
     }
     out.push_str(g);
     visible += w;
-    if w > 0 {
-      wrote_anything_visible = true;
-    }
   }
 
-  if wrote_anything_visible {
+  out
+}
+
+pub(crate) fn keep_right(s: &str, max_width: usize) -> String {
+  let total = calc_str_width(s);
+  if total <= max_width {
+    return s.to_string();
+  }
+
+  let mut skip = total - max_width;
+  let mut out = String::new();
+  let mut esc_seq = 0u8;
+
+  for g in s.graphemes(true) {
+    let w = width(g, &mut esc_seq);
+    if skip > 0 && w > 0 {
+      skip -= w.min(skip);
+      continue;
+    }
+    out.push_str(g);
+  }
+
+  out
+}
+
+pub(crate) fn truncate_with_reset(
+  s: &str,
+  max_width: usize,
+  marker: &str,
+  justify: Justify,
+) -> String {
+  let mut out = truncate_with_marker(s, max_width, marker, justify);
+  if !out.is_empty() {
     out.push_str("\x1b[0m");
   }
   out
 }
 
-pub(crate) fn truncate_with_ellipsis(s: &str, max_width: usize) -> String {
+pub(crate) fn truncate_with_marker(
+  s: &str,
+  max_width: usize,
+  marker: &str,
+  justify: Justify,
+) -> String {
   if calc_str_width(s) <= max_width {
     return s.to_string();
   }
-  if max_width <= 3 {
-    // Not enough room even for the ellipsis itself; just hard-truncate.
-    return truncate_visual(s, max_width);
+  let mw = calc_str_width(marker);
+  if max_width <= mw {
+    // Not enough room even for the marker itself; just hard-truncate.
+    return truncate_visual(s, max_width, justify);
   }
-  let mut out = truncate_visual(s, max_width - 3);
-  out.push_str("...");
-  out
+  let budget = max_width - mw;
+
+  match justify {
+    Justify::Left => {
+      let mut out = keep_left(s, budget);
+      out.push_str(marker);
+      out
+    }
+    Justify::Right => {
+      let mut out = String::from(marker);
+      out.push_str(&keep_right(s, budget));
+      out
+    }
+    Justify::Center => {
+      let left_w = budget / 2;
+      let right_w = budget - left_w;
+      let mut out = keep_left(s, left_w);
+      out.push_str(marker);
+      out.push_str(&keep_right(s, right_w));
+      out
+    }
+  }
 }
 
 // Big credit to rustyline for this
@@ -682,39 +762,32 @@ pub(crate) enum ColorMode {
 mod truncate_visual_tests {
   use super::*;
 
-  const RESET: &str = "\x1b[0m";
-
   #[test]
-  fn empty_string_returns_empty_no_reset() {
-    // Nothing visible was written → no SGR reset appended.
-    assert_eq!(truncate_visual("", 10), "");
+  fn empty_string_returns_empty() {
+    assert_eq!(truncate_visual("", 10, Justify::Left), "");
   }
 
   #[test]
-  fn short_string_passes_through_with_reset() {
-    // Plain text shorter than max_width returns the full string +
-    // trailing SGR reset.
-    let out = truncate_visual("hi", 10);
-    assert_eq!(out, format!("hi{RESET}"));
+  fn short_string_passes_through() {
+    let out = truncate_visual("hi", 10, Justify::Left);
+    assert_eq!(out, "hi");
   }
 
   #[test]
   fn exact_fit_passes_through() {
-    let out = truncate_visual("hello", 5);
-    assert_eq!(out, format!("hello{RESET}"));
+    let out = truncate_visual("hello", 5, Justify::Left);
+    assert_eq!(out, "hello");
   }
 
   #[test]
   fn over_long_is_truncated() {
-    let out = truncate_visual("hello world", 5);
-    assert_eq!(out, format!("hello{RESET}"));
+    let out = truncate_visual("hello world", 5, Justify::Left);
+    assert_eq!(out, "hello");
   }
 
   #[test]
   fn zero_max_width_with_only_visible_input_drops_everything() {
-    let out = truncate_visual("hello", 0);
-    // No visible char fits, so wrote_anything_visible stays false and
-    // the reset is *not* appended.
+    let out = truncate_visual("hello", 0, Justify::Left);
     assert_eq!(out, "");
   }
 
@@ -723,27 +796,23 @@ mod truncate_visual_tests {
     // The CSI sequence itself contributes width 0, so even with a
     // tight budget the visible chars after still survive.
     let input = "\x1b[31mhi\x1b[0m";
-    let out = truncate_visual(input, 2);
-    // Both visible chars + the inline escapes survive; an extra
-    // reset is then appended.
-    assert_eq!(out, format!("\x1b[31mhi\x1b[0m{RESET}"));
+    let out = truncate_visual(input, 2, Justify::Left);
+    // The input's own escapes survive verbatim; nothing is added.
+    assert_eq!(out, "\x1b[31mhi\x1b[0m");
   }
 
   #[test]
   fn wide_grapheme_counted_as_its_width() {
     // CJK character takes width 2 in monospace terminals.
-    let out = truncate_visual("漢字", 2);
+    let out = truncate_visual("漢字", 2, Justify::Left);
     // Only one CJK char fits in width 2.
-    assert_eq!(out, format!("漢{RESET}"));
+    assert_eq!(out, "漢");
   }
 
   #[test]
-  fn ansi_only_input_writes_no_reset() {
-    // The bytes are pushed into the output (esc_seq path doesn't
-    // break the loop), but no visible char triggered the reset.
-    // We're really just pinning the wrote_anything_visible branch.
+  fn ansi_only_input_passes_through() {
     let input = "\x1b[31m";
-    let out = truncate_visual(input, 5);
+    let out = truncate_visual(input, 5, Justify::Left);
     assert_eq!(out, "\x1b[31m");
   }
 
@@ -751,8 +820,8 @@ mod truncate_visual_tests {
   fn truncation_breaks_before_overrun() {
     // "abcdef" with width 4 stops after "abcd"; the 'e' check sees
     // visible(4) + w(1) > 4 and breaks before pushing.
-    let out = truncate_visual("abcdef", 4);
-    assert_eq!(out, format!("abcd{RESET}"));
+    let out = truncate_visual("abcdef", 4, Justify::Left);
+    assert_eq!(out, "abcd");
   }
 }
 

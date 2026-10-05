@@ -10,7 +10,7 @@ pub(crate) mod random;
 pub(crate) mod strops;
 pub(crate) mod ui;
 
-use std::{os::fd::BorrowedFd, str::FromStr};
+use std::{ops::Index, os::fd::BorrowedFd, str::FromStr};
 
 use bstr::ByteSlice;
 
@@ -32,6 +32,65 @@ impl std::io::Write for FdWriter<'_> {
   }
   fn flush(&mut self) -> std::io::Result<()> {
     Ok(())
+  }
+}
+
+/// For binary sets under 64 items, this uses a bitset fast path
+pub(crate) enum StateSet {
+  Bitset(u64),
+  Vector(Vec<bool>),
+}
+
+impl StateSet {
+  pub(crate) fn new(len: usize) -> Self {
+    if len < 64 {
+      Self::Bitset(0)
+    } else {
+      Self::Vector(vec![false; len])
+    }
+  }
+  pub(crate) fn get(&self, idx: usize) -> Option<bool> {
+    match self {
+      StateSet::Bitset(set) => (idx < 64).then(|| set & (1 << idx) != 0),
+      StateSet::Vector(set) => set.get(idx).copied(),
+    }
+  }
+  pub(crate) fn set(&mut self, idx: usize, val: bool) {
+    match self {
+      StateSet::Bitset(set) => {
+        if idx < 64 {
+          if val {
+            *set |= 1 << idx;
+          } else {
+            *set &= !(1 << idx);
+          }
+        }
+      }
+      StateSet::Vector(set) => {
+        if let Some(slot) = set.get_mut(idx) {
+          *slot = val;
+        }
+      }
+    }
+  }
+  pub(crate) fn fill(&mut self, val: bool) {
+    match self {
+      StateSet::Bitset(set) => {
+        *set = if val { u64::MAX } else { 0 };
+      }
+      StateSet::Vector(set) => set.fill(val),
+    }
+  }
+}
+
+impl Index<usize> for StateSet {
+  type Output = bool;
+  fn index(&self, index: usize) -> &Self::Output {
+    if self.get(index).unwrap_or(false) {
+      &true
+    } else {
+      &false
+    }
   }
 }
 

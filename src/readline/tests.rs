@@ -1990,7 +1990,7 @@ mod readline_mod_coverage {
     // Lengths: L=1, M=1, R=1, leftover = 11 - 3 = 8.
     // pad_lm = 4, pad_mr = 4 → "L    M    R" (11 cols).
     assert_eq!(out, "L    M    R");
-    assert_eq!(out.chars().count(), 11);
+    assert_eq!(crate::util::ui::calc_str_width(&out), 11);
   }
 
   #[test]

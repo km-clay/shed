@@ -16,6 +16,16 @@ pub(crate) enum Word {
   Sep(Span), // the '--' separator
 }
 
+impl std::fmt::Debug for Word {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Word::Arg(word, _) => write!(f, "Arg({word:?})"),
+      Word::Opt(opt) => write!(f, "Opt({opt:?})"),
+      Word::Sep(_) => write!(f, "Sep"),
+    }
+  }
+}
+
 /// The result of parsing a builtin's command line.
 pub(crate) struct Parsed {
   pub words: Vec<Word>,   // the parsed arguments and options
@@ -39,6 +49,7 @@ impl From<Vec<(VarStr, Span)>> for Parsed {
   }
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct Opt {
   key: VarStr,
   span: Span,

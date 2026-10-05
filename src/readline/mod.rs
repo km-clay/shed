@@ -18,6 +18,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::defer;
 use crate::readline::editmode::ExNdRule;
+use crate::util::ui::Justify;
 use crate::{
   autocmd, builtin, eval, exec_term, expand,
   expand::{alias, prompt},
@@ -272,13 +273,13 @@ impl StatusLine {
     let leftover = after_middle.saturating_sub(left_w);
 
     let middle_str = if middle_w < mw {
-      ui::truncate_with_ellipsis(middle, middle_w)
+      ui::truncate_with_reset(middle, middle_w, "…", Justify::Left)
     } else {
       middle.to_string()
     };
 
     let left_str = if left_w < lw {
-      ui::truncate_with_ellipsis(left, left_w)
+      ui::truncate_with_reset(left, left_w, "…", Justify::Left)
     } else {
       left.to_string()
     };

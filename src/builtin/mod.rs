@@ -89,12 +89,14 @@ mod sock;
 mod source;
 mod stash;
 mod stat;
+mod string;
 mod test; // [[ ]] thing
 mod thru;
 mod times;
 mod trap;
 mod varcmds;
 mod vice;
+mod zd;
 
 pub(crate) use argv::{BuiltinArgs, join_raw_args};
 pub(crate) use help::HELP_PAGE_INSTALL_DIR;
@@ -197,6 +199,7 @@ register_builtins! {
   b"source"   => source  ::Source,
   b"stash"    => stash   ::StashBuiltin,
   b"stat"     => stat    ::Stat,
+  b"str"      => string  ::Str,
   b"test"     => test    ::Test,
   b"thru"     => thru    ::Thru,
   b"times"    => times   ::Times,
@@ -213,7 +216,7 @@ register_builtins! {
   b"wait"     => jobctl  ::Wait,
   b"writeint" => int     ::WriteInt,
   b"yes"      => self    ::Yes,
-  b"zd"       => cd      ::Zd,
+  b"zd"       => zd      ::Zd,
 }
 
 /// Lookup a name in the builtin table via binary search
@@ -635,6 +638,7 @@ pub(super) trait BuiltinRouter {
     {
       cmd_span = span;
     }
+
     let Some(sub) = sub.or_else(|| self.default_sub()) else {
       return self.sub_not_found(BuiltinArgs::new(words, span, cmd_span));
     };
