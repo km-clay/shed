@@ -310,6 +310,15 @@ fn arrops_pop_emits_raw_bytes() {
 }
 
 #[test]
+fn case_pattern_matches_non_utf8_subject() {
+  // Regression: the subject went through `to_string`, so a raw byte became
+  // U+FFFD while the pattern kept the real byte -- the two could never match.
+  let guard = TestGuard::new();
+  test_input(r#"printf '\x89PNG' >@s; case "$s" in $'\x89PNG') printf hit ;; esac"#).unwrap();
+  assert_eq!(guard.read_output_bytes(), b"hit");
+}
+
+#[test]
 fn param_prefix_removal_preserves_non_utf8() {
   // Regression (ultrareview bug_005): `${x#pat}` sliced a lossy view, so a raw
   // byte became U+FFFD. It must trim on the byte value.

@@ -305,11 +305,7 @@ impl super::Dispatcher {
 
     let case_logic = |s: &mut Self, tree: &Ast| -> ShResult<()> {
       let exp_pattern = tree[*pattern].clone().expand()?;
-      let pattern_raw = exp_pattern
-        .get_words()
-        .first()
-        .map(ToString::to_string)
-        .unwrap_or_default();
+      let pattern_raw = exp_pattern.get_words().first().cloned().unwrap_or_default();
 
       Shed::set_status(0);
       'outer: for block in case_blocks.ids() {
