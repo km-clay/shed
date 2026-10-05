@@ -366,7 +366,7 @@ pub(super) struct Shed {
   logic: RefCell<logic::LogTab>,
   /// `chrono timer` stopwatches
   timers: RefCell<timers::Timers>,
-  pipe_frames: RefCell<crate::procio::PipeFrames>,
+  pipe_frames: RefCell<procio::PipeFrames>,
   /// The terminal state
   terminal: RefCell<terminal::Terminal>,
   /// The shell configuration options

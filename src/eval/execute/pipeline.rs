@@ -156,6 +156,11 @@ impl super::Dispatcher {
       let run_in_shell = lastpipe && i == num_cmds - 1 && !cmd_forks;
       let will_fork = (num_cmds > 1 || is_bg) && !thread_this_stage && !run_in_shell;
       let _fork = Shed::meta_mut(|m| m.enter_fork(will_fork));
+      crate::vstrace!(
+        "pipe stage {i}/{num_cmds} cmd={} forks={cmd_forks} threaded={thread_this_stage} \
+         thread_pipes={use_thread_pipes} in_shell={run_in_shell} will_fork={will_fork}",
+        cmd_name.to_str_lossy()
+      );
 
       if run_in_shell {
         if let Some(read) = prev_read.take() {
@@ -214,6 +219,16 @@ impl super::Dispatcher {
           // external -> external
           Sinks::os_pipes()?
         };
+        crate::vstrace!(
+          "pipe stage {i} pipe_kind={}",
+          if use_thread_pipes {
+            "thread"
+          } else if thread_this_stage {
+            "gated_os"
+          } else {
+            "os"
+          }
+        );
         Shed::pipe_frames_mut(|f| {
           f.record(&read);
           f.record(&write);
@@ -224,6 +239,7 @@ impl super::Dispatcher {
         prev_read = Some(read);
       } else {
         // last segment, apply output redirs
+        crate::vstrace!("pipe stage {i} applying out_rdrs (last segment)");
         guard.apply_set(&out_rdrs)?;
       }
 
@@ -261,10 +277,13 @@ impl super::Dispatcher {
       if result.is_err() {
         break;
       }
+      crate::vstrace!("pipe stage {i} iteration end -- guard drops now");
     }
 
     let job = self.job_stack.finalize_job().unwrap();
+    crate::vstrace!("pipeline: dispatch_job (wait) begin");
     let dispatch_result = jobs::dispatch_job(job, is_bg, Shed::term(Terminal::interactive));
+    crate::vstrace!("pipeline: dispatch_job (wait) end");
 
     // The in-process tail ran inline, so its statuses never reached the wait.
     // Splice them onto the forked prefix's (which the wait left in PIPESTATUS)

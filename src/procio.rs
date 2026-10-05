@@ -43,7 +43,7 @@ use nix::{
     stat::Mode,
     wait::{WaitPidFlag as WtFlag, WaitStatus as WtStat, waitpid},
   },
-  unistd::{self, ForkResult, fork, write},
+  unistd::{self, ForkResult, Pid, fork, write},
 };
 
 use crate::{
@@ -56,7 +56,6 @@ use crate::{
   lifecycle, match_loop, sherr, shopt, signal,
   state::{
     Shed,
-    db::FORKED_CHILD,
     meta::MetaTab,
     shopt::ReadLimit,
     terminal::Terminal,
@@ -67,7 +66,7 @@ use crate::{
     error::{ShErr, ShResult},
     strops::{self, ByteCursor, SliceCursor},
   },
-  varstr,
+  varstr, vstrace,
 };
 
 /// Minimum fd number for shell-internal file descriptors.
@@ -916,37 +915,43 @@ impl RedirSpec {
   /// brief borrow to read the current fd.
   pub(crate) fn as_sink(&self) -> ShResult<Arc<dyn Sink>> {
     let sink: Arc<dyn Sink> = match self {
-      RedirSpec::Var { name, mode, .. } => {
-        match mode {
-          RedirType::ReadVar => {
-            let vn = VarName::parse(&name.to_str_lossy(), true)?;
-            let var = Shed::vars(|v| v.resolve_var(&vn).unwrap_or_default());
+      RedirSpec::Var { name, mode, .. } => match mode {
+        RedirType::ReadVar => {
+          let vn = VarName::parse(&name.to_str_lossy(), true)?;
+          let var = Shed::vars(|v| v.resolve_var(&vn).unwrap_or_default());
 
-            Arc::new(BufSink::from_bytes(var.as_bytes()))
-          }
-          kind @ (RedirType::WriteVar | RedirType::AppendVar) => {
-            let vn = VarName::parse(&name.to_str_lossy(), true)?;
-            let content = if matches!(kind, RedirType::AppendVar) {
-              Shed::vars(|v| v.resolve_var(&vn).unwrap_or_default())
-            } else {
-              VarStr::default()
-            };
+          Arc::new(BufSink::from_bytes(var.as_bytes()))
+        }
+        kind @ (RedirType::WriteVar | RedirType::AppendVar) => {
+          let vn = VarName::parse(&name.to_str_lossy(), true)?;
+          let content = if matches!(kind, RedirType::AppendVar) {
+            Shed::vars(|v| v.resolve_var(&vn).unwrap_or_default())
+          } else {
+            VarStr::default()
+          };
 
-            // need to add a way to know if this forks or not
-            if Shed::meta(MetaTab::redir_forks) {
-              Arc::new(VarSink::new_external(vn, content.into_bytes())?)
-            } else {
-              Arc::new(VarSink::new_local(vn, content.into_bytes()))
-            }
-          }
-          _ => {
-            return Err(sherr!(
-              InternalErr,
-              "Invalid redirection mode for variable redirection"
-            ));
+          let forks = Shed::meta(MetaTab::redir_forks);
+          vstrace!(
+            "as_sink var={} redir_forks={forks} pid={}",
+            vn.name(),
+            Pid::this()
+          );
+          if forks {
+            let sink: Arc<dyn Sink> = Arc::new(VarSink::new_external(vn, content.into_bytes())?);
+            let deferred = Shed::pipe_frames_mut(|f| f.defer(&sink));
+            vstrace!("as_sink deferred external var sink: {deferred}");
+            sink
+          } else {
+            Arc::new(VarSink::new_local(vn, content.into_bytes()))
           }
         }
-      }
+        _ => {
+          return Err(sherr!(
+            InternalErr,
+            "Invalid redirection mode for variable redirection"
+          ));
+        }
+      },
       RedirSpec::Dup { from, .. } => match from.resolve_source()? {
         None => Arc::new(CloseSink),
         Some(fd) => {
@@ -1055,51 +1060,115 @@ impl From<RedirSpec> for RedirSet {
   }
 }
 
-/// A trait for abstracting over different types of I/O sinks (e.g., files, buffers, pipes).
-///
-/// This trait is used by the [`Sinks`] struct, which is `shed`'s virtual FD table. Having a virtual
-/// fd table allows us to also do I/O redirection internally, and keep pipelines in-process if forking
-/// is unnecessary (e.g. a pipeline with only builtins)
+#[derive(Clone)]
+struct PipeFrame {
+  owner: Pid,
+  pipes: Vec<Weak<dyn Sink>>,
+  deferred: Vec<Arc<dyn Sink>>,
+}
+
+impl PipeFrame {
+  fn new() -> Self {
+    Self {
+      owner: Pid::this(),
+      pipes: Vec::new(),
+      deferred: Vec::new(),
+    }
+  }
+  fn record(&mut self, sink: &Arc<dyn Sink>) {
+    self.pipes.push(Arc::downgrade(sink));
+  }
+  fn defer(&mut self, sink: &Arc<dyn Sink>) -> bool {
+    if self.owner != Pid::this() {
+      return false;
+    }
+    self.deferred.push(Arc::clone(sink));
+    true
+  }
+}
+
+impl Debug for PipeFrame {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    let deferred = self
+      .deferred
+      .iter()
+      .map(|sink| sink.kind())
+      .collect::<Vec<_>>();
+
+    f.debug_struct("PipeFrame")
+      .field("owner", &self.owner)
+      .field("pipes", &self.pipes)
+      .field("deferred", &deferred)
+      .finish()
+  }
+}
+
 /// Pipe ends created by each enclosing pipeline, innermost frame last.
 ///
-/// A forked stage inherits every descriptor in the process, including the pipe
-/// ends of sibling and enclosing stages, and must close the ones it does not
-/// own or their pipes never reach EOF. Ends are held weakly so that one dropped
-/// mid-pipeline cannot name a descriptor the kernel has since reused.
-#[derive(Default, Clone, Debug)]
+/// Also contains deferred external `>@var` redirections, which must wait
+/// on their command to be reaped before committing the var change.
+#[derive(Default, Clone)]
 pub(crate) struct PipeFrames {
-  frames: Vec<Vec<Weak<dyn Sink>>>,
+  frames: Vec<PipeFrame>,
+}
+
+impl Debug for PipeFrames {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("PipeFrames")
+      .field("frames", &self.frames)
+      .finish()
+  }
 }
 
 impl PipeFrames {
   pub(crate) fn push_frame(&mut self) {
-    self.frames.push(Vec::new());
+    self.frames.push(PipeFrame::new());
   }
 
   pub(crate) fn pop_frame(&mut self) {
     self.frames.pop();
   }
 
+  /// Hold `sink` until the innermost pipeline frame pops. No-op outside a
+  /// pipeline, where the creating scope already drops at a correct point.
+  pub(crate) fn defer(&mut self, sink: &Arc<dyn Sink>) -> bool {
+    let Some(frame) = self.frames.last_mut() else {
+      return false;
+    };
+
+    frame.defer(sink)
+  }
+
   pub(crate) fn record(&mut self, sink: &Arc<dyn Sink>) {
     if let Some(frame) = self.frames.last_mut() {
-      frame.push(Arc::downgrade(sink));
+      frame.record(sink);
     }
   }
 
   /// Live OS descriptors across every frame. Ends that have been dropped, and
   /// `thread_pipes` ends that never had a descriptor, drop out here.
   pub(crate) fn live_fds(&self) -> Vec<RawFd> {
-    self
-      .frames
-      .iter()
-      .flatten()
-      .filter_map(Weak::upgrade)
-      .filter_map(|s| s.as_os_fd().ok().map(|fd| fd.as_raw_fd()))
-      .collect()
+    let mut fds = vec![];
+
+    for frame in &self.frames {
+      for weak in &frame.pipes {
+        if let Some(sink) = weak.upgrade()
+          && let Ok(fd) = sink.as_os_fd()
+        {
+          fds.push(fd.as_raw_fd());
+        }
+      }
+    }
+
+    fds
   }
 }
 
 /// A trait for abstracting over different types of I/O sinks (e.g., files, buffers, pipes)
+///
+/// This trait is used by the [`Sinks`] struct, which is `shed`'s virtual FD table. Having a virtual
+/// fd table allows us to also do I/O redirection internally, and keep pipelines in-process if forking
+/// is unnecessary (e.g. a pipeline with only builtins)
 ///
 /// Shed treats anything that implements this trait as a file, so on top of wrapping normal file
 /// descriptors with this, we can also create entire new types of files if we want to.
@@ -1870,6 +1939,7 @@ impl Sink for GatedSink {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SinkKind {
   Buffer,
+  Var,
   Os,
   Tty,
   ReadPipe,
@@ -1950,33 +2020,62 @@ enum VarSink {
   Local {
     name: VarName,
     buf: Mutex<Vec<u8>>,
+    creator_pid: Pid,
   },
   External {
     name: VarName,
     write: Arc<dyn Sink>,
     read: Arc<dyn Sink>,
     buf: Mutex<Vec<u8>>,
+    creator_pid: Pid,
   },
 }
 
 impl VarSink {
   pub(crate) fn new_local(name: VarName, buf: Vec<u8>) -> Self {
+    vstrace!(
+      "VarSink::new_local var={} seed={}B pid={}",
+      name.name(),
+      buf.len(),
+      Pid::this()
+    );
     Self::Local {
       name,
       buf: Mutex::new(buf),
+      creator_pid: Pid::this(),
     }
   }
 
   pub(crate) fn new_external(name: VarName, buf: Vec<u8>) -> ShResult<Self> {
+    vstrace!(
+      "VarSink::new_external var={} seed={}B pid={}",
+      name.name(),
+      buf.len(),
+      Pid::this()
+    );
     let new = OsPipe::pipes().map(|(read, write)| Self::External {
       name,
       read,
       write,
       buf: Mutex::new(buf),
+      creator_pid: Pid::this(),
     })?;
 
     Ok(new)
   }
+
+  fn name(&self) -> &VarName {
+    match self {
+      Self::Local { name, .. } | Self::External { name, .. } => name,
+    }
+  }
+
+  fn creator_pid(&self) -> Pid {
+    match self {
+      Self::Local { creator_pid, .. } | Self::External { creator_pid, .. } => *creator_pid,
+    }
+  }
+
   fn lock_buf(&self) -> std::sync::MutexGuard<'_, Vec<u8>> {
     match self {
       Self::Local { buf, .. } | Self::External { buf, .. } => buf.lock().unwrap(),
@@ -1990,6 +2089,7 @@ impl VarSink {
         write,
         read,
         buf,
+        ..
       } => {
         // closes the write end (hopefully)
         *write = Arc::new(NullSink::new());
@@ -2003,9 +2103,15 @@ impl VarSink {
           acc.extend_from_slice(&chunk[..n]);
         }
 
+        vstrace!(
+          "VarSink::take drained var={} total={}B pid={}",
+          name.name(),
+          acc.len(),
+          Pid::this()
+        );
         (name.clone(), acc)
       }
-      Self::Local { name, buf } => (name.clone(), std::mem::take(buf.get_mut().unwrap())),
+      Self::Local { name, buf, .. } => (name.clone(), std::mem::take(buf.get_mut().unwrap())),
     }
   }
 }
@@ -2034,10 +2140,7 @@ impl Sink for VarSink {
   }
 
   fn kind(&self) -> SinkKind {
-    match self {
-      Self::Local { .. } => SinkKind::Buffer,
-      Self::External { .. } => SinkKind::WritePipe,
-    }
+    SinkKind::Var
   }
 
   fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
@@ -2047,11 +2150,29 @@ impl Sink for VarSink {
 
 impl Drop for VarSink {
   fn drop(&mut self) {
-    if FORKED_CHILD.load(Ordering::Relaxed) || !Shed::is_alive() {
+    if !Shed::is_alive() {
+      return;
+    }
+
+    let (creator, me) = (self.creator_pid(), Pid::this());
+    vstrace!(
+      "VarSink::drop var={} kind={:?} creator={creator} me={me} buffered={}B",
+      self.name().name(),
+      self.kind(),
+      self.lock_buf().len()
+    );
+
+    if creator != me {
+      vstrace!("VarSink::drop skip: inherited across fork");
       return;
     }
 
     let (name, bytes) = self.take();
+    vstrace!(
+      "VarSink::drop commit var={} bytes={}",
+      name.name(),
+      bytes.len()
+    );
 
     commit_var(&name, &bytes).unwrap_or_else(|e| {
       let name = name.name();
@@ -2061,6 +2182,13 @@ impl Drop for VarSink {
 }
 
 fn commit_var(name: &VarName, bytes: &[u8]) -> ShResult<()> {
+  vstrace!(
+    "commit_var name={} index={:?} bytes={} pid={}",
+    name.name(),
+    name.index(),
+    bytes.len(),
+    Pid::this()
+  );
   let val = VarStr::from(bytes);
 
   match name.index() {
@@ -2119,6 +2247,7 @@ impl Sinks {
 
     Self { table }
   }
+
   /// Lowest descriptor at or above [`MIN_INTERNAL_FD`] that the table is not
   /// already using, for `{name}` redirections.
   pub(crate) fn free_high_fd(&self) -> ShResult<RawFd> {
@@ -2912,7 +3041,7 @@ pub(crate) mod tests {
   run_output! {
     pipeline_simple        : "echo foo | sed 's/foo/bar/'" => "bar\n", needs "sed";
     pipeline_multi         : "echo foo bar baz | cut -d ' ' -f 2 | sed 's/a/A/'" => "bAr\n", needs "cut", "sed";
-    rube_goldberg_pipeline : "{ echo foo; echo bar } | if cat; then :; else echo failed; fi | (read line && echo $line | sed 's/foo/baz/'; sed 's/bar/buzz/')" => "baz\nbuzz\n", needs "sed", "cat";
+    pipeline_rube_goldberg : "{ echo foo; echo bar; } | if cat; then :; else echo failed; fi | (read line && echo $line | sed 's/foo/baz/'; sed 's/bar/buzz/')" => "baz\nbuzz\n", needs "sed", "cat";
     pipe_and_stderr        : "echo on stderr >&2 |& cat" => "on stderr\n", needs "cat";
   }
 
@@ -2937,6 +3066,33 @@ pub(crate) mod tests {
     var_subscript_creates  : "printf z >@fresh[1]; printf '%s' \"${fresh[*]}\"" => " z";
     var_subscript_loop     : "for i in 0 1 2; do printf 'a%s' \"$i\" >@lp[i]; done; printf '%s' \"${lp[*]}\"" => "a0 a1 a2";
     var_assoc_key_creates  : "declare -A f; printf v >@f[k]; printf '%s' \"${f[k]}\"" => "v";
+  }
+
+  run_output! {
+    var_pipe_ext_upstream   : "ls -d / | cat >@v; printf '%s' \"$v\"" => "/\n", needs "ls", "cat";
+    var_pipe_three_stage    : "ls -d / | cat | cat >@v; printf '%s' \"$v\"" => "/\n", needs "ls", "cat";
+    var_pipe_four_stage     : "ls -d / | cat | cat | cat >@v; printf '%s' \"$v\"" => "/\n", needs "ls", "cat";
+    var_pipe_in_group       : "{ ls -d / | cat >@v; printf '%s' \"$v\"; }" => "/\n", needs "ls", "cat";
+    var_pipe_in_function    : "f() { ls -d / | cat >@v; printf '%s' \"$v\"; }; f" => "/\n", needs "ls", "cat";
+    var_pipe_mid_stage      : "printf x | { cat >@v; printf 'got:%s' \"$v\"; } | cat" => "got:x", needs "cat";
+    var_pipe_local_in_stage : "printf x | { thru >@v; printf '%s' \"$v\"; }" => "x";
+  }
+
+  // The commit is deferred past the pipeline's wait. Before that it raced the
+  // capturing child and a single run still passed most of the time, so this
+  // asserts every iteration rather than one.
+  #[test]
+  fn var_pipe_capture_is_not_racy() {
+    if !has_cmds(&["ls", "cat"]) {
+      return;
+    }
+    let g = TestGuard::new();
+    test_input(
+      "ok=0; n=0; while [ $n -lt 20 ]; do ls -d / | cat >@z; \
+       [ -n \"$z\" ] && ok=$((ok+1)); z=; n=$((n+1)); done; printf '%s' \"$ok\"",
+    )
+    .unwrap();
+    assert_eq!(g.read_output(), "20", "var redirect capture lost a run");
   }
 
   // 100000 bytes overruns the 64K pipe buffer, so a child writing into an

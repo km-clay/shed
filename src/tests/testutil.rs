@@ -111,9 +111,9 @@ pub(crate) fn canon(p: impl AsRef<std::path::Path>) -> std::path::PathBuf {
 
 pub(crate) fn has_cmds(cmds: &[&str]) -> bool {
   let path_cmds = MetaTab::get_cmds_in_path();
-  path_cmds
+  cmds
     .iter()
-    .all(|c| cmds.iter().any(|&cmd| c.name() == cmd))
+    .all(|&cmd| path_cmds.iter().any(|c| c.name() == cmd))
 }
 
 pub(crate) fn has_cmd(cmd: &str) -> bool {
