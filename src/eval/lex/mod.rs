@@ -843,7 +843,23 @@ impl<'a> LexStream<'a> {
       Some(())
     };
 
+    let read_varname = |this: &mut Self| {
+      if !this.bump_if(|b| b.is_ascii_alphabetic() || b == b'_') {
+        return None;
+      }
+      this.bump_while(|b| b.is_ascii_alphanumeric() || b == b'_');
+      if this.bump_if_eq(b'[') && !scan_brackets(this, 1) {
+        return None;
+      }
+      Some(())
+    };
+
     self.attempt(|this| {
+      let varname_err = Err(lex_err!(
+        this,
+        this.cursor..this.cursor + 1,
+        "expected variable name after '@' in redirection",
+      ));
       let start = this.cursor;
 
       match_loop!(this.peek_byte() => b, {
@@ -860,15 +876,28 @@ impl<'a> LexStream<'a> {
 
           this.bump_if_eq(b'>'); // append '>>'
 
-          if !this.bump_if_eq(b'&') {
-            let tk = this.get_token(start..this.cursor, TkRule::Redir);
-            return Some(Ok(tk));
+          match this.peek_byte() {
+            Some(b'&') => {
+              this.bump();
+              read_target(this);
+
+              let tk = this.get_token(start..this.cursor, TkRule::Redir);
+              return Some(Ok(tk));
+            }
+            Some(b'@') => {
+              this.bump();
+              if read_varname(this).is_none() {
+                return Some(varname_err);
+              }
+
+              let tk = this.get_token(start..this.cursor, TkRule::Redir);
+              return Some(Ok(tk));
+            }
+            _ => {
+              let tk = this.get_token(start..this.cursor, TkRule::Redir);
+              return Some(Ok(tk));
+            }
           }
-
-          read_target(this);
-
-          let tk = this.get_token(start..this.cursor, TkRule::Redir);
-          return Some(Ok(tk));
         }
         b'<' => {
           if this.peek_nth(1) == Some(b'(') {
@@ -877,6 +906,15 @@ impl<'a> LexStream<'a> {
           this.bump();
 
           match this.peek_byte() {
+            Some(b'@') => {
+              this.bump();
+              if read_varname(this).is_none() {
+                return Some(varname_err);
+              }
+
+              let tk = this.get_token(start..this.cursor, TkRule::Redir);
+              return Some(Ok(tk));
+            }
             Some(b'<') => {
               this.bump();
 

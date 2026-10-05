@@ -435,6 +435,10 @@ impl Shed {
     }
   }
 
+  pub(crate) fn is_alive() -> bool {
+    SHED.try_with(|_| ()).is_ok()
+  }
+
   /*
    * State Accessor Functions
    *

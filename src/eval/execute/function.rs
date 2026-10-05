@@ -74,7 +74,10 @@ impl super::Dispatcher {
   /// Also adds a stack trace frame for the function call to be used in `shed`'s error reporting
   pub(super) fn exec_func(&mut self, tree: &Ast, func_id: NodeId) -> ShResult<()> {
     let func = &tree[func_id];
-    if Shed::meta_mut(MetaTab::take_fork) {
+    let fork_ctx = Shed::meta_mut(MetaTab::take_fork);
+    let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(fork_ctx));
+
+    if fork_ctx {
       let func_body = tree.break_off(func_id);
 
       let Some(root) = func_body.get_root() else {

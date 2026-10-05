@@ -69,6 +69,7 @@ impl super::Dispatcher {
   pub(super) fn exec_cmd(&mut self, tree: &Ast, cmd_id: NodeId) -> ShResult<()> {
     let cmd = &tree[cmd_id];
     let context = &cmd.context;
+
     let NdRule::Command { assignments, argv } = &cmd.class else {
       unreachable!(
         "found node class '{:?}' in exec_cmd",
@@ -82,7 +83,10 @@ impl super::Dispatcher {
     };
 
     if let AssignBehavior::Set = assign_behavior {
-      if Shed::meta_mut(MetaTab::take_fork) {
+      let fork_ctx = Shed::meta_mut(MetaTab::take_fork);
+
+      if fork_ctx {
+        let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(true));
         let child = tree.break_off(cmd_id);
         let Some(root) = child.get_root() else {
           unreachable!()
@@ -126,6 +130,7 @@ impl super::Dispatcher {
     let exec_path = cmd::lookup_cmd(cmd_name);
 
     let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
+    let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(true));
 
     // POSIX 2.8.1: a redirection failure on an ordinary command is non-fatal
     let fatal =

@@ -56,9 +56,11 @@ use crate::{
   lifecycle, match_loop, sherr, shopt, signal,
   state::{
     Shed,
+    db::FORKED_CHILD,
+    meta::MetaTab,
     shopt::ReadLimit,
     terminal::Terminal,
-    vars::{VarFlags, VarKind, VarName, VarStr},
+    vars::{VarFlags, VarKind, VarKindTag, VarName, VarStr},
   },
   util::{
     self,
@@ -407,7 +409,7 @@ pub(crate) fn pipes_high_nonblocking() -> nix::Result<(OwnedFd, OwnedFd)> {
   Ok((r, w))
 }
 
-fn read_brace_var(cur: &mut SliceCursor, bytes: &[u8]) -> Option<VarStr> {
+fn read_var_ref(cur: &mut SliceCursor, bytes: &[u8]) -> Option<VarStr> {
   let start = cur.pos();
   if !cur.bump_if(|b| b.is_ascii_alphabetic() || b == b'_') {
     return None;
@@ -416,10 +418,12 @@ fn read_brace_var(cur: &mut SliceCursor, bytes: &[u8]) -> Option<VarStr> {
   if cur.bump_if_eq(b'[') && !strops::scan_brackets(cur, 1) {
     return None; // unterminated subscript
   }
-  let end = cur.pos();
-  cur
-    .bump_if_eq(b'}')
-    .then(|| VarStr::from(&bytes[start..end]))
+  Some(VarStr::from(&bytes[start..cur.pos()]))
+}
+
+fn read_brace_var(cur: &mut SliceCursor, bytes: &[u8]) -> Option<VarStr> {
+  let var = read_var_ref(cur, bytes)?;
+  cur.bump_if_eq(b'}').then_some(var)
 }
 
 /// Names the source of a raw fd
@@ -563,6 +567,7 @@ impl RedirBldr {
     };
 
     match target {
+      RedirTarget::Var(name) if class.is_var_op() => Ok(RedirSpec::var(fd, name, class)),
       RedirTarget::Path(path) if class.is_file_op() => Ok(RedirSpec::file(fd, path, class)),
       RedirTarget::Close => Ok(RedirSpec::close(fd)),
       RedirTarget::Fd(src_fd) if class.is_dup_op() => Ok(RedirSpec::dup(src_fd, fd, class)),
@@ -611,6 +616,19 @@ impl RedirBldr {
     let mut tgt_var = None;
     let mut redir = RedirBldr::new();
 
+    // throaway macro for reading variable names in '>@var' redirs
+    macro_rules! read_name {
+      ($ty:path) => {
+        let Some(name) = read_var_ref(&mut cur, bytes) else {
+          return Err(sherr!(
+            ParseErr,
+            "expected a variable name after '@' in redirection"
+          ));
+        };
+        redir = redir.with_target(RedirTarget::Var(name)).with_class($ty);
+      };
+    }
+
     match_loop!(cur.next_byte() => ch, {
       b'{' => match read_brace_var(&mut cur, bytes) {
         Some(v) => tgt_var = Some(v),
@@ -622,11 +640,19 @@ impl RedirBldr {
         }
       }
       b'>' => {
-        redir = redir.with_class(RedirType::Output);
-        if cur.bump_if_eq(b'>') {
-          redir = redir.with_class(RedirType::Append);
+        if cur.bump_if_eq(b'@') {
+          read_name!(RedirType::WriteVar);
+          break
         } else if cur.bump_if_eq(b'|') {
           redir = redir.with_class(RedirType::OutputForce);
+        } else if cur.bump_if_eq(b'>') {
+          if cur.bump_if_eq(b'@') {
+            read_name!(RedirType::AppendVar);
+            break
+          }
+          redir = redir.with_class(RedirType::Append);
+        } else {
+          redir = redir.with_class(RedirType::Output);
         }
       }
       b'<' => {
@@ -635,6 +661,9 @@ impl RedirBldr {
 
         if cur.bump_if_eq(b'>') {
           redir = redir.with_class(RedirType::ReadWrite);
+        } else if cur.bump_if_eq(b'@') {
+          read_name!(RedirType::ReadVar);
+          break
         } else {
           while count < 2 && cur.bump_if_eq(b'<') {
             count += 1;
@@ -689,11 +718,13 @@ impl RedirBldr {
     if let Some(fd_var) = tgt_var {
       redir = redir.with_fd_var(fd_var);
     } else {
-      let tgt_fd =
-        util::parse_bytes::<i32>(&tgt_fd).unwrap_or_else(|| match redir.class.unwrap() {
-          RedirType::Input | RedirType::ReadWrite | RedirType::HereDoc | RedirType::HereString => 0,
-          _ => 1,
-        });
+      let tgt_fd = util::parse_bytes::<i32>(&tgt_fd).unwrap_or_else(|| {
+        if redir.class.unwrap().is_input() {
+          STDIN_FILENO
+        } else {
+          STDOUT_FILENO
+        }
+      });
       redir = redir.with_fd(tgt_fd);
     }
 
@@ -744,19 +775,31 @@ pub(super) enum RedirType {
   HereDoc,     // <<
   HereString,  // <<<
   ReadWrite,   // <>, fd is opened for reading and writing
+  ReadVar,     // <@var
+  WriteVar,    // >@var
+  AppendVar,   // >>@var
 }
 
 impl RedirType {
   pub(crate) fn is_input(self) -> bool {
     matches!(
       self,
-      RedirType::Input | RedirType::HereDoc | RedirType::HereString | RedirType::ReadWrite
+      RedirType::Input
+        | RedirType::HereDoc
+        | RedirType::HereString
+        | RedirType::ReadWrite
+        | RedirType::ReadVar
     )
   }
   pub(crate) fn is_output(self) -> bool {
     matches!(
       self,
-      RedirType::Output | RedirType::OutputForce | RedirType::Append | RedirType::ReadWrite
+      RedirType::Output
+        | RedirType::OutputForce
+        | RedirType::Append
+        | RedirType::ReadWrite
+        | RedirType::WriteVar
+        | RedirType::AppendVar
     )
   }
   /// Returns true if this redirection type is a file operation (i.e. not a dup or close).
@@ -770,6 +813,13 @@ impl RedirType {
         | RedirType::ReadWrite
     )
   }
+
+  pub(crate) fn is_var_op(self) -> bool {
+    matches!(
+      self,
+      RedirType::ReadVar | RedirType::WriteVar | RedirType::AppendVar
+    )
+  }
   pub(crate) fn is_dup_op(self) -> bool {
     matches!(self, RedirType::Output | RedirType::Input)
   }
@@ -781,6 +831,7 @@ impl RedirType {
 pub(super) enum RedirTarget {
   Path(Tk),
   Fd(FdSlot),
+  Var(VarStr),
   Close,
   HereDoc { body: VarStr, flags: TkFlags },
 }
@@ -793,6 +844,11 @@ pub(super) enum RedirSpec {
   File {
     fd: FdSlot,
     path: Tk,
+    mode: RedirType,
+  },
+  Var {
+    fd: FdSlot,
+    name: VarStr,
     mode: RedirType,
   },
   Dup {
@@ -811,6 +867,9 @@ pub(super) enum RedirSpec {
 }
 
 impl RedirSpec {
+  pub(crate) fn var(fd: FdSlot, name: VarStr, mode: RedirType) -> Self {
+    Self::Var { fd, name, mode }
+  }
   pub(crate) fn file(fd: FdSlot, path: Tk, mode: RedirType) -> Self {
     Self::File { fd, path, mode }
   }
@@ -832,14 +891,19 @@ impl RedirSpec {
   pub(crate) fn target_fd_origin(&self) -> ShResult<ResolvedFd> {
     match self {
       RedirSpec::Dup { to, .. } => to.resolve_or_alloc(),
-      RedirSpec::File { fd, .. } | RedirSpec::Buffer { fd, .. } => fd.resolve_or_alloc(),
+      RedirSpec::Var { fd, .. } | RedirSpec::File { fd, .. } | RedirSpec::Buffer { fd, .. } => {
+        fd.resolve_or_alloc()
+      }
       // closing names a descriptor that already exists
       RedirSpec::Close { fd, .. } => Ok(ResolvedFd::Existing(fd.resolve()?)),
     }
   }
   pub(crate) fn mode(&self) -> RedirType {
     match self {
-      RedirSpec::File { mode, .. } | RedirSpec::Dup { mode, .. } => *mode,
+      RedirSpec::Var { mode, .. } | RedirSpec::File { mode, .. } | RedirSpec::Dup { mode, .. } => {
+        *mode
+      }
+
       RedirSpec::Close { .. } => RedirType::Null,
       RedirSpec::Buffer { .. } => RedirType::HereDoc,
     }
@@ -852,6 +916,37 @@ impl RedirSpec {
   /// brief borrow to read the current fd.
   pub(crate) fn as_sink(&self) -> ShResult<Arc<dyn Sink>> {
     let sink: Arc<dyn Sink> = match self {
+      RedirSpec::Var { name, mode, .. } => {
+        match mode {
+          RedirType::ReadVar => {
+            let vn = VarName::parse(&name.to_str_lossy(), true)?;
+            let var = Shed::vars(|v| v.resolve_var(&vn).unwrap_or_default());
+
+            Arc::new(BufSink::from_bytes(var.as_bytes()))
+          }
+          kind @ (RedirType::WriteVar | RedirType::AppendVar) => {
+            let vn = VarName::parse(&name.to_str_lossy(), true)?;
+            let content = if matches!(kind, RedirType::AppendVar) {
+              Shed::vars(|v| v.resolve_var(&vn).unwrap_or_default())
+            } else {
+              VarStr::default()
+            };
+
+            // need to add a way to know if this forks or not
+            if Shed::meta(MetaTab::redir_forks) {
+              Arc::new(VarSink::new_external(vn, content.into_bytes())?)
+            } else {
+              Arc::new(VarSink::new_local(vn, content.into_bytes()))
+            }
+          }
+          _ => {
+            return Err(sherr!(
+              InternalErr,
+              "Invalid redirection mode for variable redirection"
+            ));
+          }
+        }
+      }
       RedirSpec::Dup { from, .. } => match from.resolve_source()? {
         None => Arc::new(CloseSink),
         Some(fd) => {
@@ -1851,6 +1946,133 @@ impl SinkLines {
   }
 }
 
+enum VarSink {
+  Local {
+    name: VarName,
+    buf: Mutex<Vec<u8>>,
+  },
+  External {
+    name: VarName,
+    write: Arc<dyn Sink>,
+    read: Arc<dyn Sink>,
+    buf: Mutex<Vec<u8>>,
+  },
+}
+
+impl VarSink {
+  pub(crate) fn new_local(name: VarName, buf: Vec<u8>) -> Self {
+    Self::Local {
+      name,
+      buf: Mutex::new(buf),
+    }
+  }
+
+  pub(crate) fn new_external(name: VarName, buf: Vec<u8>) -> ShResult<Self> {
+    let new = OsPipe::pipes().map(|(read, write)| Self::External {
+      name,
+      read,
+      write,
+      buf: Mutex::new(buf),
+    })?;
+
+    Ok(new)
+  }
+  fn lock_buf(&self) -> std::sync::MutexGuard<'_, Vec<u8>> {
+    match self {
+      Self::Local { buf, .. } | Self::External { buf, .. } => buf.lock().unwrap(),
+    }
+  }
+
+  fn take(&mut self) -> (VarName, Vec<u8>) {
+    match self {
+      Self::External {
+        name,
+        write,
+        read,
+        buf,
+      } => {
+        // closes the write end (hopefully)
+        *write = Arc::new(NullSink::new());
+
+        let mut acc = std::mem::take(buf.get_mut().unwrap());
+        let mut chunk = take_scratch();
+
+        while let Ok(n) = read.read(&mut chunk)
+          && n > 0
+        {
+          acc.extend_from_slice(&chunk[..n]);
+        }
+
+        (name.clone(), acc)
+      }
+      Self::Local { name, buf } => (name.clone(), std::mem::take(buf.get_mut().unwrap())),
+    }
+  }
+}
+
+impl Sink for VarSink {
+  fn read(&self, _buf: &mut [u8]) -> io::Result<usize> {
+    Err(ebadf())
+  }
+
+  fn write(&self, buf: &[u8]) -> io::Result<usize> {
+    self.lock_buf().write(buf)
+  }
+
+  fn flush(&self) -> io::Result<()> {
+    Ok(())
+  }
+
+  fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
+    match self {
+      VarSink::External { write, .. } => write.as_os_fd(),
+      VarSink::Local { .. } => Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "local variable sinks do not have an OS-level file descriptor",
+      )),
+    }
+  }
+
+  fn kind(&self) -> SinkKind {
+    match self {
+      Self::Local { .. } => SinkKind::Buffer,
+      Self::External { .. } => SinkKind::WritePipe,
+    }
+  }
+
+  fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
+    Err(ebadf())
+  }
+}
+
+impl Drop for VarSink {
+  fn drop(&mut self) {
+    if FORKED_CHILD.load(Ordering::Relaxed) || !Shed::is_alive() {
+      return;
+    }
+
+    let (name, bytes) = self.take();
+
+    commit_var(&name, &bytes).unwrap_or_else(|e| {
+      let name = name.name();
+      eprintln!("shed: error committing variable {name}: {e}");
+    });
+  }
+}
+
+fn commit_var(name: &VarName, bytes: &[u8]) -> ShResult<()> {
+  let val = VarStr::from(bytes);
+
+  match name.index() {
+    Some(idx) => {
+      let tag = Shed::vars(|v| v.try_get_var_kind_tag(name.name())).unwrap_or(VarKindTag::Arr);
+      let idx = idx.clone().resolve_for(tag)?;
+      Shed::vars_mut(|v| v.set_var_indexed(name.name(), idx, val, VarFlags::empty()))
+    }
+    None => Shed::vars_mut(|v| v.set_var(name.name(), VarKind::string(val), VarFlags::empty())),
+  }
+}
+
 /// The virtual fd table that `shed` uses for I/O redirection
 ///
 /// The wrapped `table` is a [`HashMap`] of [`RawFd`] -> [`Arc<dyn Sink>`]. The `RawFd` is the target fd (e.g. 0 for stdin, 1 for stdout, etc.), and the [`Sink`] is the source of data for that fd.
@@ -1931,6 +2153,15 @@ impl Sinks {
   /// This is called after a child is forked, so that the child inherits the redirected fds.
   /// The parent process's fds are not affected in this case.
   pub(crate) fn commit_redirects(&self) -> io::Result<()> {
+    for sink in self.table.values() {
+      if sink.kind() != SinkKind::Close {
+        // validate the table fds
+        // if anything can't provide an OS fd
+        // we return early with the error
+        sink.as_os_fd()?;
+      }
+    }
+
     for (target_fd, sink) in &self.table {
       if sink.kind() == SinkKind::Close {
         // try closing it
@@ -2683,6 +2914,41 @@ pub(crate) mod tests {
     pipeline_multi         : "echo foo bar baz | cut -d ' ' -f 2 | sed 's/a/A/'" => "bAr\n", needs "cut", "sed";
     rube_goldberg_pipeline : "{ echo foo; echo bar } | if cat; then :; else echo failed; fi | (read line && echo $line | sed 's/foo/baz/'; sed 's/bar/buzz/')" => "baz\nbuzz\n", needs "sed", "cat";
     pipe_and_stderr        : "echo on stderr >&2 |& cat" => "on stderr\n", needs "cat";
+  }
+
+  run_output! {
+    var_write              : "o=; echo hi >@o; printf '%s' \"$o\"" => "hi\n";
+    var_write_unset        : "printf hi >@wfresh; printf '%s' \"$wfresh\"" => "hi";
+    var_write_overwrites   : "printf x >@o; printf y >@o; printf '%s' \"$o\"" => "y";
+    var_append             : "a=start; printf -- -more >>@a; printf '%s' \"$a\"" => "start-more";
+    var_append_unset       : "printf new >>@afresh; printf '%s' \"$afresh\"" => "new";
+    var_read               : "v=hello; read x <@v; printf '%s' \"$x\"" => "hello";
+    var_read_unset         : "read x <@nope; printf '[%s]' \"$x\"" => "[]";
+    var_explicit_fd        : "printf to5 5>@v >&5; printf '%s' \"$v\"" => "to5";
+    var_subscript          : "arr=(a b c); printf z >@arr[1]; printf '%s' \"${arr[*]}\"" => "a z c";
+    var_subscript_idx_var  : "i=2; arr=(a b c); printf z >@arr[i]; printf '%s' \"${arr[*]}\"" => "a b z";
+    var_subscript_arith    : "arr=(a b c); printf z >@arr[1+1]; printf '%s' \"${arr[*]}\"" => "a b z";
+    var_assoc_key          : "declare -A m; m[k]=old; printf new >@m[k]; printf '%s' \"${m[k]}\"" => "new";
+    var_read_subscript     : "arr=(p q r); read x <@arr[1]; printf '%s' \"$x\"" => "q";
+    var_read_external      : "v=hello; cat <@v" => "hello", needs "cat";
+    var_write_external     : "ls -d / >@v; printf '%s' \"$v\"" => "/\n", needs "ls";
+    var_pipeline           : "printf pp | cat >@v; printf '%s' \"$v\"" => "pp", needs "cat";
+    var_roundtrip          : "s=round; cat <@s >@d; printf '%s' \"$d\"" => "round", needs "cat";
+    var_subscript_creates  : "printf z >@fresh[1]; printf '%s' \"${fresh[*]}\"" => " z";
+    var_subscript_loop     : "for i in 0 1 2; do printf 'a%s' \"$i\" >@lp[i]; done; printf '%s' \"${lp[*]}\"" => "a0 a1 a2";
+    var_assoc_key_creates  : "declare -A f; printf v >@f[k]; printf '%s' \"${f[k]}\"" => "v";
+  }
+
+  // 100000 bytes overruns the 64K pipe buffer, so a child writing into an
+  // undrained `VarSink::External` would block here rather than finish.
+  #[test]
+  fn var_redir_payload_past_pipe_buffer() {
+    if !has_cmds(&["head", "tr"]) {
+      return;
+    }
+    let g = TestGuard::new();
+    test_input("head -c 100000 /dev/zero | tr '\\0' x >@big; printf '%s' \"${#big}\"").unwrap();
+    assert_eq!(g.read_output(), "100000");
   }
 
   // Regression: a persisted close (`exec N>&-`) must not leave a `CloseSink`

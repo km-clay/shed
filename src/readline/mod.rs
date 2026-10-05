@@ -18,6 +18,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::defer;
 use crate::readline::editmode::ExNdRule;
+use crate::util::strops::VarStrDisplay;
 use crate::util::ui::Justify;
 use crate::{
   autocmd, builtin, eval, exec_term, expand,
@@ -1286,15 +1287,15 @@ impl ShedLine {
         let candidates = comp.all_candidates();
         let num_candidates = candidates.len();
 
-        let cand_assoc: VarKind = candidates
-          .into_iter()
-          .fold(vec![], |mut acc, cand| {
-            let desc = cand.desc().map(ToString::to_string).unwrap_or_default();
-            let name = cand.content().to_string();
+        let cand_vec: Vec<(VarStr, VarStr)> =
+          candidates.into_iter().fold(vec![], |mut acc, cand| {
+            let desc = cand.desc().map(VarStr::from).unwrap_or_default();
+            let name = cand.content().to_var_str();
             acc.push((name, desc));
             acc
-          })
-          .into();
+          });
+        let cand_assoc = VarKind::AssocArr(cand_vec);
+
         Shed::vars_mut(|v| v.set_var("MATCHES", cand_assoc, VarFlags::LOCAL).unwrap());
         Shed::vars_mut(|v| {
           v.set_var(

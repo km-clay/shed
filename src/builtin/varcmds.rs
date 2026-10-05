@@ -1313,19 +1313,11 @@ mod tests {
   fn declare_assoc_with_values() {
     let _g = TestGuard::new();
     test_input("declare -A mymap=([foo]=bar [biz]=baz)").unwrap();
-    let val = Shed::vars(|v| {
-      v.index_var(
-        "mymap",
-        &crate::state::vars::ArrIndex::Key("foo".to_string()),
-      )
-    });
+    let val =
+      Shed::vars(|v| v.index_var("mymap", &crate::state::vars::ArrIndex::Key("foo".into())));
     assert_eq!(val.unwrap(), "bar");
-    let val2 = Shed::vars(|v| {
-      v.index_var(
-        "mymap",
-        &crate::state::vars::ArrIndex::Key("biz".to_string()),
-      )
-    });
+    let val2 =
+      Shed::vars(|v| v.index_var("mymap", &crate::state::vars::ArrIndex::Key("biz".into())));
     assert_eq!(val2.unwrap(), "baz");
   }
 

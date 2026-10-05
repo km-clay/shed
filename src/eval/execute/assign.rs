@@ -10,7 +10,7 @@
 //! Also handles assignment arithmetic operations like `+=`, `-=`, `*=`, and `/=` for integer and string variables,
 //! as well as array appending for indexed arrays.
 
-use crate::set_var;
+use crate::{set_var, varstr};
 use std::collections::VecDeque;
 
 use itertools::Itertools;
@@ -127,7 +127,7 @@ impl super::Dispatcher {
         AssignKind::Eq => {
           if let Some((name, idx)) = indexed {
             Shed::vars_mut(|v| {
-              v.set_var_indexed(&name.to_str_lossy(), idx, val.to_string(), flags)
+              v.set_var_indexed(&name.to_str_lossy(), idx, varstr!("{val}"), flags)
             })?;
           } else {
             Shed::vars_mut(|v| v.set_var(var_name, val.clone(), flags))?;
@@ -321,12 +321,7 @@ impl super::Dispatcher {
 
           if let Some((name, idx)) = indexed {
             Shed::vars_mut(|v| {
-              v.set_var_indexed(
-                &name.to_str_lossy(),
-                idx,
-                var.to_string(),
-                VarFlags::empty(),
-              )
+              v.set_var_indexed(&name.to_str_lossy(), idx, var.into(), VarFlags::empty())
             })?;
           } else {
             set_var!(var_name, var.kind().clone())?;

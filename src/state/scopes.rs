@@ -281,7 +281,7 @@ impl ScopeStack {
     &mut self,
     var_name: &str,
     idx: ArrIndex,
-    val: String,
+    val: VarStr,
     flags: VarFlags,
   ) -> ShResult<()> {
     if flags.contains(VarFlags::LOCAL) {
@@ -792,9 +792,9 @@ mod index_var_sliced_tests {
   }
 
   fn set_assoc(name: &str, pairs: &[(&str, &str)]) {
-    let vec: Vec<(String, String)> = pairs
+    let vec: Vec<(VarStr, VarStr)> = pairs
       .iter()
-      .map(|(k, v)| (k.to_string(), v.to_string()))
+      .map(|(k, v)| ((*k).into(), (*v).into()))
       .collect();
     Shed::vars_mut(|v| {
       v.set_var(name, VarKind::assoc_arr(vec), VarFlags::empty())
@@ -1039,9 +1039,9 @@ mod get_array_keys_tests {
   }
 
   fn set_assoc(name: &str, pairs: &[(&str, &str)]) {
-    let vec: Vec<(String, String)> = pairs
+    let vec: Vec<(VarStr, VarStr)> = pairs
       .iter()
-      .map(|(k, v)| (k.to_string(), v.to_string()))
+      .map(|(k, v)| ((*k).into(), (*v).into()))
       .collect();
     Shed::vars_mut(|v| {
       v.set_var(name, VarKind::assoc_arr(vec), VarFlags::empty())

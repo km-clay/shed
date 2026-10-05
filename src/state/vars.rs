@@ -358,11 +358,11 @@ pub(crate) enum ArrIndex {
   ArgCount,
   AllJoined,
   AllSplit,
-  Key(String),
+  Key(VarStr),
 
   /// Unresolved index, parsed depending on whether we are targeting an
   /// indexed array or an associative array
-  Raw(String),
+  Raw(VarStr),
 }
 
 impl ArrIndex {
@@ -373,16 +373,18 @@ impl ArrIndex {
   pub(crate) fn parse(s: &str, allow_side_effects: bool) -> ShResult<Self> {
     let input = SegStream::from_bytes(s.as_bytes());
     let expanded = var::expand_raw_inner(None, &mut input.cursor(), allow_side_effects, false)?;
-    let s = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
-    match s.as_str() {
-      "@" => Ok(Self::AllSplit),
-      "*" => Ok(Self::AllJoined),
-      "#" => Ok(Self::ArgCount),
-      _ if s.starts_with('-')
+    let s = VarStr::from(expanded.into_bytes());
+
+    match s.as_bytes() {
+      b"@" => Ok(Self::AllSplit),
+      b"*" => Ok(Self::AllJoined),
+      b"#" => Ok(Self::ArgCount),
+      _ if s.starts_with(b"-")
         && !s[1..].is_empty()
         && s[1..].chars().all(|c| c.is_ascii_digit()) =>
       {
-        let idx = s[1..].parse::<usize>().unwrap();
+        let idx = VarStr::from(&s[1..]);
+        let idx = idx.parse::<usize>().unwrap();
         Ok(Self::FromBack(idx))
       }
       _ if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) => {
@@ -416,7 +418,7 @@ impl ArrIndex {
           Ok(Self::Literal(n))
         }
       },
-      Self::Literal(n) if matches!(tag, VarKindTag::AssocArr) => Ok(Self::Key(n.to_string())),
+      Self::Literal(n) if matches!(tag, VarKindTag::AssocArr) => Ok(Self::Key(varstr!("{n}"))),
       _ => Ok(self),
     }
   }
@@ -991,13 +993,8 @@ impl VarKind {
     Self::Arr(vec)
   }
 
-  pub(crate) fn assoc_arr<K: Into<VarStr>, V: Into<VarStr>, I: IntoIterator<Item = (K, V)>>(
-    iter: I,
-  ) -> Self {
-    let pairs = iter
-      .into_iter()
-      .map(|(k, v)| (k.into(), v.into()))
-      .collect();
+  pub(crate) fn assoc_arr<I: IntoIterator<Item = (VarStr, VarStr)>>(iter: I) -> Self {
+    let pairs = iter.into_iter().collect();
     Self::AssocArr(pairs)
   }
 
@@ -1099,12 +1096,6 @@ impl VarKind {
     }
 
     Ok(Self::AssocArr(pairs))
-  }
-}
-
-impl<K: Into<VarStr>, V: Into<VarStr>> From<Vec<(K, V)>> for VarKind {
-  fn from(value: Vec<(K, V)>) -> Self {
-    Self::assoc_arr(value)
   }
 }
 

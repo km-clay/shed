@@ -465,6 +465,7 @@ impl Dispatcher {
   }
   fn exec_builtin(&mut self, tree: &Ast, cmd_id: NodeId, cmd_name: &[u8]) -> ShResult<()> {
     let fork_builtins = Shed::meta_mut(MetaTab::take_fork);
+    let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(fork_builtins));
     let span = tree.span_for(cmd_id);
 
     let Some(builtin) = builtin::lookup_builtin(cmd_name) else {

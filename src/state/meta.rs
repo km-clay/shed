@@ -588,6 +588,13 @@ impl JumpTable {
 }
 pub(crate) type JumpTableDirs<'a> = std::iter::Cloned<vec_deque::Iter<'a, Rc<PathBuf>>>;
 
+pub(crate) struct RedirForkGuard(bool);
+impl Drop for RedirForkGuard {
+  fn drop(&mut self) {
+    Shed::meta_mut(|m| m.restore_redir_fork(self.0));
+  }
+}
+
 /// Miscellaneous global data storage
 #[derive(Debug)]
 #[expect(clippy::struct_excessive_bools)]
@@ -637,6 +644,7 @@ pub(crate) struct MetaTab {
   loop_depth: usize,
   xtrace_depth: usize,
   fork_builtins: bool,
+  fork_redirs: bool,
 
   // completion candidates given by compadd
   comp_add_candidates: Vec<Candidate>,
@@ -674,6 +682,7 @@ impl Clone for MetaTab {
       func_depth: self.func_depth,
       xtrace_depth: self.xtrace_depth,
       fork_builtins: self.fork_builtins,
+      fork_redirs: self.fork_redirs,
       envp_cache: self.envp_cache.clone(),
       comp_add_candidates: self.comp_add_candidates.clone(),
       regexes: self.regexes.clone(),
@@ -709,6 +718,7 @@ impl Default for MetaTab {
       func_depth: 0,
       xtrace_depth: 0,
       fork_builtins: false,
+      fork_redirs: false,
       envp_cache: None,
       procsub_stack: vec![],
       comp_add_candidates: vec![],
@@ -860,6 +870,16 @@ impl MetaTab {
     self.xtrace_depth += 1;
 
     XtraceGuard
+  }
+  pub(crate) fn enter_redir_fork(&mut self, forks: bool) -> RedirForkGuard {
+    let prev = std::mem::replace(&mut self.fork_redirs, forks);
+    RedirForkGuard(prev)
+  }
+  pub(crate) fn redir_forks(&self) -> bool {
+    self.fork_redirs
+  }
+  fn restore_redir_fork(&mut self, prev: bool) {
+    self.fork_redirs = prev;
   }
   pub(crate) fn take_fork(&mut self) -> bool {
     std::mem::take(&mut self.fork_builtins)

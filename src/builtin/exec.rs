@@ -1,7 +1,7 @@
 use crate::{
   eval::execute::ExecArgs,
   sherr,
-  state::{Shed, params, terminal::Terminal},
+  state::{Shed, cmd, params, terminal::Terminal},
   util::{self, error::ShResult, posix},
 };
 use nix::errno::Errno;
@@ -29,15 +29,26 @@ impl super::Builtin for Exec {
 
     let cmd = &args.cmd.0;
     let span = args.cmd.1;
+    let cmd_str = cmd.to_string_lossy();
 
     let _term_guard = Shed::term_mut(Terminal::prepare_for_exec);
+
+    if cmd::lookup_cmd(&cmd_str).is_none() {
+      return Err(sherr!(NotFound @ span, "command not found: {cmd_str}").with_code(127));
+    }
+
+    if let Err(e) = Shed::sinks(|s| s.commit_redirects()) {
+      return Err(sherr!(IoErr(e.kind()) @ span, "failed to commit redirects: {e}"));
+    }
 
     let Err(e) = posix::execvpe(cmd, &args.argv, &args.envp);
 
     // execvpe only returns on error
     let cmd_str = cmd.to_str().unwrap().to_string();
     match e {
-      Errno::ENOENT => Err(sherr!(NotFound @ span, "exec: command not found: {}", cmd_str)),
+      Errno::ENOENT => {
+        Err(sherr!(NotFound @ span, "exec: command not found: {}", cmd_str).with_code(127))
+      }
       _ => Err(sherr!(Errno(e) @ span, "{e}")),
     }
   }

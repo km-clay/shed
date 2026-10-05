@@ -1,4 +1,3 @@
-use crate::set_var;
 use std::{cell::Cell, str::FromStr};
 
 use bstr::ByteSlice;
@@ -16,6 +15,7 @@ use crate::{
     error::{ShErr, ShResult},
     strops::{self, ByteCursor, ParseRadix, SliceCursor},
   },
+  varstr,
 };
 
 use super::{escape, var};
@@ -450,7 +450,7 @@ fn assign_var(name: &str, val: i64) -> ShResult<()> {
     let tag = Shed::vars(|v| v.try_get_var_kind_tag(vn.name())).unwrap_or(VarKindTag::Arr);
     let idx = idx.clone().resolve_for(tag)?;
     return Shed::vars_mut(|v| {
-      v.set_var_indexed(vn.name(), idx, val.to_string(), VarFlags::empty())
+      v.set_var_indexed(vn.name(), idx, varstr!("{val}"), VarFlags::empty())
     });
   }
   Shed::vars_mut(|v| {
@@ -1211,6 +1211,7 @@ fn strip_enclosing_parens(s: &[u8]) -> Option<&[u8]> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::set_var;
   use crate::state::{Shed, vars::VarKind};
   use crate::tests::testutil::TestGuard;
 
