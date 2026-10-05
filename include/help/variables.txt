@@ -27,6 +27,13 @@ integer variables, and arrays.
 
       ```a=1 b=2 c=3```
 
+  A command's output can be captured straight into a variable with a
+  |redirection|(redirect). Unlike command substitution this keeps trailing newlines,
+  so it round-trips arbitrary data -- see |redir-var|:
+
+      ```ls -d / >@root```
+      ```cat image.png >@blob```
+
 ==============================================================================
 2. Mutation Operators                            *var-mutation*
 
@@ -179,4 +186,4 @@ integer variables, and arrays.
           ```unset 'arr[2]'```
 
 ==============================================================================
-See also: |param| |arith|
+See also: |param| |arith| |redir-var|

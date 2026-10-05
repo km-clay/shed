@@ -270,7 +270,116 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       ```{ echo a >&$w; echo b >&$w; } {w}> out.txt```
 
 ==============================================================================
-10. Combining Redirections                     *redir-combine*
+10. Variable Redirection                       *redir-var*
+
+  Redirect a command's output into a shell variable, or feed a variable's
+  contents in as its input. Unlike command substitution, which strips newlines,
+  the capture is byte-exact.
+
+  `command >@name`                             *redir-out-var*
+
+      Capture the command's stdout into `$name`, replacing any previous
+      value.
+
+      Example:
+        ```ls -d / >@root```
+        ```printf '%s' "$root"    # / and the newline ls printed```
+
+  `command >>@name`                            *redir-append-var*
+
+      Append the command's stdout to `$name`, keeping its existing value.
+
+      Example:
+        ```log=start```
+        ```echo ' more' >>@log```
+
+  `command <@name`                             *redir-in-var*
+
+      Feed the contents of `$name` to the command's stdin. `$name` is not
+      modified.
+
+      Example:
+        ```text=hello```
+        ```cat <@text```
+
+  A descriptor number applies as it does to file redirections, so
+  `command 2>@errs` captures stderr, and both streams can be captured
+  separately in one run:
+
+      ```command >@out 2>@err```   captures both the stdout and stderr
+                                   of `command` into separate variables
+
+  Byte transparency ~
+
+    Command substitution strips trailing newlines, and in other POSIX
+    shells a variable cannot hold a NUL byte at all. A variable
+    redirection preserves both, so arbitrary bytes round-trip:
+
+      ```cat image.png >@blob```
+      ```printf '%s' "$blob" > copy.png    # identical to the original```
+
+    Measure a capture with |len -b|(builtin-len). The POSIX `${#var}`
+    form counts characters, which differs from the byte count for
+    non-ASCII input.
+
+  Subscripts ~
+
+    The target may name an array element. The subscript is expanded the
+    same way |redir-varfd| expands its braces, so a variable or an
+    arithmetic expression works:
+
+      ```printf a >@arr[0]```
+      ```printf b >@arr[$i]```
+      ```printf c >@arr[1+1]```
+
+    An indexed array is created if the variable is unset. An associative
+    array must be declared first with |declare|(builtin-declare) and
+    `-A`; otherwise the subscript is treated as arithmetic instead of a key,
+    and evaluates to index 0.
+
+  Scope ~
+
+    A capture reaches the shell that ran the pipeline, whichever stage made
+    it. This differs from an ordinary assignment, which does not survive a
+    stage:
+
+      ```printf x | cat >@out | cat    # $out is set afterwards```
+      ```printf x | read v | cat       # $v is not```
+
+    With `exec`, the descriptor outlives the command and the capture is
+    committed when it closes:
+
+      ```exec 7>@out```
+      ```echo captured >&7```
+      ```exec 7>&-              # $out is set now```
+
+  Limits ~
+
+    A capture is bounded by the `core.max_read_limit` |shopt|. Output
+    past the limit is discarded and a warning is printed; the command's
+    exit status is not changed.
+
+  The variable name ends at the first character that cannot appear in a
+  name, so `>@a-b` captures into `a` and passes `-b` to the command as
+  an argument.
+
+  A capture made inside the body of a compound command or function cannot
+  travel back out if that body runs in a forked process. A body forks when
+  it contains an external command, and `(` `)` always forks:
+
+      ```printf x | { thru >@a; } | thru       # $a is set```
+      ```printf x | { cat >@b; } | cat         # $b is not```
+      ```printf x | ( thru >@c ) | thru        # $c is not```
+
+  The redirection itself is unaffected -- the command still writes where it
+  was told to. Only the commit is lost, the same way any other variable
+  write inside a subshell is lost. Capture at the stage itself rather than
+  inside its body to avoid this:
+
+      ```printf x | cat >@b | cat              # $b is set```
+
+==============================================================================
+11. Combining Redirections                     *redir-combine*
 
   Multiple redirections can appear on a single command, processed left
   to right:
@@ -279,7 +388,10 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
       ```command 2>&1 > out.txt   # different! stderr to terminal,
                                  # stdout to file```
 
-  Order matters: each redirection is applied in sequence.
+  Order matters: each redirection is applied in sequence. When using the dup
+  form like `2>&1`, `2` now points where `1` is pointing. Redirecting `1` at
+  this point will change where `1` is pointing, but `2` does {not} inherit this
+  change. It will continue pointing where `1` used to.
 
 ==============================================================================
 See also: |param| |glob| |arith|
