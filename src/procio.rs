@@ -2024,8 +2024,7 @@ enum VarSink {
   },
   External {
     name: VarName,
-    write: Arc<dyn Sink>,
-    read: Arc<dyn Sink>,
+    scratch: Arc<dyn Sink>,
     buf: Mutex<Vec<u8>>,
     creator_pid: Pid,
   },
@@ -2053,15 +2052,12 @@ impl VarSink {
       buf.len(),
       Pid::this()
     );
-    let new = OsPipe::pipes().map(|(read, write)| Self::External {
+    Ok(Self::External {
       name,
-      read,
-      write,
+      scratch: Arc::new(OsSink::new(scratch_fd()?)),
       buf: Mutex::new(buf),
       creator_pid: Pid::this(),
-    })?;
-
-    Ok(new)
+    })
   }
 
   fn name(&self) -> &VarName {
@@ -2085,19 +2081,15 @@ impl VarSink {
   fn take(&mut self) -> (VarName, Vec<u8>) {
     match self {
       Self::External {
-        name,
-        write,
-        read,
-        buf,
-        ..
+        name, scratch, buf, ..
       } => {
-        // closes the write end (hopefully)
-        *write = Arc::new(NullSink::new());
-
         let mut acc = std::mem::take(buf.get_mut().unwrap());
         let mut chunk = take_scratch();
 
-        while let Ok(n) = read.read(&mut chunk)
+        if let Err(e) = scratch.seek(io::SeekFrom::Start(0)) {
+          vstrace!("VarSink::take seek failed: {e}");
+        }
+        while let Ok(n) = scratch.read(&mut chunk)
           && n > 0
         {
           acc.extend_from_slice(&chunk[..n]);
@@ -2131,7 +2123,7 @@ impl Sink for VarSink {
 
   fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
     match self {
-      VarSink::External { write, .. } => write.as_os_fd(),
+      VarSink::External { scratch, .. } => scratch.as_os_fd(),
       VarSink::Local { .. } => Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "local variable sinks do not have an OS-level file descriptor",
