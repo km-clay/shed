@@ -365,7 +365,11 @@ impl StageThread {
       return;
     };
     self.status = Some(match handle.join() {
-      Ok(result) => StageStatus::Complete(Box::new(result)),
+      Ok(mut result) => {
+        // stage order: members are waited in the order they were pushed
+        procio::apply_stage_var_writes(result.take_var_writes());
+        StageStatus::Complete(Box::new(result))
+      }
       Err(_) => StageStatus::Panicked,
     });
   }

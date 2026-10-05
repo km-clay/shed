@@ -66,7 +66,7 @@ use crate::{
     error::{ShErr, ShResult},
     strops::{self, ByteCursor, SliceCursor},
   },
-  varstr, vstrace,
+  varstr,
 };
 
 /// Minimum fd number for shell-internal file descriptors.
@@ -930,16 +930,9 @@ impl RedirSpec {
             VarStr::default()
           };
 
-          let forks = Shed::meta(MetaTab::redir_forks);
-          vstrace!(
-            "as_sink var={} redir_forks={forks} pid={}",
-            vn.name(),
-            Pid::this()
-          );
-          if forks {
+          if Shed::meta(MetaTab::redir_forks) {
             let sink: Arc<dyn Sink> = Arc::new(VarSink::new_external(vn, content.into_bytes())?);
-            let deferred = Shed::pipe_frames_mut(|f| f.defer(&sink));
-            vstrace!("as_sink deferred external var sink: {deferred}");
+            Shed::pipe_frames_mut(|f| f.defer(&sink));
             sink
           } else {
             Arc::new(VarSink::new_local(vn, content.into_bytes()))
@@ -1085,6 +1078,9 @@ impl PipeFrame {
     self.deferred.push(Arc::clone(sink));
     true
   }
+  fn take_deferred(&mut self) -> Vec<Arc<dyn Sink>> {
+    std::mem::take(&mut self.deferred)
+  }
 }
 
 impl Debug for PipeFrame {
@@ -1143,6 +1139,16 @@ impl PipeFrames {
     if let Some(frame) = self.frames.last_mut() {
       frame.record(sink);
     }
+  }
+
+  /// Hand back the innermost frame's deferred sinks so the caller can drop
+  /// them outside this borrow. Dropping one commits its capture.
+  pub(crate) fn take_deferred(&mut self) -> Vec<Arc<dyn Sink>> {
+    self
+      .frames
+      .last_mut()
+      .map(PipeFrame::take_deferred)
+      .unwrap_or_default()
   }
 
   /// Live OS descriptors across every frame. Ends that have been dropped, and
@@ -2024,7 +2030,8 @@ enum VarSink {
   },
   External {
     name: VarName,
-    scratch: Arc<dyn Sink>,
+    write: Arc<dyn Sink>,
+    read: Arc<dyn Sink>,
     buf: Mutex<Vec<u8>>,
     creator_pid: Pid,
   },
@@ -2032,12 +2039,6 @@ enum VarSink {
 
 impl VarSink {
   pub(crate) fn new_local(name: VarName, buf: Vec<u8>) -> Self {
-    vstrace!(
-      "VarSink::new_local var={} seed={}B pid={}",
-      name.name(),
-      buf.len(),
-      Pid::this()
-    );
     Self::Local {
       name,
       buf: Mutex::new(buf),
@@ -2046,24 +2047,15 @@ impl VarSink {
   }
 
   pub(crate) fn new_external(name: VarName, buf: Vec<u8>) -> ShResult<Self> {
-    vstrace!(
-      "VarSink::new_external var={} seed={}B pid={}",
-      name.name(),
-      buf.len(),
-      Pid::this()
-    );
+    let (read, write) = OsPipe::pipes()?;
+
     Ok(Self::External {
       name,
-      scratch: Arc::new(OsSink::new(scratch_fd()?)),
+      write,
+      read,
       buf: Mutex::new(buf),
       creator_pid: Pid::this(),
     })
-  }
-
-  fn name(&self) -> &VarName {
-    match self {
-      Self::Local { name, .. } | Self::External { name, .. } => name,
-    }
   }
 
   fn creator_pid(&self) -> Pid {
@@ -2081,26 +2073,29 @@ impl VarSink {
   fn take(&mut self) -> (VarName, Vec<u8>) {
     match self {
       Self::External {
-        name, scratch, buf, ..
+        name,
+        write,
+        read,
+        buf,
+        ..
       } => {
+        *write = Arc::new(NullSink::new());
+
         let mut acc = std::mem::take(buf.get_mut().unwrap());
-        let mut chunk = take_scratch();
 
-        if let Err(e) = scratch.seek(io::SeekFrom::Start(0)) {
-          vstrace!("VarSink::take seek failed: {e}");
-        }
-        while let Ok(n) = scratch.read(&mut chunk)
-          && n > 0
+        if let Ok(fd) = read.as_os_fd()
+          && let Ok(capped) = read_capped(fd)
         {
-          acc.extend_from_slice(&chunk[..n]);
+          if capped.was_truncated() {
+            // raw stderr: this runs inside a `Shed::sinks` borrow
+            eprintln!(
+              "shed: variable capture truncated (exceeded {})",
+              capped.limit()
+            );
+          }
+          acc.extend_from_slice(&capped);
         }
 
-        vstrace!(
-          "VarSink::take drained var={} total={}B pid={}",
-          name.name(),
-          acc.len(),
-          Pid::this()
-        );
         (name.clone(), acc)
       }
       Self::Local { name, buf, .. } => (name.clone(), std::mem::take(buf.get_mut().unwrap())),
@@ -2123,7 +2118,7 @@ impl Sink for VarSink {
 
   fn as_os_fd(&self) -> io::Result<BorrowedFd<'_>> {
     match self {
-      VarSink::External { scratch, .. } => scratch.as_os_fd(),
+      VarSink::External { write, .. } => write.as_os_fd(),
       VarSink::Local { .. } => Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "local variable sinks do not have an OS-level file descriptor",
@@ -2146,25 +2141,11 @@ impl Drop for VarSink {
       return;
     }
 
-    let (creator, me) = (self.creator_pid(), Pid::this());
-    vstrace!(
-      "VarSink::drop var={} kind={:?} creator={creator} me={me} buffered={}B",
-      self.name().name(),
-      self.kind(),
-      self.lock_buf().len()
-    );
-
-    if creator != me {
-      vstrace!("VarSink::drop skip: inherited across fork");
+    if self.creator_pid() != Pid::this() {
       return;
     }
 
     let (name, bytes) = self.take();
-    vstrace!(
-      "VarSink::drop commit var={} bytes={}",
-      name.name(),
-      bytes.len()
-    );
 
     commit_var(&name, &bytes).unwrap_or_else(|e| {
       let name = name.name();
@@ -2173,15 +2154,39 @@ impl Drop for VarSink {
   }
 }
 
+thread_local! {
+  /// Captures made by a pipeline stage running in a worker thread, returned to
+  /// the parent so they land in its variable table rather than the worker's.
+  /// `None` in the shell's own thread, where the commit already lands correctly.
+  static STAGE_VAR_WRITES: RefCell<Option<Vec<(VarName, VarStr)>>> =
+    const { RefCell::new(None) };
+}
+
+pub(crate) fn arm_stage_var_writes() {
+  STAGE_VAR_WRITES.with(|w| *w.borrow_mut() = Some(Vec::new()));
+}
+
+pub(crate) fn take_stage_var_writes() -> Vec<(VarName, VarStr)> {
+  STAGE_VAR_WRITES.with(|w| w.borrow_mut().take().unwrap_or_default())
+}
+
+pub(crate) fn apply_stage_var_writes(writes: Vec<(VarName, VarStr)>) {
+  for (name, val) in writes {
+    commit_var(&name, val.as_bytes()).unwrap_or_else(|e| {
+      let name = name.name();
+      eprintln!("shed: error committing variable {name}: {e}");
+    });
+  }
+}
+
 fn commit_var(name: &VarName, bytes: &[u8]) -> ShResult<()> {
-  vstrace!(
-    "commit_var name={} index={:?} bytes={} pid={}",
-    name.name(),
-    name.index(),
-    bytes.len(),
-    Pid::this()
-  );
   let val = VarStr::from(bytes);
+
+  STAGE_VAR_WRITES.with(|w| {
+    if let Some(writes) = w.borrow_mut().as_mut() {
+      writes.push((name.clone(), val.clone()));
+    }
+  });
 
   match name.index() {
     Some(idx) => {
@@ -3068,6 +3073,15 @@ pub(crate) mod tests {
     var_pipe_in_function    : "f() { ls -d / | cat >@v; printf '%s' \"$v\"; }; f" => "/\n", needs "ls", "cat";
     var_pipe_mid_stage      : "printf x | { cat >@v; printf 'got:%s' \"$v\"; } | cat" => "got:x", needs "cat";
     var_pipe_local_in_stage : "printf x | { thru >@v; printf '%s' \"$v\"; }" => "x";
+  }
+
+  // A capture should outlive its pipeline stage regardless of whether that
+  // stage forked (external) or threaded (builtin). The builtin cases below
+  // fail while a threaded stage commits into its own thread-local `Shed`.
+  run_output! {
+    var_pipe_builtin_mid_persists   : "printf x | thru >@v | thru > /dev/null; printf '%s' \"$v\"" => "x";
+    var_pipe_builtin_first_persists : "printf x >@v | thru > /dev/null; printf '%s' \"$v\"" => "x";
+    var_pipe_external_mid_persists  : "printf x | cat >@v | cat > /dev/null; printf '%s' \"$v\"" => "x", needs "cat";
   }
 
   // The commit is deferred past the pipeline's wait. Before that it raced the

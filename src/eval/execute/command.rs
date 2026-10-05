@@ -350,6 +350,7 @@ impl super::Dispatcher {
       // version of getting SIGCHLD
 
       let ast = Shed::install(spec);
+      procio::arm_stage_var_writes();
       let root = ast.get_root().unwrap();
       let mut d = super::Dispatcher::new(source);
       d.job_stack.new_job();

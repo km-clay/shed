@@ -4,9 +4,15 @@ use nix::sys::signal::Signal;
 
 use crate::{
   eval::parse::ast::Ast,
-  procio::{PipeFrames, Sinks},
+  procio::{self, PipeFrames, Sinks},
   signal,
-  state::{logic::LogTab, scopes, shopt::ShOpts, timers::Timers, vars::VarTab},
+  state::{
+    logic::LogTab,
+    scopes,
+    shopt::ShOpts,
+    timers::Timers,
+    vars::{VarName, VarStr, VarTab},
+  },
   util::error::LabelBuilder,
 };
 
@@ -25,22 +31,30 @@ pub(crate) struct ForkSpec {
 #[derive(Debug)]
 pub(crate) struct StageResult {
   status: i32,
+  var_writes: Vec<(VarName, VarStr)>,
 }
 
 impl Default for StageResult {
   fn default() -> Self {
     Self {
       status: signal::signal_status(Signal::SIGABRT),
+      var_writes: vec![],
     }
   }
 }
 
 impl StageResult {
   pub(crate) fn new(status: i32) -> Self {
-    Self { status }
+    Self {
+      status,
+      var_writes: procio::take_stage_var_writes(),
+    }
   }
   pub(crate) fn status(&self) -> i32 {
     self.status
+  }
+  pub(crate) fn take_var_writes(&mut self) -> Vec<(VarName, VarStr)> {
+    std::mem::take(&mut self.var_writes)
   }
 }
 

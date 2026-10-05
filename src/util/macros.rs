@@ -624,16 +624,3 @@ macro_rules! assert_sorted {
     };
   };
 }
-
-/// Gated raw-stderr trace for var-redirect debugging.
-///
-/// Writes with `eprintln!` rather than the `log` facade on purpose: flog routes
-/// through a `Shed` accessor, and these fire from inside a `Shed::sinks` borrow.
-#[macro_export]
-macro_rules! vstrace {
-  ($($arg:tt)*) => {{
-    if std::env::var_os("SHED_VARSINK_TRACE").is_some() {
-      eprintln!($($arg)*);
-    }
-  }};
-}
