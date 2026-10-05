@@ -493,7 +493,12 @@ impl VarName {
 
     let name = raw[..bracket_start].to_string();
     let idx_str = &raw[bracket_start + 1..bracket_end];
-    let index = ArrIndex::parse(idx_str, allow_side_effects)?;
+    // quoted subscripts need special handling
+    let index = if idx_str.contains('"') || idx_str.contains('\'') {
+      super::params::expand_arr_index(idx_str.as_bytes(), allow_side_effects)?
+    } else {
+      ArrIndex::parse(idx_str, allow_side_effects)?
+    };
 
     // Array slicing only applies to [@] and [*] indexes
     let (slice_start, slice_len) = if matches!(index, ArrIndex::AllSplit | ArrIndex::AllJoined) {
