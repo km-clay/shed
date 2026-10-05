@@ -626,10 +626,14 @@ pub(super) trait BuiltinRouter {
   }
   fn dispatch_sub(&self, args: BuiltinArgs) -> ShResult<()> {
     let sub = self.sub_from_args(&args);
-    let (mut words, span, cmd_span) = args.unpack();
-    if sub.is_some() {
-      // strip the verb word before handing the rest to the subcommand
-      words.remove(0);
+    let (mut words, span, mut cmd_span) = args.unpack();
+
+    // strip subcommand, adjust cmd_span
+    if sub.is_some()
+      && let Some(pos) = words.iter().position(|w| matches!(w, Word::Arg(_, _)))
+      && let Word::Arg(_, span) = words.remove(pos)
+    {
+      cmd_span = span;
     }
     let Some(sub) = sub.or_else(|| self.default_sub()) else {
       return self.sub_not_found(BuiltinArgs::new(words, span, cmd_span));
