@@ -299,6 +299,7 @@ impl LogTab {
       self.register_autoload_funcs();
     }
     if flags.contains(ForgetFlags::COMPS) {
+      self.comp_autoloads.clear();
       self.register_autoload_comps();
     }
     if flags.contains(ForgetFlags::ALIASES) {
@@ -320,8 +321,11 @@ impl LogTab {
       self.functions.insert(name, ShFunc::Autoload(src));
     }
   }
+  /// Register the bundled completion autoloads, preserving any already
+  /// registered (user) entries. Callers that want a reset should clear
+  /// `comp_autoloads` first.
   pub(crate) fn register_autoload_comps(&mut self) {
-    self.comp_autoloads = autoload::CompLoader.bundled();
+    self.comp_autoloads.extend(autoload::CompLoader.bundled());
   }
   pub(crate) fn get_autoload_func_names(&self) -> Vec<String> {
     let mut names: Vec<String> = self
@@ -478,5 +482,38 @@ impl LogTab {
   }
   pub(crate) fn ex_aliases(&self) -> &HashMap<String, ShAlias> {
     &self.ex_aliases
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::path::PathBuf;
+
+  use super::*;
+
+  fn user_comp() -> (String, AutoloadSrc) {
+    (
+      "jj".to_string(),
+      AutoloadSrc::Path(PathBuf::from("/tmp/shed-comp/jj.sh")),
+    )
+  }
+
+  #[test]
+  fn register_autoload_comps_preserves_user_entries() {
+    let mut table = LogTab::new();
+    let (name, src) = user_comp();
+    table.insert_comp_autoload(&name, src);
+    table.register_autoload_comps();
+    // the user-registered entry must survive re-registering the bundled set
+    assert_eq!(table.get_autoload_comp_names(), vec!["jj".to_string()]);
+  }
+
+  #[test]
+  fn forget_comps_resets_to_bundled_only() {
+    let mut table = LogTab::new();
+    let (name, src) = user_comp();
+    table.insert_comp_autoload(&name, src);
+    table.forget(ForgetFlags::COMPS);
+    assert!(table.get_autoload_comp_names().is_empty());
   }
 }
