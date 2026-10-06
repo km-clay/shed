@@ -1,6 +1,8 @@
 //! The [`thru`](`Thru`) builtin
 use std::{fs, io, sync::Arc};
 
+use bstr::ByteSlice;
+
 use crate::{
   builtin::{BuiltinArgs, opt::OptSpec},
   errln,
@@ -115,6 +117,8 @@ impl super::Builtin for Thru {
         },
       };
       let span = src.map(|(_, s)| s);
+      let can_seek =
+        (from.is_some() || until.is_some()) && reader.seek(io::SeekFrom::Current(0)).is_ok();
 
       let mut buf = procio::take_scratch();
       loop {
@@ -126,8 +130,14 @@ impl super::Builtin for Thru {
           break;
         }
 
-        let cap = if from.is_some() || until.is_some() {
-          1
+        let cap = if (from.is_some() || until.is_some()) && !can_seek {
+          if skip > 0 {
+            // bulk read until we are done skipping
+            skip.min(buf.len().min(window))
+          } else {
+            // now read one at a time until we hit the delimiter
+            1
+          }
         } else {
           buf.len().min(window)
         };
@@ -164,12 +174,35 @@ impl super::Builtin for Thru {
           continue;
         }
 
-        if from.is_some() {
-          if emit.first() == from.as_ref() {
+        if let Some(delim) = from {
+          if (can_seek && Self::rewind_past(&*reader, emit, delim)?.is_some())
+            || emit.first() == Some(&delim)
+          {
             from = None;
           }
           continue;
         }
+
+        if let Some(delim) = until {
+          if can_seek {
+            if let Some(pos) = Self::rewind_past(&*reader, emit, delim)? {
+              emit = &emit[..pos];
+              procio::out_bytes(emit);
+              if let Some(t) = tee_file.as_mut() {
+                t.write_all(emit).ok();
+              }
+              byte_count += emit.len();
+              until = None;
+              take = None;
+              break 'sources;
+            }
+          } else if emit.first() == Some(&delim) {
+            until = None;
+            take = None;
+            break 'sources;
+          }
+        }
+
         if until.is_some() && emit.first() == until.as_ref() {
           until = None;
           take = None;
@@ -282,6 +315,22 @@ impl Thru {
       until,
     })
   }
+
+  /// The seeking fast path for delim scanning
+  ///
+  /// Works on stuff like files, but not pipes since those cannot be lseek'd
+  fn rewind_past(sink: &dyn Sink, chunk: &[u8], delim: u8) -> io::Result<Option<usize>> {
+    match chunk.find_byte(delim) {
+      Some(pos) => {
+        let leftover = chunk.len() - (pos + 1);
+        if leftover > 0 {
+          sink.seek(io::SeekFrom::Current(-(leftover as i64)))?;
+        }
+        Ok(Some(pos))
+      }
+      None => Ok(None),
+    }
+  }
 }
 
 #[cfg(test)]
@@ -328,6 +377,45 @@ mod tests {
       status_of("printf 'ab\\000cd' | thru --until $'\\0' >/dev/null"),
       0
     );
+  }
+
+  #[test]
+  fn skip_then_until_seekable() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("lines.txt");
+    std::fs::write(&path, "aaaa\nbbbb\ncccc\n").unwrap();
+    let g = TestGuard::new();
+
+    test_input(format!("thru -S 6 -U $'\\n' < {}", path.display())).unwrap();
+    let status = Shed::get_status();
+
+    assert_eq!(g.read_output(), "bbb");
+    assert_eq!(status, 0);
+  }
+
+  #[test]
+  fn skip_then_until_pipe() {
+    let g = TestGuard::new();
+
+    test_input("printf 'aaaa\\nbbbb\\ncccc\\n' | thru -S 6 -U $'\\n'").unwrap();
+    let status = Shed::get_status();
+
+    assert_eq!(g.read_output(), "bbb");
+    assert_eq!(status, 0);
+  }
+
+  #[test]
+  fn skip_then_from_seekable() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("lines.txt");
+    std::fs::write(&path, "X\nYYbbbb\ncccc\n").unwrap();
+    let g = TestGuard::new();
+
+    test_input(format!("thru -S 2 -F $'\\n' < {}", path.display())).unwrap();
+    let status = Shed::get_status();
+
+    assert_eq!(g.read_output(), "cccc\n");
+    assert_eq!(status, 0);
   }
 
   #[test]
