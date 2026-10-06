@@ -59,8 +59,11 @@ qtable() {
 
 		for ((col=0; col<${#widths[@]}; col++)); do
 			field="${row[col]}"
-			this_width=$(width "$field")
+
 			target_width=${widths[col]}
+      (( $(len -w -- "$field") > target_width )) && field="$(str clip "$target_width" "$field")"
+
+      this_width=$(len -w -- "$field")
 			diff=$(( target_width - this_width ))
 
 			((left)) && printf "%s" "$field"
@@ -69,7 +72,11 @@ qtable() {
 
 			((left)) || printf "%s" "$field"
 
-			printf " │ "
+      if (( col == ${#widths[@]} )); then
+        printf " │"
+      else
+        printf " │ "
+      fi
 		done
 
 		printf "\n"

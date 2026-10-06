@@ -55,7 +55,7 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
 
       Example:
         ```exec 3<> data.bin```
-        ```seek 3 0 set           # seek to beginning```
+        ```seek 3 0               # seek to beginning```
 
 ==============================================================================
 4. File Descriptor Duplication                 *redir-dup*
@@ -390,7 +390,7 @@ to stdout (fd 1) and input redirections default to stdin (fd 0).
     A held descriptor also seeks, which makes a variable usable as a
     random-access byte buffer rather than only a stream:
 
-      ```seek -e 5 0            # size of the variable```
+      ```seek -p -e 5 0         # size of the variable```
       ```seek 5 0               # rewind, then read it again```
 
   Limits ~

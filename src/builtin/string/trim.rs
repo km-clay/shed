@@ -1,6 +1,6 @@
 use bstr::ByteSlice;
 
-use crate::{HashSet, out, procio, state::vars::VarStr};
+use crate::{HashSet, out, procio, state::vars::VarStr, util::strops::ByteSet};
 
 use super::{Builtin, BuiltinArgs, ShResult, argv, mod_opt::OptSpec, opt, util};
 
@@ -118,31 +118,23 @@ impl Trim {
     start_matches: Option<VarStr>,
   ) -> ShResult<()> {
     let mut out = string.as_bytes();
-    let mut set = [false; 256]; // all possible byte values
 
     if let Some(end) = end_matches {
-      set.fill(false);
-      for b in end.bytes() {
-        set[b as usize] = true; // set values we have seen
-      }
+      let set = ByteSet::new(end.as_bytes()); // all possible byte values
 
       let end = out
         .bytes()
-        .rposition(|b| !set[b as usize]) // find values we have not seen
+        .rposition(|b| !set.contains(b)) // find values we have not seen
         .map_or(0, |i| i + 1);
 
       out = &out[..end];
     }
     if let Some(start) = start_matches {
-      // same thing here
-      set.fill(false);
-      for b in start.bytes() {
-        set[b as usize] = true;
-      }
+      let set = ByteSet::new(start.as_bytes()); // all possible byte values
 
       let start = out
         .bytes()
-        .position(|b| !set[b as usize])
+        .position(|b| !set.contains(b)) // find values we have not seen
         .unwrap_or(out.len());
 
       out = &out[start..];

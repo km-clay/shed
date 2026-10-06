@@ -3789,15 +3789,19 @@ SCRY                                             *builtin-scry* *scry*
 ==============================================================================
 SEEK                                             *builtin-seek* *seek*
 
-  `seek [-c | -e] {fd} {offset}`
+  `seek [-c | -e] [-p] {fd} {offset}`
 
-  Call `lseek(2)` on file descriptor {fd}. Prints the resulting byte
-  position to stdout. Particularly useful with '<>' redirections.
+  Call `lseek(2)` on file descriptor {fd}. Particularly useful with '<>'
+  redirections. Nothing is printed unless `-p` is given.
 
   By default the offset is absolute (from start of file).
 
   `-c`    offset is relative to the current position (SEEK_CUR)
   `-e`    offset is relative to the end of the file (SEEK_END)
+  `-p`    print the resulting byte position to stdout
+
+  `-c` and `-e` cannot be combined. The origin is set by these flags, never
+  by a positional argument; a third argument is an error.
 
   {offset} may be negative with `-c` or `-e`.
 
@@ -3806,6 +3810,7 @@ SEEK                                             *builtin-seek* *seek*
       ```seek 3 0```         seek fd 3 to the beginning
       ```seek -c 3 16```     advance fd 3 by 16 bytes
       ```seek -e 3 -1```     seek to 1 byte before the end of fd 3
+      ```seek -p -e 3 0```   print the size of fd 3
 
 ==============================================================================
 SET                                              *builtin-set* *set*
@@ -4535,22 +4540,31 @@ STR                                                    *builtin-str* *str*
 
   `str` stays deliberately lean. Parameter expansion already covers
   substrings, replacement, case, and character-set trimming with POSIX
-  classes, and when the text is already held in a variable it is the
-  faster choice, since no command substitution is needed to capture it.
+  classes, and for a simple fixed-string removal like ```${v#foo}``` it is
+  the quicker of the two.
 
-  What these subcommands add is composition: they are filters, so they
-  belong in a pipeline, where an expansion cannot reach.
+  The advantage narrows as the expansion grows. Trimming whitespace from
+  both ends needs a nested pattern match at each end, and `str trim`
+  captured with `>@var` runs that case about half again as fast. Capturing
+  with ```$(...)``` instead is several times slower than either, so the
+  comparison turns on how the result is captured as much as on the work
+  itself. See |redir-var|(redir-var).
+
+  What these subcommands add beyond that is composition: they are filters,
+  so they belong in a pipeline, where an expansion cannot reach.
 
   Subcommands ~
 
     |trim|(str-trim)   remove leading and trailing characters
+    |clip|(str-clip)   shorten a string to a length limit
+    |split|(str-split)  divide a string into parts on a delimiter
 
 ==============================================================================
 STR TRIM                                     *str-trim* *builtin-str-trim*
 
   `str trim [-e|-s] [-m {set}] [-E {set}] [-S {set}] [{string}...]`
 
-  Remove leading and trailing characters from {string}, or from standard
+  Remove leading and trailing characters from `{string}`, or from standard
   input when no operands are given. With no options, whitespace -- space,
   tab, newline and carriage return -- is removed from both ends.
 
@@ -4562,22 +4576,23 @@ STR TRIM                                     *str-trim* *builtin-str-trim*
 
   Every option turns on the end it names, so one that names a single end
   leaves the other untouched: `str trim -e` removes trailing whitespace and
-  nothing else. They accumulate rather than override, so ```-e -S ab```
+  nothing else. They accumulate rather than override, so `-e -S ab`
   trims both ends -- whitespace from the end, `a` or `b` from the start.
 
   An end's set is whatever `-E` or `-S` gives it combined with `-m`, or the
-  whitespace default when it is given neither. So ```-E foo -S bar -m biz```
+  whitespace default when it is given neither. So `-E foo -S bar -m biz`
   takes `foobiz` off the end and `barbiz` off the start.
 
-  An empty set is honoured as written, not treated as absent: ```-E ''```
-  removes nothing from the end.
+  An empty set is honoured as written, not treated as absent: `-E ''`
+  removes nothing from the end. This allows something like `-E "$set"` to
+  correctly trim nothing if the variable is empty.
 
   Capture the result with a variable redirection rather than a command
-  substitution. ```str trim "$s" >@out``` is several times quicker than
-  ```out=$(str trim "$s")```, because ```$(...)``` builds a pipe and
+  substitution. `str trim "$s" >@out` is several times quicker than
+  ```out=$(str trim "$s")```, because `$(...)` builds a pipe and
   re-parses its text on every call. See |redir-var|.
 
-  {set} is a set of characters, not a substring: ```-E ab``` removes any
+  `{set}` is a set of characters, not a substring: `-E ab` removes any
   trailing `a` or `b` in any order, never the sequence `ab`. Removal of
   {sequences} can be expressed using |parameter expansion|(param).
 
@@ -4586,12 +4601,12 @@ STR TRIM                                     *str-trim* *builtin-str-trim*
 
   Text and bytes ~
 
-    When every {set} in play is ASCII, including the whitespace default,
+    When every `{set}` in play is ASCII, including the whitespace default,
     the input is treated as bytes and whatever it contains survives
     unchanged. This is safe because a UTF-8 sequence never contains an
     ASCII byte, so an ASCII set cannot match inside a character.
 
-    A {set} holding any non-ASCII character switches to character
+    A `{set}` holding any non-ASCII character switches to character
     semantics instead, so a multi-byte character is matched whole rather
     than byte by byte.
 
@@ -4608,15 +4623,240 @@ STR TRIM                                     *str-trim* *builtin-str-trim*
       ```printf "  x  " | str trim```       reads standard input
       ```str trim -S "(" -E ")" "(x)"```    a different set at each end
 
-  When the text is already held in a variable, parameter expansion does
-  the same job without a command substitution, and faster:
+  Parameter expansion can trim too, without a command substitution:
 
       ```v="${v#"${v%%[![:space:]]*}"}"```     trim the start
       ```v="${v%"${v##*[![:space:]]}"}"```     trim the end
 
   (Kind of hideous to look at though)
 
-  See also: |len|(builtin-len)
+  It is not the faster route for this, despite appearances. Each end costs
+  a nested pattern match, and ```str trim "$v" >@v``` beats the pair above.
+  Reach for the expansion when a plain ```${v#prefix}``` will do.
+
+  See also: |clip|(str-clip), |len|(builtin-len)
+
+==============================================================================
+STR CLIP                                     *str-clip* *builtin-str-clip*
+
+  `str clip [-c | -b | -w] [-j {justify}] [-m {marker}] {limit} [{string}...]`
+
+  Shorten `{string}`, or standard input when no operand is given, so that it
+  measures no more than `{limit}`. A string already within `{limit}` is passed
+  through untouched.
+
+    `-c`  `--chars`                 measure in characters (the default)
+    `-b`  `--bytes`                 measure in raw bytes
+    `-w`  `--width`                 measure in terminal columns
+    `-j`  `--justify` {justify}      which end of the text to keep
+    `-m`  `--marker` {marker}        stand-in for the removed text
+
+  The three units match |len|(builtin-len), so the builtin that measures and
+  the builtin that cuts agree on what a length is:
+
+      ```str clip -c 6 日本語テキスト```     日本語テキス -- six characters
+      ```str clip -w 6 日本語テキスト```     日本語 -- six columns
+
+  Only one unit may be given; combining them is an error.
+
+  `-b` is byte-exact and makes no attempt to respect character boundaries, so
+  a multi-byte character straddling `{limit}` is split, the same way
+  |thru|(builtin-thru) `-T` cuts a stream. `-c` and `-w` need characters, so
+  input that is not valid UTF-8 has its invalid bytes replaced before being
+  measured.
+
+  `{justify}` is `left`, `center` or `right`, matched without regard to case,
+  and defaults to `left`. It names the text that survives, so `right` keeps
+  the tail and puts the marker in front, and `center` keeps both ends.
+
+  Marker ~
+
+    There is no marker by default; the text is simply cut. `{marker}` counts
+    against `{limit}` in whatever unit is in force, so clipping `abcdefghij` to
+    5 characters with a one-character marker leaves four of the original:
+
+        ```str clip 5 abcdefghij```            abcde
+        ```str clip 5 -m … abcdefghij```       abcd…
+
+    A `{marker}` that is itself as long as `{limit}` leaves no room for any of
+    the text, and the result is empty rather than a bare marker.
+
+  Exit status ~
+
+    `0`   always; a string shorter than `{limit}` is not an error
+    `1`   `{limit}` is missing or not a number, `{justify}` is not one of the
+          three names, or more than one unit was given
+
+  Examples ~
+
+      ```str clip 5 abcdefghij```            abcde
+      ```str clip 5 -j right abcdefghij```   fghij
+      ```str clip 6 -j center abcdefgh```    abcfgh
+      ```str clip 5 -m ... abcdefghij```     ab...
+      ```str clip 20 abc```                  abc
+      ```str clip -b 4 "$blob"```            first four bytes, exactly
+      ```printf abcdefghij | str clip 4```   reads standard input
+
+  See also: |trim|(str-trim), |len|(builtin-len), |thru|(builtin-thru)
+
+==============================================================================
+STR SPLIT                                   *str-split* *builtin-str-split*
+
+  `str split [-d {delim} | --any {set} | --0in] [-t] [-E]`
+  `          [-s {sep} | -q | -a {name} | --0out] [{string}...]`
+
+  Divide `{string}`, or standard input when no operand is given, into parts and
+  emit them. With no options the parts are the fields of the input under
+  `IFS`, written one per line -- the same division |read|(builtin-read)
+  performs.
+
+  Where to divide ~
+
+    `-d`  `--delim` {delim}            divide at each occurrence of `{delim}`
+          `--any` {set}              divide at any single byte in `{set}`
+          `--0in`                  divide a NUL-terminated record stream
+
+    `-t`  `--terminated`            read the delimiter as a terminator
+
+    With none of these, the input is split on `IFS`, which is where the
+    default differs from everything else here: it folds rather than separates.
+    A run of `IFS` whitespace counts as one divider and runs at either end are
+    discarded, while an `IFS` character that is not whitespace divides exactly
+    once and so can leave an empty field:
+
+        ```str split "a  b"```         two parts -- the run folds
+        ```str split " a b "```        two parts -- the ends go
+        ```IFS=: str split "a::b"```   three parts: `a`, empty, `b`
+
+    That two-class rule is POSIX field splitting, and `str split` and `read`
+    agree on it for any `IFS`. An empty `IFS` divides nothing, so the whole
+    input is one part.
+
+    The other three divide strictly. Nothing folds, nothing is trimmed, and
+    every occurrence opens a new part, so adjacent delimiters leave an empty
+    part between them and a leading or trailing one leaves an empty part at
+    that end:
+
+        ```str split --any $' \t' "a  b"```   three parts: `a`, empty, `b`
+        ```str split -d , "a,b,"```          three parts: `a`, `b`, empty
+
+    `{delim}` is a literal byte string of any length, so `-d ", "` divides on a
+    comma followed by a space and nothing else. `--any` takes a set of
+    individual bytes instead, so `--any ",;"` divides at either punctuation
+    mark.
+
+    Only one may be given; combining them is an error.
+
+    Terminators ~
+
+      `-t` says the delimiter ends a part rather than coming between two, which
+      is how line- and record-oriented streams are shaped. One trailing
+      delimiter is then absorbed instead of opening an empty part at the end,
+      and input that is entirely empty yields no parts at all. Nothing else
+      changes: an unterminated final part still counts, and interior empty
+      parts are still kept.
+
+          ```str split -d , "a,b,"```      three parts: `a`, `b`, empty
+          ```str split -t -d , "a,b,"```   two parts: `a`, `b`
+          ```str split -t -d , "a,b"```    two parts -- the last needs no terminator
+          ```str split -t -d , ""```       no parts
+
+      This is what a file of lines wants. Captured byte-exactly with `>@buf`
+      a trailing newline is still there, so ```-d $'\n'``` alone leaves an
+      empty part after the last line and ```-t -d $'\n'``` does not.
+      |redir-var|(redir-var) has more on why the capture keeps it where
+      ```$(...)``` would not.
+
+      `--0in` implies `-t`; it is exactly ```-t --any $'\0'```. In the `IFS`
+      division `-t` changes nothing, because a trailing field separator is
+      already absorbed there.
+
+    `IFS` holds space, tab and newline unless it has been set, so a carriage
+    return is not a divider by default and stays attached to its field. For
+    input with CRLF line-endings, reach for `-d $'\r\n'`, which divides on
+    the pair.
+
+    `--0in` is the exception: it reads NUL as a record {terminator} rather than a
+    separator, which is what `find -print0`, `grep -z` and friends produce. A
+    trailing NUL closes the last record instead of opening an empty one, so
+    terminated and unterminated input give the same answer:
+
+        ```str split --0in $'a\0b\0c\0'```   three parts
+        ```str split --0in $'a\0b\0c'```     three parts
+
+    An interior empty record is still kept, and empty input is no records at
+    all rather than one empty one -- unlike `-d , ""`, which is a single empty
+    part. For strict separator behaviour on NUL, use `--any $'\0'` instead.
+
+  What to emit ~
+
+    `-s`  `--sep` {sep}              join the parts with `{sep}`
+    `-q`  `--quoted`               quote each part, separated by spaces
+    `-a`  `--array` {name}           assign the parts to the array `${name}`
+          `--0out`               terminate each part with a NUL
+
+    The default is `-s` with a newline. Only one may be given; combining them
+    is an error.
+
+    `-s` cannot represent a part that contains `{sep}` -- the output is then
+    ambiguous about where the boundaries were. `-q`, `-a` and `--0out` all
+    survive any input: `-q` escapes each part so |unquote|(builtin-unquote) can
+    recover it exactly, `-a` never serializes at all, and `--0out` terminates
+    rather than separates, so a part may itself hold a NUL without the stream
+    becoming ambiguous.
+
+    `--0out` writes nothing at all for no parts, so it pipes into `xargs -0`
+    without inventing an empty argument, and `--0out` paired with `--0in`
+    round-trips a record stream byte for byte.
+
+        ```str split -q -d , "a b,c d" | unquote -a parts```
+
+    builds the same array as `-a parts` does, and is the form to reach for when
+    the parts have to cross a pipeline.
+
+  Escapes ~
+
+    `-E`  `--escaped`               let a backslash protect a delimiter
+
+    `-E` applies to `-d` and `--any` only; the `IFS` and `--0in` divisions
+    always read every byte literally.
+
+    Without `-E` every byte is literal, which is what dividing arbitrary data
+    wants. With it, a backslash shields the byte after it, so an escaped
+    delimiter does not divide:
+
+        ```str split -d , "a\,b,c"```      three parts: `a\\`, `b`, `c`
+        ```str split -E -d , "a\,b,c"```   two parts: `a\,b`, `c`
+
+    `-E` governs backslashes only. Quotes are never special, so a delimiter
+    inside `'` or `"` still divides.
+
+  Parts are byte-exact. A part may hold any byte including NUL, and nothing is
+  normalised on the way in or out; see |redir-var|(redir-var).
+
+  Exit status ~
+
+    `0`   always; input with no delimiter in it is a single part, not an error
+    `1`   two input options or two output options were given together
+
+  Examples ~
+
+      ```str split "a b c"```                 a, b, c
+      ```str split "a  b"```                  a, b -- the run folds
+      ```IFS=: str split "a::b"```            a, empty, b
+      ```str split -d , "a,b,c"```            a, b, c
+      ```str split -d ", " "a, b, c"```       divides on the pair, not either byte
+      ```str split --any ",;" "a,b;c"```      a, b, c
+      ```str split -s : -d , "a,b,c"```       a:b:c
+      ```str split -q -d , "a b,c d"```       'a b' 'c d'
+      ```str split -a p -d , "a,b,c"```       p is (a b c)
+      ```printf "x y z" | str split```        reads standard input
+      ```str split -t -d $'\n' "$buf"```      lines, with no empty tail
+      ```str split --0out -d , "a,b,c"```     a\0b\0c\0
+      ```find . -print0 | str split --0in```  one path per line
+
+  See also: |trim|(str-trim), |clip|(str-clip), |unquote|(builtin-unquote),
+            |read|(builtin-read)
 
 ==============================================================================
 THRU                                             *builtin-thru* *thru*

@@ -381,67 +381,6 @@ fn unescape(line: &[u8]) -> Vec<u8> {
   out
 }
 
-/// POSIX field splitting. IFS-whitespace runs collapse into a single
-/// delimiter and are stripped from both ends; non-whitespace IFS characters
-/// are hard delimiters that can yield empty fields. When `max` is set,
-/// splitting stops after `max - 1` fields and the untouched remainder (with
-/// trailing IFS-whitespace trimmed) becomes the final field, mirroring
-/// `read var1 var2 ...` where the last variable absorbs the rest of the line.
-fn ifs_split(input: &[u8], ifs: &[u8], max: Option<usize>) -> Vec<Vec<u8>> {
-  let is_ws = |b: u8| b.is_ascii_whitespace() && ifs.contains(&b);
-  let is_hard = |b: u8| !b.is_ascii_whitespace() && ifs.contains(&b);
-
-  let mut fields: Vec<Vec<u8>> = Vec::new();
-  let mut cur: Vec<u8> = Vec::new();
-  let mut bytes = input.iter().copied().enumerate().peekable();
-
-  while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
-    bytes.next();
-  }
-
-  while let Some(&(i, c)) = bytes.peek() {
-    if max.is_some_and(|max| fields.len() == max - 1) {
-      let mut rest = input[i..].to_vec();
-      while rest.last().is_some_and(|&b| is_ws(b)) {
-        rest.pop();
-      }
-      fields.push(rest);
-      return fields;
-    }
-
-    bytes.next();
-
-    if is_ws(c) {
-      while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
-        bytes.next();
-      }
-      if bytes.peek().is_some_and(|&(_, c)| is_hard(c)) {
-        bytes.next();
-        while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
-          bytes.next();
-        }
-      }
-      // trailing whitespace must not produce an empty field
-      if bytes.peek().is_some() {
-        fields.push(std::mem::take(&mut cur));
-      }
-    } else if is_hard(c) {
-      fields.push(std::mem::take(&mut cur));
-      while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
-        bytes.next();
-      }
-    } else {
-      cur.push(c);
-    }
-  }
-
-  if !cur.is_empty() {
-    fields.push(cur);
-  }
-
-  fields
-}
-
 /// Merge zero-width fields into the following one. A field that renders to no
 /// glyphs (a lone SGR color escape, say) can't stand alone, so it attaches to
 /// the next field. Genuine empty fields (zero bytes, from adjacent
@@ -485,7 +424,7 @@ fn field_split_vars(input: &[u8], vars: &[(VarStr, Span)]) -> ShResult<()> {
   }
 
   let sep = params::get_separators();
-  let fields = ifs_split(input, sep.as_bytes(), Some(vars.len()));
+  let fields = strops::ifs_split(input, sep.as_bytes(), Some(vars.len()));
 
   for (i, (name, _)) in vars.iter().enumerate() {
     let value: &[u8] = fields.get(i).map_or(&[][..], Vec::as_slice);
@@ -507,7 +446,7 @@ fn field_split_arr(input: &[u8], arr_name: &str) -> ShResult<()> {
   }
 
   let sep = params::get_separators();
-  let fields = glue_zero_width(ifs_split(input, sep.as_bytes(), None));
+  let fields = glue_zero_width(strops::ifs_split(input, sep.as_bytes(), None));
 
   Shed::vars_mut(|v| {
     v.set_var(

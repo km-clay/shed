@@ -9,6 +9,67 @@ use crate::{
 
 use super::QuoteState;
 
+/// POSIX field splitting. IFS-whitespace runs collapse into a single
+/// delimiter and are stripped from both ends; non-whitespace IFS characters
+/// are hard delimiters that can yield empty fields. When `max` is set,
+/// splitting stops after `max - 1` fields and the untouched remainder (with
+/// trailing IFS-whitespace trimmed) becomes the final field, mirroring
+/// `read var1 var2 ...` where the last variable absorbs the rest of the line.
+pub(crate) fn ifs_split(input: &[u8], ifs: &[u8], max: Option<usize>) -> Vec<Vec<u8>> {
+  let is_ws = |b: u8| b.is_ascii_whitespace() && ifs.contains(&b);
+  let is_hard = |b: u8| !b.is_ascii_whitespace() && ifs.contains(&b);
+
+  let mut fields: Vec<Vec<u8>> = Vec::new();
+  let mut cur: Vec<u8> = Vec::new();
+  let mut bytes = input.iter().copied().enumerate().peekable();
+
+  while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
+    bytes.next();
+  }
+
+  while let Some(&(i, c)) = bytes.peek() {
+    if max.is_some_and(|max| fields.len() == max - 1) {
+      let mut rest = input[i..].to_vec();
+      while rest.last().is_some_and(|&b| is_ws(b)) {
+        rest.pop();
+      }
+      fields.push(rest);
+      return fields;
+    }
+
+    bytes.next();
+
+    if is_ws(c) {
+      while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
+        bytes.next();
+      }
+      if bytes.peek().is_some_and(|&(_, c)| is_hard(c)) {
+        bytes.next();
+        while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
+          bytes.next();
+        }
+      }
+      // trailing whitespace must not produce an empty field
+      if bytes.peek().is_some() {
+        fields.push(std::mem::take(&mut cur));
+      }
+    } else if is_hard(c) {
+      fields.push(std::mem::take(&mut cur));
+      while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
+        bytes.next();
+      }
+    } else {
+      cur.push(c);
+    }
+  }
+
+  if !cur.is_empty() {
+    fields.push(cur);
+  }
+
+  fields
+}
+
 /* - splitting functions
  * the splitting functions in std are fine, but don't cut it when quoting rules and escaping are involved
  * so we have to roll our own stuff. we can take a functional approach to to this that generalizes quite well
@@ -52,7 +113,29 @@ pub(crate) fn split_at_unescaped(slice: &[u8], pat: &[u8]) -> Option<(usize, usi
 }
 
 pub(crate) fn split_at_any_unescaped(slice: &[u8], pats: &[&[u8]]) -> Option<(usize, usize)> {
-  split_at_any_inner(slice, pats, b'\\', b'\'', b'"')
+  split_at_match(slice, |s| {
+    pats.iter().find(|p| s.starts_with(p)).map(|p| p.len())
+  })
+}
+
+pub(crate) struct ByteSet([bool; 256]);
+
+impl ByteSet {
+  pub(crate) fn new(bytes: &[u8]) -> Self {
+    let mut set = [false; 256];
+    for &b in bytes {
+      set[b as usize] = true;
+    }
+    ByteSet(set)
+  }
+
+  pub(crate) fn whitespace() -> Self {
+    Self::new(b" \t\n\r")
+  }
+
+  pub(crate) fn contains(&self, byte: u8) -> bool {
+    self.0[byte as usize]
+  }
 }
 
 pub(crate) fn split_assignment_raw(arg: &[u8]) -> (&[u8], Option<&[u8]>) {
@@ -62,39 +145,91 @@ pub(crate) fn split_assignment_raw(arg: &[u8]) -> (&[u8], Option<&[u8]>) {
   (arg[..e].trim(), Some(&arg[e + l..]))
 }
 
-/// Split at the first of `pats` not escaped by `esc` and not inside a
-/// `sng_quote`/`dub_quote` region. Shared by the backslash and marker
-/// variants; only the escape/quote characters differ.
-fn split_at_any_inner(
+/// Which bytes, if any, the scanners treat as escape and quote characters.
+///
+/// [`QuotePolicy::SHELL`] is shed's own syntax, where a backslash escapes the
+/// next byte and quotes open a region the delimiter cannot match inside.
+/// [`QuotePolicy::LITERAL`] disables both, which is what splitting arbitrary
+/// data wants -- an apostrophe in a CSV field should not open a quoted region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct QuotePolicy {
+  pub(crate) esc: Option<u8>,
+  pub(crate) sng_quote: Option<u8>,
+  pub(crate) dub_quote: Option<u8>,
+}
+
+impl QuotePolicy {
+  pub(crate) const SHELL: Self = Self {
+    esc: Some(b'\\'),
+    sng_quote: Some(b'\''),
+    dub_quote: Some(b'"'),
+  };
+
+  pub(crate) const ESCAPE: Self = Self {
+    esc: Some(b'\\'),
+    sng_quote: None,
+    dub_quote: None,
+  };
+
+  pub(crate) const LITERAL: Self = Self {
+    esc: None,
+    sng_quote: None,
+    dub_quote: None,
+  };
+}
+
+pub(crate) fn split_at_pat_with(
   slice: &[u8],
-  pats: &[&[u8]],
-  esc: u8,
-  sng_quote: u8,
-  dub_quote: u8,
+  pat: &[u8],
+  policy: QuotePolicy,
+) -> Option<(usize, usize)> {
+  split_at_match_with(slice, |s| s.starts_with(pat).then_some(pat.len()), policy)
+}
+
+pub(crate) fn split_at_byteset_with(
+  slice: &[u8],
+  set: &ByteSet,
+  policy: QuotePolicy,
+) -> Option<(usize, usize)> {
+  split_at_match_with(slice, |s| set.contains(s[0]).then_some(1), policy)
+}
+
+fn split_at_match(
+  slice: &[u8],
+  mut matches: impl FnMut(&[u8]) -> Option<usize>,
+) -> Option<(usize, usize)> {
+  split_at_match_with(slice, &mut matches, QuotePolicy::SHELL)
+}
+
+/// Split at the first position where `matches` reports a delimiter, skipping
+/// anything `policy` marks as escaped or quoted.
+pub(crate) fn split_at_match_with(
+  slice: &[u8],
+  mut matches: impl FnMut(&[u8]) -> Option<usize>,
+  policy: QuotePolicy,
 ) -> Option<(usize, usize)> {
   let mut qt_state = QuoteState::default();
   let mut i = 0;
 
   while i < slice.len() {
     let b = slice[i];
-    match b {
-      _ if b == esc => {
-        i += 2;
-        continue;
-      }
-      _ if b == sng_quote => qt_state.toggle_single(),
-      _ if b == dub_quote => qt_state.toggle_double(),
-      _ if qt_state.in_quote() => {
-        i += 1;
-        continue;
-      }
-      _ => {}
+
+    if policy.esc == Some(b) {
+      i += 2;
+      continue;
     }
 
-    for pat in pats {
-      if slice[i..].starts_with(pat) {
-        return Some((i, pat.len()));
-      }
+    if policy.sng_quote == Some(b) {
+      qt_state.toggle_single();
+    } else if policy.dub_quote == Some(b) {
+      qt_state.toggle_double();
+    } else if qt_state.in_quote() {
+      i += 1;
+      continue;
+    }
+
+    if let Some(len) = matches(&slice[i..]) {
+      return Some((i, len));
     }
 
     i += 1;
@@ -304,4 +439,99 @@ fn scan_delims<C: ByteCursor>(opener: u8, c: &mut C, mut depth: usize) -> bool {
     _ => {}
   });
   depth == 0
+}
+
+#[cfg(test)]
+mod split_policy_tests {
+  use super::{ByteSet, QuotePolicy, split_at_byteset_with, split_at_pat_with};
+  use pretty_assertions::assert_eq;
+
+  #[test]
+  fn shell_policy_skips_a_quoted_delimiter() {
+    assert_eq!(
+      split_at_pat_with(b"'a,b',c", b",", QuotePolicy::SHELL),
+      Some((5, 1))
+    );
+  }
+
+  #[test]
+  fn literal_policy_matches_inside_quotes() {
+    assert_eq!(
+      split_at_pat_with(b"'a,b',c", b",", QuotePolicy::LITERAL),
+      Some((2, 1))
+    );
+  }
+
+  #[test]
+  fn shell_policy_skips_an_escaped_delimiter() {
+    assert_eq!(
+      split_at_pat_with(b"a\\,b,c", b",", QuotePolicy::SHELL),
+      Some((4, 1))
+    );
+  }
+
+  #[test]
+  fn literal_policy_ignores_the_escape() {
+    assert_eq!(
+      split_at_pat_with(b"a\\,b,c", b",", QuotePolicy::LITERAL),
+      Some((2, 1))
+    );
+  }
+
+  #[test]
+  fn escapes_only_honours_escape_but_not_quotes() {
+    let policy = QuotePolicy::ESCAPE;
+
+    assert_eq!(split_at_pat_with(b"a\\,b", b",", policy), None);
+    assert_eq!(split_at_pat_with(b"'a,b'", b",", policy), Some((2, 1)));
+  }
+
+  #[test]
+  fn byteset_respects_the_policy() {
+    let set = ByteSet::whitespace();
+
+    assert_eq!(
+      split_at_byteset_with(b"'a b' c", &set, QuotePolicy::SHELL),
+      Some((5, 1))
+    );
+    assert_eq!(
+      split_at_byteset_with(b"'a b' c", &set, QuotePolicy::LITERAL),
+      Some((2, 1))
+    );
+  }
+
+  #[test]
+  fn shell_default_skips_an_escaped_delimiter() {
+    use super::split_at_unescaped;
+
+    assert_eq!(split_at_unescaped(b"a\\=b=c", b"="), Some((4, 1)));
+  }
+
+  #[test]
+  fn shell_default_skips_a_quoted_delimiter() {
+    use super::split_at_unescaped;
+
+    assert_eq!(split_at_unescaped(b"'a=b'=c", b"="), Some((5, 1)));
+  }
+
+  #[test]
+  fn assignment_split_honours_an_escaped_equals() {
+    use super::split_assignment_raw;
+
+    let (name, value) = split_assignment_raw(b"a\\=b=c");
+
+    assert_eq!(name, b"a\\=b");
+    assert_eq!(value, Some(&b"c"[..]));
+  }
+
+  #[test]
+  fn no_delimiter_is_none_under_every_policy() {
+    for policy in [
+      QuotePolicy::SHELL,
+      QuotePolicy::LITERAL,
+      QuotePolicy::ESCAPE,
+    ] {
+      assert_eq!(split_at_pat_with(b"abc", b",", policy), None);
+    }
+  }
 }

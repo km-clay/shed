@@ -10,7 +10,7 @@ Bundled functions are autoloaded on first call, and you can add your
 own or override a bundled one the same way; see |autoloading|. The body
 of any function can be inspected with `declare -f`:
 
-    ```declare -f split```     show the implementation of `split`
+    ```declare -f qtable```     show the implementation of `qtable`
 
 Reading these implementations can provide good examples of idiomatic
 shed scripting. They exercise quoting, error handling,
@@ -30,14 +30,14 @@ The following functions are bundled:
   `qpipe`       pipe each record through an external command |function-qpipe|
   `qselect`     project or reorder fields in records         |function-qselect|
   `qtable`      render a quoted stream as a table            |function-qtable|
+  `qtrim`       trim whitespace from every field            |function-qtrim|
   `qwhere`      filter records by a predicate                |function-qwhere|
-  `split`       split a string by a pattern                  |function-split|
   `version`     print the shed version                       |function-version|
 
 Quoted Stream Adapters ~                                  *quoted-streams*
 
   The `q`-prefixed functions (`qmap`, `qwhere`, `qselect`, `qpad`,
-  `qcount`, `qpipe`, `qtable`) operate on streams of shell-quoted
+  `qcount`, `qpipe`, `qtable`, `qtrim`) operate on streams of shell-quoted
   records. A "quoted stream" is a byte stream where:
 
     - records are separated by newlines
@@ -47,7 +47,7 @@ Quoted Stream Adapters ~                                  *quoted-streams*
       for plain identifiers)
     - empty fields are encoded as `''`
 
-  Producers (|split|(function-split), |quote|(builtin-quote),
+  Producers (|str split|(str-split) `-q`, |quote|(builtin-quote),
   |hist|(builtin-hist) `--quoted`) emit streams in this format.
   Consumers (these `q`-adapters, |unquote|(builtin-unquote),
   |scry|(builtin-scry) `-q`, `read -q`) decode them. The format is
@@ -143,7 +143,7 @@ AUTOLOADING                                      *autoloading*
     Inspecting a function with `declare -f` also forces the load, so it
     doubles as a way to preview an autoloaded body:
 
-        ```declare -f split```     load `split` if needed, then show it
+        ```declare -f qtable```     load `qtable` if needed, then show it
 
   Registering a directory ~
 
@@ -417,6 +417,32 @@ QTABLE                                           *function-qtable* *qtable*
   See also: |quoted-streams|, |named-streams|, |builtin-width|
 
 ==============================================================================
+
+QTRIM                                            *function-qtrim* *qtrim*
+
+  `qtrim [{str trim options}]`
+
+  Trim every field of every record in a quoted stream, re-encoding the
+  result so the stream stays well-formed. Field count is preserved: a
+  field that trims away to nothing stays in place as an empty field.
+
+  Any options are handed to |str trim|(str-trim) unchanged, so the same
+  ends and character sets are available per field:
+
+      ```producer | qtrim```            whitespace off both ends
+      ```producer | qtrim -e```         trailing whitespace only
+      ```producer | qtrim -E ,```       commas off the end of each field
+
+  Trimming is byte-exact; a field holding bytes that are not valid UTF-8
+  passes through with only its ends removed.
+
+  Examples:
+
+      ```quote "  a  " "" "  b  " | qtrim```      `a '' b`
+      ```quote "  a b  " "  c  " | qtrim```       `'a b' c`
+
+  See also: |str trim|(str-trim), |qmap|(function-qmap)
+
 QWHERE                                           *function-qwhere* *qwhere*
 
   `qwhere [-n] {predicate}`
@@ -457,62 +483,6 @@ QWHERE                                           *function-qwhere* *qwhere*
                           10 characters
 
   See also: |quoted-streams|, |named-streams|, |function-qmap|
-
-==============================================================================
-SPLIT                                            *function-split* *split*
-
-  `split {pattern} {string}`
-  `cmd | split {pattern}`
-  `cmd | split -0`
-
-  Split input on every occurrence of {pattern} and emit each part
-  through |quote|(builtin-quote). The output is a quoted record
-  stream suitable for decoding/formatting via |unquote|(builtin-unquote),
-  or for consumption by the `q`-prefixed adapter functions (see |quoted-streams|).
-
-  A single trailing delimiter is stripped before splitting, so a
-  delimiter-terminated string does not yield an empty final field.
-  Interior empty fields are preserved. An empty {string}, or input
-  that is empty once the trailing delimiter is removed, produces no
-  output.
-
-  `-0`    use the NUL byte as the delimiter. Equivalent to passing
-          `$'\0'` as the pattern. Designed to pair with `find -print0`
-          and other NUL-emitting tools.
-
-  Input modes ~
-
-    With both {pattern} and {string} as arguments, splits {string}
-    once and exits.
-
-    With only {pattern} (or `-0`) and data piped on stdin, reads each
-    input line and splits each independently. Each non-empty line
-    becomes one or more output records depending on how many parts the
-    pattern produces; blank lines produce no output.
-
-  Examples:
-
-      ```split : "$PATH" | unquote -a paths```
-                                split `PATH` into `$paths`, preserving
-                                structure of paths containing whitespace
-
-      ```split , "a,b,c" | unquote```
-                                prints `a`, `b`, `c` on three lines
-
-      ```split "->" "x->y->z" | unquote -a chain```
-                                multi-character delimiter, into an array
-
-      ```find . -print0 | split -0 | unquote -0 | xargs -0 ...```
-                                bridge `find -print0` into shed's
-                                quoted-stream protocol and back to
-                                a NUL-aware external consumer
-
-      ```cat config.txt | split = | qwhere '[ "$1" = "some_key" ]'```
-                                stream mode: each line of the file
-                                is split on `=`, then filtered
-
-  See also: |quote|(builtin-quote), |unquote|(builtin-unquote),
-  |quoted-streams|
 
 ==============================================================================
 VERSION                                          *function-version* *version*

@@ -368,8 +368,8 @@ macro_rules! sherr {
 /// 	Bar
 /// }
 /// two_way_display! {Foobars,
-/// 	Foo <=> "foo",
-/// 	Bar <=> "bar",
+/// 	Foo <=> "foo";
+/// 	Bar <=> "bar";
 /// }
 /// ```
 #[macro_export]

@@ -21,6 +21,7 @@ pub(crate) use format::{
 pub(crate) use num::{ParseRadix, VarStrDisplay};
 pub(crate) use quote::QuoteState;
 pub(crate) use scan::{
-  ByteCursor, SliceCursor, ends_with_unescaped, has_unescaped, scan_brackets, scan_param_exp,
-  scan_parens, split_all_with, split_assignment_raw, split_at_unescaped, split_tk,
+  ByteCursor, ByteSet, QuotePolicy, SliceCursor, ends_with_unescaped, has_unescaped, ifs_split,
+  scan_brackets, scan_param_exp, scan_parens, split_all_with, split_assignment_raw,
+  split_at_byteset_with, split_at_pat_with, split_at_unescaped, split_tk,
 };
