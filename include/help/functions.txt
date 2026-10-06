@@ -391,12 +391,12 @@ QSELECT                                          *function-qselect* *qselect*
 ==============================================================================
 QTABLE                                           *function-qtable* *qtable*
 
-  `qtable [-n]`
+  `qtable [-n] [-l]`
 
   Render a quoted stream as a box-drawn table, one row per record and
-  one column per field. Column widths are sized to the widest cell
-  using |width|(builtin-width), so the layout stays aligned even with
-  wide characters and combining marks.
+  one column per field. Column widths are sized to the widest cell in
+  display columns, measured with |len|(builtin-len) `-w`, so the layout
+  stays aligned through wide characters and combining marks.
 
   The whole stream is buffered before drawing, since column widths
   cannot be known until every record has been read. Not suitable for
@@ -407,6 +407,38 @@ QTABLE                                           *function-qtable* *qtable*
           When the table is taller than the terminal the header is
           repeated at the bottom. See |named-streams|.
 
+  `-l`    left-justify cell contents. The default is right.
+
+  Fitting the terminal ~
+
+    A table wider than the terminal would wrap and lose its shape, so
+    the columns are narrowed until it fits. Width is taken from
+    `COLUMNS`, falling back to 80.
+
+    The narrowing is not spread evenly. The widest column gives up
+    space first, down to the width of the next-widest, and so on, so
+    the narrow columns that hold sizes or dates keep their size and
+    only the long one is cut. No column shrinks below three columns;
+    once every column has reached that floor the table is as small as
+    it goes and will wrap.
+
+    Cells cut this way end with a marker, so a shortened value is not
+    mistaken for a complete one:
+
+        ```│ a-very-long-filename-that-goes-on-and-on-forev… │ 4096 │```
+
+    The marker counts against the column, so the row still lands on
+    the budget. Cutting is done in display columns, which is what keeps
+    a table of CJK filenames inside the terminal.
+
+  Settings ~
+
+    `SQR_TABLE_JUSTIFY`   `left` or `right`; the default is `right`.
+                        `-l` is the same as setting this to `left`.
+    `SQR_TABLE_WIDTH`     width to fit, overriding `COLUMNS`.
+    `SQR_TABLE_MARKER`    the cut marker; the default is an ellipsis.
+                        Set it empty to cut with no marker.
+
   Examples:
 
       ```producer | qtable```                render records as a table
@@ -414,7 +446,12 @@ QTABLE                                           *function-qtable* *qtable*
       ```producer | qtable -n```             use the first record as
                                          column headings
 
-  See also: |quoted-streams|, |named-streams|, |builtin-width|
+      ```SQR_TABLE_WIDTH=40 producer | qtable```
+                                         fit a narrower budget than
+                                         the terminal
+
+  See also: |quoted-streams|, |named-streams|, |len|(builtin-len),
+            |str clip|(str-clip)
 
 ==============================================================================
 

@@ -819,7 +819,7 @@ tmpdir=$(mktemp -d)
   temporarily forced on. If any command in {body} fails, control
   transfers to the catch arm. Both clauses on the catch arm are
   optional, which gives the block four distinct shapes - see
-  |script-try-matrix| below for the full breakdown.
+  |script-try-catch|(script-try-catch) below for the full breakdown.
 
   This is a shed extension: standard POSIX shells do not have a
   `try` block.

@@ -129,10 +129,6 @@ impl ByteSet {
     ByteSet(set)
   }
 
-  pub(crate) fn whitespace() -> Self {
-    Self::new(b" \t\n\r")
-  }
-
   pub(crate) fn contains(&self, byte: u8) -> bool {
     self.0[byte as usize]
   }
@@ -488,7 +484,7 @@ mod split_policy_tests {
 
   #[test]
   fn byteset_respects_the_policy() {
-    let set = ByteSet::whitespace();
+    let set = ByteSet::new(b" \t\n\r");
 
     assert_eq!(
       split_at_byteset_with(b"'a b' c", &set, QuotePolicy::SHELL),

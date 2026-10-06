@@ -81,9 +81,9 @@ A tour of various features that are unique to `shed`.
   shed ships text processing tools meant for use in scripts and pipelines:
 
     |vice|(builtin-vice)             a vim-motion text processor; structural edits in a pipe
-    |thru|(builti-thru)             a streaming `cat`/`tee` replacement
+    |thru|(builtin-thru)             a streaming `cat`/`tee` replacement
     |quote|(builtin-quote) |unquote|(builtin-unquote)    shell-quote text, or strip one layer of quoting
-    |width|(builtin-width)            display width of text (wide and combining chars aware)
+    |len|(builtin-len) `-w`           display width of text (wide and combining chars aware)
 
 ==============================================================================
 6. The prompt is a full text editor              *tips-editor*

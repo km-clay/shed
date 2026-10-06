@@ -123,7 +123,7 @@ see |the shopt builtin|(builtin-shopt) for more info.
 
   1.4 Operators                                *operators*
 
-  Operators take a {motion} or |text-object| to define the range they
+  Operators take a {motion} or |text-object|(text-objects) to define the range they
   act on. Double an operator to act on the whole line (e.g. `dd`, `>>`,
   `==`).
 

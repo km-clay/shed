@@ -34,7 +34,7 @@ EXTENSIONS                                                  *shed-extensions*
 
     `printf %r`   repeat the argument string N times          |builtin-printf|
     `thru`        fork-free `cat`/`tee` replacement               |builtin-thru|
-    `width`       display width of a string in columns        |builtin-width|
+    `len`         byte, character or display length of text   |builtin-len|
     `flog`        write a formatted log message               |builtin-flog|
     `seek`        seek a file descriptor to an offset (lseek) |builtin-seek|
     `vice`        slice & edit text with vim motions          |builtin-vice|

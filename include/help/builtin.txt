@@ -169,7 +169,7 @@ EXCMD                                            *builtin-excmd* *excmd*
 ==============================================================================
 ARROPS                                           *builtin-arrops* *arrops*
 
-  Array operation builtins for manipulating shell |arrays|. All commands
+  Array operation builtins for manipulating shell |arrays|(var-arrays). All commands
   share a common set of options:
 
     `-c {n}`     perform the operation {n} times (default: 1)

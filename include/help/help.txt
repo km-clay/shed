@@ -53,7 +53,7 @@ Our *GitHub* repository can be found at `https://github.com/km-clay/shed`.
 
                       Examples:
                         ```help help-nav```         jumps to this section
-                        ```help prompt-escapes```   jumps to |prompt escape docs|(prompt-escape)
+                        ```help prompt-escapes```   jumps to |prompt escape docs|(prompt-escapes)
                         ```help heredoc```          jumps to |heredoc docs|(heredoc)
 
   Tab completion for the `help` command will complete valid search tags.

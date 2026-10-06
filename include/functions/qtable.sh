@@ -1,12 +1,8 @@
 qtable() {
-	local -a widths
-	local -a records
-	local -a fields
-	local -a headers
-	local i=0
-	local has_names=0
+	local -a widths records fields headers
+	local left i=0 has_names=0
 	local justify="${SQR_TABLE_JUSTIFY:-right}"
-	local left
+	local SQR_TABLE_MARKER="${SQR_TABLE_MARKER:-…}"
 
 	while getopts ":nl" opt; do
 		case "$opt" in
@@ -61,7 +57,7 @@ qtable() {
 			field="${row[col]}"
 
 			target_width=${widths[col]}
-      (( $(len -w -- "$field") > target_width )) && field="$(str clip "$target_width" "$field")"
+      (( $(len -w -- "$field") > target_width )) && field="$(str clip -w -m "$SQR_TABLE_MARKER" "$target_width" "$field")"
 
       this_width=$(len -w -- "$field")
 			diff=$(( target_width - this_width ))
@@ -72,7 +68,7 @@ qtable() {
 
 			((left)) || printf "%s" "$field"
 
-      if (( col == ${#widths[@]} )); then
+      if (( col == ${#widths[@]} - 1 )); then
         printf " │"
       else
         printf " │ "
@@ -113,6 +109,47 @@ qtable() {
 	local num_fields="${#widths}"
 	local approx_height=$(( num_records + 6 ))
 	headers=( "${headers[@]:0:$num_fields}"  )
+
+  # Shrink to fit the terminal. Each column costs its width plus two spaces of
+  # padding, and the borders add one character per column plus one, so the
+  # drawn width is the sum of the widths plus 3n+1.
+	local budget="${SQR_TABLE_WIDTH:-${COLUMNS:-80}}"
+	local min_col=3
+	local total=$(( 3 * num_fields + 1 ))
+
+	for ((i=0; i<num_fields; i++)); do
+		total=$(( total + widths[i] ))
+	done
+
+  # Take from the widest column first, down to the next-widest, so narrow
+  # columns keep their size and only the long field is truncated.
+	while (( total > budget )); do
+		local wi=0 w1=0 w2=0
+
+		for ((i=0; i<num_fields; i++)); do
+			if (( widths[i] > w1 )); then
+				w2=$w1
+				w1=${widths[i]}
+				wi=$i
+			elif (( widths[i] > w2 )); then
+				w2=${widths[i]}
+			fi
+		done
+
+		(( w1 <= min_col )) && break
+
+		local floor=$min_col
+		(( w2 > floor )) && floor=$w2
+
+		local take=$(( w1 - floor ))
+		local need=$(( total - budget ))
+
+		(( take > need )) && take=$need
+		(( take < 1 )) && take=1
+
+		widths[wi]=$(( w1 - take ))
+		total=$(( total - take ))
+	done
 
 	draw_separator '╭' '┬' '╮'
 
