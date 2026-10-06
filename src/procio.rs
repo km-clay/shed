@@ -2140,6 +2140,11 @@ impl Sink for VarSink {
   }
 
   fn write(&self, buf: &[u8]) -> io::Result<usize> {
+    if self.creator_pid != Pid::this()
+      && let Some(pipes) = self.pipes.get()
+    {
+      return pipes.write.write(buf);
+    }
     self.lock_buf().write(buf)
   }
 
@@ -3238,6 +3243,57 @@ pub(crate) mod tests {
     }
     let g = TestGuard::new();
     test_input("head -c 100000 /dev/zero | tr '\\0' x >@big; printf '%s' \"${#big}\"").unwrap();
+    assert_eq!(g.read_output(), "100000");
+  }
+
+  #[test]
+  fn var_redir_builtin_writer_in_forked_stage() {
+    if !has_cmds(&["cat"]) {
+      return;
+    }
+    let g = TestGuard::new();
+    test_input(
+      "printf x | { printf hi; cat > /dev/null; } >@v | cat > /dev/null; printf '%s' \"$v\"",
+    )
+    .unwrap();
+    assert_eq!(g.read_output(), "hi");
+  }
+
+  #[test]
+  fn var_redir_stderr_builtin_writer_in_forked_stage() {
+    if !has_cmds(&["cat"]) {
+      return;
+    }
+    let g = TestGuard::new();
+    test_input("printf x | { echo r >&2; cat > /dev/null; } 2>@v; printf '%s' \"$v\"").unwrap();
+    assert_eq!(g.read_output(), "r\n");
+  }
+
+  #[test]
+  fn var_redir_mixed_writers_keep_write_order_in_forked_stage() {
+    if !has_cmds(&["cat"]) {
+      return;
+    }
+    let g = TestGuard::new();
+    test_input("printf x | { cat; printf -AFTER; } >@v | cat > /dev/null; printf '%s' \"$v\"")
+      .unwrap();
+    assert_eq!(g.read_output(), "x-AFTER");
+  }
+
+  #[test]
+  fn var_redir_large_builtin_write_does_not_block_parent() {
+    if !has_cmds(&["cat"]) {
+      return;
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("xs");
+    std::fs::write(&path, vec![b'x'; 100_000]).unwrap();
+    let g = TestGuard::new();
+    test_input(format!(
+      "{{ thru < {} ; cat < /dev/null > /dev/null; }} >@v; printf '%s' \"${{#v}}\"",
+      path.display()
+    ))
+    .unwrap();
     assert_eq!(g.read_output(), "100000");
   }
 

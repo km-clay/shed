@@ -4,6 +4,7 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::eval::parse::node;
 use crate::state::ForkKind;
 use crate::{
   defer, errln,
@@ -231,7 +232,9 @@ impl super::Dispatcher {
     F: FnMut(&mut Self, &Ast) -> ShResult<()>,
   {
     let fork_builtins = Shed::meta_mut(MetaTab::take_fork);
-    let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(fork_builtins));
+    let fork_var_redirs = fork_builtins || node::node_forks(tree, node_id);
+    let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(fork_var_redirs));
+
     let blame = tree.span_for(node_id);
     let node = &tree[node_id];
     let redirs = &tree[node.redirs];
@@ -274,6 +277,8 @@ impl super::Dispatcher {
     let NdRule::Subshell { body } = &subsh.class else {
       unreachable!()
     };
+
+    let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(true));
     let span = tree.span_for(*body);
 
     let redirs = RedirSet::from(&tree[subsh.redirs]);
