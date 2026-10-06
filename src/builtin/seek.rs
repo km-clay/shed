@@ -1,64 +1,69 @@
 use std::io;
 
-use crate::{outln, sherr, state::Shed, util, util::error::ShResult};
+use crate::{
+  opt, outln, sherr,
+  state::Shed,
+  util::{self, error::ShResult},
+};
 
 use super::opt::OptSpec;
 
 pub(super) struct Seek;
+#[rustfmt::skip]
 impl super::Builtin for Seek {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      OptSpec::new_short("cursor-rel", b'c'),
-      OptSpec::new_short("end-rel", b'e'),
+      opt!("current" | b'c'),
+      opt!("end"     | b'e'),
+      opt!("print"   | b'p'),
     ]
   }
-  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let span = args.span();
-    let mut cursor_rel = false;
-    let mut end_rel = false;
-    let (arg_vec, opts) = args.take_argv();
+    let mut arguments = args.arguments();
 
-    let mut arg_iter = arg_vec.into_iter();
+    let cursor_rel = args.has_opt("current");
+    let end_rel    = args.has_opt("end");
+    let print      = args.has_opt("print");
 
-    for opt in opts {
-      match opt.key() {
-        "cursor-rel" => cursor_rel = true,
-        "end-rel" => end_rel = true,
-        _ => {
-          return Err(
-            sherr!(ExecFail @ opt.span(), "lseek: Unexpected flag '{opt}'",).with_code(2),
-          );
-        }
-      }
+    if cursor_rel && end_rel {
+      let cur_span = args.opt_span("current").unwrap();
+      let end_span = args.opt_span("end").unwrap();
+      let cur_str  = cur_span.slice();
+      let end_str  = end_span.slice();
+      return Err(sherr!(
+        ExecFail @ cur_span,
+        "cannot specify both {cur_str} and {end_str}"
+      ));
     }
 
-    let Some((fd, fd_span)) = arg_iter.next() else {
-      return Err(sherr!(ExecFail @ span, "lseek: Missing required argument 'fd'",).with_code(2));
+    let Some((fd, fd_span)) = arguments.next() else {
+      return Err(sherr!(ExecFail @ span, "missing required argument 'fd'",).with_code(2));
     };
-    let Ok(fd) = fd.to_str_lossy().parse::<u32>() else {
+
+    let Some(fd) = fd.parse::<u32>() else {
       return Err(
-        sherr!(ExecFail @ fd_span, "Invalid file descriptor")
+        sherr!(ExecFail @ fd_span, "invalid file descriptor")
           .with_note("file descriptors are integers".into()),
       );
     };
 
-    let Some((offset, offset_span)) = arg_iter.next() else {
+    let Some((offset, offset_span)) = arguments.next() else {
       return Err(sherr!(
         ExecFail @ span,
-        "lseek: Missing required argument 'offset'",
+        "missing required argument 'offset'",
       ));
     };
     let Ok(offset) = offset.to_str_lossy().parse::<i64>() else {
       return Err(
-        sherr!(ExecFail @ offset_span, "Invalid offset")
+        sherr!(ExecFail @ offset_span, "invalid offset")
           .with_note("offset can be a positive or negative integer".into()),
       );
     };
 
-    if let Some((extra, extra_span)) = arg_iter.next() {
+    if let Some((extra, extra_span)) = arguments.next() {
       return Err(
-        sherr!(ExecFail @ extra_span, "lseek: unexpected argument: '{extra}'")
-          .with_note("the seek origin is set with `-c` or `-e`, not a positional".into())
+        sherr!(ExecFail @ extra_span, "unexpected argument: '{extra}'")
           .with_code(2),
       );
     }
@@ -77,7 +82,9 @@ impl super::Builtin for Seek {
       .seek(seek_from)
       .map_err(|e| sherr!(ExecFail @ span, "lseek failed: {e}"))?;
 
-    outln!("{new_off}");
+    if print {
+      outln!("{new_off}");
+    }
 
     util::with_status(0)
   }
@@ -98,7 +105,7 @@ mod tests {
     let g = TestGuard::new();
 
     test_input(format!("exec 9<> {}", path.display())).unwrap();
-    test_input("seek 9 0").unwrap();
+    test_input("seek -p 9 0").unwrap();
 
     let out = g.read_output();
     assert_eq!(out, "0\n");
@@ -112,7 +119,7 @@ mod tests {
     let g = TestGuard::new();
 
     test_input(format!("exec 9<> {}", path.display())).unwrap();
-    test_input("seek 9 6").unwrap();
+    test_input("seek -p 9 6").unwrap();
 
     let out = g.read_output();
     assert_eq!(out, "6\n");
@@ -143,8 +150,8 @@ mod tests {
     let g = TestGuard::new();
 
     test_input(format!("exec 9<> {}", path.display())).unwrap();
-    test_input("seek 9 3").unwrap();
-    test_input("seek -c 9 4").unwrap();
+    test_input("seek -p 9 3").unwrap();
+    test_input("seek -p -c 9 4").unwrap();
 
     let out = g.read_output();
     assert_eq!(out, "3\n7\n");
@@ -158,7 +165,7 @@ mod tests {
     let g = TestGuard::new();
 
     test_input(format!("exec 9<> {}", path.display())).unwrap();
-    test_input("seek -e 9 0").unwrap();
+    test_input("seek -p -e 9 0").unwrap();
 
     let out = g.read_output();
     assert_eq!(out, "6\n");
@@ -172,7 +179,7 @@ mod tests {
     let g = TestGuard::new();
 
     test_input(format!("exec 9<> {}", path.display())).unwrap();
-    test_input("seek -e 9 -2").unwrap();
+    test_input("seek -p -e 9 -2").unwrap();
 
     let out = g.read_output();
     assert_eq!(out, "4\n");
@@ -212,6 +219,37 @@ mod tests {
 
     let val = var!("line");
     assert_eq!(val, "abc");
+  }
+
+  #[test]
+  fn seek_is_silent_without_print() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("seek.txt");
+    std::fs::write(&path, "hello world\n").unwrap();
+    let g = TestGuard::new();
+
+    test_input(format!("exec 9<> {}", path.display())).unwrap();
+    test_input("seek 9 6").unwrap();
+
+    assert_eq!(
+      g.read_output(),
+      "",
+      "seek must not print unless asked with -p"
+    );
+  }
+
+  #[test]
+  fn seek_origin_flags_do_not_imply_print() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("seek.txt");
+    std::fs::write(&path, "hello\n").unwrap();
+    let g = TestGuard::new();
+
+    test_input(format!("exec 9<> {}", path.display())).unwrap();
+    test_input("seek -e 9 0").unwrap();
+    test_input("seek -c 9 -1").unwrap();
+
+    assert_eq!(g.read_output(), "");
   }
 
   #[test]
