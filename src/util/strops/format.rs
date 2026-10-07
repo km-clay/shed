@@ -322,13 +322,13 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
             let inner = match b {
               b'[' => Self::parse_segments(set, cur, Some(']'))?,
               b'{' => Self::parse_segments(set, cur, Some('}'))?,
-              _ => unreachable!()
+              _    => unreachable!()
             };
 
             let seg = match b {
               b'[' => Segment::AllGroup(fields, inner.into_boxed_slice()),
               b'{' => Segment::AnyGroup(fields, inner.into_boxed_slice()),
-              _ => unreachable!()
+              _    => unreachable!()
             };
 
             segments.push(seg);
@@ -432,7 +432,12 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
   }
 
   #[rustfmt::skip]
-  fn render_segments(&self, segments: &[Segment<S::Conv>], src: &mut S::Source, out: &mut Vec<u8>) -> ShResult<Option<RenderResult>> {
+  fn render_segments(
+    &self,
+    segments: &[Segment<S::Conv>],
+    src: &mut S::Source,
+    out: &mut Vec<u8>,
+  ) -> ShResult<Option<RenderResult>> {
     let mut seg_result = None;
 
     let mut update_result = |present: bool| {
@@ -454,7 +459,7 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
         Segment::Spec(field, conv) => {
           let field = self.resolve_counts(field, src)?;
           let rendered = self.set.render(conv, &field, src)?;
-          pad_field(&rendered, &field, out);
+          pad_and_render(&rendered, &field, out);
 
           update_result(self.set.is_present(&rendered));
         }
@@ -473,14 +478,14 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
               buf = buf.trim().to_vec();
             };
 
-            pad_field(&Field::string(buf), &params, out);
-            update_result(true);
-          } else {
-            update_result(false);
+            pad_and_render(&Field::string(buf), &params, out);
           }
+
+          update_result(should_render);
         }
       }
     }
+
     Ok(seg_result)
   }
 
@@ -519,7 +524,7 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
 }
 
 /// Pad a rendered [`Field`] to `params`' width and append it to `out`.
-fn pad_field(field: &Field, params: &FieldParams, out: &mut Vec<u8>) {
+fn pad_and_render(field: &Field, params: &FieldParams, out: &mut Vec<u8>) {
   let body = field.body();
   if let FieldKind::Raw = field.kind() {
     out.extend_from_slice(body);

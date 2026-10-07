@@ -46,7 +46,10 @@ impl Builtin for Format {
 
     let fmt_string = args
       .opt_value("format")
-      .or_else(|| (!parse_duration).then_some(VarStr::from("%a %b %e %I:%M:%S %p %Z %Y")));
+      .unwrap_or_else(|| match parse_duration {
+        true => VarStr::from("%^{%[%y years%] %[%O months%] %[%D days,%] %[%H:%]%M:%S.%03L%}"),
+        false => VarStr::from("%a %b %e %I:%M:%S %p %Z %Y"),
+      });
 
     // Operands are joined, so a multi-word expression needs no quoting. A
     // span reads as `A to B`, which `parse_dur` splits.
@@ -57,6 +60,7 @@ impl Builtin for Format {
 
     let formatted = if parse_duration {
       let text = time.to_str_lossy();
+
       let mut elapsed = match strops::TimeReader::parse_dur(&text) {
         Ok(micros) => TimeDelta::microseconds(micros),
         Err(dur_err) => {
@@ -67,28 +71,19 @@ impl Builtin for Format {
         }
       };
 
-      if let Some(fmt_string) = fmt_string {
-        let mut buf = vec![];
+      let mut buf = vec![];
 
-        strops::StrFormatter::parse(&DurFmt { running: None }, &fmt_string)
-          .and_then(|f| f.render(&mut elapsed, &mut buf))
-          .promote_err(span)
-          .with_code(1)?;
+      strops::StrFormatter::parse(&DurFmt { running: None }, &fmt_string)
+        .and_then(|f| f.render(&mut elapsed, &mut buf))
+        .promote_err(span)
+        .with_code(1)?;
 
-        VarStr::from(buf)
-      } else {
-        strops::format_time(elapsed, true)
-          .unwrap_or_else(|| String::from("0s"))
-          .to_var_str()
-      }
+      VarStr::from(buf)
     } else {
       let dt = strops::TimeReader::interpret(&time.to_str_lossy())
         .promote_err(span)
         .with_code(2)?;
 
-      let Some(fmt_string) = fmt_string else {
-        return Err(sherr!(ExecFail @ args.cmd_span(), "missing format string").with_code(2));
-      };
       let fmt = fmt_string.to_str_lossy();
 
       match tz {
