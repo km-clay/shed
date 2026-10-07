@@ -9,7 +9,12 @@ use bstr::ByteSlice;
 use crate::{
   match_loop, sherr,
   state::vars::VarStr,
-  util::{self, error::ShResult, strops::ByteCursor},
+  util::{
+    self,
+    error::ShResult,
+    strops::{ByteCursor, ParseRadix},
+    ui,
+  },
 };
 
 use super::SliceCursor;
@@ -22,6 +27,7 @@ bitflags! {
     const PLUS  = 1 << 2;
     const SPACE = 1 << 3;
     const ALT   = 1 << 4;
+    const TRIM  = 1 << 5;
   }
 }
 
@@ -120,12 +126,12 @@ pub(crate) enum FieldKind {
 
 /// One rendered directive, before width padding
 pub(crate) struct Field {
-  body: Vec<u8>,
+  body: VarStr,
   kind: FieldKind,
 }
 
 impl Field {
-  pub(crate) fn body(&self) -> &[u8] {
+  pub(crate) fn body(&self) -> &VarStr {
     &self.body
   }
 
@@ -136,18 +142,21 @@ impl Field {
 
 impl Field {
   pub(crate) fn string(body: Vec<u8>) -> Self {
+    let body = VarStr::from(body);
     Self {
       body,
       kind: FieldKind::String,
     }
   }
   pub(crate) fn styled(body: Vec<u8>) -> Self {
+    let body = VarStr::from(body);
     Self {
       body,
       kind: FieldKind::Styled,
     }
   }
   pub(crate) fn raw(body: Vec<u8>) -> Self {
+    let body = VarStr::from(body);
     Self {
       body,
       kind: FieldKind::Raw,
@@ -162,6 +171,7 @@ impl Field {
     base: Option<Base>,
     zero_pad: bool,
   ) -> Self {
+    let body = VarStr::from(body);
     Self {
       body,
       kind: FieldKind::Numeric {
@@ -199,6 +209,18 @@ pub(crate) trait StrFmt {
     src: &mut Self::Source,
   ) -> ShResult<Field>;
 
+  fn is_present(&self, field: &Field) -> bool {
+    match field.kind() {
+      FieldKind::Raw | FieldKind::String => !field.body().is_empty(),
+
+      FieldKind::Styled => ui::calc_str_width(&field.body().to_str_lossy()) != 0,
+
+      FieldKind::Numeric { .. } => {
+        <i64>::parse_radix(&field.body().to_str_lossy()).is_some_and(|n| n != 0)
+      }
+    }
+  }
+
   /// A hook for operating on literal runs before pushing as a segment
   ///
   /// This is used by `printf` to expand ANSI-C escapes in the format string, for instance.
@@ -212,9 +234,26 @@ pub(crate) trait StrFmt {
   }
 }
 
+enum RenderResult {
+  NoRender,
+  Any,
+  All,
+}
+
+impl RenderResult {
+  fn any_rendered(&self) -> bool {
+    matches!(self, RenderResult::Any | RenderResult::All)
+  }
+  fn all_rendered(&self) -> bool {
+    matches!(self, RenderResult::All)
+  }
+}
+
 enum Segment<C> {
   Literal(Vec<u8>),
   Spec(FieldParams, C),
+  AnyGroup(FieldParams, Box<[Segment<C>]>),
+  AllGroup(FieldParams, Box<[Segment<C>]>),
 }
 
 /// `printf`-style formatting engine.
@@ -229,7 +268,20 @@ pub(crate) struct StrFormatter<'s, S: StrFmt> {
 
 impl<'s, S: StrFmt> StrFormatter<'s, S> {
   pub(crate) fn parse(set: &'s S, fmt: &[u8]) -> ShResult<Self> {
-    let mut cur = SliceCursor::new(fmt);
+    let mut cursor = SliceCursor::new(fmt);
+    let segments = Self::parse_segments(set, &mut cursor, None)?;
+    Ok(Self {
+      set,
+      segments: segments.into_boxed_slice(),
+    })
+  }
+
+  #[rustfmt::skip]
+  fn parse_segments(
+    set: &'s S,
+    cur: &mut SliceCursor,
+    closer: Option<char>
+  ) -> ShResult<Vec<Segment<S::Conv>>> {
     let mut segments: Vec<Segment<S::Conv>> = Vec::new();
     let mut literal = vec![];
 
@@ -241,25 +293,68 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
     };
 
     match_loop!(cur.next_byte() => byte, {
-      b'%' if cur.peek_byte().is_none_or(|b| b == b'%') => {
-        literal.push(byte);
-        cur.bump_if_eq(b'%');
-      }
       b'%' => {
-        push_lit(&mut literal, &mut segments);
-        let fields = Self::parse_fields(&mut cur)?;
-        let conv = set.parse_conv(&mut cur)?;
-        segments.push(Segment::Spec(fields, conv));
+        match cur.peek_byte() {
+          None                    => {             literal.push(byte); continue; }
+          Some(b'%')              => { cur.bump(); literal.push(byte); continue; }
+          Some(b @ (b']' | b'}')) => {
+            let b = b as char;
+            match closer {
+              Some(exp) if exp == b => {
+                cur.bump();
+                push_lit(&mut literal, &mut segments);
+                return Ok(segments);
+              }
+              Some(exp) => return Err(sherr!(ParseErr, "expected '%{exp}' to close this group, found '%{b}'")),
+              None      => return Err(sherr!(ParseErr, "unmatched '%{b}' in format string"                  )),
+            }
+          }
+          _ => ()
+        }
+
+        let fields = Self::parse_fields(cur)?;
+
+        match cur.peek_byte() {
+          Some(b @ (b'[' | b'{')) => {
+            push_lit(&mut literal, &mut segments);
+            cur.bump();
+
+            let inner = match b {
+              b'[' => Self::parse_segments(set, cur, Some(']'))?,
+              b'{' => Self::parse_segments(set, cur, Some('}'))?,
+              _ => unreachable!()
+            };
+
+            let seg = match b {
+              b'[' => Segment::AllGroup(fields, inner.into_boxed_slice()),
+              b'{' => Segment::AnyGroup(fields, inner.into_boxed_slice()),
+              _ => unreachable!()
+            };
+
+            segments.push(seg);
+          }
+          _ => {
+            push_lit(&mut literal, &mut segments);
+            let conv = set.parse_conv(cur)?;
+            segments.push(Segment::Spec(fields, conv));
+          }
+        }
       }
       _ => literal.push(byte),
     });
 
+    if let Some(exp) = closer {
+      let opener = match exp {
+        ']' => '[',
+        '}' => '{',
+        _ => unreachable!()
+      };
+      return Err(sherr!(ParseErr, "unmatched '%{opener}' in format string"));
+    }
+
     push_lit(&mut literal, &mut segments);
 
-    Ok(Self {
-      set,
-      segments: segments.into_boxed_slice(),
-    })
+    Ok(segments)
   }
 
   fn parse_fields(cur: &mut SliceCursor) -> ShResult<FieldParams> {
@@ -311,6 +406,7 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
       b' ' => { flags |= FmtFlags::SPACE; cur.bump(); }
       b'#' => { flags |= FmtFlags::ALT; cur.bump();   }
       b'0' => { flags |= FmtFlags::ZERO; cur.bump();  }
+      b'^' => { flags |= FmtFlags::TRIM; cur.bump();  }
       _ => break
     });
 
@@ -318,26 +414,74 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
   }
 
   pub(crate) fn has_specs(&self) -> bool {
-    self
-      .segments
-      .iter()
-      .any(|s| matches!(s, Segment::Spec(_, _)))
+    Self::any_spec(&self.segments)
+  }
+
+  fn any_spec(segments: &[Segment<S::Conv>]) -> bool {
+    segments.iter().any(|s| match s {
+      Segment::Literal(_) => false,
+      Segment::Spec(_, _) => true,
+      Segment::AnyGroup(_, inner) | Segment::AllGroup(_, inner) => Self::any_spec(inner),
+    })
   }
 
   /// Render the format string against a source of values, producing a byte vector.
   pub(crate) fn render(&self, src: &mut S::Source, out: &mut Vec<u8>) -> ShResult<()> {
-    for seg in &self.segments {
+    self.render_segments(&self.segments, src, out)?;
+    Ok(())
+  }
+
+  #[rustfmt::skip]
+  fn render_segments(&self, segments: &[Segment<S::Conv>], src: &mut S::Source, out: &mut Vec<u8>) -> ShResult<Option<RenderResult>> {
+    let mut seg_result = None;
+
+    let mut update_result = |present: bool| {
+      match seg_result {
+        None if present  => seg_result = Some(RenderResult::All     ),
+        None if !present => seg_result = Some(RenderResult::NoRender),
+
+        Some(RenderResult::NoRender) if present  => seg_result = Some(RenderResult::Any),
+        Some(RenderResult::All     ) if !present => seg_result = Some(RenderResult::Any),
+        _ => ()
+      }
+    };
+
+    for seg in segments {
       match seg {
-        Segment::Literal(b) => out.extend_from_slice(b),
+        Segment::Literal(b) => {
+          out.extend_from_slice(b);
+        },
         Segment::Spec(field, conv) => {
           let field = self.resolve_counts(field, src)?;
           let rendered = self.set.render(conv, &field, src)?;
           pad_field(&rendered, &field, out);
+
+          update_result(self.set.is_present(&rendered));
+        }
+        seg @ (Segment::AnyGroup(field, inner) | Segment::AllGroup(field, inner)) => {
+          let mut buf = vec![];
+
+          let should_render = match seg {
+            Segment::AnyGroup(_, _) => self.render_segments(inner, src, &mut buf)?.is_none_or(|r| r.any_rendered()),
+            Segment::AllGroup(_, _) => self.render_segments(inner, src, &mut buf)?.is_none_or(|r| r.all_rendered()),
+            _ => unreachable!()
+          };
+
+          if should_render {
+            let params = self.resolve_counts(field, src)?;
+            if params.flags().contains(FmtFlags::TRIM) {
+              buf = buf.trim().to_vec();
+            };
+
+            pad_field(&Field::string(buf), &params, out);
+            update_result(true);
+          } else {
+            update_result(false);
+          }
         }
       }
     }
-
-    Ok(())
+    Ok(seg_result)
   }
 
   fn resolve_counts(&self, field: &FieldParams, src: &mut S::Source) -> ShResult<FieldParams> {

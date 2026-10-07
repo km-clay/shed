@@ -651,7 +651,10 @@ impl<'a> TimeReader<'a> {
   }
 
   fn peek_tk(&self) -> Option<&TimeTk> {
-    self.tks.get(self.pos)
+    self.peek_nth(0)
+  }
+  fn peek_nth(&self, n: usize) -> Option<&TimeTk> {
+    self.tks.get(self.pos + n)
   }
 
   fn parse_epoch(s: &str) -> ShResult<DateTime<Utc>> {
@@ -703,7 +706,13 @@ impl<'a> TimeReader<'a> {
     self.tks = Self::tokenize(self.orig)?;
     while let Some(tk) = self.next_tk() {
       match tk {
-        TimeTk::Num(n) => self.read_offset(n)?,
+        TimeTk::Num(n) => {
+          if n >= 1000.0 && !matches!(self.peek_tk(), Some(TimeTk::Word(_))) {
+            self.read_year(n)?;
+          } else {
+            self.read_offset(n)?;
+          }
+        }
         TimeTk::Word(w) => self.read_word(&w)?,
         TimeTk::Epoch(dt) => self.anchor = Some(dt),
         TimeTk::Clock(time) => self.clock = Some(time),
@@ -738,6 +747,15 @@ impl<'a> TimeReader<'a> {
     Ok(base + chrono::Duration::microseconds(micros))
   }
 
+  fn read_year(&mut self, n: f64) -> ShResult<()> {
+    let year = n as i32;
+    let date = NaiveDate::from_ymd_opt(year, 1, 1)
+      .ok_or_else(|| sherr!(ParseErr, "invalid year '{year}'"))?;
+
+    self.anchor = Some(local_to_utc(date.and_hms_opt(0, 0, 0).unwrap())?);
+    Ok(())
+  }
+
   fn read_offset(&mut self, n: f64) -> ShResult<()> {
     let Some(TimeTk::Word(unit)) = self.next_tk() else {
       return Err(sherr!(ParseErr, "expected a unit after '{n}'"));
@@ -768,7 +786,7 @@ impl<'a> TimeReader<'a> {
     if let Some(dir) = Self::direction(word) {
       self.commit(dir);
       self.dir = Some(dir);
-    } else if let Some(anchor) = Self::keyword_anchor(word, self.upcoming)? {
+    } else if let Some(anchor) = self.keyword_anchor(word, self.upcoming)? {
       self.anchor = Some(anchor);
     } else {
       return Err(sherr!(ParseErr, "unknown time expression '{word}'"));
@@ -795,28 +813,48 @@ impl<'a> TimeReader<'a> {
   }
 
   #[rustfmt::skip]
-  fn keyword_anchor(word: &VarStr, upcoming: bool) -> ShResult<Option<DateTime<Utc>>> {
+  fn keyword_anchor(&mut self, word: &VarStr, upcoming: bool) -> ShResult<Option<DateTime<Utc>>> {
     let today = Local::now().date_naive();
     let midnight = |d: NaiveDate| -> ShResult<DateTime<Utc>> {
       local_to_utc(d.and_hms_opt(0, 0, 0).unwrap())
     };
+
     if let Some(wd) = word.parse::<Weekday>() {
       let delta = i64::from(wd.num_days_from_monday())
-                - i64::from(today.weekday().num_days_from_monday());
+        - i64::from(today.weekday().num_days_from_monday());
       let mut when = midnight(today + TimeDelta::days(delta))?;
+
       if upcoming && when <= Utc::now() {
         when = midnight(today + TimeDelta::days(delta + 7))?;
       }
-      return Ok(Some(when));
+
+      return Ok(Some(when))
     }
 
-    Ok(match word.as_bytes() {
-      b"now" => Some(Utc::now()),
-      b"today" => Some(midnight(today)?),
-      b"yesterday" => Some(midnight(today - Days::new(1))?),
-      b"tomorrow" => Some(midnight(today + Days::new(1))?),
-      _ => None,
-    })
+    let mut when =match word.as_bytes() {
+      b"now"       => Utc::now(),
+      b"today"     => midnight(today)?,
+      b"yesterday" => midnight(today - Days::new(1))?,
+      b"tomorrow"  => midnight(today + Days::new(1))?,
+      _            => return Ok(None),
+    };
+
+    let year_offset = self.peek_tk().and_then(|tk| {
+      let TimeTk::Num(n) = tk else { return None };
+      if *n < 1000.0 { return None; }
+      if matches!(self.peek_nth(1), Some(TimeTk::Word(_))) { return None; }
+
+      NaiveDate::from_ymd_opt(*n as i32, 1, 1)
+    });
+
+    if let Some(off) = year_offset {
+      self.pos += 1;
+      when = when.with_year(off.year()).ok_or_else(|| {
+        sherr!(ParseErr, "invalid year offset '{off}' for date '{when}'")
+      })?;
+    }
+
+    Ok(Some(when))
   }
 
   #[rustfmt::skip]

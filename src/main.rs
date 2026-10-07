@@ -1,4 +1,3 @@
-#![warn(clippy::pedantic)]
 #![warn(unreachable_pub)]
 #![expect(
   clippy::assert_is_empty,

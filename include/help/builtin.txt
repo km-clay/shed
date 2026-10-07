@@ -499,7 +499,13 @@ CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
     Lowercase specifiers are totals, the whole duration expressed in
     that unit.
 
-      `%D`    whole days
+      `%E`    whole millennia             `%e`    total millennia
+      `%C`    centuries in the millennium `%c`    total centuries
+      `%T`    decades within the century  `%t`    total decades
+      `%Y`    years within the decade     `%y`    total years
+      `%O`    months within the year      `%o`    total months
+      `%W`    weeks within the month      `%w`    total weeks
+      `%D`    days within the week        `%d`    total days
       `%H`    hours within the day        `%h`    total hours
       `%M`    minutes within the hour     `%m`    total minutes
       `%S`    seconds within the minute   `%s`    total seconds
@@ -509,7 +515,18 @@ CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
       `%R`    `running` or `stopped`
       `%%`    a literal `%`
 
-    Days are the largest unit, so `%D` and `%d` are the same number.
+    Millennia are the largest unit, so `%E` and `%e` are the same number.
+    Every other component is what is left after the units above it have
+    taken their share, which is why ```chrono fmt -d '400 days' -f '%D'```
+    is `5` where `%d` is `400`.
+
+    A month is 30 days and a year is 365, matching what `-d` accepts as
+    `mo` and `y`. Since 365 is not a multiple of 30 and 30 is not a
+    multiple of 7, each of `%O`, `%W` and `%D` divides the remainder left
+    by the one before it rather than its own next-larger unit. Spelling
+    the whole ladder out reproduces what `-d` prints on its own:
+
+        ```chrono fmt -d '400 days' -f '%Y/%O/%W/%D'```   `1/1/0/5`
 
     A negative duration -- see |chrono-fmt-dur| -- prints its sign on the
     totals only. A timer's elapsed time is never negative.
@@ -634,7 +651,8 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
   `-f {format}` / `--format {format}` selects the rendering. Which format
   language it speaks depends on `-d`: without it, {format} is a `strftime`
   format; with it, the |duration syntax|(chrono-timer-format) that
-  ```chrono timer``` uses.
+  ```chrono timer``` uses. The formatting specifiers can use the same parameters
+  used by |printf|(builtin-printf).
 
   With no `-f`, an instant prints the way ```date``` writes one, and a
   duration prints in words:
@@ -714,7 +732,7 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
     in the past. Write `5 minutes from now` for the other direction.
 
     An unrecognized `strftime` specifier is passed through unchanged, the
-    way |printf|(builtin-printf) treats one, so |%Q| renders as `%Q`.
+    way |printf|(builtin-printf) treats one, so `%Q` literally renders as `%Q`.
 
   Durations ~                                             *chrono-fmt-dur*
 
@@ -791,6 +809,8 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
     `0`   the time was formatted
     `2`   a missing operand, an operand that is neither a duration nor an
           instant, or an unknown `-z` zone
+
+  See also: |printf|(builtin-printf)
 
 ==============================================================================
 CHRONO EVERY                               *chrono-every* *builtin-chrono-every*
@@ -3145,6 +3165,66 @@ PRINTF                                           *builtin-printf* *printf*
     `\xNN`  byte with hex value NN (1-2 digits)
     `\NNN`  byte with octal value NNN (1-3 digits)
 
+  Optional groups ~                              *printf-groups*
+
+    A run of the format can be wrapped so that it only appears when the
+    conversions inside it produced a value. The group's literal text goes
+    with it, so punctuation and spacing vanish along with the field rather
+    than being left stranded.
+
+    `%{` ... `%}`    show the group when {any} conversion inside has a value
+    `%[` ... `%]`    show it only when {every} conversion inside has one
+
+    A group takes field parameters the way a conversion does, written
+    before the opening delimiter and applied to everything the group
+    rendered:
+
+      `%^{` ... `%}`     trim whitespace from both ends of the group
+      `%8{` ... `%}`     pad the group to eight columns
+      `%-8{` ... `%}`    pad it to eight, text to the left
+
+    The other flags have no meaning on a group and are ignored. Precision
+    is also ignored.
+
+    A conversion has a value when a `numeric field` is {not zero}, and a
+    `string field` is not empty. Anything else counts as absent.
+
+        ```printf '%{<%d>%}' 5```              outputs: `<5>`
+        ```printf '%{<%d>%}' 0```              outputs nothing, angle brackets included
+        ```printf '%[%s: %s%]' key value```    outputs: `key: value`
+        ```printf '%[%s: %s%]' key ''```       outputs nothing -- the label goes too
+
+    A group is all-or-nothing. Once it is showing, everything inside renders,
+    including conversions that are themselves absent, so
+    ```printf '%{%dh %dm%}' 0 5``` gives `0h 5m`. To drop the units
+    separately, give each one its own group.
+
+  Nested Optional Groups ~
+
+    Groups nest, and an inner group counts as present for its parent exactly
+    when it rendered. That composes into a wrapper that disappears cleanly
+    when everything inside it is absent:
+
+        ```printf '%{(%{%dh %}%{%dm%})%}' 0 5```   outputs: `(5m)`
+        ```printf '%{(%{%dh %}%{%dm%})%}' 0 0```   outputs nothing, no `()`
+
+    A group holding no conversions has nothing to be absent, so it always
+    shows.
+
+    Arguments are consumed either way. A hidden group still takes its
+    arguments from the list, so the format stays aligned with the arguments
+    whatever the data happens to be. That is what keeps a restarting format
+    in step:
+
+        ```printf '%{%d%}|' 0 5 0 7```   outputs: `|5||7|`
+
+    The format runs four times; the passes that saw a zero contribute only
+    the `|` outside the group.
+
+    An unmatched or mismatched delimiter is an error: `%{` closed by `%]`
+    says which closer was expected, and a delimiter with no partner says
+    which one has none.
+
   Examples ~
 
       ```printf 'hello %s\n' world```
@@ -3188,7 +3268,7 @@ PRINTF                                           *builtin-printf* *printf*
       ```printf '%*d\n' 8 42```
                                 width read from argument (width 8)
 
-  See also: |builtin-echo|, |builtin-quote|
+  See also: |builtin-echo|, |builtin-quote|, |printf-groups|
 
 ==============================================================================
 PUSHD                                            *builtin-pushd* *pushd*

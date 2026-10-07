@@ -159,6 +159,19 @@ pub(super) struct DurFmt {
 pub(super) enum DurConv {
   Status,
 
+  TotalMillennia,
+  Millennia,
+  TotalCenturies,
+  Centuries,
+  TotalDecades,
+  Decades,
+  TotalYears,
+  Years,
+  TotalMonths,
+  Months,
+  TotalWeeks,
+  Weeks,
+  TotalDays,
   Days,
   Hours,
   TotalHours,
@@ -182,7 +195,20 @@ impl StrFmt for DurFmt {
       return Err(sherr!(ParseErr, "incomplete format specifier"));
     };
     Ok(match b {
-      b'D' | b'd' => DurConv::Days,
+      b'E' => DurConv::Millennia,
+      b'e' => DurConv::TotalMillennia,
+      b'C' => DurConv::Centuries,
+      b'c' => DurConv::TotalCenturies,
+      b'T' => DurConv::Decades,
+      b't' => DurConv::TotalDecades,
+      b'Y' => DurConv::Years,
+      b'y' => DurConv::TotalYears,
+      b'O' => DurConv::Months,
+      b'o' => DurConv::TotalMonths,
+      b'W' => DurConv::Weeks,
+      b'w' => DurConv::TotalWeeks,
+      b'D' => DurConv::Days,
+      b'd' => DurConv::TotalDays,
       b'H' => DurConv::Hours,
       b'h' => DurConv::TotalHours,
       b'M' => DurConv::Mins,
@@ -213,18 +239,31 @@ impl StrFmt for DurFmt {
     field: &FieldParams,
     src: &mut Self::Source,
   ) -> ShResult<Field> {
-    const NANOS_PER_MICRO: u128 = 1_000;
-    const NANOS_PER_MILLI: u128 = 1_000 * NANOS_PER_MICRO;
-    const NANOS_PER_SEC  : u128 = 1_000 * NANOS_PER_MILLI;
-    const NANOS_PER_MIN  : u128 = 60    * NANOS_PER_SEC;
-    const NANOS_PER_HOUR : u128 = 60    * NANOS_PER_MIN;
-    const NANOS_PER_DAY  : u128 = 24    * NANOS_PER_HOUR;
+    const NANOS_PER_MICRO   : u128 = 1_000;
+    const NANOS_PER_MILLI   : u128 = 1_000 * NANOS_PER_MICRO;
+    const NANOS_PER_SEC     : u128 = 1_000 * NANOS_PER_MILLI;
+    const NANOS_PER_MIN     : u128 = 60    * NANOS_PER_SEC;
+    const NANOS_PER_HOUR    : u128 = 60    * NANOS_PER_MIN;
+    const NANOS_PER_DAY     : u128 = 24    * NANOS_PER_HOUR;
+    const NANOS_PER_WEEK    : u128 = 7     * NANOS_PER_DAY;
+    const NANOS_PER_MONTH   : u128 = 30    * NANOS_PER_DAY; // roughly
+    const NANOS_PER_YEAR    : u128 = 365   * NANOS_PER_DAY; // roughly
+    const NANOS_PER_DECADE  : u128 = 10    * NANOS_PER_YEAR;
+    const NANOS_PER_CENTURY : u128 = 10    * NANOS_PER_DECADE;
+    const NANOS_PER_MILLENNIUM: u128 = 10  * NANOS_PER_CENTURY;
 
     let signed = i128::from(src.num_seconds()) * 1_000_000_000 + i128::from(src.subsec_nanos());
     let negative = signed < 0;
     let nanos = signed.unsigned_abs();
 
     let n = match conv {
+      DurConv::TotalMillennia => nanos / NANOS_PER_MILLENNIUM,
+      DurConv::TotalCenturies => nanos / NANOS_PER_CENTURY,
+      DurConv::TotalDecades   => nanos / NANOS_PER_DECADE,
+      DurConv::TotalYears     => nanos / NANOS_PER_YEAR,
+      DurConv::TotalMonths    => nanos / NANOS_PER_MONTH,
+      DurConv::TotalWeeks     => nanos / NANOS_PER_WEEK,
+      DurConv::TotalDays      => nanos / NANOS_PER_DAY,
       DurConv::TotalHours  => nanos / NANOS_PER_HOUR,
       DurConv::TotalMins   => nanos / NANOS_PER_MIN,
       DurConv::TotalSecs   => nanos / NANOS_PER_SEC,
@@ -232,10 +271,22 @@ impl StrFmt for DurFmt {
       DurConv::TotalMicros => nanos / NANOS_PER_MICRO,
       DurConv::TotalNanos  => nanos,
 
-      DurConv::Days   =>  nanos / NANOS_PER_DAY,
-      DurConv::Hours  => (nanos % NANOS_PER_DAY  ) / NANOS_PER_HOUR,
-      DurConv::Mins   => (nanos % NANOS_PER_HOUR ) / NANOS_PER_MIN,
-      DurConv::Secs   => (nanos % NANOS_PER_MIN  ) / NANOS_PER_SEC,
+      DurConv::Millennia =>  nanos / NANOS_PER_MILLENNIUM,
+      DurConv::Centuries => (nanos % NANOS_PER_MILLENNIUM) / NANOS_PER_CENTURY,
+      DurConv::Decades   => (nanos % NANOS_PER_CENTURY) / NANOS_PER_DECADE,
+      DurConv::Years     => (nanos % NANOS_PER_DECADE ) / NANOS_PER_YEAR,
+      // 365 is not a multiple of 30 and 30 is not a multiple of 7, so each of
+      // these takes the remainder left by the unit above it rather than the
+      // remainder of its own next-larger unit.
+      DurConv::Months    =>   nanos % NANOS_PER_YEAR    / NANOS_PER_MONTH,
+      DurConv::Weeks     =>  (nanos % NANOS_PER_YEAR)
+                                   % NANOS_PER_MONTH    / NANOS_PER_WEEK,
+      DurConv::Days      => ((nanos % NANOS_PER_YEAR)
+                                   % NANOS_PER_MONTH)
+                                   % NANOS_PER_WEEK     / NANOS_PER_DAY,
+      DurConv::Hours     => (nanos % NANOS_PER_DAY     ) / NANOS_PER_HOUR,
+      DurConv::Mins      => (nanos % NANOS_PER_HOUR    ) / NANOS_PER_MIN,
+      DurConv::Secs      => (nanos % NANOS_PER_MIN     ) / NANOS_PER_SEC,
 
       DurConv::Millis => (nanos % NANOS_PER_SEC) / NANOS_PER_MILLI,
       DurConv::Micros => (nanos % NANOS_PER_SEC) / NANOS_PER_MICRO,
@@ -269,14 +320,20 @@ impl StrFmt for DurFmt {
     // A component is part of a whole, so the sign belongs to the totals --
     // the ones a script feeds back into arithmetic.
     let sign = match conv {
-      DurConv::TotalHours
+      DurConv::TotalMillennia
+      | DurConv::TotalCenturies
+      | DurConv::TotalDecades
+      | DurConv::TotalYears
+      | DurConv::TotalMonths
+      | DurConv::TotalWeeks
+      | DurConv::TotalDays
+      | DurConv::TotalHours
       | DurConv::TotalMins
       | DurConv::TotalSecs
       | DurConv::TotalMillis
       | DurConv::TotalMicros
       | DurConv::TotalNanos
-      | DurConv::Days
-        if negative =>
+        if negative && n != 0 =>
       {
         Some(Sign::Minus)
       }
@@ -342,5 +399,98 @@ impl BuiltinRouter for Chrono {
       ),
     ];
     SUB_COMMANDS
+  }
+}
+
+#[cfg(test)]
+mod dur_fmt_tests {
+  use crate::tests::testutil::{TestGuard, test_input};
+  use pretty_assertions::assert_eq;
+
+  fn out_of(cmd: &str) -> String {
+    let g = TestGuard::new();
+    test_input(cmd).unwrap();
+    g.read_output()
+  }
+
+  /// `out_of` with the trailing newline the renderer appends removed.
+  fn val_of(cmd: &str) -> String {
+    out_of(cmd).trim_end().to_string()
+  }
+
+  /// The default renderer and an equivalent format string must agree. This is
+  /// what pins the component ladder: every rung takes the remainder left by the
+  /// one above it, and 365 is not a multiple of 30 nor 30 of 7, so a rung that
+  /// resets to its own next-larger unit drifts here and nowhere else.
+  fn same(dur: &str, fmt: &str) {
+    let default = out_of(&format!("chrono fmt -d '{dur}'"));
+    let formatted = out_of(&format!("chrono fmt -d '{dur}' -f '{fmt}'"));
+
+    assert_eq!(default, formatted, "duration '{dur}' with format '{fmt}'");
+  }
+
+  #[test]
+  fn millennia_and_centuries_match_the_default() {
+    same("2500 years", r"%{%1E millennia%}%{ %1C centuries%}");
+  }
+
+  #[test]
+  fn decades_and_years_match_the_default() {
+    same("37 years", r"%{%1T decades%}%{ %1Y years%}");
+  }
+
+  #[test]
+  fn years_months_and_days_match_the_default() {
+    same("400 days", r"%{%1Y year%}%{ %1O month%}%{ %1D days%}");
+  }
+
+  #[test]
+  fn weeks_and_days_match_the_default() {
+    same("25 days", r"%{%1W weeks%}%{ %1D days%}");
+  }
+
+  #[test]
+  fn clock_units_match_the_default() {
+    same("3661 seconds", r"%{%1Hh%}%{ %1Mm%}%{ %1Ss%}");
+  }
+
+  /// The zero minute is dropped by the group, the way the default drops it.
+  #[test]
+  fn an_interior_zero_unit_is_omitted() {
+    same("3605 seconds", r"%{%1Hh%}%{ %1Mm%}%{ %1Ss%}");
+  }
+
+  #[test]
+  fn components_climb_the_ladder() {
+    assert_eq!(
+      val_of("chrono fmt -d '2500 years' -f '%E/%C/%T/%Y'"),
+      "2/5/0/0"
+    );
+    assert_eq!(val_of("chrono fmt -d '150 years' -f '%C/%T/%Y'"), "1/5/0");
+    assert_eq!(val_of("chrono fmt -d '37 years' -f '%C/%T/%Y'"), "0/3/7");
+    assert_eq!(
+      val_of("chrono fmt -d '400 days' -f '%Y/%O/%W/%D'"),
+      "1/1/0/5"
+    );
+    assert_eq!(val_of("chrono fmt -d '25 days' -f '%O/%W/%D'"), "0/3/4");
+  }
+
+  #[test]
+  fn totals_are_independent_of_the_ladder() {
+    assert_eq!(
+      val_of("chrono fmt -d '400 days' -f '%y/%o/%w/%d'"),
+      "1/13/57/400"
+    );
+  }
+
+  #[test]
+  fn totals_carry_the_sign_and_components_do_not() {
+    assert!(val_of("chrono fmt -d 'now to 3 years ago' -f '%d'").starts_with('-'));
+    assert!(!val_of("chrono fmt -d 'now to 3 years ago' -f '%D'").starts_with('-'));
+  }
+
+  #[test]
+  fn a_zero_total_has_no_sign() {
+    assert_eq!(val_of("chrono fmt -d 'now to 3 years ago' -f '%c'"), "0");
   }
 }

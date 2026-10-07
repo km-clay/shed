@@ -569,6 +569,109 @@ mod tests {
   use crate::state;
   use crate::tests::testutil::{TestGuard, test_input};
 
+  // ===================== optional groups =====================
+
+  fn out_of(cmd: &str) -> String {
+    let g = TestGuard::new();
+    test_input(cmd).unwrap();
+    g.read_output()
+  }
+
+  #[test]
+  fn group_shows_a_present_number() {
+    assert_eq!(out_of(r"printf '%{<%d>%}' 5"), "<5>");
+  }
+
+  #[test]
+  fn group_hides_a_zero_number() {
+    assert_eq!(out_of(r"printf '%{<%d>%}' 0"), "");
+  }
+
+  #[test]
+  fn group_shows_a_present_string() {
+    assert_eq!(out_of(r"printf '%{<%s>%}' x"), "<x>");
+  }
+
+  #[test]
+  fn group_hides_an_empty_string() {
+    assert_eq!(out_of(r"printf '%{<%s>%}' ''"), "");
+  }
+
+  #[test]
+  fn any_group_shows_when_one_of_several_is_present() {
+    assert_eq!(out_of(r"printf '%{<%d %d>%}' 0 5"), "<0 5>");
+  }
+
+  #[test]
+  fn any_group_hides_when_all_are_absent() {
+    assert_eq!(out_of(r"printf '%{<%d %d>%}' 0 0"), "");
+  }
+
+  #[test]
+  fn all_group_shows_when_every_one_is_present() {
+    assert_eq!(out_of(r"printf '%[<%d %d>%]' 3 5"), "<3 5>");
+  }
+
+  // Regression: a leading literal inside the group used to make the first
+  // conversion look like a later one, so the all-group never fired.
+  #[test]
+  fn all_group_shows_with_a_leading_literal() {
+    assert_eq!(out_of(r"printf '%[<%d>%]' 5"), "<5>");
+  }
+
+  #[test]
+  fn all_group_hides_when_any_is_absent() {
+    assert_eq!(out_of(r"printf '%[<%d %d>%]' 0 5"), "");
+    assert_eq!(out_of(r"printf '%[<%d %d>%]' 5 0"), "");
+  }
+
+  #[test]
+  fn nested_group_shows_through_its_parent() {
+    assert_eq!(out_of(r"printf '%{(%{<%d>%})%}' 7"), "(<7>)");
+  }
+
+  // Regression: a hidden inner group reported nothing rather than absence, so
+  // the parent kept its own literals and emitted an empty "()".
+  #[test]
+  fn hidden_nested_group_hides_its_parent() {
+    assert_eq!(out_of(r"printf '%{(%{<%d>%})%}' 0"), "");
+  }
+
+  #[test]
+  fn groups_nest_three_deep() {
+    assert_eq!(out_of(r"printf '%{a%{b%{%d%}c%}d%}' 9"), "ab9cd");
+    assert_eq!(out_of(r"printf '%{a%{b%{%d%}c%}d%}' 0"), "");
+  }
+
+  #[test]
+  fn group_without_conversions_passes_through() {
+    assert_eq!(out_of(r"printf '%{hello%}'"), "hello");
+  }
+
+  #[test]
+  fn group_tracks_a_repeat_conversion() {
+    assert_eq!(out_of(r"printf '%{[%3r]%}' ab"), "[ababab]");
+  }
+
+  #[test]
+  fn sibling_groups_resolve_independently() {
+    assert_eq!(out_of(r"printf 'x%{%d%}y%{%d%}z' 0 5"), "xy5z");
+  }
+
+  #[test]
+  fn unmatched_group_delimiters_are_errors() {
+    for fmt in [
+      r"printf '%{oops'",
+      r"printf 'oops%}'",
+      r"printf '%[oops'",
+      r"printf 'oops%]'",
+    ] {
+      let _g = TestGuard::new();
+      test_input(fmt).ok();
+      assert_ne!(state::Shed::get_status(), 0, "{fmt} should fail");
+    }
+  }
+
   // ===================== invalid-number handling =====================
 
   #[test]
