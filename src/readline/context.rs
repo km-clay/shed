@@ -100,7 +100,7 @@ pub(crate) fn nested_subs(input: &[u8]) -> Vec<NestedSub> {
         let s = tk.as_bytes();
         let body = s
           .strip_prefix(b"$(".as_slice())
-          .and_then(|s| s.strip_suffix(b")".as_slice()))
+          .map(|s| s.strip_suffix(b")").unwrap_or(s))
           .unwrap_or(s);
         out.push(NestedSub::Cmd(tk.span, body.into()));
         return;
@@ -109,7 +109,7 @@ pub(crate) fn nested_subs(input: &[u8]) -> Vec<NestedSub> {
         let s = tk.as_bytes();
         let body = s
           .strip_prefix(b"`".as_slice())
-          .and_then(|s| s.strip_suffix(b"`".as_slice()))
+          .map(|s| s.strip_suffix(b"`").unwrap_or(s))
           .unwrap_or(s);
         out.push(NestedSub::Cmd(tk.span, body.into()));
         return;
