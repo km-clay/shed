@@ -3,7 +3,7 @@
 //! These functions do stuff like setting up the logger, parsing the command
 //! line arguments, hanging up child processes on exit, etc.
 
-use crate::set_var;
+use crate::{set_var, socket};
 use std::{
   io::Write,
   os::unix::ffi::{OsStrExt, OsStringExt},
@@ -265,6 +265,7 @@ pub(super) fn setup() -> Option<ShedArgs> {
   flog::init().ok();
   params::set_ver_info().ok();
   params::inc_sh_lvl().ok();
+  socket::poke_token();
 
   // Parse argv with shed's own option scanner (shared with the `set` builtin),
   // so `-e`/`-x`/`-o pipefail`/`+e` etc. behave identically at invocation and

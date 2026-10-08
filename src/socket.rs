@@ -48,6 +48,7 @@ use crate::{
   var, varstr,
 };
 pub(crate) use private::authorize;
+pub(crate) use private::poke_token;
 
 mod private {
   //! This module contains the private token used to authorize requests to the socket's private interface.
@@ -76,6 +77,10 @@ mod private {
     PRIVATE_TOKEN.check_bytes(token)
   }
 
+  pub(crate) fn poke_token() {
+    PRIVATE_TOKEN.poke()
+  }
+
   /// A private token
   struct PrivateToken(String);
   impl PrivateToken {
@@ -88,6 +93,11 @@ mod private {
     fn authorize(&self, request: impl Display) -> String {
       let token = &self.0;
       format!("PRIVATE {token} {request}")
+    }
+    fn poke(&self) {
+      // do nothing
+      // used to make the lazylock initialize
+      // at a specific point in time (lifecycle.rs)
     }
   }
 }
