@@ -172,7 +172,8 @@ pub(super) enum DurConv {
   TotalWeeks,
   Weeks,
   TotalDays,
-  Days,
+  DaysModMonths,
+  DaysModWeeks,
   Hours,
   TotalHours,
   Mins,
@@ -207,7 +208,8 @@ impl StrFmt for DurFmt {
       b'o' => DurConv::TotalMonths,
       b'W' => DurConv::Weeks,
       b'w' => DurConv::TotalWeeks,
-      b'D' => DurConv::Days,
+      b'D' => DurConv::DaysModMonths,
+      b'A' => DurConv::DaysModWeeks,
       b'd' => DurConv::TotalDays,
       b'H' => DurConv::Hours,
       b'h' => DurConv::TotalHours,
@@ -281,9 +283,12 @@ impl StrFmt for DurFmt {
       DurConv::Months    =>   nanos % NANOS_PER_YEAR    / NANOS_PER_MONTH,
       DurConv::Weeks     =>  (nanos % NANOS_PER_YEAR)
                                    % NANOS_PER_MONTH    / NANOS_PER_WEEK,
-      DurConv::Days      => ((nanos % NANOS_PER_YEAR)
+      DurConv::DaysModWeeks  => ((nanos % NANOS_PER_YEAR)
                                    % NANOS_PER_MONTH)
                                    % NANOS_PER_WEEK     / NANOS_PER_DAY,
+      DurConv::DaysModMonths => ((nanos % NANOS_PER_YEAR)
+                                   % NANOS_PER_MONTH)
+                                   / NANOS_PER_DAY,
       DurConv::Hours     => (nanos % NANOS_PER_DAY     ) / NANOS_PER_HOUR,
       DurConv::Mins      => (nanos % NANOS_PER_HOUR    ) / NANOS_PER_MIN,
       DurConv::Secs      => (nanos % NANOS_PER_MIN     ) / NANOS_PER_SEC,
@@ -418,46 +423,71 @@ mod dur_fmt_tests {
     out_of(cmd).trim_end().to_string()
   }
 
-  /// The default renderer and an equivalent format string must agree. This is
-  /// what pins the component ladder: every rung takes the remainder left by the
-  /// one above it, and 365 is not a multiple of 30 nor 30 of 7, so a rung that
-  /// resets to its own next-larger unit drifts here and nowhere else.
-  fn same(dur: &str, fmt: &str) {
-    let default = out_of(&format!("chrono fmt -d '{dur}'"));
-    let formatted = out_of(&format!("chrono fmt -d '{dur}' -f '{fmt}'"));
-
-    assert_eq!(default, formatted, "duration '{dur}' with format '{fmt}'");
+  /// Every rung takes the remainder left by the one above it, and 365 is not a
+  /// multiple of 30 nor 30 of 7, so a rung that resets to its own next-larger
+  /// unit drifts here and nowhere else.
+  fn is(dur: &str, fmt: &str, expect: &str) {
+    assert_eq!(
+      val_of(&format!("chrono fmt -d '{dur}' -f '{fmt}'")),
+      expect,
+      "duration '{dur}' with format '{fmt}'"
+    );
   }
 
   #[test]
-  fn millennia_and_centuries_match_the_default() {
-    same("2500 years", r"%{%1E millennia%}%{ %1C centuries%}");
+  fn millennia_and_centuries_climb_the_ladder() {
+    is(
+      "2500 years",
+      r"%{%1E millennia%}%{ %1C centuries%}",
+      "2 millennia 5 centuries",
+    );
   }
 
   #[test]
-  fn decades_and_years_match_the_default() {
-    same("37 years", r"%{%1T decades%}%{ %1Y years%}");
+  fn decades_and_years_climb_the_ladder() {
+    is(
+      "37 years",
+      r"%{%1T decades%}%{ %1Y years%}",
+      "3 decades 7 years",
+    );
   }
 
   #[test]
-  fn years_months_and_days_match_the_default() {
-    same("400 days", r"%{%1Y year%}%{ %1O month%}%{ %1D days%}");
+  fn years_months_and_days_climb_the_ladder() {
+    is(
+      "400 days",
+      r"%{%1Y year%}%{ %1O month%}%{ %1D days%}",
+      "1 year 1 month 5 days",
+    );
+  }
+
+  /// `%A` is the week-relative rung; `%D` skips weeks and counts within the month.
+  #[test]
+  fn weeks_and_days_climb_the_ladder() {
+    is("25 days", r"%{%1W weeks%}%{ %1A days%}", "3 weeks 4 days");
   }
 
   #[test]
-  fn weeks_and_days_match_the_default() {
-    same("25 days", r"%{%1W weeks%}%{ %1D days%}");
+  fn clock_units_climb_the_ladder() {
+    is("3661 seconds", r"%{%1Hh%}%{ %1Mm%}%{ %1Ss%}", "1h 1m 1s");
   }
 
-  #[test]
-  fn clock_units_match_the_default() {
-    same("3661 seconds", r"%{%1Hh%}%{ %1Mm%}%{ %1Ss%}");
-  }
-
-  /// The zero minute is dropped by the group, the way the default drops it.
+  /// The zero minute is dropped by the group.
   #[test]
   fn an_interior_zero_unit_is_omitted() {
-    same("3605 seconds", r"%{%1Hh%}%{ %1Mm%}%{ %1Ss%}");
+    is("3605 seconds", r"%{%1Hh%}%{ %1Mm%}%{ %1Ss%}", "1h 5s");
+  }
+
+  #[test]
+  fn the_default_format_pins_its_rungs() {
+    assert_eq!(
+      val_of("chrono fmt -d '400 days'"),
+      "1 years 1 months 5 days, 00:00.000"
+    );
+    assert_eq!(val_of("chrono fmt -d '7 days'"), "7 days, 00:00.000");
+    assert_eq!(val_of("chrono fmt -d '1 year'"), "1 years 00:00.000");
+    assert_eq!(val_of("chrono fmt -d 0s"), "00:00.000");
+    assert_eq!(val_of("chrono fmt -d '3661 seconds'"), "01:01:01.000");
   }
 
   #[test]
@@ -472,7 +502,8 @@ mod dur_fmt_tests {
       val_of("chrono fmt -d '400 days' -f '%Y/%O/%W/%D'"),
       "1/1/0/5"
     );
-    assert_eq!(val_of("chrono fmt -d '25 days' -f '%O/%W/%D'"), "0/3/4");
+    assert_eq!(val_of("chrono fmt -d '25 days' -f '%O/%W/%A'"), "0/3/4");
+    assert_eq!(val_of("chrono fmt -d '25 days' -f '%O/%D'"), "0/25");
   }
 
   #[test]

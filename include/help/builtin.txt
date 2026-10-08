@@ -489,69 +489,18 @@ CHRONO TIMER                               *chrono-timer* *builtin-chrono-timer*
 
   Format specifiers ~                                   *chrono-timer-format*
 
-    `status` takes a {format} to print the elapsed time however you
+    `status` takes a `{format}` to print the elapsed time however you
     like, in place of the default rendering. It follows the {name} when
     one is given, and stands alone when one is not. `chrono timer`
     takes the same {format} when listing, applying it to every timer.
 
-    Uppercase specifiers are components, each one the remainder within
-    the next larger unit, matching the strftime code of the same name.
-    Lowercase specifiers are totals, the whole duration expressed in
-    that unit.
+    A `{format}` uses the duration specifiers documented at
+    |chrono-fmt-format|, plus one that only a timer has:
 
-      `%E`    whole millennia             `%e`    total millennia
-      `%C`    centuries in the millennium `%c`    total centuries
-      `%T`    decades within the century  `%t`    total decades
-      `%Y`    years within the decade     `%y`    total years
-      `%O`    months within the year      `%o`    total months
-      `%W`    weeks within the month      `%w`    total weeks
-      `%D`    days within the week        `%d`    total days
-      `%H`    hours within the day        `%h`    total hours
-      `%M`    minutes within the hour     `%m`    total minutes
-      `%S`    seconds within the minute   `%s`    total seconds
-      `%L`    milliseconds                `%l`    total milliseconds
-      `%U`    microseconds                `%u`    total microseconds
-      `%N`    nanoseconds                 `%n`    total nanoseconds
       `%R`    `running` or `stopped`
-      `%%`    a literal `%`
 
-    Millennia are the largest unit, so `%E` and `%e` are the same number.
-    Every other component is what is left after the units above it have
-    taken their share, which is why ```chrono fmt -d '400 days' -f '%D'```
-    is `5` where `%d` is `400`.
-
-    A month is 30 days and a year is 365, matching what `-d` accepts as
-    `mo` and `y`. Since 365 is not a multiple of 30 and 30 is not a
-    multiple of 7, each of `%O`, `%W` and `%D` divides the remainder left
-    by the one before it rather than its own next-larger unit. Spelling
-    the whole ladder out reproduces what `-d` prints on its own:
-
-        ```chrono fmt -d '400 days' -f '%Y/%O/%W/%D'```   `1/1/0/5`
-
-    A negative duration -- see |chrono-fmt-dur| -- prints its sign on the
-    totals only. A timer's elapsed time is never negative.
-
-    `%L`, `%U` and `%N` are all fractions of the {second}, at differing
-    precision -- they are alternatives, not digit groups, so `%S.%L`
-    is a sensible format and `%L%U%N` is not.
-
-    Components zero-pad to their full width by default -- `%H`, `%M`
-    and `%S` to two columns, `%L` to three, `%U` to six, `%N` to nine.
-    A component is a remainder, so a narrow one reads as the wrong
-    quantity: `%S.%L` of 1.005 seconds is `01.005`, not `1.5`. Totals
-    are never padded -- they have no upper bound, and a leading zero
-    would make them octal in shell arithmetic.
-
-    Each specifier accepts the usual `%[flags][width][.precision]`
-    field parameters, and an explicit width replaces the default, so
-    `%1H` drops the padding and `%5H` widens it.
-
-    An unrecognized specifier is an error.
-
-    `%H:%M:%S` reads the same way it does in strftime, but measures
-    elapsed time rather than a clock instant -- `%H` is hours into the
-    duration, not the hour of the day. See |builtin-printf| for
-    formatting an instant rather than a duration.
+    A timer's elapsed time is never negative, so the sign rule described
+    there never comes up here.
 
   Examples:
 
@@ -650,16 +599,16 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
 
   `-f {format}` / `--format {format}` selects the rendering. Which format
   language it speaks depends on `-d`: without it, {format} is a `strftime`
-  format; with it, the |duration syntax|(chrono-timer-format) that
-  ```chrono timer``` uses. The formatting specifiers can use the same parameters
-  used by |printf|(builtin-printf).
+  format; with it, the |duration syntax|(chrono-fmt-format) described
+  below, which ```chrono timer``` renders through too. The formatting
+  specifiers can use the same parameters used by |printf|(builtin-printf).
 
   With no `-f`, an instant prints the way ```date``` writes one, and a
-  duration prints in words:
+  duration names its years, months and days and shows the rest as a clock:
 
-      ```chrono fmt now```          `Thu Oct  1 01:09:47 AM -04:00 2026`
-      ```chrono fmt -d 1h30m```     `1h 30m`
-      ```chrono fmt -d yesterday``` `-1 day 1h 9m 47s`
+      ```chrono fmt now```          `Thu Oct  8 05:31:44 PM -04:00 2026`
+      ```chrono fmt -d 1h30m```     `01:30:00.000`
+      ```chrono fmt -d yesterday``` `1 days, 17:31:44.555`
 
   Durations ~
 
@@ -668,13 +617,13 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
     Written as `{instant} to {instant}`, it is the span between the two,
     which is how you ask how long something lasted:
 
-        ```chrono fmt -d 9:00am to 5:00pm```        `8h`
+        ```chrono fmt -d 9:00am to 5:00pm```        `08:00:00.000`
         ```chrono fmt -d october 5 2024 to october 10 2024```
-                                                `5 days`
-        ```chrono fmt -d 2 hours ago to now```      `2h`
+                                                `5 days, 00:00.000`
+        ```chrono fmt -d 2 hours ago to now```      `02:00:00.000`
 
-    The span is signed, so a backwards one reports as such rather than
-    silently flipping: ```chrono fmt -d 5:00pm to 9:00am``` is `-8h`.
+    The span is signed rather than silently flipped, and the sign shows
+    on the totals: ```chrono fmt -d -f '%h' 5:00pm to 9:00am``` is `-8`.
     Only a standalone `to` splits -- `today`, `tomorrow` and `october`
     contain the word and are left alone.
 
@@ -744,9 +693,9 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
     Several terms are summed, and every number needs a unit -- a bare
     number is an error here, unlike `chrono sleep`.
 
-    `mo` is 30 days and `y` is 365 days, both here and in the words that
-    `-d` prints without `-f`, so ```chrono fmt -d 1y``` reads back as
-    `1 year` rather than drifting.
+    `mo` is 30 days and `y` is 365 days, both here and in what `-d`
+    prints without `-f`, so ```chrono fmt -d 1y``` reads back as
+    `1 years 00:00.000` rather than drifting.
 
     `A to B` is accepted anywhere a duration is, so |read|(builtin-read)
     `--timeout`, |hist|(builtin-hist) `--longer-than` and `chrono sleep`
@@ -763,7 +712,7 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
 
         ```chrono fmt -d -f '%H:%M' 17:00```       until 5pm today
         ```chrono fmt -d tomorrow```               until midnight
-        ```chrono fmt -d -f '%D' yesterday```      `-1`
+        ```chrono fmt -d -f '%d' yesterday```      `-1`
 
     The two readings never disagree: wherever an operand parses as both,
     it names the same length, because a bare offset means {ago} and the
@@ -773,9 +722,78 @@ CHRONO FMT                                     *chrono-fmt* *builtin-chrono-fmt*
     which are what a script does arithmetic on; components are
     magnitudes within a larger unit and print unsigned.
 
-    The specifiers, their padding, and the component/total split are
-    documented at |chrono-timer-format|. `%R` has no meaning here, since
-    a bare duration has no timer behind it.
+    The specifiers themselves, their padding, and the component/total
+    split are below. `%R` is the one a duration has no use for, since a
+    bare duration has no timer behind it.
+
+  Duration specifiers ~                                *chrono-fmt-format*
+
+    With `-d`, `{format}` is a duration format rather than a `strftime`
+    one. `chrono timer` renders through the same specifiers; see
+    |chrono-timer-format|.
+
+    Uppercase specifiers are components, each one the remainder within
+    the next larger unit, matching the strftime code of the same name.
+    Lowercase specifiers are totals, the whole duration expressed in
+    that unit.
+
+      `%E`    whole millennia             `%e`    total millennia
+      `%C`    centuries in the millennium `%c`    total centuries
+      `%T`    decades within the century  `%t`    total decades
+      `%Y`    years within the decade     `%y`    total years
+      `%O`    months within the year      `%o`    total months
+      `%W`    weeks within the month      `%w`    total weeks
+      `%D`    days within the month       `%d`    total days
+      `%A`    days within the week
+      `%H`    hours within the day        `%h`    total hours
+      `%M`    minutes within the hour     `%m`    total minutes
+      `%S`    seconds within the minute   `%s`    total seconds
+      `%L`    milliseconds                `%l`    total milliseconds
+      `%U`    microseconds                `%u`    total microseconds
+      `%N`    nanoseconds                 `%n`    total nanoseconds
+      `%%`    a literal `%`
+
+    Millennia are the largest unit, so `%E` and `%e` are the same number.
+    Every other component is what is left after the units above it have
+    taken their share, which is why ```chrono fmt -d '400 days' -f '%D'```
+    is `5` where `%d` is `400`.
+
+    A month is 30 days and a year is 365, matching what `-d` accepts as
+    `mo` and `y`. Since 365 is not a multiple of 30 and 30 is not a
+    multiple of 7, a component divides the remainder left by the one
+    above it rather than its own next-larger unit:
+
+        ```chrono fmt -d '400 days' -f '%Y/%O/%D'```    `1/1/5`
+
+    Below the month the ladder forks: `%D` counts every day left in the
+    month, where `%W` and `%A` split those same days into weeks and days.
+
+        ```chrono fmt -d '25 days' -f '%D'```           `25`
+        ```chrono fmt -d '25 days' -f '%W/%A'```        `3/4`
+
+    A negative duration prints its sign on the totals only.
+
+    `%L`, `%U` and `%N` are all fractions of the {second}, at differing
+    precision -- they are alternatives, not digit groups, so `%S.%L`
+    is a sensible format and `%L%U%N` is not.
+
+    Components zero-pad to their full width by default -- `%H`, `%M`
+    and `%S` to two columns, `%L` to three, `%U` to six, `%N` to nine.
+    A component is a remainder, so a narrow one reads as the wrong
+    quantity: `%S.%L` of 1.005 seconds is `01.005`, not `1.5`. Totals
+    are never padded -- they have no upper bound, and a leading zero
+    would make them octal in shell arithmetic.
+
+    Each specifier accepts the usual `%[flags][width][.precision]`
+    field parameters, and an explicit width replaces the default, so
+    `%1H` drops the padding and `%5H` widens it.
+
+    An unrecognized specifier is an error.
+
+    `%H:%M:%S` reads the same way it does in strftime, but measures
+    elapsed time rather than a clock instant -- `%H` is hours into the
+    duration, not the hour of the day. See |chrono-fmt-instant| for
+    formatting an instant rather than a duration.
 
   Timezones ~                                         *chrono-fmt-timezone*
 

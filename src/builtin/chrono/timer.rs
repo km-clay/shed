@@ -354,24 +354,24 @@ mod tests {
     // `format_time` elides zero; `chrono fmt` must still print something.
     let (out, status) = run("chrono fmt -d 0s");
     assert_eq!(status, 0);
-    assert_eq!(out.trim(), "0s", "got {out:?}");
+    assert_eq!(out.trim(), "00:00.000", "got {out:?}");
 
     // a round trip telescopes to zero
     let (out, _) = run("chrono fmt -d '9:00am to 5:00pm to 9:00am'");
-    assert_eq!(out.trim(), "0s", "got {out:?}");
+    assert_eq!(out.trim(), "00:00.000", "got {out:?}");
   }
 
   #[test]
   fn fmt_chained_spans_telescope() {
-    let (out, _) = run("chrono fmt -d '9:00am to 1:00pm to 5:00pm'");
-    assert_eq!(out.trim(), "8h", "got {out:?}");
+    let (out, _) = run("chrono fmt -d -f '%h' '9:00am to 1:00pm to 5:00pm'");
+    assert_eq!(out.trim(), "8", "got {out:?}");
 
     let (out, _) = run("chrono fmt -d -f '%h' '9:00am to 11:00am to 2:00pm to 6:00pm'");
     assert_eq!(out.trim(), "9", "got {out:?}");
 
     // direction survives
-    let (out, _) = run("chrono fmt -d '5:00pm to 9:00am'");
-    assert_eq!(out.trim(), "-8h", "got {out:?}");
+    let (out, _) = run("chrono fmt -d -f '%h' '5:00pm to 9:00am'");
+    assert_eq!(out.trim(), "-8", "got {out:?}");
   }
 
   #[test]

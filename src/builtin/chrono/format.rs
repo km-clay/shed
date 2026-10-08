@@ -47,7 +47,7 @@ impl Builtin for Format {
     let fmt_string = args
       .opt_value("format")
       .unwrap_or_else(|| match parse_duration {
-        true => VarStr::from("%^{%[%y years%] %[%O months%] %[%D days,%] %[%H:%]%M:%S.%03L%}"),
+        true => VarStr::from("%[%y years %]%[%O months %]%[%D days, %]%[%H:%]%M:%S.%03L"),
         false => VarStr::from("%a %b %e %I:%M:%S %p %Z %Y"),
       });
 
@@ -75,6 +75,7 @@ impl Builtin for Format {
 
       strops::StrFormatter::parse(&DurFmt { running: None }, &fmt_string)
         .and_then(|f| f.render(&mut elapsed, &mut buf))
+        .option_promote(args.opt_span("format"))
         .promote_err(span)
         .with_code(1)?;
 

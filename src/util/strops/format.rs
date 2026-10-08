@@ -9,12 +9,7 @@ use bstr::ByteSlice;
 use crate::{
   match_loop, sherr,
   state::vars::VarStr,
-  util::{
-    self,
-    error::ShResult,
-    strops::{ByteCursor, ParseRadix},
-    ui,
-  },
+  util::{self, error::ShResult, strops::ByteCursor, ui},
 };
 
 use super::SliceCursor;
@@ -215,9 +210,11 @@ pub(crate) trait StrFmt {
 
       FieldKind::Styled => ui::calc_str_width(&field.body().to_str_lossy()) != 0,
 
-      FieldKind::Numeric { .. } => {
-        <i64>::parse_radix(&field.body().to_str_lossy()).is_some_and(|n| n != 0)
-      }
+      FieldKind::Numeric { .. } => field
+        .body()
+        .as_bytes()
+        .iter()
+        .any(|b| b.is_ascii_hexdigit() && *b != b'0'),
     }
   }
 
@@ -344,12 +341,12 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
     });
 
     if let Some(exp) = closer {
-      let opener = match exp {
-        ']' => '[',
-        '}' => '{',
+      let (opener, closer) = match exp {
+        ']' => ("%[", "%]"),
+        '}' => ("%{", "%}"),
         _ => unreachable!()
       };
-      return Err(sherr!(ParseErr, "unmatched '%{opener}' in format string"));
+      return Err(sherr!(ParseErr, "unmatched '{opener}' in format string, expected '{closer}'"));
     }
 
     push_lit(&mut literal, &mut segments);
