@@ -17,8 +17,8 @@ use super::{
 };
 
 pub(super) struct Format;
+#[rustfmt::skip]
 impl Builtin for Format {
-  #[rustfmt::skip]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("timezone" | b'z', 1),
@@ -88,8 +88,8 @@ impl Builtin for Format {
       let fmt = fmt_string.to_str_lossy();
 
       match tz {
-        Zone::Utc => strops::strftime(&dt, &fmt)?.to_var_str(),
-        Zone::Local => strops::strftime(&dt.with_timezone(&Local), &fmt)?.to_var_str(),
+        Zone::Utc       => strops::strftime(&dt, &fmt)?.to_var_str(),
+        Zone::Local     => strops::strftime(&dt.with_timezone(&Local), &fmt)?.to_var_str(),
         Zone::Named(tz) => strops::strftime(&dt.with_timezone(&tz), &fmt)?.to_var_str(),
       }
     };

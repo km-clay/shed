@@ -42,6 +42,11 @@ impl ParseRadix for u64 {
     u64::from_str_radix(s, radix).ok()
   }
 }
+impl ParseRadix for u128 {
+  fn from_radix(s: &str, radix: u32) -> Option<Self> {
+    u128::from_str_radix(s, radix).ok()
+  }
+}
 
 pub(crate) trait VarStrDisplay {
   fn to_var_str(&self) -> VarStr;

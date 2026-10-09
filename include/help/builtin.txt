@@ -3523,9 +3523,11 @@ READ                                             *builtin-read* *read*
 ==============================================================================
 READINT                                          *builtin-readint* *readint*
 
-  `readint --type {type} [--big-endian]`
-  `readint --width {bits} [--signed] [--big-endian]`
-  `readint [--signed] [--big-endian]`                    (width inferred)
+  `readint --type {type} [--big-endian] [{count}] [-a {name}]`
+  `readint --width {bits} [--signed] [--big-endian] [{count}] [-a {name}]`
+  `readint [--signed] [--big-endian] [-a {name}]`        (width inferred)
+
+  where `{count}` is `-n {values}` or `-N {values}`
 
   Read a binary integer from standard input and print its decimal
   value. With `--width` or `--type`, `readint` consumes exactly that
@@ -3535,23 +3537,67 @@ READINT                                          *builtin-readint* *readint*
   cleanly into a `$(readint ...)` substitution. Read from another
   descriptor by redirecting stdin, e.g. `readint <&5`.
 
+  One integer is read per call unless a {count} asks for more; see
+  |readint-batch|.
+
   A binary integer is defined by three facts, and the flags name each:
   how many bytes, in what order, and whether it can be negative.
 
   Flags ~
 
-    `-w {bits}`, `--width {bits}`   width in {bits}: `8`, `16`, `32`,
+    `-w {bits}`, `--width {bits}`       width in {bits}: `8`, `16`, `32`,
                                     `64`, or `128`. The value is spaced,
                                     not attached: `-w 16`, not `-w16`.
-    `-s`, `--signed`               decode as a signed (two's-complement)
+    `-s`, `--signed`                    decode as a signed (two's-complement)
                                     integer. Unsigned by default.
-    `-E`, `--big-endian`           most-significant byte first. The
+    `-E`, `--big-endian`                most-significant byte first. The
                                     default is little-endian.
-    `-T {type}`, `--type {type}`   width and sign together, by Rust name:
+    `-T {type}`, `--type {type}`        width and sign together:
                                     `u8`/`i8`, `u16`/`i16`, `u32`/`i32`,
                                     `u64`/`i64`, `u128`/`i128`. Mutually
                                     exclusive with `-w`/`-s`; byte order
                                     is still set separately with `-E`.
+    `-n {count}`, `--at-most {count}`
+                                    read up to {count} integers, stopping
+                                    at end of input. Requires `-w` or
+                                    `-T`, and excludes `-N`.
+    `-N {count}`, `--exactly {count}`
+                                    read exactly {count} integers, failing
+                                    if the input runs short. Requires `-w`
+                                    or `-T`, and excludes `-n`.
+    `-a {name}`, `--array {name}`       assign the values as the elements of
+                                    array `{name}` instead of writing them
+                                    to stdout.
+
+  Reading several integers ~                              *readint-batch*
+
+  With `-n` or `-N`, `readint` decodes several values in one call instead
+  of one per invocation. The count is in integers, not bytes; the width
+  still comes from `-w`/`-T`.
+
+  `-n` is a ceiling and `-N` is a requirement: given a stream that ends
+  early, `-n` yields the values that were there and `-N` fails. Either
+  way, bytes left over that cannot fill one more integer are an error,
+  so a truncated stream is never silently rounded down.
+
+  Without `-a`, the values go to stdout separated by newlines with none
+  after the last, which leaves the single-value form byte-identical.
+  With `-a {name}` they become the elements of {name}, which is the form
+  |writeint|(builtin-writeint) consumes:
+
+      ```readint -T u32 -n 1200 -a samples```
+      ```writeint -T u32 "${samples[@]}"```
+
+  Reading a batch costs one command invocation instead of one per value,
+  which is the difference that matters when decoding a whole frame.
+
+  A batch that finds no values exits `1`, so a frame loop ends on its own
+  at end of input the way |thru|(builtin-thru)'s does:
+
+      ```while readint -T u32 -n 1200 -a samples; do ... done```
+
+  A batch that finds some but not all of them still succeeds -- that is
+  what separates `-n` from `-N`.
 
   Width inference ~
 
@@ -3562,18 +3608,20 @@ READINT                                          *builtin-readint* *readint*
   end-of-file it is meant for a bounded stream such as a `thru` slice;
   the maximum is 16 bytes, and `readint` reads no more than that before
   erroring, so an oversized or unbounded source fails fast instead of
-  being consumed whole. More than 16 bytes, or empty input, is an error.
+  being consumed whole. More than 16 bytes is an error, and empty input
+  fails quietly. Because the width is whatever the stream turns out to
+  hold, a {count} cannot be combined with inference; `-a` can, and
+  receives the one value.
 
   Unknown options are rejected, so a mistyped flag such as `--be` fails
   loudly instead of silently decoding the wrong byte order.
 
   Exit status ~
 
-  `0`     a value was read and printed
-  nonzero on a usage error (an invalid width or type, an unknown option,
-  or `--type` combined with `-w`/`-s`); on a fixed-width read that hits
-  end-of-input early; or, in inferred mode, on empty input or more than
-  16 bytes
+  `0`     the values were read, and printed or assigned
+  `1`     there was nothing to read: empty input, or a `-n` batch that
+          found no values at all
+  `2`     usage error (invalid width/type, unknown option, etc)
 
   Examples ~
 
@@ -3585,6 +3633,10 @@ READINT                                          *builtin-readint* *readint*
                                 read a big-endian u32 from fd 5
       ```thru -T 3 | readint```
                                 infer width from a 3-byte slice -> 24-bit
+      ```readint -T u32 -n 3```
+                                up to three u32s, newline-separated
+      ```readint -T u32 -N 4 -a hdr```
+                                exactly four u32s into array `hdr`
 
   This is a `shed` extension; `bash` and `POSIX` do not provide it.
 
@@ -3593,34 +3645,56 @@ READINT                                          *builtin-readint* *readint*
 ==============================================================================
 WRITEINT                                         *builtin-writeint* *writeint*
 
-  `writeint --type {type} [--big-endian] [{value}]`
-  `writeint --width {bits} [--signed] [--big-endian] [{value}]`
+  `writeint --type {type} [--big-endian] [{value} ...]`
+  `writeint --width {bits} [--signed] [--big-endian] [{value} ...]`
 
-  Encode an integer as a fixed-width binary value and write the raw
-  bytes to stdout (no trailing newline). This is the inverse of
-  |builtin-readint|; the width, sign, and byte-order flags mean exactly
+  Encode integers as fixed-width binary values and write the raw bytes
+  to stdout (no trailing newline). This is the inverse of
+  |readint|(builtin-readint); the width, sign, and byte-order flags mean exactly
   the same thing and take the same values.
 
-  {value} comes from the argument, or from standard input when no
-  argument is given, e.g. `echo 300 | writeint -w 16`. It is parsed as
-  decimal, or with a `0x`/`0b`/`0` prefix for hex/binary/octal, and may
-  carry a leading `-` for negatives.
+  Each {value} is parsed as decimal, or with a `0x`/`0b`/`0` prefix for
+  hex/binary/octal, and may carry a leading `-` for negatives.
 
-  A value that does not fit the width is truncated to the low {width}
+  Several {value} operands are encoded in turn and their bytes
+  concatenated, so an array written by |readint|(readint-batch) `-a`
+  goes back out in one call:
+
+      ```writeint -T u32 "${samples[@]}"```
+
+  With no `{value}` operands the values are read from standard input and
+  split on `$IFS`, the way |read|(builtin-read) splits fields. `readint`'s
+  newline-separated output therefore feeds straight back in, and another
+  separator only needs `$IFS` set:
+
+      ```echo 300 | writeint -w 16```
+      ```printf '1 2 3' | writeint -T u16```
+      ```printf '1,2,3' | IFS=, writeint -T u16```
+
+  Nothing to write is not success: an empty stream writes nothing and
+  exits `1`, which ends a `while` loop the way |thru|(builtin-thru) does.
+
+  An array that expands to nothing is indistinguishable from no operands
+  at all, so ```writeint -T u32 "${ints[@]}"``` with an empty {ints}
+  falls back to standard input.
+
+  A value that does not fit the width is truncated to the low `{width}`
   bytes rather than reported as an error, the way a narrowing cast
   wraps: `writeint -w 8 300` writes the single byte `0x2c`.
 
   Exit status ~
 
   `0`     the bytes were written
-  nonzero on a usage error: no width or type, an invalid width or type,
-  a missing or non-numeric value, or `--type` combined with `-w`/`-s`
+  `1`     there was nothing to write: an empty input stream, or no
+          {value} operands and no input to fall back on
+  `2`     usage error (invalid width/type, unknown option, etc)
 
   Examples ~
 
       ```writeint -w 16 300```            little-endian -> 2c 01
       ```writeint --type i16 -1```        two's-complement -> ff ff
       ```writeint --type u32 -E 44100```  big-endian -> 00 00 ac 44
+      ```writeint -T u16 1 2 3```         three values -> 01 00 02 00 03 00
 
   This is a `shed` extension; `bash` and `POSIX` do not provide it.
 
@@ -4963,8 +5037,8 @@ THRU                                             *builtin-thru* *thru*
   `     [-U {byte}] [{file} ...]`
 
   Pass input to standard output unchanged: a fork-free `cat`, with a few
-  control-flow extras. With one or more {file} arguments it reads each in
-  order; with none it reads standard input. A {file} of `-` also means standard
+  control-flow extras. With one or more `{file}` arguments it reads each in
+  order; with none it reads standard input. A `{file}` of `-` also means standard
   input. Intended for these main use cases:
 
     - Reading file(s) without forking an external `cat`: `thru config.toml`.
@@ -4981,8 +5055,8 @@ THRU                                             *builtin-thru* *thru*
   Options ~
 
     `-t {dest}`, `--tee {dest}`
-                  Write a copy of the stream to {dest} in addition to
-                  stdout. {dest} can be a regular file path or any
+                  Write a copy of the stream to `{dest}` in addition to
+                  stdout. `{dest}` can be a regular file path or any
                   filesystem path that the operating system maps to an
                   open file descriptor (`/dev/stderr`, `/dev/stdout`,
                   ```/dev/fd/N```). By default the destination file is
@@ -4998,13 +5072,13 @@ THRU                                             *builtin-thru* *thru*
                   the pass-through output.
 
     `-S {bytes}`, `--skip {bytes}`
-                  Discard the first {bytes} bytes of input before passing
+                  Discard the first `{bytes}` bytes of input before passing
                   anything through. The bytes are read and dropped, not
                   emitted. Combined with `-T` this carves an exact
                   slice `[skip, skip+take)` out of any stream.
 
     `-T {bytes}`, `--take {bytes}`
-                  Pass through at most {bytes} bytes of input, then stop;
+                  Pass through at most `{bytes}` bytes of input, then stop;
                   any further input is left unread. The cut is byte-exact
                   and binary-safe: it is not adjusted to a character
                   boundary, so a multi-byte character straddling the end
@@ -5012,17 +5086,17 @@ THRU                                             *builtin-thru* *thru*
                   a file descriptor, or with `-S` to slice any stream.
 
     `-F {byte}`, `--from {byte}`
-                  Discard input up to and including the first {byte}, then
-                  begin passing through. {byte} must be exactly one byte
+                  Discard input up to and including the first `{byte},` then
+                  begin passing through. `{byte}` must be exactly one byte
                   (`$'\0'`, `:`, ...) and is itself consumed, never emitted.
                   The marker that opens a slice. Exits non-zero (see Exit
-                  status) if {byte} is never seen before end of input.
+                  status) if `{byte}` is never seen before end of input.
 
     `-U {byte}`, `--until {byte}`
-                  Stop once the next {byte} is seen, passing through
-                  everything before it; the {byte} is consumed but not
-                  emitted. {byte} must be exactly one byte. The marker that
-                  closes a slice. Exits non-zero (see Exit status) if {byte}
+                  Stop once the next `{byte}` is seen, passing through
+                  everything before it; the `{byte}` is consumed but not
+                  emitted. `{byte}` must be exactly one byte. The marker that
+                  closes a slice. Exits non-zero (see Exit status) if `{byte}`
                   is never seen before end of input, which is what terminates
                   a record loop: `while thru -U $'\0'; do ...; done`.
 
@@ -5053,7 +5127,7 @@ THRU                                             *builtin-thru* *thru*
   `1`   end of input with no bytes moved — the clean EOF that ends a
         `while thru` loop, the way `read` returns non-zero at EOF
   `2`   usage or bad option
-  `3`   `-T` was set but the stream ended before {n} bytes; the short read
+  `3`   `-T` was set but the stream ended before `{n}` bytes; the short read
         is still emitted (a truncated final record)
   `4`   `-U` was set but its delimiter never appeared before end of input
   `5`   `-F` was set but its delimiter never appeared before end of input
