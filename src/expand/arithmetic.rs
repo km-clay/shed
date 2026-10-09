@@ -20,6 +20,9 @@ use crate::{
 
 use super::{escape, var};
 
+/// The number type used for arithmetic evaluation.
+pub(crate) type Num = i128;
+
 #[derive(Debug, Clone)]
 enum ArithOp {
   // math
@@ -100,7 +103,7 @@ impl FromStr for ArithOp {
 
 #[derive(Debug, Clone)]
 enum ArithTk {
-  Num(i64),
+  Num(Num),
   Op(ArithOp),
   Comma,
   LParen,
@@ -132,12 +135,12 @@ enum ArithTk {
 
 // Stack value used during eval_rpn, keeps Var names alive for assignment targets
 enum StackVal {
-  Num(i64),
+  Num(Num),
   Var(String),
 }
 
 impl StackVal {
-  fn to_num(&self) -> ShResult<i64> {
+  fn to_num(&self) -> ShResult<Num> {
     match self {
       StackVal::Num(n) => Ok(*n),
       StackVal::Var(name) => resolve_var_num(name),
@@ -161,8 +164,8 @@ fn radix_digit_value(c: u8, base: u32) -> Option<u32> {
   (v < base).then_some(v)
 }
 
-/// Parse an ASCII byte buffer as a base-10 `i64` (arithmetic literals are ASCII).
-fn parse_decimal(bytes: &[u8]) -> Option<i64> {
+/// Parse an ASCII byte buffer as a base-10 `Num` (arithmetic literals are ASCII).
+fn parse_decimal(bytes: &[u8]) -> Option<Num> {
   std::str::from_utf8(bytes).ok()?.parse().ok()
 }
 
@@ -187,7 +190,7 @@ impl Drop for DepthGuard {
 /// bash), so a variable holding another name (`y=x`) or a sub-expression
 /// (`b="a+1"`) resolves transitively. Unset/empty resolves to 0; cyclic
 /// references are cut off by [`MAX_ARITH_DEPTH`].
-fn resolve_var_num(name: &str) -> ShResult<i64> {
+fn resolve_var_num(name: &str) -> ShResult<Num> {
   let val = if name.contains('[') {
     let vn = VarName::parse(name, true)?;
     Shed::vars(|v| v.resolve_var(&vn)).unwrap_or_default()
@@ -198,7 +201,7 @@ fn resolve_var_num(name: &str) -> ShResult<i64> {
   if trimmed.is_empty() {
     return Ok(0);
   }
-  if let Some(n) = util::parse_bytes::<i64>(trimmed) {
+  if let Some(n) = util::parse_bytes::<Num>(trimmed) {
     return Ok(n);
   }
   if ARITH_DEPTH.with(Cell::get) >= MAX_ARITH_DEPTH {
@@ -212,7 +215,7 @@ fn resolve_var_num(name: &str) -> ShResult<i64> {
   let result = expand_arithmetic(None, trimmed)?;
   result
     .to_str_lossy()
-    .parse::<i64>()
+    .parse::<Num>()
     .map_err(|_| sherr!(ParseErr, "Variable '{name}' does not contain an integer"))
 }
 
@@ -252,21 +255,21 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
     ArithOp::PlusAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
-      let new_val = read_var_as_i64(&lhs)? + rhs;
+      let new_val = resolve_var_num(&lhs)? + rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::MinusAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
-      let new_val = read_var_as_i64(&lhs)? - rhs;
+      let new_val = resolve_var_num(&lhs)? - rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::MulAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
-      let new_val = read_var_as_i64(&lhs)? * rhs;
+      let new_val = resolve_var_num(&lhs)? * rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
@@ -276,7 +279,7 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
         return Err(sherr!(InternalErr, "Division by zero"));
       }
       let lhs = pop_var!();
-      let new_val = read_var_as_i64(&lhs)? / rhs;
+      let new_val = resolve_var_num(&lhs)? / rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
@@ -286,7 +289,7 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
         return Err(sherr!(InternalErr, "Modulo by zero"));
       }
       let lhs = pop_var!();
-      let new_val = read_var_as_i64(&lhs)? % rhs;
+      let new_val = resolve_var_num(&lhs)? % rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
@@ -336,32 +339,32 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
     ArithOp::Lt => {
       let rhs = pop_num!();
       let lhs = pop_num!();
-      stack.push(StackVal::Num(i64::from(lhs < rhs)));
+      stack.push(StackVal::Num(Num::from(lhs < rhs)));
     }
     ArithOp::Gt => {
       let rhs = pop_num!();
       let lhs = pop_num!();
-      stack.push(StackVal::Num(i64::from(lhs > rhs)));
+      stack.push(StackVal::Num(Num::from(lhs > rhs)));
     }
     ArithOp::Le => {
       let rhs = pop_num!();
       let lhs = pop_num!();
-      stack.push(StackVal::Num(i64::from(lhs <= rhs)));
+      stack.push(StackVal::Num(Num::from(lhs <= rhs)));
     }
     ArithOp::Ge => {
       let rhs = pop_num!();
       let lhs = pop_num!();
-      stack.push(StackVal::Num(i64::from(lhs >= rhs)));
+      stack.push(StackVal::Num(Num::from(lhs >= rhs)));
     }
     ArithOp::Eq => {
       let rhs = pop_num!();
       let lhs = pop_num!();
-      stack.push(StackVal::Num(i64::from(lhs == rhs)));
+      stack.push(StackVal::Num(Num::from(lhs == rhs)));
     }
     ArithOp::Ne => {
       let rhs = pop_num!();
       let lhs = pop_num!();
-      stack.push(StackVal::Num(i64::from(lhs != rhs)));
+      stack.push(StackVal::Num(Num::from(lhs != rhs)));
     }
 
     // && and || are decomposed into JIFZ_PEEK/JIFNZ_PEEK + Pop + Nez at
@@ -404,35 +407,35 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
     ArithOp::BitAndAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
-      let new_val = read_var_as_i64(&lhs)? & rhs;
+      let new_val = resolve_var_num(&lhs)? & rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::BitOrAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
-      let new_val = read_var_as_i64(&lhs)? | rhs;
+      let new_val = resolve_var_num(&lhs)? | rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::BitXorAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
-      let new_val = read_var_as_i64(&lhs)? ^ rhs;
+      let new_val = resolve_var_num(&lhs)? ^ rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::ShiftLAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
-      let new_val = read_var_as_i64(&lhs)?.wrapping_shl(rhs as u32);
+      let new_val = resolve_var_num(&lhs)?.wrapping_shl(rhs as u32);
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::ShiftRAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
-      let new_val = read_var_as_i64(&lhs)?.wrapping_shr(rhs as u32);
+      let new_val = resolve_var_num(&lhs)?.wrapping_shr(rhs as u32);
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
@@ -441,7 +444,7 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
 }
 
 /// Assign `val` to `name`, honouring an array subscript if the name carries one.
-fn assign_var(name: &str, val: i64) -> ShResult<()> {
+fn assign_var(name: &str, val: Num) -> ShResult<()> {
   let vn = VarName::parse(name, true)?;
   if let Some(idx) = vn.index() {
     // `Raw` indexes defer resolution until the target's kind is known: a key
@@ -460,10 +463,6 @@ fn assign_var(name: &str, val: i64) -> ShResult<()> {
       VarFlags::empty(),
     )
   })
-}
-
-fn read_var_as_i64(name: &str) -> ShResult<i64> {
-  resolve_var_num(name)
 }
 
 impl ArithTk {
@@ -488,7 +487,7 @@ impl ArithTk {
           }
         }
 
-        let parsed: i64 = if cur.peek_byte() == Some(b'#') {
+        let parsed: Num = if cur.peek_byte() == Some(b'#') {
           // `base#digits` radix literal (bash), base 2..=64.
           cur.next_byte(); // consume '#'
           let base: u32 = parse_decimal(&literal)
@@ -508,18 +507,18 @@ impl ArithTk {
           if digits.is_empty() {
             return Err(sherr!(ParseErr, "Missing digits after base '{base}#'"));
           }
-          let mut result: i64 = 0;
+          let mut result: Num = 0;
           for &c in &digits {
             let d = radix_digit_value(c, base).ok_or_else(|| {
               sherr!(ParseErr, "Invalid digit '{}' for base {base}", c as char)
             })?;
-            result = result * i64::from(base) + i64::from(d);
+            result = result * Num::from(base) + Num::from(d);
           }
           result
         } else {
           // Shared integer-literal grammar (0x / 0b / 0NNN / decimal), same as
           // `printf %d`.
-          i64::parse_radix(&literal.to_str_lossy()).ok_or_else(|| sherr!(
+          Num::parse_radix(&literal.to_str_lossy()).ok_or_else(|| sherr!(
             ParseErr, "Invalid number in arithmetic expression: '{}'", literal.as_bstr(),
           ))?
         };
@@ -902,8 +901,8 @@ impl ArithTk {
         // Check for postfix inc/dec
         if tokens.peek().is_some_and(|tk| matches!(tk, ArithTk::Inc | ArithTk::Dec)) {
           let op = tokens.next().unwrap();
-          let val = read_var_as_i64(var)?;
-          let delta: i64 = if matches!(op, ArithTk::Inc) { 1 } else { -1 };
+          let val = resolve_var_num(var)?;
+          let delta: Num = if matches!(op, ArithTk::Inc) { 1 } else { -1 };
           assign_var(var, val + delta)?;
           output.push(ArithTk::Num(val)); // push old value (postfix)
         } else {
@@ -920,8 +919,8 @@ impl ArithTk {
           ));
         };
         let Some(ArithTk::Var(var)) = tokens.next() else { unreachable!() };
-        let val = read_var_as_i64(&var)?;
-        let delta: i64 = if matches!(op, ArithTk::Inc) { 1 } else { -1 };
+        let val = resolve_var_num(&var)?;
+        let delta: Num = if matches!(op, ArithTk::Inc) { 1 } else { -1 };
         let new_val = val + delta;
         assign_var(&var, new_val)?;
         output.push(ArithTk::Num(new_val)); // push new value (prefix)
@@ -1050,7 +1049,7 @@ impl ArithTk {
     Ok(output)
   }
 
-  pub(crate) fn eval_rpn(tokens: &[ArithTk]) -> ShResult<i64> {
+  pub(crate) fn eval_rpn(tokens: &[ArithTk]) -> ShResult<Num> {
     let mut stack: Vec<StackVal> = Vec::new();
 
     macro_rules! pop_num {
@@ -1107,12 +1106,12 @@ impl ArithTk {
         }
         ArithTk::Nez => {
           let val = pop_num!();
-          stack.push(StackVal::Num(i64::from(val != 0)));
+          stack.push(StackVal::Num(Num::from(val != 0)));
         }
 
         ArithTk::Not => {
           let val = pop_num!();
-          stack.push(StackVal::Num(i64::from(val == 0)));
+          stack.push(StackVal::Num(Num::from(val == 0)));
         }
 
         ArithTk::Neg => {
@@ -1179,11 +1178,11 @@ pub(crate) fn expand_arithmetic(span: Option<Span>, expr: &[u8]) -> ShResult<Var
   let tokens = ArithTk::tokenize(&expanded)?;
   let rpn = ArithTk::to_rpn(tokens)?;
   let result = ArithTk::eval_rpn(&rpn)?;
-  Ok(result.into())
+  Ok(varstr!("{result}"))
 }
 
 /// Eval a pre-expanded expression
-pub(crate) fn eval_expanded(expr: &[u8]) -> ShResult<i64> {
+pub(crate) fn eval_expanded(expr: &[u8]) -> ShResult<Num> {
   let tokens = ArithTk::tokenize(expr)?;
   let rpn = ArithTk::to_rpn(tokens)?;
   ArithTk::eval_rpn(&rpn)

@@ -1,4 +1,4 @@
-use crate::set_var;
+use crate::{expand::arithmetic::Num, set_var};
 use bstr::ByteSlice;
 
 use crate::{
@@ -173,7 +173,7 @@ fn eval_slice_index(
   span: Option<Span>,
   stream: &SegStream,
   allow_side_effects: bool,
-) -> ShResult<i64> {
+) -> ShResult<Num> {
   let expanded = var::expand_raw_inner(span, &mut stream.cursor(), allow_side_effects, false)?;
   let bytes = expanded.into_bytes();
   // An empty index (e.g. an unset variable) is 0, as in an empty arith context.
@@ -185,7 +185,7 @@ fn eval_slice_index(
 
 /// Resolve a possibly-negative substring offset against a char count `n`.
 /// A negative offset counts from the end; results are clamped to `[0, n]`.
-fn resolve_offset(pos: i64, n: i64) -> i64 {
+fn resolve_offset(pos: Num, n: Num) -> Num {
   if pos < 0 {
     (n + pos).max(0)
   } else {
@@ -510,7 +510,7 @@ fn perform_param_expansion_inner(
         let value = Shed::vars(get);
         let bytes = value.as_bytes();
         let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();
-        let n = starts.len() as i64;
+        let n = starts.len() as Num;
 
         let start = resolve_offset(pos, n) as usize;
         let start_byte = starts.get(start).copied().unwrap_or(bytes.len());
@@ -526,7 +526,7 @@ fn perform_param_expansion_inner(
         let value = Shed::vars(get);
         let bytes = value.as_bytes();
         let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();
-        let n = starts.len() as i64;
+        let n = starts.len() as Num;
 
         let start = resolve_offset(pos, n);
         let start_byte = starts.get(start as usize).copied().unwrap_or(bytes.len());
