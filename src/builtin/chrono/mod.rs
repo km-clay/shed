@@ -130,8 +130,8 @@ enum Zone {
 impl Zone {
   fn parse(tz: Option<VarStr>, utc: bool) -> ShResult<Self> {
     let tz = if let Some(name) = tz {
-      let zone = name.parse::<Tz>().ok_or_else(|| {
-        sherr!(ExecFail, "unknown timezone '{name}'",)
+      let zone = name.parse::<Tz>().map_err(|n| {
+        sherr!(ExecFail, "unknown timezone '{n}'",)
           .with_note("for a list of timezone names, run `chrono zone`".into())
           .with_code(2)
       })?;
@@ -141,7 +141,7 @@ impl Zone {
     } else {
       // an inherited TZ we cannot parse is not this command's problem
       try_var!("TZ")
-        .and_then(|v| v.parse::<Tz>())
+        .and_then(|v| v.parse::<Tz>().ok())
         .map_or(Zone::Local, Zone::Named)
     };
     Ok(tz)

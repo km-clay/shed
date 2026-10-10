@@ -1,7 +1,7 @@
 use crate::set_var;
 use std::{
   io,
-  net::{TcpListener, TcpStream},
+  net::{IpAddr, TcpListener, TcpStream},
   os::{
     fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd},
     unix::{
@@ -129,7 +129,7 @@ fn connect_abstract(_name: &str) -> io::Result<OwnedFd> {
 
 enum TcpHost {
   Hostname(VarStr),
-  IpAddr(std::net::IpAddr),
+  IpAddr(IpAddr),
 }
 
 struct TcpSocket {
@@ -294,7 +294,7 @@ impl SockOpts {
         }
         "tcp" => {
           let arg = opt.value()?;
-          let host = if let Some(ip) = arg.parse::<std::net::IpAddr>() {
+          let host = if let Ok(ip) = arg.parse::<IpAddr>() {
             TcpHost::IpAddr(ip)
           } else {
             TcpHost::Hostname(arg)
@@ -303,9 +303,9 @@ impl SockOpts {
         }
         "port" => {
           let arg = opt.value()?;
-          let Some(port) = arg.parse::<u16>() else {
-            return Err(sherr!(ExecFail, "Invalid port number '{arg}'").with_code(2));
-          };
+          let port = arg
+            .parse::<u16>()
+            .map_err(|v| sherr!(ExecFail, "Invalid port number '{v}'").with_code(2))?;
 
           tcp_port = Some(port);
         }

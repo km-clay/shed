@@ -273,14 +273,14 @@ impl Thru {
           .or_else(|| args.opt_span("limit"))
           .unwrap();
         s.parse::<usize>()
-          .ok_or_else(|| sherr!(InvalidOpt @ span, "invalid limit").with_code(2))
+          .map_err(|v| sherr!(InvalidOpt @ span, "invalid limit: '{v}'").with_code(2))
       })
       .transpose()?;
     let skip = args
       .opt_value("skip")
       .map(|s| {
-        s.parse::<usize>().ok_or_else(|| {
-          sherr!(InvalidOpt @ args.opt_span("skip").unwrap(), "invalid skip").with_code(2)
+        s.parse::<usize>().map_err(|v| {
+          sherr!(InvalidOpt @ args.opt_span("skip").unwrap(), "invalid skip: '{v}'").with_code(2)
         })
       })
       .transpose()?;

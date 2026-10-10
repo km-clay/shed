@@ -272,12 +272,9 @@ impl super::Builtin for Raise {
       match opt.key() {
         "code" => {
           let c = opt.value()?;
-          let Some(code_arg) = c.parse::<i32>() else {
-            return Err(sherr!(
-              SyntaxErr @ opt.span(),
-              "Invalid exit code: expected a number, got '{code}'",
-            ));
-          };
+          let code_arg = c.parse::<i32>().map_err(
+            |v| sherr!(SyntaxErr @ opt.span(), "Invalid exit code: expected a number, got '{v}'"),
+          )?;
 
           code = code_arg;
         }

@@ -389,7 +389,7 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
 
     let width = VarStr::from(digits)
       .parse::<usize>()
-      .ok_or_else(|| sherr!(ParseErr, "invalid width"))?;
+      .map_err(|v| sherr!(ParseErr, "invalid width: '{v}'"))?;
 
     Ok(width)
   }

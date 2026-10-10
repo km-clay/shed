@@ -41,12 +41,11 @@ impl super::Builtin for Seek {
       return Err(sherr!(ExecFail @ span, "missing required argument 'fd'",).with_code(2));
     };
 
-    let Some(fd) = fd.parse::<u32>() else {
-      return Err(
-        sherr!(ExecFail @ fd_span, "invalid file descriptor")
-          .with_note("file descriptors are integers".into()),
-      );
-    };
+    let fd = fd.parse::<u32>()
+      .map_err(|v| {
+        sherr!(ExecFail @ fd_span, "invalid file descriptor `{v}`").with_code(2)
+          .with_note("file descriptors are non-negative integers".into())
+      })?;
 
     let Some((offset, offset_span)) = arguments.next() else {
       return Err(sherr!(

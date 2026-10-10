@@ -22,6 +22,8 @@ use super::{escape, var};
 
 /// The number type used for arithmetic evaluation.
 pub(crate) type Num = i128;
+#[allow(non_camel_case_types)]
+pub(crate) type uNum = u128;
 
 #[derive(Debug, Clone)]
 enum ArithOp {
@@ -32,6 +34,7 @@ enum ArithOp {
   Div,
   Mod,
   Pow,
+
   // comparison
   Lt,
   Gt,
@@ -39,15 +42,18 @@ enum ArithOp {
   Ge,
   Eq,
   Ne,
+
   // logical
   And,
   Or,
+
   // bitwise
   BitAnd,
   BitOr,
   BitXor,
   ShiftL,
   ShiftR,
+
   // assign
   Assign,
   PlusAssign,
@@ -395,12 +401,18 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
     ArithOp::ShiftL => {
       let rhs = pop_num!();
       let lhs = pop_num!();
-      stack.push(StackVal::Num(lhs.wrapping_shl(rhs as u32)));
+      let Ok(count) = u32::try_from(rhs) else {
+        return Err(sherr!(ParseErr, "negative shift count: {rhs}"));
+      };
+      stack.push(StackVal::Num(lhs.unbounded_shl(count)));
     }
     ArithOp::ShiftR => {
       let rhs = pop_num!();
       let lhs = pop_num!();
-      stack.push(StackVal::Num(lhs.wrapping_shr(rhs as u32)));
+      let Ok(count) = u32::try_from(rhs) else {
+        return Err(sherr!(ParseErr, "negative shift count: {rhs}"));
+      };
+      stack.push(StackVal::Num(lhs.unbounded_shr(count)));
     }
 
     // Bitwise/shift compound assignment
@@ -428,14 +440,20 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
     ArithOp::ShiftLAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
-      let new_val = resolve_var_num(&lhs)?.wrapping_shl(rhs as u32);
+      let Ok(count) = u32::try_from(rhs) else {
+        return Err(sherr!(ParseErr, "negative shift count: {rhs}"));
+      };
+      let new_val = resolve_var_num(&lhs)?.unbounded_shl(count);
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::ShiftRAssign => {
       let rhs = pop_num!();
       let lhs = pop_var!();
-      let new_val = resolve_var_num(&lhs)?.wrapping_shr(rhs as u32);
+      let Ok(count) = u32::try_from(rhs) else {
+        return Err(sherr!(ParseErr, "negative shift count: {rhs}"));
+      };
+      let new_val = resolve_var_num(&lhs)?.unbounded_shr(count);
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }

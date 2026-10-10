@@ -1,17 +1,10 @@
-use std::{
-  io::{self, Write},
-  sync::Arc,
-};
+use std::{io::Write, sync::Arc};
 
 use crate::{
-  builtin::BuiltinArgs,
   opt,
   procio::{self, Sink, SinkIo},
-  sherr, signal,
-  state::{
-    Shed, params,
-    vars::{VarFlags, VarKind, VarStr},
-  },
+  sherr,
+  state::{params, vars::VarStr},
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -20,7 +13,7 @@ use crate::{
   varstr,
 };
 
-use super::opt::OptSpec;
+use super::{BuiltinArgs, ReadLimit, opt::OptSpec};
 
 #[derive(Debug, Clone, Copy)]
 struct IntSpec {
@@ -132,88 +125,7 @@ impl IntSpec {
   }
 }
 
-enum IntRead {
-  AtMost(usize),
-  Exactly(usize),
-}
-
-impl Default for IntRead {
-  fn default() -> Self {
-    Self::Exactly(1)
-  }
-}
-
-impl IntRead {
-  fn at_most(arg: &VarStr) -> ShResult<Self> {
-    let n = arg
-      .to_str_lossy()
-      .parse::<usize>()
-      .map_err(|_| sherr!(ParseErr, "invalid integer for -n: {arg}"))?;
-    if n == 0 {
-      return Err(sherr!(
-        ParseErr,
-        "invalid integer for -n: {arg} (must be > 0)"
-      ));
-    }
-    Ok(Self::AtMost(n))
-  }
-  fn exactly(arg: &VarStr) -> ShResult<Self> {
-    let n = arg
-      .to_str_lossy()
-      .parse::<usize>()
-      .map_err(|_| sherr!(ParseErr, "invalid integer for -N: {arg}"))?;
-    if n == 0 {
-      return Err(sherr!(
-        ParseErr,
-        "invalid integer for -N: {arg} (must be > 0)"
-      ));
-    }
-    Ok(Self::Exactly(n))
-  }
-
-  fn wanted(&self) -> usize {
-    match self {
-      Self::AtMost(n) | Self::Exactly(n) => *n,
-    }
-  }
-}
-
-fn fill(reader: &Arc<dyn Sink>, buf: &mut [u8]) -> ShResult<usize> {
-  let mut got = 0;
-  while got < buf.len() {
-    match reader.read(&mut buf[got..]) {
-      Ok(0) => break,
-      Ok(n) => got += n,
-      Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-        signal::check_signals()?;
-      }
-      Err(e) => return Err(sherr!(ExecFail, "failed to read from stdin: {e}")),
-    }
-  }
-  Ok(got)
-}
-
-fn emit(
-  vals: impl Iterator<Item = VarStr>,
-  writer: &mut SinkIo,
-  args: &BuiltinArgs,
-) -> ShResult<()> {
-  if let Some(name) = args.opt_value("array") {
-    Shed::vars_mut(|v| v.set_var(&name.to_str_lossy(), VarKind::arr(vals), VarFlags::empty()))
-      .promote_err(args.cmd_span())?;
-  } else {
-    for (i, v) in vals.enumerate() {
-      if i > 0 {
-        writer.write_all(b"\n").ok();
-      }
-      writer.write_all(&v).ok();
-    }
-  }
-
-  util::with_status(0)
-}
-
-pub(super) struct ReadInt;
+pub(crate) struct ReadInt;
 #[rustfmt::skip]
 impl super::Builtin for ReadInt {
   fn strict_opts(&self) -> bool {
@@ -223,7 +135,7 @@ impl super::Builtin for ReadInt {
     vec![
       OptSpec::new_short("at-most", b'n').argc(1),
       OptSpec::new_short("exactly", b'N').argc(1),
-      OptSpec::new_short("array",   b'a').argc(1),
+      opt!("array"      | b'a', 1),
       opt!("width"      | b'w', 1),
       opt!("type"       | b'T', 1),
       opt!("big-endian" | b'E'),
@@ -245,10 +157,10 @@ impl super::Builtin for ReadInt {
     let mut writer = SinkIo(procio::stdout_sink()?);
 
     let limit = args.opt_value("at-most")
-      .map(|v| IntRead::at_most(&v))
+      .map(|v| ReadLimit::at_most(&v))
       .or_else(|| {
         args.opt_value("exactly")
-          .map(|v| IntRead::exactly(&v))
+          .map(|v| ReadLimit::exactly(&v))
       })
       .transpose()
       .promote_err(args.cmd_span())?
@@ -284,7 +196,7 @@ impl ReadInt {
     args: &BuiltinArgs,
   ) -> ShResult<()> {
     let mut buf = vec![0u8; 17];
-    let got = fill(reader, &mut buf)
+    let got = super::fill(reader, &mut buf)
       .promote_err(args.cmd_span())?;
 
     if got == 0 {
@@ -297,11 +209,11 @@ impl ReadInt {
     spec.width = Some(got as u8);
     let val = std::iter::once(spec.decode(&buf[..got]));
 
-    emit(val, writer, args).promote_err(args.cmd_span())
+    super::emit(val, writer, args).promote_err(args.cmd_span())
   }
   fn sized_read(
     width: usize,
-    limit: IntRead,
+    limit: ReadLimit,
     reader: &Arc<dyn Sink>,
     writer: &mut SinkIo,
     spec: IntSpec,
@@ -310,7 +222,7 @@ impl ReadInt {
     let want = limit.wanted();
 
     let mut buf = vec![0u8; width * want];
-    let     got = fill(reader, &mut buf).promote_err(args.cmd_span())?;
+    let     got = super::fill(reader, &mut buf).promote_err(args.cmd_span())?;
 
     let whole = got / width;
     let rem   = got % width;
@@ -319,7 +231,7 @@ impl ReadInt {
       return Err(sherr!(ExecFail, "trailing {rem} bytes do not form a complete integer"));
     }
 
-    if let IntRead::Exactly(_) = limit && whole < want {
+    if let ReadLimit::Exactly(_) = limit && whole < want {
       return Err(sherr!(ExecFail, "expected {want} integers, got {whole}"));
     }
 
@@ -331,11 +243,11 @@ impl ReadInt {
       .chunks_exact(width)
       .map(|c| spec.decode(c));
 
-    emit(vals, writer, args).promote_err(args.cmd_span())
+    super::emit(vals, writer, args).promote_err(args.cmd_span())
   }
 }
 
-pub(super) struct WriteInt;
+pub(crate) struct WriteInt;
 #[rustfmt::skip]
 impl super::Builtin for WriteInt {
   fn opts(&self) -> Vec<OptSpec> {

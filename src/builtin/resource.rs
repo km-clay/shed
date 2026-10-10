@@ -30,6 +30,7 @@ struct RLimits {
   vmem: Option<u64>,
 }
 
+#[rustfmt::skip]
 impl RLimits {
   pub(crate) fn from_opts(opts: &[Opt]) -> ShResult<Self> {
     let mut fds = None;
@@ -38,39 +39,22 @@ impl RLimits {
     let mut core = None;
     let mut vmem = None;
 
+    let parse_opt = |o: &Opt| -> ShResult<u64> {
+      let arg = o.value()?;
+      let val = arg.parse::<u64>().map_err(|v| {
+        sherr!(ParseErr @ o.span(), "invalid argument for {o}: {v}",).with_code(2)
+      })?;
+      Ok(val)
+    };
+
     for o in opts {
       match o.key() {
-        "fds" => {
-          let arg = o.value()?;
-          fds = Some(arg.parse::<u64>().ok_or_else(|| {
-            sherr!(ParseErr @ o.span(), "invalid argument for -n: {arg}",).with_code(2)
-          })?);
-        }
-        "procs" => {
-          let arg = o.value()?;
-          procs = Some(arg.parse::<u64>().ok_or_else(|| {
-            sherr!(ParseErr @ o.span(), "invalid argument for -u: {arg}",).with_code(2)
-          })?);
-        }
-        "stack" => {
-          let arg = o.value()?;
-          stack = Some(arg.parse::<u64>().ok_or_else(|| {
-            sherr!(ParseErr @ o.span(), "invalid argument for -s: {arg}",).with_code(2)
-          })?);
-        }
-        "core" => {
-          let arg = o.value()?;
-          core = Some(arg.parse::<u64>().ok_or_else(|| {
-            sherr!(ParseErr @ o.span(), "invalid argument for -c: {arg}",).with_code(2)
-          })?);
-        }
-        "vmem" => {
-          let arg = o.value()?;
-          vmem = Some(arg.parse::<u64>().ok_or_else(|| {
-            sherr!(ParseErr @ o.span(), "invalid argument for -v: {arg}",).with_code(2)
-          })?);
-        }
-        _ => {
+        "fds"   => fds   = Some(parse_opt(o)?),
+        "procs" => procs = Some(parse_opt(o)?),
+        "stack" => stack = Some(parse_opt(o)?),
+        "core"  => core  = Some(parse_opt(o)?),
+        "vmem"  => vmem  = Some(parse_opt(o)?),
+        _       => {
           return Err(sherr!(ParseErr @ o.span(), "invalid option: {o}").with_code(2));
         }
       }

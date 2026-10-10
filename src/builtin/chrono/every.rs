@@ -73,7 +73,7 @@ impl Count {
   fn parse(s: &VarStr, opt: &str) -> ShResult<Self> {
     let n = s
       .parse::<i32>()
-      .ok_or_else(|| sherr!(ParseErr, "invalid {opt} value"))?;
+      .map_err(|v| sherr!(ParseErr, "invalid {opt} value: '{v}'"))?;
     match n.cmp(&-1) {
       Ordering::Less => Err(sherr!(ParseErr, "{opt} value must be -1 or greater")),
       Ordering::Equal => Ok(Self::Infinite),
@@ -134,7 +134,7 @@ impl EverySpec {
 
     let times = args.opt_value("times").map(|v| {
       v.parse::<u32>()
-        .ok_or_else(|| sherr!(ParseErr @ args.opt_span("times").unwrap(), "invalid times value"))
+        .map_err(|v| sherr!(ParseErr @ args.opt_span("times").unwrap(), "invalid times value: '{v}'"))
         .with_code(2)
     }).transpose()?;
 

@@ -231,13 +231,9 @@ impl HistQuery {
         "with-status" => {
           let arg = opt.value()?;
           match arg.parse::<i32>() {
-            Some(s) => new.with_status = (Some(s), negated),
-            None => {
-              return Err(sherr!(
-                ParseErr,
-                "Invalid status code for {opt}: {}",
-                arg.to_str_lossy()
-              ));
+            Ok(s) => new.with_status = (Some(s), negated),
+            Err(a) => {
+              return Err(sherr!(ParseErr, "Invalid status code for {opt}: {a}",));
             }
           }
         }
@@ -258,11 +254,10 @@ impl HistQuery {
         opt_key @ ("lines-gt" | "lines-lt") => {
           let is_gt = opt_key == "lines-gt";
           let arg = opt.value()?;
-          let Some(count) = arg.parse::<u64>() else {
-            return Err(
-              sherr!(ParseErr, "Invalid number for {opt}: {}", arg.to_str_lossy()).with_code(2),
-            );
-          };
+          let count = arg
+            .parse::<u64>()
+            .map_err(|v| sherr!(ParseErr, "Invalid number for {opt}: {v}"))?;
+
           if is_gt {
             new.lines_gt = (Some(count), negated);
           } else {

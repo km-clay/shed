@@ -656,8 +656,16 @@ impl VarStr {
     String::from_utf8_lossy(&self.0)
   }
 
-  pub(crate) fn parse<T: FromStr>(&self) -> Option<T> {
-    self.to_str()?.parse::<T>().ok()
+  /// Wrapper method for [`FromStr::from_str`]
+  ///
+  /// Fails if the `VarStr` is invalid UTF-8, or the parse fails.
+  /// On failure, returns a clone of the original `VarStr` for error reporting.
+  pub(crate) fn parse<T: FromStr>(&self) -> Result<T, VarStr> {
+    self
+      .to_str()
+      .ok_or_else(|| self.clone())?
+      .parse::<T>()
+      .map_err(|_| self.clone())
   }
 
   pub(crate) fn to_cstring(&self) -> Option<CString> {

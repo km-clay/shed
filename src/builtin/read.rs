@@ -72,7 +72,7 @@ impl super::Builtin for Read {
           let n = opt.value()?;
           let bytes = n
             .parse::<usize>()
-            .ok_or_else(|| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
+            .map_err(|n| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
           max_bytes = Some(bytes);
         }
         "prompt" => {

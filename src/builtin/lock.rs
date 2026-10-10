@@ -32,13 +32,14 @@ impl super::Builtin for Lock {
       return Err(sherr!(ExecFail @ rest, "expected exactly one file descriptor").with_code(2));
     }
 
-    let Some(fd) = arg.parse::<i32>() else {
-      let mut err = sherr!(ExecFail @ span, "invalid file descriptor `{arg}`").with_code(2);
+    let fd = arg.parse::<i32>().map_err(|v| {
+      let mut err = sherr!(ExecFail @ span, "invalid file descriptor `{v}`").with_code(2);
       if arg.contains(&b'/') {
         err = err.with_note("lock expects a file descriptor, not a path".into());
       }
-      return Err(err);
-    };
+      err
+    })?;
+
     let Some(sink) = Shed::sinks(|s| s.get(fd)) else {
       return Err(sherr!(ExecFail @ span, "file descriptor `{fd}` not open").with_code(1));
     };

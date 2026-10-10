@@ -819,7 +819,7 @@ impl<'a> TimeReader<'a> {
       local_to_utc(d.and_hms_opt(0, 0, 0).unwrap())
     };
 
-    if let Some(wd) = word.parse::<Weekday>() {
+    if let Ok(wd) = word.parse::<Weekday>() {
       let delta = i64::from(wd.num_days_from_monday())
         - i64::from(today.weekday().num_days_from_monday());
       let mut when = midnight(today + TimeDelta::days(delta))?;

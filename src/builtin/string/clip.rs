@@ -62,7 +62,7 @@ impl ClipSpec {
       .next()
       .map(|(a, s)| {
         a.parse::<usize>()
-          .ok_or_else(|| sherr!(ParseErr @ s, "invalid limit '{a}'"))
+          .map_err(|v| sherr!(ParseErr @ s, "invalid limit '{v}'"))
       })
       .transpose()?;
 
@@ -74,8 +74,8 @@ impl ClipSpec {
     let justify = args
       .opt_value("justify")
       .map(|j| {
-        j.parse::<Justify>().ok_or_else(
-          || sherr!(ParseErr @ args.opt_span("justify").unwrap(), "invalid justify value '{j}'"),
+        j.parse::<Justify>().map_err(
+          |v| sherr!(ParseErr @ args.opt_span("justify").unwrap(), "invalid justify value '{v}'"),
         )
       })
       .transpose()?
