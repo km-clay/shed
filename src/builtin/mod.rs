@@ -73,6 +73,7 @@ mod lock;
 mod msg;
 mod num;
 pub(crate) mod opt;
+mod pack;
 mod pipe;
 mod poll;
 mod printf;
@@ -173,6 +174,7 @@ register_builtins! {
   b"lock"       => lock    ::Lock,
   b"msg"        => msg     ::Msg,
   b"nextd"      => dirjump ::NextD,
+  b"pack"       => pack    ::Pack,
   b"pipe"       => pipe    ::Pipe,
   b"poll"       => poll    ::Poll,
   b"pop"        => arrops  ::Pop,
@@ -211,6 +213,7 @@ register_builtins! {
   b"ulimit"     => resource::ULimit,
   b"umask"      => resource::UMask,
   b"unalias"    => alias   ::Unalias,
+  b"unpack"     => pack    ::Unpack,
   b"unquote"    => quote   ::Unquote,
   b"unset"      => varcmds ::Unset,
   b"vice"       => vice    ::Vice,

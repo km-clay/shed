@@ -389,6 +389,12 @@ pub(crate) fn parse_size(s: &str) -> ShResult<u64> {
   }
 }
 
+pub(crate) fn human_size(bytes: u64) -> VarStr {
+  let mut out = String::new();
+  format_size(bytes, &mut out).unwrap();
+  VarStr::from(out)
+}
+
 pub(crate) fn format_size(bytes: u64, buf: &mut impl std::fmt::Write) -> std::fmt::Result {
   const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
   let mut size = bytes as f64;

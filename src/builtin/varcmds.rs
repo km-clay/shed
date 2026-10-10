@@ -51,12 +51,6 @@ trait VarCmd: super::Builtin {
   }
 }
 
-pub(super) fn is_array_literal_assignment(raw: &[u8]) -> bool {
-  strops::split_at_unescaped(raw, b"=")
-    .map(|(eq, len)| &raw[eq + len..])
-    .is_some_and(|rhs| rhs.starts_with(b"(") && strops::ends_with_unescaped(rhs, b")"))
-}
-
 /// Like `prepare_argv` but preserves raw token text for `name=(...)` array
 /// literal assignments. The normal expansion pipeline runs `unescape_str`
 /// which treats `(` as a subshell opener and strips parens, breaking array
@@ -69,7 +63,7 @@ pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span
     let raw    = slice.as_bytes();
     let eq_pos = strops::split_at_unescaped(raw, b"=").map(|(pos, _)| pos);
 
-    if is_array_literal_assignment(raw) {
+    if strops::is_array_literal_assignment(raw) {
       out.push((raw.into(), tk.span));
       continue;
     }
@@ -95,21 +89,6 @@ pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span
     }
   }
   Ok(out)
-}
-
-/// Turn the variable value into a `VarKind`
-fn assignment_value(val: &[u8], src: &[u8]) -> VarKind {
-  if is_array_literal_assignment(src) {
-    VarKind::parse(val)
-  } else {
-    VarKind::string(val.into())
-  }
-}
-
-/// Split `name=value`, building the value's `VarKind` from the raw source token
-pub(super) fn split_assignment<'a>(arg: &'a [u8], src: &[u8]) -> (&'a [u8], Option<VarKind>) {
-  let (var, val) = strops::split_assignment_raw(arg);
-  (var, val.map(|v| assignment_value(v, src)))
 }
 
 #[derive(Clone, Copy)]
@@ -158,7 +137,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
       continue;
     }
     let val = match (kind, raw_val) {
-      (DeclareKind::Str, Some(v)) => assignment_value(v, span.slice().as_bytes()),
+      (DeclareKind::Str, Some(v)) => strops::assignment_value(v, span.slice().as_bytes()),
       (DeclareKind::Int, Some(v)) => {
         let evaluated = arithmetic::expand_arithmetic(Some(span), v).promote_err(span)?;
         let n = evaluated.to_str_lossy().parse::<i32>().map_err(|_| {
@@ -345,7 +324,7 @@ impl super::Builtin for Readonly {
     }
 
     for (arg, span) in arg_vec {
-      let (var, val) = split_assignment(&arg, span.slice().as_bytes());
+      let (var, val) = strops::split_assignment(&arg, span.slice().as_bytes());
       let var        = &var.to_str_lossy();
       Shed::vars_mut(|v| match val {
         Some(val) => v.set_var(var, val, VarFlags::READONLY),
@@ -435,7 +414,7 @@ impl super::Builtin for Export {
     }
 
     for (arg, span) in arg_vec {
-      let (var, val) = split_assignment(&arg, span.slice().as_bytes());
+      let (var, val) = strops::split_assignment(&arg, span.slice().as_bytes());
       let var        = &var.to_str_lossy();
       if unexport {
         if let Some(val) = val {

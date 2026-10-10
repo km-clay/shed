@@ -97,27 +97,40 @@ impl Builtin for ChMod {
 pub(super) fn handle_err(err: io::Error, file: &VarStr) -> ShErr {
   match err.kind() {
     EK::NotFound => {
-      sherr!(ExecFail, "cannot set mode of `{file}`: no such file or directory"        )
+      sherr!(
+        ExecFail,
+        "cannot set mode of `{file}`: no such file or directory"
+      )
     }
     EK::InvalidFilename => {
-      sherr!(ExecFail, "cannot set mode of `{file}`: invalid filename"                 )
+      sherr!(ExecFail, "cannot set mode of `{file}`: invalid filename")
     }
     EK::NotADirectory => {
-      sherr!(ExecFail, "cannot set mode of `{file}`: path component is not a directory")
+      sherr!(
+        ExecFail,
+        "cannot set mode of `{file}`: path component is not a directory"
+      )
     }
     EK::ReadOnlyFilesystem => {
-      sherr!(ExecFail, "cannot set mode of `{file}`: read-only filesystem"             )
+      sherr!(
+        ExecFail,
+        "cannot set mode of `{file}`: read-only filesystem"
+      )
     }
     EK::PermissionDenied => match err.raw_os_error() {
-      Some(libc::EPERM) => {
-        sherr!(ExecFail, "cannot set mode of `{file}`: operation not permitted"          )
-          .with_note("only the file's owner or the superuser can change its mode".into())
-      }
-      _ => sherr!(ExecFail, "cannot set mode of `{file}`: permission denied"                ),
+      Some(libc::EPERM) => sherr!(
+        ExecFail,
+        "cannot set mode of `{file}`: operation not permitted"
+      )
+      .with_note("only the file's owner or the superuser can change its mode".into()),
+      _ => sherr!(ExecFail, "cannot set mode of `{file}`: permission denied"),
     },
     _ => {
       if err.raw_os_error() == Some(libc::ELOOP) {
-        sherr!(ExecFail, "cannot set mode of `{file}`: too many levels of symbolic links")
+        sherr!(
+          ExecFail,
+          "cannot set mode of `{file}`: too many levels of symbolic links"
+        )
       } else {
         sherr!(ExecFail, "cannot set mode of `{file}`: {err}")
       }

@@ -48,6 +48,7 @@ The following builtins are available:
   `local`       declare variables local to a function       |builtin-local|
   `msg`         post a message to the status bar            |builtin-msg|
   `nextd`       go forward in the directory history         |builtin-nextd|
+  `pack`        encode an array as a byte layout            |builtin-pack|
   `poll`        wait for readiness on file descriptors      |builtin-poll|
   `popd`        pop the directory stack                     |builtin-popd|
   `prevd`       go back in the directory history            |builtin-prevd|
@@ -84,6 +85,7 @@ The following builtins are available:
   `ulimit`      set process resource limits                 |builtin-ulimit|
   `umask`       set the file creation mask                  |builtin-umask|
   `unalias`     remove aliases                              |builtin-unalias|
+  `unpack`      slice fields of known width out of input    |builtin-unpack|
   `unquote`     decode shell-quoted input into fields       |builtin-unquote|
   `unset`       remove variables or functions               |builtin-unset|
   `vice`        slice and edit text with vim motions        |builtin-vice|
@@ -3917,6 +3919,199 @@ WRITEFLOAT                               *builtin-writefloat* *writefloat*
   This is a `shed` extension; `bash` and `POSIX` do not provide it.
 
   See also: |builtin-readfloat|, |builtin-writeint|, |builtin-thru|.
+==============================================================================
+UNPACK                                             *builtin-unpack* *unpack*
+
+  `unpack --array {name} [--append] {field} ...`
+  `unpack --assoc {name} [--append] {field} ...`
+
+  where `{field}` is `{width}`, `{name}={width}` or `+{width}`
+
+  Slice fields of known width out of standard input and assign them to an
+  array. Nothing is decoded along the way -- a field is the raw bytes
+  found at that position, and a field that needs to become a number is
+  handed to |readint|(builtin-readint) or |readfloat|(builtin-readfloat)
+  afterwards. This keeps `unpack` to one job: saying where the
+  boundaries are.
+
+  The spec is read left to right and consumes exactly as many bytes as
+  its widths add up to. Every field is filled before anything is
+  assigned, and a field is read until it is whole, so a pipe or socket
+  that delivers one in pieces is assembled rather than reported short.
+
+  Flags ~
+
+    `-a {name}`, `--array {name}`   assign the fields as the elements of
+                                    array `{name}`, in spec order.
+    `-A {name}`, `--assoc {name}`   assign each field to the key named in
+                                    the spec. Every field must be named.
+    `-C`, `--append`                add to `{name}` instead of replacing
+                                    it. See |unpack-append|.
+
+  The spec ~                                                *unpack-spec*
+
+  A field is a width in bytes, optionally prefixed with a name:
+
+      ```printf 'abcdefgh' | unpack -a f 2 3 3```
+      ```printf 'abcdefgh' | unpack -a f x=2 y=3 z=3```
+
+  Both fill `f` with `ab`, `cde` and `fgh`. Under `--array` a name is
+  decorative -- fields land at `0`, `1` and `2` whatever they are
+  called -- and is worth writing only because it says what the field
+  holds. Under `--assoc` the name is how the field is reached, so it is
+  required. A name may not appear twice in one spec.
+
+  A width prefixed with `+` is skipped: its bytes are consumed and
+  discarded, and no element or key is created for them. This is how
+  reserved and padding bytes are stepped over.
+
+      ```printf 'abcdefgh' | unpack -a f 2 +3 3```     `ab` and `fgh`
+
+  Reading a structure ~                                   *unpack-struct*
+
+  A spec is made of ordinary words, so it keeps in an array and reads
+  like the structure it describes:
+
+      ```SPEC=(magic=4 class=1 data=1 ver=1 osabi=1 +8
+        type=2 machine=2 version=4 entry=8)```
+
+      unpack -A hdr "${SPEC[@]}" < /bin/sh
+      printf '%s' "${hdr[machine]}" | readint -T u16```     `62`
+
+  The same array drives |builtin-pack| in the other direction, so one
+  declaration serves both reading and writing.
+
+  Fields of varying length ~                              *unpack-append*
+
+  A width is an ordinary word and may come from a variable, which is how
+  a field whose length was itself read from the input is handled.
+  `--append` continues into a target that already holds fields instead
+  of replacing it:
+
+      ```unpack -A rec len=4 # read field len value```
+      ```printf '%s' "${rec[len]}" | readint -T u32 >@length # decode it```
+      ```unpack --append -A rec payload=$length # continue unpacking```
+
+  `--append` creates the target if it does not exist. Appending a key
+  that is already present is an error rather than an overwrite, on the
+  reasoning that a spec naming the same field twice is a mistake.
+
+  Exit status ~
+
+  `0`     every field was filled and assigned
+  nonzero on a usage error: no `--array` or `--assoc`, or both at once;
+          a field that is not a whole number of bytes; a repeated field
+          name; a nameless field under `--assoc`; a width past
+          `core.max_read_limit`; or input that ran out before the spec
+          did
+
+  Because every field is read before anything is assigned, input that
+  runs short leaves the target untouched rather than half-filled. The
+  bytes already consumed are gone from the stream either way, so a
+  failed `unpack` is not worth retrying.
+
+  Examples ~
+
+      ```unpack -a f 2 3 3```          three fields by position
+      ```unpack -A h x=2 +6 y=4```     two named fields, six bytes skipped
+      ```unpack -A h "${SPEC[@]}"```   a spec kept in a variable
+      ```unpack -a f 4 <&5```          read from another descriptor
+
+  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+
+  See also: |builtin-pack|, |builtin-readint|, |builtin-readfloat|,
+  |builtin-thru|.
+==============================================================================
+PACK                                                   *builtin-pack* *pack*
+
+  `pack --array {name} [--exact] {field} ...`
+  `pack --assoc {name} [--exact] {field} ...`
+
+  where `{field}` is `{width}`, `{name}={width}` or `+{width}`
+
+  Write the fields of an array to stdout as a fixed-width byte layout
+  (no trailing newline). This is the inverse of |builtin-unpack| and
+  takes the same spec, so one declaration can drive both directions.
+
+  Fields are emitted in spec order, not in the order the array stores
+  them, and the whole layout is written in one go once every field has
+  been resolved.
+
+  Flags ~
+
+    `-a {name}`, `--array {name}`   take fields from the elements of
+                                    array `{name}`, in order.
+    `-A {name}`, `--assoc {name}`   take each field from the key named in
+                                    the spec. Every field must be named.
+    `-E`, `--exact`                 require each value to be exactly its
+                                    declared width. See |pack-widths|.
+
+  Widths ~                                                  *pack-widths*
+
+  A field declares how many bytes it occupies, and the layout is that
+  wide whether or not the value fills it. A value shorter than its
+  field is padded with zero bytes on the right; a longer one is
+  truncated. Either way the fields that follow stay where the spec puts
+  them:
+
+      ```arr=(ab x cd)
+      pack -a arr 2 4 2```       `ab` `x\0\0\0` `cd` -- eight bytes
+
+  `--exact` turns a mismatch into an error instead. It is worth reaching
+  for whenever the values came from somewhere that should already agree
+  with the spec, since a short field otherwise becomes a silently
+  malformed record:
+
+      ```arr=(ab)
+      pack -E -a arr 4```        fails: `2` bytes for a `4` byte field
+
+  A width prefixed with `+` emits that many zero bytes and consumes no
+  field, which is how reserved and padding bytes are filled in. It
+  mirrors the skip that |unpack-spec| performs on the way in, so a spec
+  containing `+8` round-trips.
+
+      ```arr=(ab cd)
+      pack -a arr 2 +4 2```      `ab\0\0\0\0cd` -- eight bytes
+
+  Round-tripping ~                                           *pack-round*
+
+  Because both builtins read the same spec, a structure can be taken
+  apart, edited and put back without naming its layout twice:
+
+      ```SPEC=(magic=4 class=1 data=1 ver=1 osabi=1 +8
+            type=2 machine=2 version=4 entry=8)
+
+      unpack -A hdr "${SPEC[@]}" < in.bin
+      pack -E -A hdr "${SPEC[@]}" > out.bin```
+
+  Fields the spec skips with `+` are not preserved -- `unpack` discards
+  them and `pack` writes zeros in their place -- so a round trip is
+  byte-exact only where the skipped bytes were already zero.
+
+  Exit status ~
+
+  `0`     the layout was written
+  nonzero on a usage error: no `--array` or `--assoc`, or both at once;
+          a field that is not a whole number of bytes; a repeated field
+          name; a nameless field under `--assoc`; a name the array does
+          not hold; fewer fields in the array than the spec asks for; a
+          width past `core.max_read_limit`; or a width mismatch under
+          `--exact`
+
+  Nothing is written unless the whole spec resolves, so a failure
+  cannot leave a partial record on the output.
+
+  Examples ~
+
+      ```pack -a arr 2 3 3```          three fields by position
+      ```pack -A h type=2 +6 len=4```  named fields with padding between
+      ```pack -E -A h "${SPEC[@]}"```  a spec kept in a variable
+      ```pack -a arr 4 >&5```          write to another descriptor
+
+  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+
+  See also: |builtin-unpack|, |builtin-writeint|, |builtin-writefloat|,
+  |builtin-printf|.
 ==============================================================================
 READONLY                                         *builtin-readonly* *readonly*
 

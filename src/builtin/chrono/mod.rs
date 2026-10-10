@@ -297,7 +297,10 @@ impl StrFmt for DurFmt {
 
       DurConv::Status => {
         let Some(running) = self.running else {
-          return Err(sherr!(ExecFail, "timer status can only be formatted with `chrono timer`"));
+          return Err(sherr!(
+            ExecFail,
+            "timer status can only be formatted with `chrono timer`"
+          ));
         };
         let status = if running { "running" } else { "stopped" };
 

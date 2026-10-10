@@ -26,10 +26,10 @@ impl Builtin for Touch {
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("mtime"    | b'm'   ),
-      opt!("atime"    | b'a'   ),
-      opt!("no-deref" | b'h'   ),
-      opt!("time"     | b't', 1),
+      opt!("mtime" | b'm'),
+      opt!("atime" | b'a'),
+      opt!("no-deref" | b'h'),
+      opt!("time" | b't', 1),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {

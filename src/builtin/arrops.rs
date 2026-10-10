@@ -14,13 +14,8 @@ use std::collections::VecDeque;
 
 use crate::{
   builtin::Builtin,
-  eval::lex::Span,
   opt, procio, sherr,
-  state::{
-    Shed,
-    scopes::ScopeStack,
-    vars::{VarFlags, VarKind, VarStr},
-  },
+  state::{Shed, scopes::ScopeStack, vars::VarStr},
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -29,21 +24,12 @@ use crate::{
 
 use super::{BuiltinArgs, opt::OptSpec};
 
-fn push_val(v: &mut ScopeStack, name: &VarStr, val: &VarStr, span: Span, end: End) -> ShResult<()> {
-  match v.get_arr_mut(&name.to_str_lossy()).ok() {
-    Some(arr) => match end {
-      End::Front => arr.push_front(val.clone()),
-      End::Back  => arr.push_back(val.clone()),
-    },
-    None => {
-      v.set_var(
-        &name.to_str_lossy(),
-        VarKind::arr([val.clone()]),
-        VarFlags::empty(),
-      )
-      .promote_err(span)?;
-    }
-  }
+fn push_val(v: &mut ScopeStack, name: &VarStr, val: &VarStr, end: End) -> ShResult<()> {
+  let arr = v.get_arr_mut(&name.to_str_lossy())?;
+  match end {
+    End::Front => arr.push_front(val.clone()),
+    End::Back  => arr.push_back(val.clone()),
+  };
   Ok(())
 }
 
@@ -56,9 +42,9 @@ trait ArrOp: Builtin {
   /// Common options
   fn arr_opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("count"    | b'c', 1),
-      opt!("delim"    | b'd', 1),
-      opt!("reverse"  | b'r'),
+      opt!("count" | b'c', 1),
+      opt!("delim" | b'd', 1),
+      opt!("reverse" | b'r'),
     ]
   }
   /// Whether we are pushing or popping
@@ -108,12 +94,12 @@ trait ArrOp: Builtin {
 
           Shed::vars_mut(|v| -> ShResult<()> {
             for part in parts {
-              push_val(v, name, &VarStr::from(part), span, end)?;
+              push_val(v, name, &VarStr::from(part), end).promote_err(span)?;
             }
             Ok(())
           })?;
         }
-        None => Shed::vars_mut(|v| push_val(v, name, &input, span, end))?,
+        None => Shed::vars_mut(|v| push_val(v, name, &input, end).promote_err(span))?,
       }
 
       return util::with_status(0);
@@ -125,7 +111,7 @@ trait ArrOp: Builtin {
     // each argument is pushed to the array
     Shed::vars_mut(|v| -> ShResult<()> {
       for (val, span) in arguments {
-        push_val(v, name, val, span, end)?;
+        push_val(v, name, val, end).promote_err(span)?;
       }
       Ok(())
     })?;
@@ -163,8 +149,7 @@ trait ArrOp: Builtin {
           End::Front => arr.pop_front(),
           End::Back  => arr.pop_back(),
         };
-        let Some(popped_val) =
-          Shed::vars_mut(|v| v.get_arr_mut(&arg.to_str_lossy()).ok().and_then(pop))
+        let Some(popped_val) = Shed::vars_mut(|v| v.get_arr_mut(&arg.to_str_lossy()).map(pop))?
         else {
           return util::with_status(1);
         };

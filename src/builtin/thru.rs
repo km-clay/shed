@@ -35,14 +35,14 @@ impl super::Builtin for Thru {
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("count"      | b'c'   ),
-      opt!("append"     | b'a'   ),
-      opt!("tee"        | b't', 1),
-      opt!("limit"      | b'L', 1),
-      opt!("take"       | b'T', 1),
-      opt!("skip"       | b'S', 1),
-      opt!("from"       | b'F', 1),
-      opt!("until"      | b'U', 1),
+      opt!("count" | b'c'),
+      opt!("append" | b'a'),
+      opt!("tee" | b't', 1),
+      opt!("limit" | b'L', 1),
+      opt!("take" | b'T', 1),
+      opt!("skip" | b'S', 1),
+      opt!("from" | b'F', 1),
+      opt!("until" | b'U', 1),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {

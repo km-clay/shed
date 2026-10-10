@@ -33,10 +33,16 @@ impl Builtin for Rename {
     match std::fs::rename(from, to) {
       Ok(()) => util::with_status(0),
       Err(e) => match e.kind() {
-        EK::NotFound          => Err(sherr!(ExecFail @ f_span, "source path `{from}` does not exist")),
-        EK::IsADirectory      => Err(sherr!(ExecFail @ t_span, "cannot rename file `{from}` to directory `{to}`")),
-        EK::NotADirectory     => Err(sherr!(ExecFail @ t_span, "cannot rename `{from}` to `{to}`: not a directory")),
-        EK::DirectoryNotEmpty => Err(sherr!(ExecFail @ t_span, "cannot rename directory `{from}` to non-empty directory `{to}`")),
+        EK::NotFound => Err(sherr!(ExecFail @ f_span, "source path `{from}` does not exist")),
+        EK::IsADirectory => {
+          Err(sherr!(ExecFail @ t_span, "cannot rename file `{from}` to directory `{to}`"))
+        }
+        EK::NotADirectory => {
+          Err(sherr!(ExecFail @ t_span, "cannot rename `{from}` to `{to}`: not a directory"))
+        }
+        EK::DirectoryNotEmpty => Err(
+          sherr!(ExecFail @ t_span, "cannot rename directory `{from}` to non-empty directory `{to}`"),
+        ),
 
         EK::CrossesDevices => Err(
           sherr!(ExecFail @ t_span, "cannot rename `{from}` to `{to}`: different filesystems")

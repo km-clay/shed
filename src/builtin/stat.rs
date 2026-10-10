@@ -790,11 +790,11 @@ impl super::Builtin for Stat {
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("dereference" | b'L'   ),
-      opt!("file-system" | b'f'   ),
-      opt!("human"       | b'h'   ),
-      opt!("terse"       | b't'   ),
-      opt!("format"      | b'c', 1),
+      opt!("dereference" | b'L'),
+      opt!("file-system" | b'f'),
+      opt!("human" | b'h'),
+      opt!("terse" | b't'),
+      opt!("format" | b'c', 1),
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {

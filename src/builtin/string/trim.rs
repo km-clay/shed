@@ -31,11 +31,11 @@ pub(super) struct Trim;
 impl Builtin for Trim {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("end"           | b'e'   ),
-      opt!("start"         | b's'   ),
-      opt!("end-matches"   | b'E', 1),
+      opt!("end" | b'e'),
+      opt!("start" | b's'),
+      opt!("end-matches" | b'E', 1),
       opt!("start-matches" | b'S', 1),
-      opt!("matches"       | b'm', 1),
+      opt!("matches" | b'm', 1),
     ]
   }
   fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {

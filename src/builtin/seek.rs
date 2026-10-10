@@ -13,8 +13,8 @@ impl super::Builtin for Seek {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("current" | b'c'),
-      opt!("end"     | b'e'),
-      opt!("print"   | b'p'),
+      opt!("end" | b'e'),
+      opt!("print" | b'p'),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {

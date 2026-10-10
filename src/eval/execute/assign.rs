@@ -61,8 +61,8 @@ impl super::Dispatcher {
       let NdRule::Assignment { kind, var, val } = &assign.class else {
         unreachable!()
       };
-      let old_status = Shed::get_status();
 
+      let old_status = Shed::get_status();
       let var_name   = &tree[*var].span.slice();
       let var_name   = &var_name.to_str_lossy();
 

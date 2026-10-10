@@ -7,7 +7,9 @@ use bitflags::bitflags;
 use bstr::ByteSlice;
 
 use crate::{
-  errln, match_loop, sherr, state::vars::VarStr, util::{self, error::ShResult, strops::ByteCursor, ui},
+  errln, match_loop, sherr,
+  state::vars::VarStr,
+  util::{self, error::ShResult, strops::ByteCursor, ui},
 };
 
 use super::SliceCursor;
@@ -347,7 +349,10 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
         '}' => ("%{", "%}"),
         _   => unreachable!(),
       };
-      return Err(sherr!(ParseErr, "unmatched '{opener}' in format string, expected '{closer}'"));
+      return Err(sherr!(
+        ParseErr,
+        "unmatched '{opener}' in format string, expected '{closer}'"
+      ));
     }
 
     push_lit(&mut literal, &mut segments);
@@ -488,9 +493,14 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
     Ok(seg_result)
   }
 
-  fn resolve_counts(&self, field: &FieldParams, src: &mut S::Source, conv: Option<&S::Conv>) -> ShResult<FieldParams> {
+  fn resolve_counts(
+    &self,
+    field: &FieldParams,
+    src: &mut S::Source,
+    conv: Option<&S::Conv>,
+  ) -> ShResult<FieldParams> {
     const MAX_FIELD: usize = u16::MAX as usize;
-    let max = conv.map_or(MAX_FIELD, |c| self.set.width_limit(c));
+    let     max   = conv.map_or(MAX_FIELD, |c| self.set.width_limit(c));
 
     let mut flags = field.flags();
 

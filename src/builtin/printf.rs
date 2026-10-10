@@ -3,14 +3,19 @@ use std::iter::Peekable;
 use bstr::ByteSlice;
 
 use crate::{
-  errln, expand::escape, procio, sherr, shopt, state::vars::VarStr, util::{
+  errln,
+  expand::escape,
+  procio, sherr, shopt,
+  state::vars::VarStr,
+  util::{
     self,
     error::ShResult,
     strops::{
       self, Base, ByteCursor, Case, Count, Field, FieldParams, FmtFlags, ParseRadix, Sign,
       SliceCursor, StrFmt, StrFormatter,
     },
-  }, varstr,
+  },
+  varstr,
 };
 
 enum Conversion {

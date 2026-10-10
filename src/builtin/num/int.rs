@@ -134,11 +134,11 @@ impl super::Builtin for ReadInt {
     vec![
       OptSpec::new_short("at-most", b'n').argc(1),
       OptSpec::new_short("exactly", b'N').argc(1),
-      opt!("array"      | b'a', 1),
-      opt!("width"      | b'w', 1),
-      opt!("type"       | b'T', 1),
+      opt!("array" | b'a', 1),
+      opt!("width" | b'w', 1),
+      opt!("type" | b'T', 1),
       opt!("big-endian" | b'E'),
-      opt!("signed"     | b's'),
+      opt!("signed" | b's'),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
@@ -183,13 +183,15 @@ impl ReadInt {
     args: &BuiltinArgs,
   ) -> ShResult<()> {
     let mut buf = vec![0u8; 17];
-    let     got = super::fill(reader, &mut buf).promote_err(args.cmd_span())?;
+    let     got = reader.read_up_to(&mut buf).promote_err(args.cmd_span())?;
 
     if got == 0 {
       return util::with_status(1);
     }
     if got > 16 {
-      return Err(sherr!(ExecFail @ args.cmd_span(), "input too long to infer width: got {got} bytes, max 16"));
+      return Err(
+        sherr!(ExecFail @ args.cmd_span(), "input too long to infer width: got {got} bytes, max 16"),
+      );
     }
 
     spec.width = Some(got as u8);
@@ -208,13 +210,16 @@ impl ReadInt {
     let     want  = limit.wanted();
 
     let mut buf   = vec![0u8; width * want];
-    let     got   = super::fill(reader, &mut buf).promote_err(args.cmd_span())?;
+    let     got   = reader.read_up_to(&mut buf).promote_err(args.cmd_span())?;
 
     let     whole = got / width;
     let     rem   = got % width;
 
     if rem != 0 {
-      return Err(sherr!(ExecFail, "trailing {rem} bytes do not form a complete integer"));
+      return Err(sherr!(
+        ExecFail,
+        "trailing {rem} bytes do not form a complete integer"
+      ));
     }
 
     if let ReadLimit::Exactly(_) = limit
@@ -237,8 +242,8 @@ pub(crate) struct WriteInt;
 impl super::Builtin for WriteInt {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("width"      | b'w', 1),
-      opt!("type"       | b'T', 1),
+      opt!("width" | b'w', 1),
+      opt!("type" | b'T', 1),
       opt!("big-endian" | b'E'),
     ]
   }

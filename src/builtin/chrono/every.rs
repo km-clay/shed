@@ -173,13 +173,13 @@ pub(super) struct Every;
 impl Builtin for Every {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("starting",        1),
-      opt!("queue",           1),
-      opt!("retry",           1),
-      opt!("until",           1),
-      opt!("times"    | b'T', 1),
-      opt!("catch-up" | b'C'   ),
-      opt!("now"      | b'N'   ),
+      opt!("starting", 1),
+      opt!("queue", 1),
+      opt!("retry", 1),
+      opt!("until", 1),
+      opt!("times" | b'T', 1),
+      opt!("catch-up" | b'C'),
+      opt!("now" | b'N'),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {

@@ -95,10 +95,10 @@ impl Builtin for Clip {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("justify" | b'j', 1),
-      opt!("marker"  | b'm', 1),
-      opt!("bytes"   | b'b'),
-      opt!("chars"   | b'c'),
-      opt!("width"   | b'w'),
+      opt!("marker" | b'm', 1),
+      opt!("bytes" | b'b'),
+      opt!("chars" | b'c'),
+      opt!("width" | b'w'),
     ]
   }
 

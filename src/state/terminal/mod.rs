@@ -206,15 +206,15 @@ impl Terminal {
           return Ok(());
         }
       }
-      Ctl::Cursor(CursorCtl::ShowCursor) => {
-        if !Self::toggle_attr(&mut self.cursor_visible, Toggle::On) {
-          return Ok(());
-        }
+      Ctl::Cursor(CursorCtl::ShowCursor)
+        if !Self::toggle_attr(&mut self.cursor_visible, Toggle::On) =>
+      {
+        return Ok(());
       }
-      Ctl::Cursor(CursorCtl::HideCursor) => {
-        if !Self::toggle_attr(&mut self.cursor_visible, Toggle::Off) {
-          return Ok(());
-        }
+      Ctl::Cursor(CursorCtl::HideCursor)
+        if !Self::toggle_attr(&mut self.cursor_visible, Toggle::Off) =>
+      {
+        return Ok(());
       }
       Ctl::Cursor(CursorCtl::SetStyle(style)) => {
         if *style == self.cursor_style {

@@ -44,21 +44,26 @@ impl BuiltinRouter for Zd {
   fn sub_commands(&self) -> &'static [SubCommand] {
     const SUB_COMMANDS: &[SubCommand] = &[
       sub_command!(
-        &ZdAdd, "add",
+        &ZdAdd,
+        "add",
         "[-r] <dirs...>",
         "add directories to dir history database"
       ),
       sub_command!(
-        &ZdRemove, "remove",
+        &ZdRemove,
+        "remove",
         "[-r] <dirs...>",
         "remove specific directories from dir history database"
       ),
       sub_command!(
-        &ZdClean, "clean",
+        &ZdClean,
+        "clean",
         "prune dead directories from dir history database"
       ),
       sub_command!(
-        &ZdList, "list", "[--json|--quoted] [--reverse] [--sort <kind>] [<query>]",
+        &ZdList,
+        "list",
+        "[--json|--quoted] [--reverse] [--sort <kind>] [<query>]",
         "list entries from the dir history database"
       ),
     ];

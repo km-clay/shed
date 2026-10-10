@@ -123,10 +123,8 @@ impl super::Dispatcher {
     }
     // argv is not empty. let's set this stuff here.
     let cmd_tk       = &tree[argv.get(0)];
-
     let cmd_name     = &cmd_tk.slice();
     let cmd_name     = &cmd_name.to_str_lossy();
-
     let exec_path    = cmd::lookup_cmd(cmd_name);
 
     let no_fork      = cmd.flags.contains(NdFlags::NO_FORK);
@@ -139,12 +137,12 @@ impl super::Dispatcher {
       Ok(g)  => g,
       Err(e) => return e.report_or_propagate(tree.span_for(cmd_id)),
     };
-    let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
 
+    let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
     let fg_job        = self.fg_job;
     let interactive   = Shed::term(Terminal::interactive);
-
     let expanded      = super::prepare_argv(&tree[*argv])?;
+
     if expanded.is_empty() {
       Shed::set_status(0);
       return Ok(());
@@ -221,7 +219,6 @@ impl super::Dispatcher {
       let Err(e) = if let Some(path) = exec_path {
         let     path   = VarStr::from(path);
         let     c_path = path.to_cstring_lossy();
-
         let mut envp   = exec_args.envp.to_vec();
 
         envp.retain(|e| !e.as_bytes().starts_with(b"_="));

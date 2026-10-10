@@ -192,20 +192,29 @@ impl FloatSpec {
 
     let (e_raw, m_raw) = if shifted == exp_mask as Num {
       if mant > mant_mask {
-        return Err(sherr!(ParseErr, "mantissa out of range for infinity/NaN: {mant}"))
-          .with_code(2);
+        return Err(sherr!(
+          ParseErr,
+          "mantissa out of range for infinity/NaN: {mant}"
+        ))
+        .with_code(2);
       }
       (exp_mask, mant)
     } else if mant >= implicit {
       if shifted < 1 {
-        return Err(sherr!(ParseErr, "exponent too small for normalized mantissa: {exp}"))
-          .with_code(2);
+        return Err(sherr!(
+          ParseErr,
+          "exponent too small for normalized mantissa: {exp}"
+        ))
+        .with_code(2);
       }
       (shifted as u128, mant - implicit)
     } else {
       if shifted != 1 {
-        return Err(sherr!(ParseErr, "exponent too large for denormalized mantissa: {exp}"))
-          .with_code(2);
+        return Err(sherr!(
+          ParseErr,
+          "exponent too large for denormalized mantissa: {exp}"
+        ))
+        .with_code(2);
       }
       (0, mant)
     };
@@ -262,11 +271,11 @@ impl super::Builtin for ReadFloat {
     vec![
       OptSpec::new_short("at-most", b'n').argc(1),
       OptSpec::new_short("exactly", b'N').argc(1),
-      opt!("array"      | b'a', 1               ),
-      opt!("width"      | b'w', 1               ),
-      opt!("type"       | b'T', 1               ),
-      opt!("big-endian" | b'E'                  ),
-      opt!("decimal"    | b'd'                  ),
+      opt!("array" | b'a', 1),
+      opt!("width" | b'w', 1),
+      opt!("type" | b'T', 1),
+      opt!("big-endian" | b'E'),
+      opt!("decimal" | b'd'),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
@@ -289,18 +298,22 @@ impl super::Builtin for ReadFloat {
     let     want  : usize         = limit.wanted();
 
     let mut buf   : Vec<u8>       = vec![0u8; want * width];
-    let     got   : usize         = super::fill(&reader, &mut buf).promote_err(args.cmd_span())?;
+    let     got   : usize         = reader.read_up_to(&mut buf).promote_err(args.cmd_span())?;
     let     whole : usize         = got / width;
     let     rem   : usize         = got % width;
 
     if rem != 0 {
-      return Err(sherr!(ExecFail @ args.cmd_span(), "incomplete float read: got {got} bytes, expected multiple of {width}"));
+      return Err(
+        sherr!(ExecFail @ args.cmd_span(), "incomplete float read: got {got} bytes, expected multiple of {width}"),
+      );
     }
 
     if let ReadLimit::Exactly(_) = limit
       && whole < want
     {
-      return Err(sherr!(ExecFail @ args.cmd_span(), "incomplete float read: got {whole} floats, expected {want}"));
+      return Err(
+        sherr!(ExecFail @ args.cmd_span(), "incomplete float read: got {whole} floats, expected {want}"),
+      );
     }
 
     if whole == 0 {
@@ -322,9 +335,9 @@ pub(crate) struct WriteFloat;
 impl super::Builtin for WriteFloat {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("type"       | b'T', 1),
-      opt!("width"      | b'w', 1),
-      opt!("decimal"    | b'd'),
+      opt!("type" | b'T', 1),
+      opt!("width" | b'w', 1),
+      opt!("decimal" | b'd'),
       opt!("big-endian" | b'E'),
     ]
   }

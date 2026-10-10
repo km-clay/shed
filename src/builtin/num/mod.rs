@@ -1,11 +1,8 @@
-use std::{
-  io::{self, Write},
-  sync::Arc,
-};
+use std::io::Write;
 
 use crate::{
-  procio::{Sink, SinkIo},
-  sherr, signal,
+  procio::SinkIo,
+  sherr,
   state::{
     Shed,
     vars::{VarFlags, VarKind, VarStr},
@@ -65,21 +62,6 @@ impl ReadLimit {
       Self::AtMost(n) | Self::Exactly(n) => *n,
     }
   }
-}
-
-fn fill(reader: &Arc<dyn Sink>, buf: &mut [u8]) -> ShResult<usize> {
-  let mut got = 0;
-  while got < buf.len() {
-    match reader.read(&mut buf[got..]) {
-      Ok(0) => break,
-      Ok(n) => got += n,
-      Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-        signal::check_signals()?;
-      }
-      Err(e) => return Err(sherr!(ExecFail, "failed to read from stdin: {e}")),
-    }
-  }
-  Ok(got)
 }
 
 fn emit(

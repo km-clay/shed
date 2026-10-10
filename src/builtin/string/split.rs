@@ -110,15 +110,15 @@ pub(super) struct Split;
 impl Builtin for Split {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("any",               1),
-      opt!("array"      | b'a', 1),
-      opt!("sep"        | b's', 1),
-      opt!("delim"      | b'd', 1),
-      opt!("escaped"    | b'E'   ),
-      opt!("quoted"     | b'q'   ),
-      opt!("terminated" | b't'   ),
-      opt!("0in"                 ),
-      opt!("0out"                ),
+      opt!("any", 1),
+      opt!("array" | b'a', 1),
+      opt!("sep" | b's', 1),
+      opt!("delim" | b'd', 1),
+      opt!("escaped" | b'E'),
+      opt!("quoted" | b'q'),
+      opt!("terminated" | b't'),
+      opt!("0in"),
+      opt!("0out"),
     ]
   }
   fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {

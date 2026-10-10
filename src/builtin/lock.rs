@@ -15,8 +15,8 @@ impl super::Builtin for Lock {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("nonblock" | b'n'),
-      opt!("shared"   | b's'),
-      opt!("unlock"   | b'u'),
+      opt!("shared" | b's'),
+      opt!("unlock" | b'u'),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {

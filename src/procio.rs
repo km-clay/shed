@@ -123,6 +123,10 @@ impl Scratch {
   fn new_local() -> Self {
     Scratch::Local(vec![0; Self::LOCAL_SCRATCH_BUF_SIZE])
   }
+  fn buf_mut(&mut self) -> &mut Vec<u8> {
+    let (Scratch::Global(buf) | Scratch::Local(buf)) = self;
+    buf
+  }
 }
 
 impl Deref for Scratch {
@@ -152,6 +156,13 @@ impl DerefMut for Scratch {
 pub(crate) struct ScratchGuard(Option<Scratch>);
 
 impl ScratchGuard {
+  pub(crate) fn buf_mut(&mut self) -> &mut Vec<u8> {
+    self
+      .0
+      .as_mut()
+      .map(Scratch::buf_mut)
+      .expect("only None right before getting dropped")
+  }
   pub(crate) fn take_scratch() -> Self {
     let scratch = SCRATCH_BUF.with(|b| {
       let mut buf = b.borrow_mut();
@@ -196,7 +207,11 @@ impl DerefMut for ScratchGuard {
 
 impl Drop for ScratchGuard {
   fn drop(&mut self) {
-    if let Some(Scratch::Global(buf)) = self.0.take() {
+    if let Some(Scratch::Global(mut buf)) = self.0.take() {
+      if buf.len() > Scratch::GLOBAL_SCRATCH_BUF_SIZE {
+        buf.truncate(Scratch::GLOBAL_SCRATCH_BUF_SIZE);
+        buf.shrink_to_fit();
+      }
       SCRATCH_BUF.with(|b| {
         let mut b = b.borrow_mut();
         *b = Some(ScratchSlot::Available(buf));
@@ -621,9 +636,9 @@ impl RedirBldr {
         let name = VarStr::from(&bytes[cur.pos()..]);
         if name.is_empty() {
           return Err(sherr!(
-                                            ParseErr,
-                                            "expected a variable name after '@' in redirection"
-                                          ));
+                    ParseErr,
+                    "expected a variable name after '@' in redirection"
+                  ));
         }
         redir = redir.with_target(RedirTarget::Var(name)).with_class($ty);
       };
@@ -1181,6 +1196,32 @@ impl PipeFrames {
 /// descriptors with this, we can also create entire new types of files if we want to.
 pub(crate) trait Sink: Send + Sync {
   fn read(&self, buf: &mut [u8]) -> io::Result<usize>;
+  fn read_up_to(&self, buf: &mut [u8]) -> ShResult<usize> {
+    let     len = buf.len();
+    let mut got = 0;
+
+    while got < len {
+      match self.read(&mut buf[got..len]) {
+        Ok(0) => break,
+        Ok(n) => got += n,
+        Err(ref e) if e.kind() == io::ErrorKind::Interrupted => signal::check_signals()?,
+        Err(e) => return Err(e.into()),
+      }
+    }
+
+    Ok(got)
+  }
+  fn read_exact(&self, buf: &mut [u8]) -> ShResult<()> {
+    let len = buf.len();
+    let got = self.read_up_to(buf)?;
+
+    if got < len {
+      Err(sherr!(ExecFail, "expected {len} bytes, got {got}"))
+    } else {
+      Ok(())
+    }
+  }
+
   fn write(&self, buf: &[u8]) -> io::Result<usize>;
   fn write_all(&self, buf: &[u8]) -> io::Result<usize> {
     let mut total_written = 0;

@@ -21,9 +21,9 @@ impl Builtin for Format {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("timezone" | b'z', 1),
-      opt!("format"   | b'f', 1),
-      opt!("duration" | b'd'   ),
-      opt!("utc"      | b'u'   ),
+      opt!("format" | b'f', 1),
+      opt!("duration" | b'd'),
+      opt!("utc" | b'u'),
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {

@@ -1,6 +1,5 @@
 #![warn(unreachable_pub)]
 #![expect(
-  clippy::assert_is_empty,
   clippy::unnecessary_wraps,
   clippy::too_many_lines,
   clippy::cast_sign_loss,

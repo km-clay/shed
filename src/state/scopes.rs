@@ -346,18 +346,82 @@ impl ScopeStack {
     }
     Err(sherr!(ExecFail, "Variable '{}' not found", var_name,))
   }
+  pub(crate) fn try_get_assoc_items(&self, var_name: &str) -> ShResult<Vec<(VarStr, VarStr)>> {
+    for scope in self.scopes_rev() {
+      if scope.var_exists(var_name)
+        && let Some(var) = scope.vars().get(var_name)
+      {
+        match var.kind() {
+          VarKind::AssocArr(items) => {
+            return Ok(items.clone());
+          }
+          _ => {
+            return Err(sherr!(
+              ExecFail,
+              "Variable '{}' is not an associative array",
+              var_name,
+            ));
+          }
+        }
+      }
+    }
+    Err(sherr!(ExecFail, "Variable '{}' not found", var_name,))
+  }
   pub(crate) fn get_arr_elems(&self, var_name: &str) -> Vec<VarStr> {
     self.try_get_arr_elems(var_name).unwrap_or_default()
   }
-  pub(crate) fn get_arr_mut(&mut self, var_name: &str) -> ShResult<&mut VecDeque<VarStr>> {
+  pub(crate) fn get_assoc_mut(&mut self, var_name: &str) -> ShResult<&mut Vec<(VarStr, VarStr)>> {
+    if self.try_get_assoc_mut(var_name).is_err() {
+      self
+        .set_var(var_name, VarKind::assoc_arr(vec![]), VarFlags::empty())
+        .ok();
+    }
+    self.try_get_assoc_mut(var_name)
+  }
+  pub(crate) fn try_get_assoc_mut(
+    &mut self,
+    var_name: &str,
+  ) -> ShResult<&mut Vec<(VarStr, VarStr)>> {
     for scope in self.scopes_rev_mut() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars_mut().get_mut(var_name)
       {
+        if var.flags().contains(VarFlags::READONLY) {
+          return Err(sherr!(ExecFail, "Variable '{var_name}' is readonly"));
+        }
+        match var.kind_mut() {
+          VarKind::AssocArr(items) => return Ok(items),
+          _ => {
+            return Err(sherr!(
+              ExecFail,
+              "Variable '{var_name}' is not an associative array"
+            ));
+          }
+        }
+      }
+    }
+    Err(sherr!(ExecFail, "Variable '{var_name}' not found"))
+  }
+  pub(crate) fn get_arr_mut(&mut self, var_name: &str) -> ShResult<&mut VecDeque<VarStr>> {
+    if self.try_get_arr_mut(var_name).is_err() {
+      self
+        .set_var(var_name, VarKind::arr(vec![]), VarFlags::empty())
+        .ok();
+    }
+    self.try_get_arr_mut(var_name)
+  }
+  pub(crate) fn try_get_arr_mut(&mut self, var_name: &str) -> ShResult<&mut VecDeque<VarStr>> {
+    for scope in self.scopes_rev_mut() {
+      if scope.var_exists(var_name)
+        && let Some(var) = scope.vars_mut().get_mut(var_name)
+      {
+        if var.flags().contains(VarFlags::READONLY) {
+          return Err(sherr!(ExecFail, "Variable '{var_name}' is readonly"));
+        }
         match var.kind_mut() {
           VarKind::Arr(items) => return Ok(items),
           _ => {
-            return Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name,));
+            return Err(sherr!(ExecFail, "Variable '{var_name}' is not an array"));
           }
         }
       }

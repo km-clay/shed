@@ -5,6 +5,7 @@ use bstr::ByteSlice;
 use crate::{
   eval::lex::{Span, Tk},
   match_loop,
+  state::vars::VarKind,
 };
 
 use super::QuoteState;
@@ -132,6 +133,27 @@ impl ByteSet {
   pub(crate) fn contains(&self, byte: u8) -> bool {
     self.0[byte as usize]
   }
+}
+
+pub(crate) fn is_array_literal_assignment(raw: &[u8]) -> bool {
+  super::split_at_unescaped(raw, b"=")
+    .map(|(eq, len)| &raw[eq + len..])
+    .is_some_and(|rhs| rhs.starts_with(b"(") && super::ends_with_unescaped(rhs, b")"))
+}
+
+/// Turn the variable value into a `VarKind`
+pub(crate) fn assignment_value(val: &[u8], src: &[u8]) -> VarKind {
+  if is_array_literal_assignment(src) {
+    VarKind::parse(val)
+  } else {
+    VarKind::string(val.into())
+  }
+}
+
+/// Split `name=value`, building the value's `VarKind` from the raw source token
+pub(crate) fn split_assignment<'a>(arg: &'a [u8], src: &[u8]) -> (&'a [u8], Option<VarKind>) {
+  let (var, val) = split_assignment_raw(arg);
+  (var, val.map(|v| assignment_value(v, src)))
 }
 
 pub(crate) fn split_assignment_raw(arg: &[u8]) -> (&[u8], Option<&[u8]>) {

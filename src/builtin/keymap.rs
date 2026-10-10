@@ -13,15 +13,15 @@ impl super::Builtin for KeyMapBuiltin {
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
-      opt!("normal"     | b'n'),
-      opt!("emacs"      | b'e'),
-      opt!("insert"     | b'i'),
-      opt!("visual"     | b'v'),
-      opt!("ex"         | b'x'),
+      opt!("normal" | b'n'),
+      opt!("emacs" | b'e'),
+      opt!("insert" | b'i'),
+      opt!("visual" | b'v'),
+      opt!("ex" | b'x'),
       opt!("op-pending" | b'o'),
-      opt!("replace"    | b'r'),
-      opt!("recursive"  | b'R'),
-      opt!("remove"           ).argc(1),
+      opt!("replace" | b'r'),
+      opt!("recursive" | b'R'),
+      opt!("remove").argc(1),
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
