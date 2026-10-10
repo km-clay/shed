@@ -50,8 +50,8 @@ impl SelectShape {
 
   pub(crate) fn into_select_mode(self, resolved: Pos) -> SelectMode {
     match self {
-      SelectShape::Char(_) => SelectMode::Char(resolved),
-      SelectShape::Line(_) => SelectMode::Line(resolved),
+      SelectShape::Char(_)  => SelectMode::Char(resolved),
+      SelectShape::Line(_)  => SelectMode::Line(resolved),
       SelectShape::Block(_) => SelectMode::Block(resolved),
     }
   }
@@ -107,8 +107,8 @@ impl super::LineBuf {
         (s, end)
       }
       Motion::LineRange(s, e) => {
-        let s = self.resolve_line_addr(&s).ok()??;
-        let e = self.resolve_line_addr(&e).ok()??;
+        let s      = self.resolve_line_addr(&s).ok()??;
+        let e      = self.resolve_line_addr(&e).ok()??;
         let (s, e) = util::ordered(s, e);
         (
           Pos { row: s, col: 0 },
@@ -127,9 +127,9 @@ impl super::LineBuf {
   pub(crate) fn select_range_byte_pos(&mut self) -> Option<Range<usize>> {
     match self.select_range()? {
       Motion::CharRange(s, e) => {
-        let (s, e) = util::ordered(s, e);
-        let start = self.pos_to_byte(s)?;
-        let mut end = self.pos_to_byte(e)?;
+        let     (s, e) = util::ordered(s, e);
+        let     start  = self.pos_to_byte(s)?;
+        let mut end    = self.pos_to_byte(e)?;
         // Charwise selections are inclusive of the grapheme under the cursor,
         // matching how the operator path treats a CharRange motion.
         if let Some(gr) = self.lines.get(e.row).and_then(|line| line.0.get(e.col)) {

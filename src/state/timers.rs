@@ -62,7 +62,7 @@ impl std::ops::Deref for WatchName {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct StopWatch {
   elapsed: Duration,
-  since: Option<Instant>,
+  since  : Option<Instant>,
 }
 
 impl StopWatch {
@@ -124,7 +124,7 @@ impl StopWatch {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Timers {
   default: StopWatch,
-  named: Vec<(WatchName, StopWatch)>,
+  named  : Vec<(WatchName, StopWatch)>,
 }
 
 impl Timers {

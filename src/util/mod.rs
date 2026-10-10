@@ -106,7 +106,7 @@ where
   F: FnOnce() -> T,
 {
   let saved = Shed::get_status();
-  let res = f();
+  let res   = f();
   Shed::set_status(saved);
   res
 }

@@ -57,8 +57,8 @@ pub(crate) fn reexec_as_script(
   if classify::is_binary_file(script) {
     return Err(Errno::ENOEXEC);
   }
-  let interp = VarStr::from(std::env::current_exe().map_err(|_| Errno::ENOEXEC)?);
-  let interp = interp.to_cstring_lossy();
+  let     interp   = VarStr::from(std::env::current_exe().map_err(|_| Errno::ENOEXEC)?);
+  let     interp   = interp.to_cstring_lossy();
   let mut new_args = vec![interp.clone(), script.to_owned()];
 
   new_args.extend(args.iter().skip(1).cloned());
@@ -67,7 +67,7 @@ pub(crate) fn reexec_as_script(
 
 impl super::Dispatcher {
   pub(super) fn exec_cmd(&mut self, tree: &Ast, cmd_id: NodeId) -> ShResult<()> {
-    let cmd = &tree[cmd_id];
+    let cmd     = &tree[cmd_id];
     let context = &cmd.context;
 
     let NdRule::Command { assignments, argv } = &cmd.class else {
@@ -87,7 +87,7 @@ impl super::Dispatcher {
 
       if fork_ctx {
         let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(true));
-        let child = tree.break_off(cmd_id);
+        let child        = tree.break_off(cmd_id);
         let Some(root) = child.get_root() else {
           unreachable!()
         };
@@ -122,29 +122,29 @@ impl super::Dispatcher {
       }
     }
     // argv is not empty. let's set this stuff here.
-    let cmd_tk = &tree[argv.get(0)];
+    let cmd_tk       = &tree[argv.get(0)];
 
-    let cmd_name = &cmd_tk.slice();
-    let cmd_name = &cmd_name.to_str_lossy();
+    let cmd_name     = &cmd_tk.slice();
+    let cmd_name     = &cmd_name.to_str_lossy();
 
-    let exec_path = cmd::lookup_cmd(cmd_name);
+    let exec_path    = cmd::lookup_cmd(cmd_name);
 
-    let no_fork = cmd.flags.contains(NdFlags::NO_FORK);
+    let no_fork      = cmd.flags.contains(NdFlags::NO_FORK);
     let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(true));
 
     // POSIX 2.8.1: a redirection failure on an ordinary command is non-fatal
     let fatal =
       !Shed::term(Terminal::interactive) && builtin::is_special_builtin(cmd_name.as_bytes());
     let _guard = match Sinks::try_apply_set(&tree[cmd.redirs].into(), fatal) {
-      Ok(g) => g,
+      Ok(g)  => g,
       Err(e) => return e.report_or_propagate(tree.span_for(cmd_id)),
     };
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
 
-    let fg_job = self.fg_job;
-    let interactive = Shed::term(Terminal::interactive);
+    let fg_job        = self.fg_job;
+    let interactive   = Shed::term(Terminal::interactive);
 
-    let expanded = super::prepare_argv(&tree[*argv])?;
+    let expanded      = super::prepare_argv(&tree[*argv])?;
     if expanded.is_empty() {
       Shed::set_status(0);
       return Ok(());
@@ -155,7 +155,7 @@ impl super::Dispatcher {
     // Resolve prefix assignments in the parent. We set them in the child later.
     if !assignments.is_empty() {
       let assignments = &tree[*assignments];
-      let _guard = guards::prefix_assign_guard(tree, assignments);
+      let _guard      = guards::prefix_assign_guard(tree, assignments);
       if let Err(e) = Self::set_assignments(tree, assignments, assign_behavior) {
         Shed::set_status(1);
         e.print_error();
@@ -166,7 +166,7 @@ impl super::Dispatcher {
         let a = &tree[*id];
         if let NdRule::Assignment { var, .. } = &a.class {
           let name = tree[*var].span.slice();
-          let raw = name.as_bytes();
+          let raw  = name.as_bytes();
 
           let name: VarStr =
             params::parse_arr_bracket(raw).map_or_else(|| raw.into(), |(base, _)| base);
@@ -213,16 +213,16 @@ impl super::Dispatcher {
         unsafe { nix::libc::_exit(1) };
       }
 
-      let cmd = &exec_args.cmd.0;
-      let span = exec_args.cmd.1;
+      let cmd     = &exec_args.cmd.0;
+      let span    = exec_args.cmd.1;
       let cmd_raw = cmd.to_str().unwrap_or_default();
 
       let mut exec_file: Option<CString> = None;
       let Err(e) = if let Some(path) = exec_path {
-        let path = VarStr::from(path);
-        let c_path = path.to_cstring_lossy();
+        let     path   = VarStr::from(path);
+        let     c_path = path.to_cstring_lossy();
 
-        let mut envp = exec_args.envp.to_vec();
+        let mut envp   = exec_args.envp.to_vec();
 
         envp.retain(|e| !e.as_bytes().starts_with(b"_="));
         let path = VarStr::from([b"_=", path.as_bytes()].concat());
@@ -303,7 +303,7 @@ impl super::Dispatcher {
       ForkResult::Child => child_logic(existing_pgid),
       ForkResult::Parent { child } => {
         let timer = self.take_timer();
-        let job = self.job_stack.curr_job_mut().unwrap();
+        let job   = self.job_stack.curr_job_mut().unwrap();
 
         let child_pgid = if let Some(pgid) = existing_pgid {
           pgid
@@ -339,8 +339,8 @@ impl super::Dispatcher {
       .filter_map(|fd| sinks.get(fd).map(|arc| Arc::downgrade(&arc)))
       .collect();
 
-    let spec = Shed::fork_spec(sinks, ast);
-    let source = self.source_name.clone();
+    let spec                 = Shed::fork_spec(sinks, ast);
+    let source               = self.source_name.clone();
     let (notif_rd, notif_wr) = procio::pipes_high_nonblocking()?;
 
     let handle = thread::spawn(move || {
@@ -349,10 +349,10 @@ impl super::Dispatcher {
       // be notified. this is the thread
       // version of getting SIGCHLD
 
-      let ast = Shed::install(spec);
+      let ast    = Shed::install(spec);
       procio::arm_stage_var_writes();
-      let root = ast.get_root().unwrap();
-      let mut d = super::Dispatcher::new(source);
+      let     root = ast.get_root().unwrap();
+      let mut d    = super::Dispatcher::new(source);
       d.job_stack.new_job();
       if let Err(e) = d.dispatch_node(&ast, root)
         && !e.is_flow_control()

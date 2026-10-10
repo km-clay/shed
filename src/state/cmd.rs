@@ -71,8 +71,8 @@ pub(crate) fn list_util_names() -> HashSet<VarStr> {
     .into_iter()
     .map(|u| u.name());
   let builtin_names = BUILTIN_NAMES.iter().map(|n| VarStr::from(*n));
-  let func_names = Shed::logic(|l| l.funcs().keys().map(VarStr::from).collect::<Vec<_>>());
-  let aliases = Shed::logic(|l| l.aliases().keys().map(VarStr::from).collect::<Vec<_>>());
+  let func_names    = Shed::logic(|l| l.funcs().keys().map(VarStr::from).collect::<Vec<_>>());
+  let aliases       = Shed::logic(|l| l.aliases().keys().map(VarStr::from).collect::<Vec<_>>());
 
   cmd_names.extend(path_cmds);
   cmd_names.extend(builtin_names);
@@ -96,7 +96,7 @@ pub(crate) fn check_typo_against(
   cand: impl IntoIterator<Item = VarStr>,
 ) -> Vec<VarStr> {
   let max_edits = (cmd.len() / 3).clamp(1, 2);
-  let max_dist = max_edits * strops::EDIT_WEIGHT;
+  let max_dist  = max_edits * strops::EDIT_WEIGHT;
 
   let mut matches = cand
     .into_iter()

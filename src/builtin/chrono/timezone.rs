@@ -15,7 +15,7 @@ enum Target {
 impl Target {
   fn matches(&self, name: &str) -> bool {
     match self {
-      Target::Regex(re) => re.is_match(name),
+      Target::Regex(re)      => re.is_match(name),
       Target::Substring(sub) => name.to_ascii_lowercase().contains(sub),
     }
   }
@@ -28,9 +28,9 @@ impl Builtin for Timezone {
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let (arg, arg_span) = argv::join_raw_arg_iter(args.arguments());
-    let use_re = args.has_opt("regex");
+    let use_re          = args.has_opt("regex");
 
-    let raw = arg.trim().to_str_lossy().to_string();
+    let raw             = arg.trim().to_str_lossy().to_string();
 
     let target = if raw.is_empty() {
       None

@@ -32,9 +32,9 @@ pub(crate) fn parse_arr_bracket(var_name: &[u8]) -> Option<(VarStr, VarStr)> {
   if !var_name.contains(&b'[') {
     return None;
   }
-  let mut cur = SliceCursor::new(var_name);
-  let mut name = util::scratch_buf();
-  let mut idx_raw = util::scratch_buf();
+  let mut cur           = SliceCursor::new(var_name);
+  let mut name          = util::scratch_buf();
+  let mut idx_raw       = util::scratch_buf();
   let mut bracket_depth = 0;
 
   match_loop!(cur.next_byte() => ch, {
@@ -78,7 +78,7 @@ pub(crate) fn expand_arr_index(idx_raw: &[u8], allow_side_effects: bool) -> ShRe
     .try_fold(vec![], |mut acc, wrds| {
       match wrds {
         Ok(wrds) => acc.extend_from_slice(&wrds),
-        Err(e) => return Err(e),
+        Err(e)   => return Err(e),
       }
       Ok(acc)
     })?
@@ -194,13 +194,13 @@ pub(crate) fn get_time_fmt() -> VarStr {
 }
 
 pub(crate) fn set_ver_info() -> ShResult<()> {
-  let version = env!("CARGO_PKG_VERSION");
-  let mut semver = version.split('.');
-  let major = semver.next().unwrap_or("0");
-  let minor = semver.next().unwrap_or("0");
-  let patch = semver.next().unwrap_or("0");
-  let arch = std::env::consts::ARCH;
-  let os = std::env::consts::OS;
+  let     version = env!("CARGO_PKG_VERSION");
+  let mut semver  = version.split('.');
+  let     major   = semver.next().unwrap_or("0");
+  let     minor   = semver.next().unwrap_or("0");
+  let     patch   = semver.next().unwrap_or("0");
+  let     arch    = std::env::consts::ARCH;
+  let     os      = std::env::consts::OS;
   let ver_info = vec![
     ("major".into(), major.into()),
     ("minor".into(), minor.into()),
@@ -231,7 +231,7 @@ fn adjust_sh_lvl(lvl: i32) -> ShResult<()> {
     .flatten()
     .unwrap_or_default();
 
-  let new = cur.saturating_add_signed(lvl);
+  let new    = cur.saturating_add_signed(lvl);
 
   let sh_lvl = Var::new(VarKind::string(varstr!("{new}")), VarFlags::EXPORT);
 

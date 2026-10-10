@@ -73,7 +73,7 @@ impl HistImport {
     };
     Ok(match arg {
       "bash" => home.join(".bash_history"),
-      "zsh" => home.join(".zsh_history"),
+      "zsh"  => home.join(".zsh_history"),
       "fish" => paths::data_dir()
         .unwrap_or_else(|| PathBuf::from(format!("{}/.local/share", home.display())))
         .join("fish")
@@ -97,7 +97,7 @@ impl HistImport {
     let arr = |key: &str| -> ShResult<Vec<Value>> {
       match root.get(key) {
         Some(Value::Array(a)) => Ok(a.clone()),
-        None => Ok(vec![]),
+        None    => Ok(vec![]),
         Some(_) => Err(sherr!(ExecFail @ span, "malformed backup: '{key}' is not an array")),
       }
     };
@@ -116,13 +116,12 @@ impl HistImport {
       let token = Uuid::from_str(&token)
         .map_err(|_| sherr!(ExecFail @ span, "malformed backup: bad token {token}"))?;
 
-      #[rustfmt::skip]
       let ent = HistEntry {
-        command  :str_of(&o, "command").unwrap_or_default(),
-        cwd      :str_of(&o, "cwd"    ).unwrap_or_default(),
-        status   :int_of(&o, "status" ) as i32,
-        timestamp:UNIX_EPOCH + Duration::from_secs(int_of(&o, "timestamp").max(0) as u64),
-        runtime  :Duration::from_micros(int_of(&o, "runtime").max(0) as u64),
+        command: str_of(&o, "command").unwrap_or_default(),
+        cwd: str_of(&o, "cwd").unwrap_or_default(),
+        status: int_of(&o, "status") as i32,
+        timestamp: UNIX_EPOCH + Duration::from_secs(int_of(&o, "timestamp").max(0) as u64),
+        runtime: Duration::from_micros(int_of(&o, "runtime").max(0) as u64),
         token,
       };
 
@@ -144,11 +143,10 @@ impl HistImport {
     for v in arr("reflog")? {
       let Value::Object(o) = v else { continue };
 
-      #[rustfmt::skip]
       let ent = ReflogEntry {
         old_head : str_of(&o, "old_head"),
         new_head : str_of(&o, "new_head"),
-        op       : str_of(&o, "op"      ).unwrap_or_default(),
+        op       : str_of(&o, "op").unwrap_or_default(),
         table    : Table::from(MAIN_HIST_TABLE_NAME),
         branch   : Branch::from(str_of(&o, "branch").unwrap_or_default().as_str()),
         timestamp: UNIX_EPOCH + Duration::from_secs(int_of(&o, "timestamp").max(0) as u64),
@@ -158,7 +156,7 @@ impl HistImport {
     }
 
     let count = entries.len();
-    let hist = open_history(span, false, true)?;
+    let hist  = open_history(span, false, true)?;
     let dump = HistDump {
       entries,
       branches,

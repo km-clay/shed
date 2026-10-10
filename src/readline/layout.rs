@@ -22,20 +22,20 @@ pub(super) fn pad_prompt_for_gutter(
   term_width: usize,
 ) -> String {
   let prompt_end = Layout::calc_pos(term_width, prompt, Pos { col: 0, row: 0 }, 0, false);
-  let multiline = line.contains('\n') || prompt_end.col == 0;
+  let multiline  = line.contains('\n') || prompt_end.col == 0;
   if !multiline {
     return prompt.to_string();
   }
   let line_count = line.split('\n').count();
-  let pad = gutter_width(offset, line_count).saturating_sub(prompt_end.col);
+  let pad        = gutter_width(offset, line_count).saturating_sub(prompt_end.col);
   if pad == 0 {
     return prompt.to_string();
   }
-  let padding = " ".repeat(pad);
-  let mut out = prompt.to_string();
+  let     padding = " ".repeat(pad);
+  let mut out     = prompt.to_string();
   match out.rfind('\n') {
     Some(nl_pos) => out.insert_str(nl_pos + 1, &padding),
-    None => out.insert_str(0, &padding),
+    None         => out.insert_str(0, &padding),
   }
   out
 }
@@ -47,11 +47,11 @@ pub(super) fn enumerate_lines(
   offset: usize,
   _total_buf_lines: usize,
 ) -> String {
-  let lines: Vec<&str> = s.split('\n').collect();
-  let visible_count = lines.len();
-  let max_num_len = (offset + visible_count).to_string().len();
-  let mut first = true;
-  let mut last_style = String::new();
+  let     lines: Vec<&str> = s.split('\n').collect();
+  let     visible_count    = lines.len();
+  let     max_num_len      = (offset + visible_count).to_string().len();
+  let mut first            = true;
+  let mut last_style       = String::new();
   lines
     .into_iter()
     .enumerate()
@@ -64,11 +64,11 @@ pub(super) fn enumerate_lines(
       if i == 0 && left_pad > 0 {
         acc.push_str(ln);
       } else {
-        let num = (i + offset + 1).to_string();
-        let num_pad = max_num_len - num.len();
+        let num        = (i + offset + 1).to_string();
+        let num_pad    = max_num_len - num.len();
         // " 2 | " - num + padding + " | "
         let prefix_len = max_num_len + 3; // "N | "
-        let trail_pad = left_pad.saturating_sub(prefix_len);
+        let trail_pad  = left_pad.saturating_sub(prefix_len);
         let prefix = if show_numbers {
           format!("\x1b[0m\x1b[90m{}{num} |\x1b[0m ", " ".repeat(num_pad))
         } else {
@@ -80,12 +80,12 @@ pub(super) fn enumerate_lines(
       // restore it after the line number prefix on the next line
       let mut rest = ln;
       while let Some(esc_pos) = rest.find("\x1b[") {
-        let after_esc = &rest[esc_pos..];
+        let after_esc        = &rest[esc_pos..];
         let after_esc_prefix = &after_esc[2..];
 
         if let Some(params_len) = after_esc_prefix.find('m') {
           let full_seq_len = params_len + 3; // 3 bytes: \x1b[...m
-          let full_seq = &after_esc[..full_seq_len];
+          let full_seq     = &after_esc[..full_seq_len];
           last_style = full_seq.to_string();
           rest = &after_esc[full_seq_len..];
         } else {
@@ -104,8 +104,8 @@ pub(super) fn enumerate_lines(
 /// Used for rendering the line editor content in a way that respects the user's `tab_width` shell option.
 /// Has no effect on the text that is submitted to the shell or saved to history, this is strictly for display.
 fn expand_tabs(s: &str, left_margin: usize, tab_stop: usize) -> String {
-  let mut out = String::new();
-  let mut col = left_margin;
+  let mut out     = String::new();
+  let mut col     = left_margin;
   let mut esc_seq = 0;
   for c in s.graphemes(true) {
     if c == "\t" {
@@ -128,26 +128,26 @@ fn expand_tabs(s: &str, left_margin: usize, tab_stop: usize) -> String {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Layout {
   pub prompt_end: Pos,
-  pub cursor: Pos,
-  pub end: Pos,
-  pub psr_end: Option<Pos>,
-  pub t_cols: usize,
+  pub cursor    : Pos,
+  pub end       : Pos,
+  pub psr_end   : Option<Pos>,
+  pub t_cols    : usize,
 }
 
 impl Layout {
   pub(super) fn new() -> Self {
     Self {
       prompt_end: Pos::default(),
-      cursor: Pos::default(),
-      end: Pos::default(),
-      psr_end: None,
-      t_cols: 0,
+      cursor    : Pos::default(),
+      end       : Pos::default(),
+      psr_end   : None,
+      t_cols    : 0,
     }
   }
   pub(super) fn from_parts(term_width: usize, prompt: &str, to_cursor: &str, to_end: &str) -> Self {
     let prompt_end = Self::calc_pos(term_width, prompt, Pos { col: 0, row: 0 }, 0, false);
-    let cursor = Self::calc_pos(term_width, to_cursor, prompt_end, prompt_end.col, true);
-    let end = Self::calc_pos(term_width, to_end, prompt_end, prompt_end.col, false);
+    let cursor     = Self::calc_pos(term_width, to_cursor, prompt_end, prompt_end.col, true);
+    let end        = Self::calc_pos(term_width, to_end, prompt_end, prompt_end.col, false);
     Layout {
       prompt_end,
       cursor,
@@ -172,9 +172,9 @@ impl Layout {
     left_margin: usize,
     raw_calc: bool,
   ) -> Pos {
-    let tab_stop = shopt!(line.tab_width);
-    let mut pos = orig;
-    let mut esc_seq = 0;
+    let     tab_stop = shopt!(line.tab_width);
+    let mut pos      = orig;
+    let mut esc_seq  = 0;
     for c in s.graphemes(true) {
       if c == "\n" {
         pos.row += 1;
@@ -217,10 +217,10 @@ pub(super) fn redraw(
 ) {
   queue_term!(TermCtl::Clear(ScreenFromCursor)).ok();
 
-  let end = new_layout.end;
-  let cursor = new_layout.cursor;
+  let end           = new_layout.end;
+  let cursor        = new_layout.cursor;
 
-  let t_cols = Shed::term(Terminal::t_cols);
+  let t_cols        = Shed::term(Terminal::t_cols);
   let padded_prompt = pad_prompt_for_gutter(prompt, line, offset, t_cols);
 
   queue_term!(TermCtl::Osc(PromptStart)).ok();
@@ -243,10 +243,10 @@ pub(super) fn redraw(
   // Reset SGR again
   write_term!("\x1b[0m").ok();
 
-  let tab_width = shopt!(line.tab_width);
+  let tab_width  = shopt!(line.tab_width);
   let prompt_end = Layout::calc_pos(t_cols, &padded_prompt, Pos { col: 0, row: 0 }, 0, false);
-  let expanded = expand_tabs(line, prompt_end.col, tab_width);
-  let multiline = expanded.contains('\n') || prompt_end.col == 0;
+  let expanded   = expand_tabs(line, prompt_end.col, tab_width);
+  let multiline  = expanded.contains('\n') || prompt_end.col == 0;
   if multiline {
     let show_numbers = shopt!(line.line_numbers);
     let display_line = enumerate_lines(
@@ -270,13 +270,13 @@ pub(super) fn redraw(
 }
 
 pub(super) fn move_cursor_to_end(layout: &Layout) {
-  let t_cols = Shed::term(Terminal::t_cols);
-  let mut end = layout.end.row;
+  let     t_cols = Shed::term(Terminal::t_cols);
+  let mut end    = layout.end.row;
   if layout.psr_end.is_some() && layout.t_cols > t_cols && t_cols > 0 {
     let extra = (layout.t_cols.saturating_sub(1)) / t_cols;
     end += extra;
   }
-  let cursor_row = layout.cursor.row;
+  let cursor_row    = layout.cursor.row;
 
   let cursor_motion = end.saturating_sub(cursor_row);
   queue_term!(TermCtl::Cursor(Down(cursor_motion as u16))).ok();
@@ -286,13 +286,13 @@ pub(super) fn clear_rows(layout: &Layout) {
   // Account for lines that may have wrapped due to terminal resize.
   // If a PSR was drawn, the last row extended to the old terminal width.
   // When the terminal shrinks, that row wraps into extra physical rows.
-  let t_cols = Shed::term(Terminal::t_cols);
+  let     t_cols        = Shed::term(Terminal::t_cols);
   let mut rows_to_clear = layout.end.row;
   if layout.psr_end.is_some() && layout.t_cols > t_cols && t_cols > 0 {
     let extra = (layout.t_cols.saturating_sub(1)) / t_cols;
     rows_to_clear += extra;
   }
-  let cursor_row = layout.cursor.row;
+  let cursor_row    = layout.cursor.row;
 
   let cursor_motion = rows_to_clear.saturating_sub(cursor_row);
   queue_term!(TermCtl::Cursor(Down(cursor_motion as u16))).ok();

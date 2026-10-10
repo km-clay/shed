@@ -9,7 +9,6 @@ use crate::{
 use super::opt::OptSpec;
 
 pub(super) struct Seek;
-#[rustfmt::skip]
 impl super::Builtin for Seek {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
@@ -19,12 +18,12 @@ impl super::Builtin for Seek {
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let span = args.span();
-    let mut arguments = args.arguments();
+    let     span       = args.span();
+    let mut arguments  = args.arguments();
 
-    let cursor_rel = args.has_opt("current");
-    let end_rel    = args.has_opt("end");
-    let print      = args.has_opt("print");
+    let     cursor_rel = args.has_opt("current");
+    let     end_rel    = args.has_opt("end");
+    let     print      = args.has_opt("print");
 
     if cursor_rel && end_rel {
       let cur_span = args.opt_span("current").unwrap();
@@ -41,11 +40,11 @@ impl super::Builtin for Seek {
       return Err(sherr!(ExecFail @ span, "missing required argument 'fd'",).with_code(2));
     };
 
-    let fd = fd.parse::<u32>()
-      .map_err(|v| {
-        sherr!(ExecFail @ fd_span, "invalid file descriptor `{v}`").with_code(2)
-          .with_note("file descriptors are non-negative integers".into())
-      })?;
+    let fd = fd.parse::<u32>().map_err(|v| {
+      sherr!(ExecFail @ fd_span, "invalid file descriptor `{v}`")
+        .with_code(2)
+        .with_note("file descriptors are non-negative integers".into())
+    })?;
 
     let Some((offset, offset_span)) = arguments.next() else {
       return Err(sherr!(
@@ -61,10 +60,7 @@ impl super::Builtin for Seek {
     };
 
     if let Some((extra, extra_span)) = arguments.next() {
-      return Err(
-        sherr!(ExecFail @ extra_span, "unexpected argument: '{extra}'")
-          .with_code(2),
-      );
+      return Err(sherr!(ExecFail @ extra_span, "unexpected argument: '{extra}'").with_code(2));
     }
 
     let seek_from = if cursor_rel {
@@ -98,7 +94,7 @@ mod tests {
 
   #[test]
   fn seek_set_beginning() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("seek.txt");
     std::fs::write(&path, "hello world\n").unwrap();
     let g = TestGuard::new();
@@ -112,7 +108,7 @@ mod tests {
 
   #[test]
   fn seek_set_offset() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("seek.txt");
     std::fs::write(&path, "hello world\n").unwrap();
     let g = TestGuard::new();
@@ -126,7 +122,7 @@ mod tests {
 
   #[test]
   fn seek_then_read() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("seek.txt");
     std::fs::write(&path, "hello world\n").unwrap();
     let g = TestGuard::new();
@@ -143,7 +139,7 @@ mod tests {
 
   #[test]
   fn seek_cur_relative() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("seek.txt");
     std::fs::write(&path, "abcdefghij\n").unwrap();
     let g = TestGuard::new();
@@ -158,7 +154,7 @@ mod tests {
 
   #[test]
   fn seek_end() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("seek.txt");
     std::fs::write(&path, "hello\n").unwrap(); // 6 bytes
     let g = TestGuard::new();
@@ -172,7 +168,7 @@ mod tests {
 
   #[test]
   fn seek_end_negative() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("seek.txt");
     std::fs::write(&path, "hello\n").unwrap(); // 6 bytes
     let g = TestGuard::new();
@@ -186,7 +182,7 @@ mod tests {
 
   #[test]
   fn seek_write_overwrite() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("seek.txt");
     std::fs::write(&path, "hello world\n").unwrap();
     let _g = TestGuard::new();
@@ -201,7 +197,7 @@ mod tests {
 
   #[test]
   fn seek_rewind_full_read() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("seek.txt");
     std::fs::write(&path, "abc\n").unwrap();
     let g = TestGuard::new();
@@ -222,7 +218,7 @@ mod tests {
 
   #[test]
   fn seek_is_silent_without_print() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("seek.txt");
     std::fs::write(&path, "hello world\n").unwrap();
     let g = TestGuard::new();
@@ -239,7 +235,7 @@ mod tests {
 
   #[test]
   fn seek_origin_flags_do_not_imply_print() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("seek.txt");
     std::fs::write(&path, "hello\n").unwrap();
     let g = TestGuard::new();

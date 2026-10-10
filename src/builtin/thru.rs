@@ -15,13 +15,13 @@ use crate::{
 };
 
 struct ThruOpts {
-  count: bool,
+  count : bool,
   append: bool,
-  tee: Option<VarStr>,
-  take: Option<usize>,
-  skip: Option<usize>,
-  from: Option<u8>,
-  until: Option<u8>,
+  tee   : Option<VarStr>,
+  take  : Option<usize>,
+  skip  : Option<usize>,
+  from  : Option<u8>,
+  until : Option<u8>,
 }
 
 /// Primitive command that simply reads bytes from stdin or files and writes to stdout or a variable.
@@ -33,7 +33,6 @@ impl super::Builtin for Thru {
   fn strict_opts(&self) -> bool {
     true
   }
-  #[rustfmt::skip]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("count"      | b'c'   ),
@@ -94,7 +93,7 @@ impl super::Builtin for Thru {
     }
 
     let mut byte_count = 0;
-    let mut skip = skip.unwrap_or(0);
+    let mut skip       = skip.unwrap_or(0);
     'sources: for src in sources {
       if take == Some(0) {
         break;
@@ -124,7 +123,7 @@ impl super::Builtin for Thru {
       loop {
         let window = match take {
           Some(l) => skip.saturating_add(l),
-          None => buf.len(),
+          None    => buf.len(),
         };
         if window == 0 {
           break;
@@ -166,7 +165,7 @@ impl super::Builtin for Thru {
           },
         };
 
-        let chunk = &buf[..n];
+        let chunk   = &buf[..n];
         let dropped = skip.min(n);
         skip -= dropped;
         let mut emit = &chunk[dropped..];
@@ -261,9 +260,9 @@ impl super::Builtin for Thru {
 
 impl Thru {
   fn parse_opts(args: &BuiltinArgs) -> ShResult<ThruOpts> {
-    let count = args.has_opt("count");
+    let count  = args.has_opt("count");
     let append = args.has_opt("append");
-    let tee = args.opt_value("tee");
+    let tee    = args.opt_value("tee");
     let take = args
       .opt_value("take")
       .or_else(|| args.opt_value("limit"))
@@ -381,7 +380,7 @@ mod tests {
 
   #[test]
   fn skip_then_until_seekable() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("lines.txt");
     std::fs::write(&path, "aaaa\nbbbb\ncccc\n").unwrap();
     let g = TestGuard::new();
@@ -406,7 +405,7 @@ mod tests {
 
   #[test]
   fn skip_then_from_seekable() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("lines.txt");
     std::fs::write(&path, "X\nYYbbbb\ncccc\n").unwrap();
     let g = TestGuard::new();

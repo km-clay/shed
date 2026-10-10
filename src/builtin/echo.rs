@@ -37,18 +37,18 @@ impl Builtin for Echo {
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let xpg_echo = shopt!(core.xpg_echo);
-    let mut flags = EchoFlags::empty();
+    let     xpg_echo = shopt!(core.xpg_echo);
+    let mut flags    = EchoFlags::empty();
     if xpg_echo {
       flags |= EchoFlags::USE_ESCAPE;
     }
     for opt in args.options() {
       match opt.key() {
         "no_newline" => flags |= EchoFlags::NO_NEWLINE,
-        "prompt" => flags |= EchoFlags::USE_PROMPT,
-        "escape" => flags |= EchoFlags::USE_ESCAPE,
-        "no_escape" => flags &= !EchoFlags::USE_ESCAPE,
-        _ => {}
+        "prompt"     => flags |= EchoFlags::USE_PROMPT,
+        "escape"     => flags |= EchoFlags::USE_ESCAPE,
+        "no_escape"  => flags &= !EchoFlags::USE_ESCAPE,
+        _            => {}
       }
     }
     let use_prompt = flags.contains(EchoFlags::USE_PROMPT);
@@ -67,8 +67,8 @@ impl Builtin for Echo {
       })
       .collect();
 
-    let joined = prepared?.join_with(" ");
-    let mut bytes = joined.as_bytes().to_vec();
+    let     joined = prepared?.join_with(" ");
+    let mut bytes  = joined.as_bytes().to_vec();
     if !flags.contains(EchoFlags::NO_NEWLINE) {
       bytes.push(b'\n');
     }

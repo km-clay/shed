@@ -79,10 +79,10 @@ bitflags! {
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct CompOpts {
-  pub func: Option<VarStr>,
-  pub wordlist: Option<Vec<VarStr>>,
-  pub action: Option<VarStr>,
-  pub flags: CompFlags,
+  pub func     : Option<VarStr>,
+  pub wordlist : Option<Vec<VarStr>>,
+  pub action   : Option<VarStr>,
+  pub flags    : CompFlags,
   pub opt_flags: CompOptFlags,
 }
 
@@ -189,8 +189,8 @@ impl CompStrat {
   fn from_leaf(leaf: &CtxTk, cursor_pos: usize) -> (Self, Range<usize>, usize) {
     let prefix =
       String::from_utf8_lossy(leaf.prefix_from(cursor_pos).unwrap_or_default()).into_owned();
-    let raw = leaf.slice();
-    let whole = raw.to_str_lossy();
+    let raw        = leaf.slice();
+    let whole      = raw.to_str_lossy();
     let cursor_pos = leaf.relative_cursor_pos(cursor_pos);
     let strat = match leaf.class() {
       CtxTkRule::ValidCommand(kind) => match kind {
@@ -319,10 +319,10 @@ impl CompStrat {
 #[derive(Default, Debug, Clone)]
 pub(crate) struct Candidate {
   content: String,
-  weight: i32,
-  desc: Option<String>,
-  id: Option<usize>,  // for stuff like history that cares about the original index
-  chars: Box<[char]>, // for stuff like the fuzzy picker that wants to read this really fast
+  weight : i32,
+  desc   : Option<String>,
+  id     : Option<usize>, // for stuff like history that cares about the original index
+  chars  : Box<[char]>,   // for stuff like the fuzzy picker that wants to read this really fast
 }
 
 impl Eq for Candidate {}
@@ -348,7 +348,7 @@ impl Ord for Candidate {
 impl From<PathBuf> for Candidate {
   fn from(value: PathBuf) -> Self {
     let path_raw = value.to_string_lossy().into_owned();
-    let desc = file_desc(&value);
+    let desc     = file_desc(&value);
     Self::new(path_raw, 0, Some(desc.to_str_lossy().into_owned()), None)
   }
 }
@@ -453,7 +453,7 @@ impl Candidate {
     let ignore_case = shopt!(prompt.completion_ignore_case);
     if ignore_case {
       let other_lower = other.to_lowercase();
-      let self_lower = self.content.to_lowercase();
+      let self_lower  = self.content.to_lowercase();
       self_lower.starts_with(&other_lower)
     } else {
       self.content.starts_with(other)
@@ -486,7 +486,7 @@ impl Candidate {
     self
   }
   pub(crate) fn display(&self) -> String {
-    let mut out = String::with_capacity(self.content.len());
+    let mut out   = String::with_capacity(self.content.len());
     let mut chars = self.content.chars();
     while let Some(ch) = chars.next() {
       if ch == '\\' {
@@ -503,12 +503,12 @@ impl Candidate {
   pub(crate) fn strip_prefix(&self, prefix: &str) -> Option<String> {
     let ignore_case = shopt!(prompt.completion_ignore_case);
     if ignore_case {
-      let old_len = self.content.len();
+      let old_len      = self.content.len();
       let prefix_lower = prefix.to_lowercase();
-      let self_lower = self.content.to_lowercase();
-      let stripped = self_lower.strip_prefix(&prefix_lower)?;
-      let new_len = stripped.len();
-      let delta = old_len - new_len;
+      let self_lower   = self.content.to_lowercase();
+      let stripped     = self_lower.strip_prefix(&prefix_lower)?;
+      let new_len      = stripped.len();
+      let delta        = old_len - new_len;
       Some(self.content[delta..].to_string())
     } else {
       self.content.strip_prefix(prefix).map(ToString::to_string)
@@ -551,8 +551,8 @@ pub(crate) fn complete_jobs(start: &str) -> Vec<Candidate> {
         .iter()
         .filter_map(|j| j.as_ref())
         .filter_map(|j| {
-          let name = j.name()?;
-          let pgid = j.pgid();
+          let name     = j.name()?;
+          let pgid     = j.pgid();
           let cmd_line = j.get_cmd_line();
           Some(Candidate::from(name.to_string()).with_desc(&varstr!("{pgid} ({cmd_line})")))
         })
@@ -707,10 +707,10 @@ fn unescape_for_completion(raw: &str) -> String {
 
 /// Length of the longest byte-aligned common suffix between `a` and `b`.
 fn common_suffix_len(a: &str, b: &str) -> usize {
-  let a = a.as_bytes();
-  let b = b.as_bytes();
-  let max = a.len().min(b.len());
-  let mut n = 0;
+  let     a   = a.as_bytes();
+  let     b   = b.as_bytes();
+  let     max = a.len().min(b.len());
+  let mut n   = 0;
   while n < max && a[a.len() - 1 - n] == b[b.len() - 1 - n] {
     n += 1;
   }
@@ -737,8 +737,8 @@ fn splice_literal_prefix(literal: &str, expanded: &str, candidate: &str) -> VarS
     return varstr!("{literal}{rest_escaped}");
   }
 
-  let suffix_len = common_suffix_len(literal, expanded);
-  let literal_structural = &literal[..literal.len() - suffix_len];
+  let suffix_len          = common_suffix_len(literal, expanded);
+  let literal_structural  = &literal[..literal.len() - suffix_len];
   let expanded_structural = &expanded[..expanded.len() - suffix_len];
 
   match candidate.strip_prefix(expanded_structural) {
@@ -756,7 +756,7 @@ fn with_expanded_prefix<F>(literal: &str, comp_func: F) -> Vec<Candidate>
 where
   F: FnOnce(&str, usize) -> Vec<Candidate>,
 {
-  let expanded = unescape_for_completion(literal);
+  let expanded   = unescape_for_completion(literal);
   let candidates = comp_func(&expanded, expanded.len());
   candidates
     .into_iter()
@@ -848,7 +848,7 @@ pub(crate) enum CompSpecResult {
            * behavior flags */
   Match {
     result: CompResult,
-    flags: CompOptFlags,
+    flags : CompOptFlags,
   }, // Compspec found and candidates returned
 }
 
@@ -861,7 +861,7 @@ pub(crate) struct BashCompSpec {
 
   pub targets: CompFlags,
 
-  pub flags: CompOptFlags,
+  pub flags : CompOptFlags,
   /// The original command
   pub source: VarStr,
 }
@@ -988,7 +988,7 @@ impl BashCompSpec {
       )
     })?;
 
-    let cmd_name = words.first().cloned().unwrap_or_default();
+    let cmd_name  = words.first().cloned().unwrap_or_default();
 
     let cword_str = words.get(*cword).cloned().unwrap_or_default();
 
@@ -1027,11 +1027,11 @@ impl BashCompSpec {
 
 impl CompSpec for BashCompSpec {
   fn complete(&self, ctx: &CompContext) -> ShResult<Vec<Candidate>> {
-    let prefix = &ctx.words[ctx.cword];
+    let prefix    = &ctx.words[ctx.cword];
 
     let unescaped = escape::unescape_str(prefix.as_bytes());
-    let expanded = var::expand_raw_inner(None, &mut unescaped.cursor(), false, false)?;
-    let stripped = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
+    let expanded  = var::expand_raw_inner(None, &mut unescaped.cursor(), false, false)?;
+    let stripped  = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
 
     // path-shaped: wrapper handles expansion and escaping, candidates are
     // already display-ready and skip the reformat below
@@ -1085,11 +1085,11 @@ impl CompSpec for BashCompSpec {
         if let Some(tail) = c.strip_prefix(&stripped) {
           let ignore_case = shopt!(prompt.completion_ignore_case);
           let new_prefix = if ignore_case {
-            let match_len = c.content.len() - tail.len();
+            let match_len  = c.content.len() - tail.len();
             let cand_match = &c.content[..match_len];
             let struct_len = prefix.len().saturating_sub(stripped.len());
 
-            let prefix = &prefix[..struct_len];
+            let prefix     = &prefix[..struct_len];
             format!("{prefix}{cand_match}")
           } else {
             prefix.clone()
@@ -1156,9 +1156,9 @@ impl Clone for Box<dyn CompSpec> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CompContext {
-  pub words: Vec<String>,
-  pub cword: usize,
-  pub line: String,
+  pub words     : Vec<String>,
+  pub cword     : usize,
+  pub line      : String,
   pub cursor_pos: usize,
 }
 
@@ -1197,8 +1197,8 @@ impl CompResult {
     let Some(first) = candidates.first() else {
       return Self::Many { candidates };
     };
-    let f_content = first.content();
-    let mut end = first.len();
+    let     f_content = first.content();
+    let mut end       = first.len();
 
     for cand in &candidates[1..] {
       let c = cand.content();
@@ -1250,9 +1250,9 @@ impl CompMatch {
   /// is built from their own splicing logic.
   pub(crate) fn with_line(self, line: String) -> Self {
     match self {
-      Self::Exact { .. } => Self::Exact { line },
+      Self::Exact { .. }        => Self::Exact { line },
       Self::CommonPrefix { .. } => Self::CommonPrefix { line },
-      Self::Cycled { .. } => Self::Cycled { line },
+      Self::Cycled { .. }       => Self::Cycled { line },
     }
   }
 }
@@ -1297,7 +1297,7 @@ pub(crate) trait Completer {
   fn token_span(&self) -> (usize, usize);
   fn original_input(&self) -> &str;
   fn token(&self) -> &str {
-    let orig = self.original_input();
+    let orig   = self.original_input();
     let (s, e) = self.token_span();
     orig.get(s..e).unwrap_or(orig)
   }
@@ -1310,14 +1310,14 @@ pub(crate) trait Completer {
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct SimpleCompleter {
-  pub candidates: Vec<Candidate>,
-  pub selected_idx: usize,
+  pub candidates    : Vec<Candidate>,
+  pub selected_idx  : usize,
   pub original_input: String,
-  pub token_span: (usize, usize),
-  pub cursor_pos: usize,
-  pub active: bool,
-  pub dirs_only: bool,
-  pub add_space: bool,
+  pub token_span    : (usize, usize),
+  pub cursor_pos    : usize,
+  pub active        : bool,
+  pub dirs_only     : bool,
+  pub add_space     : bool,
 }
 
 impl Completer for SimpleCompleter {
@@ -1457,7 +1457,7 @@ impl SimpleCompleter {
     if self.candidates.is_empty() {
       return self.original_input.clone();
     }
-    let selected = &self.candidates[self.selected_idx];
+    let selected     = &self.candidates[self.selected_idx];
     let (start, end) = self.token_span;
     format!(
       "{}{}{}",
@@ -1537,7 +1537,7 @@ impl SimpleCompleter {
     } else {
       Ok(CompSpecResult::Match {
         result: CompResult::from_candidates(candidates),
-        flags: spec.get_flags(),
+        flags : spec.get_flags(),
       })
     }
   }
@@ -1568,7 +1568,7 @@ impl SimpleCompleter {
     source: CompSource,
   ) -> ShResult<CompResult> {
     let tks = match source {
-      CompSource::Shell => context::get_context_tokens(line),
+      CompSource::Shell  => context::get_context_tokens(line),
       CompSource::ExMode => context::get_ex_context_tokens(line),
     };
     let (strat, replace_span, _leaf_cursor_pos) = CompStrat::resolve(&tks, cursor_pos);
@@ -1578,10 +1578,10 @@ impl SimpleCompleter {
     // reset this inbetween completions
     self.add_space = false;
     let mut result = match strat {
-      CompStrat::Var { prefix } => CompResult::from_candidates(complete_vars(&prefix)),
-      CompStrat::Tilde { prefix } => CompResult::from_candidates(complete_users(&prefix)),
+      CompStrat::Var { prefix }       => CompResult::from_candidates(complete_vars(&prefix)),
+      CompStrat::Tilde { prefix }     => CompResult::from_candidates(complete_users(&prefix)),
       CompStrat::ExCommand { prefix } => CompResult::from_candidates(complete_ex_commands(&prefix)),
-      CompStrat::Builtin { prefix } => CompResult::from_candidates(complete_builtins(&prefix)),
+      CompStrat::Builtin { prefix }   => CompResult::from_candidates(complete_builtins(&prefix)),
       CompStrat::Command { prefix } => {
         CompResult::from_candidates(with_expanded_prefix(&prefix, complete_commands))
       }
@@ -1624,8 +1624,8 @@ impl SimpleCompleter {
       candidates.sort_by(|a, b| {
         let a_content = a.content();
         let b_content = b.content();
-        let a_len = a_content.len();
-        let b_len = b_content.len();
+        let a_len     = a_content.len();
+        let b_len     = b_content.len();
 
         a_content.cmp(b_content).then_with(|| a_len.cmp(&b_len))
       });

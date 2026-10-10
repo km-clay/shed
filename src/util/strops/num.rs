@@ -10,7 +10,7 @@ pub(crate) trait ParseRadix: Sized {
     let (sign, rest) = match s.as_bytes().first() {
       Some(b'-') => ("-", &s[1..]),
       Some(b'+') => ("", &s[1..]),
-      _ => ("", s),
+      _          => ("", s),
     };
     let (radix, digits) =
       if let Some(h) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {

@@ -39,9 +39,9 @@ pub(crate) enum PromptTk {
 }
 
 fn tokenize_prompt(raw: &[u8]) -> Vec<PromptTk> {
-  let mut cur = SliceCursor::new(raw);
+  let mut cur     = SliceCursor::new(raw);
   let mut tk_text = util::scratch_buf();
-  let mut tokens = vec![];
+  let mut tokens  = vec![];
 
   match_loop!(cur.next_byte() => ch, {
     b'\\' => {
@@ -200,9 +200,9 @@ fn tokenize_prompt(raw: &[u8]) -> Vec<PromptTk> {
 }
 
 pub(crate) fn expand_prompt(raw: &[u8]) -> ShResult<String> {
-  let errexit = shopt!(set.errexit);
-  let noexec = shopt!(set.noexec);
-  let xtrace = shopt!(set.xtrace);
+  let errexit    = shopt!(set.errexit);
+  let noexec     = shopt!(set.noexec);
+  let xtrace     = shopt!(set.xtrace);
   let fork_trace = shopt!(core.fork_trace);
 
   defer! {
@@ -239,7 +239,7 @@ pub(crate) fn expand_prompt(raw: &[u8]) -> ShResult<String> {
   });
 
   if shopt!(prompt.substitute) {
-    let marked = escape::unescape_prompt(&result);
+    let marked   = escape::unescape_prompt(&result);
     let expanded = var::expand_raw_inner(None, &mut marked.cursor(), true, false)?;
     result = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
   }
@@ -250,7 +250,7 @@ pub(crate) fn expand_prompt(raw: &[u8]) -> ShResult<String> {
 fn ansi_color(c: &str, out: &mut String) {
   match ui::ansi_from_description(c) {
     Ok(esc_seq) => out.push_str(esc_seq.as_str()),
-    Err(e) => status_msg!("{e}"),
+    Err(e)      => status_msg!("{e}"),
   }
 }
 
@@ -275,17 +275,17 @@ fn prompt_pwd(short: bool, out: &mut String) {
     return;
   }
 
-  let pathbuf = PathBuf::from(&pwd);
+  let     pathbuf      = PathBuf::from(&pwd);
 
-  let mut segments = pathbuf.iter().count();
-  let mut path_iter = pathbuf.iter();
-  let max_segments = shopt!(prompt.trunc_prompt_path);
+  let mut segments     = pathbuf.iter().count();
+  let mut path_iter    = pathbuf.iter();
+  let     max_segments = shopt!(prompt.trunc_prompt_path);
   while segments > max_segments {
     path_iter.next();
     segments -= 1;
   }
   let path_rebuilt: PathBuf = path_iter.collect();
-  let path_rebuilt = path_rebuilt.to_str().unwrap().to_string();
+  let path_rebuilt          = path_rebuilt.to_str().unwrap().to_string();
 
   out.push_str(&path_rebuilt);
 }
@@ -296,7 +296,7 @@ fn username(out: &mut String) {
 }
 
 fn prompt_symbol(out: &mut String) {
-  let uid = var!("UID");
+  let uid    = var!("UID");
   let symbol = if &uid == "0" { '#' } else { '$' };
   out.push(symbol);
 }
@@ -544,7 +544,7 @@ mod tests {
   #[test]
   fn prompt_function_undefined_becomes_text() {
     // `\@somename` with no defined function falls back to Text.
-    let _g = crate::tests::testutil::TestGuard::new();
+    let _g     = crate::tests::testutil::TestGuard::new();
     let tokens = tokenize_prompt(b"\\@nope_unlikely_to_exist 1");
     // The non-alphanumeric ' ' terminates the function name → Text fallback
     assert!(matches!(tokens[0], PromptTk::Text(ref t) if t == "\\@nope_unlikely_to_exist"));
@@ -576,7 +576,7 @@ mod tests {
 
   #[test]
   fn expand_color_emits_ansi_sequence() {
-    let _g = crate::tests::testutil::TestGuard::new();
+    let _g  = crate::tests::testutil::TestGuard::new();
     let out = expand_prompt(b"\\c{red}").unwrap();
     // ansi_from_description("red") yields a CSI sequence containing "31".
     assert!(out.contains("\x1b["), "no escape in {out:?}");
@@ -586,14 +586,14 @@ mod tests {
   #[test]
   fn expand_color_unknown_falls_through_silently() {
     // Unknown color description → status_msg fires, nothing appended.
-    let _g = crate::tests::testutil::TestGuard::new();
+    let _g  = crate::tests::testutil::TestGuard::new();
     let out = expand_prompt(b"X\\c{notacolor}Y").unwrap();
     assert_eq!(out, "XY");
   }
 
   #[test]
   fn expand_runtime_millis_when_timer_unset_emits_nothing() {
-    let _g = crate::tests::testutil::TestGuard::new();
+    let _g  = crate::tests::testutil::TestGuard::new();
     let out = expand_prompt(b"X\\tY").unwrap();
     assert_eq!(out, "XY");
   }
@@ -734,7 +734,7 @@ mod tests {
 
   #[test]
   fn expand_job_count_is_zero_with_no_jobs() {
-    let _g = crate::tests::testutil::TestGuard::new();
+    let _g  = crate::tests::testutil::TestGuard::new();
     let out = expand_prompt(b"\\j").unwrap();
     assert_eq!(out, "0");
   }
@@ -742,7 +742,7 @@ mod tests {
   #[test]
   fn expand_ascii_octal_emits_char() {
     // \141 → octal 141 = 0x61 = 'a'
-    let _g = crate::tests::testutil::TestGuard::new();
+    let _g  = crate::tests::testutil::TestGuard::new();
     let out = expand_prompt(b"\\141").unwrap();
     assert_eq!(out, "a");
   }

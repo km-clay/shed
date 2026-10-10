@@ -69,10 +69,10 @@ impl From<&Grapheme> for CharClass {
 }
 
 pub(super) struct CharClassIter<'a> {
-  lines: &'a Lines,
-  row: usize,
-  col: usize,
-  exhausted: bool,
+  lines      : &'a Lines,
+  row        : usize,
+  col        : usize,
+  exhausted  : bool,
   at_boundary: bool,
 }
 
@@ -137,7 +137,7 @@ impl Iterator for CharClassIter<'_> {
       return self.next();
     }
 
-    let pos = self.get_pos();
+    let pos   = self.get_pos();
     let class = line[self.col].class();
 
     self.col += 1;
@@ -152,10 +152,10 @@ impl Iterator for CharClassIter<'_> {
 }
 
 pub(super) struct CharClassIterRev<'a> {
-  lines: &'a Lines,
-  row: usize,
-  col: usize,
-  exhausted: bool,
+  lines      : &'a Lines,
+  row        : usize,
+  col        : usize,
+  exhausted  : bool,
   at_boundary: bool,
 }
 
@@ -218,7 +218,7 @@ impl Iterator for CharClassIterRev<'_> {
       return Some((pos, CharClass::Whitespace));
     }
 
-    let pos = self.get_pos();
+    let pos   = self.get_pos();
     let class = line[self.col].class();
 
     if self.col == 0 {

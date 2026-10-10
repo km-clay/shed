@@ -17,11 +17,11 @@ impl super::Builtin for Hash {
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut refresh = false;
-    let mut clear = false;
+    let mut clear   = false;
 
     for opt in args.options() {
       match opt.key() {
-        "clear" => clear = true,
+        "clear"   => clear = true,
         "refresh" => refresh = true,
         _ => {
           return Err(

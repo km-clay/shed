@@ -34,10 +34,10 @@ bitflags! {
 }
 
 struct ViceProg {
-  cmds: Vec<ViceCmd>,
-  sep: Option<Vec<KeyEvent>>,
-  delim: VarStr,
-  flags: ViceFlags,
+  cmds      : Vec<ViceCmd>,
+  sep       : Option<Vec<KeyEvent>>,
+  delim     : VarStr,
+  flags     : ViceFlags,
   backup_ext: Option<VarStr>,
 }
 
@@ -100,10 +100,10 @@ pub(super) struct Vice;
 impl Vice {
   fn parse_cmds(opts: &[Opt]) -> ShResult<ViceProg> {
     let mut prog = ViceProg {
-      cmds: vec![],
-      sep: None,
-      delim: " ".into(),
-      flags: ViceFlags::empty(),
+      cmds      : vec![],
+      sep       : None,
+      delim     : " ".into(),
+      flags     : ViceFlags::empty(),
       backup_ext: None,
     };
 
@@ -128,9 +128,9 @@ impl Vice {
         "delim" => {
           prog.delim = opt.value()?;
         }
-        "quoted" => prog.flags |= ViceFlags::QUOTED,
-        "in-place" => prog.flags |= ViceFlags::INPLACE,
-        "lines" => prog.flags |= ViceFlags::LINES,
+        "quoted"    => prog.flags |= ViceFlags::QUOTED,
+        "in-place"  => prog.flags |= ViceFlags::INPLACE,
+        "lines"     => prog.flags |= ViceFlags::LINES,
         "keep-mode" => prog.flags |= ViceFlags::KEEP_MODE,
         "backup-ext" => {
           prog.backup_ext = Some(opt.value()?);
@@ -222,7 +222,7 @@ impl Vice {
   /// Run the program against the current buffer and render one output record:
   /// the cut fields joined by the delimiter, or the whole buffer if no `-c`.
   fn render(core: &mut EditorCore, prog: &ViceProg, span: Span) -> ShResult<String> {
-    let mut fields = vec![];
+    let mut fields     = vec![];
     let mut spent_cmds = vec![];
     Self::exec_cmds(core, prog, prog.cmds.clone(), &mut fields, &mut spent_cmds)
       .promote_err(span)?;
@@ -270,8 +270,8 @@ impl Vice {
     mut sink: impl FnMut(&str) -> ShResult<()>,
   ) -> ShResult<bool> {
     let mut emitted_line = false;
-    let mut core = EditorCore::empty();
-    let mut lines = SinkLines::new(stream);
+    let mut core         = EditorCore::empty();
+    let mut lines        = SinkLines::new(stream);
 
     while let Some(line) = lines.next_line()? {
       if signal::sigint_pending() {
@@ -303,14 +303,14 @@ impl Vice {
     if let Err(e) = SinkIo(stream).read_to_end(&mut buf) {
       return Err(sherr!(ExecFail @ span, "Failed to read input: '{e}'"));
     }
-    let input = buf.to_str_lossy();
+    let     input   = buf.to_str_lossy();
 
-    let mut core = EditorCore::headless(&input);
-    let record = Self::render(&mut core, prog, span)?;
-    let aborted = core.editor.search_failed();
+    let mut core    = EditorCore::headless(&input);
+    let     record  = Self::render(&mut core, prog, span)?;
+    let     aborted = core.editor.search_failed();
 
     // emit whatever was captured before an abort; drop only if nothing was
-    let emit = !(aborted && record.is_empty());
+    let     emit    = !(aborted && record.is_empty());
     if emit {
       sink(&record)?;
     }
@@ -341,7 +341,7 @@ impl Vice {
     span: Span,
   ) -> ShResult<()> {
     if let Some(ext) = backup_ext {
-      let ext = ext.to_str_lossy();
+      let ext   = ext.to_str_lossy();
       let slice = ext.strip_prefix('.').unwrap_or(&ext);
       std::fs::copy(file, format!("{file}.{slice}"))?;
     }
@@ -350,8 +350,8 @@ impl Vice {
       .parent()
       .filter(|p| !p.as_os_str().is_empty())
       .unwrap_or_else(|| Path::new("."));
-    let mut temp = tempfile::NamedTempFile::new_in(dir)?;
-    let perms = std::fs::metadata(file)?.permissions();
+    let mut temp  = tempfile::NamedTempFile::new_in(dir)?;
+    let     perms = std::fs::metadata(file)?.permissions();
 
     temp.write_all(output.as_bytes())?;
     temp.as_file().set_permissions(perms)?;
@@ -378,13 +378,13 @@ impl super::Builtin for Vice {
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let span = args.span();
+    let span            = args.span();
     let (arg_vec, opts) = args.take_argv();
-    let prog = Self::parse_cmds(&opts).promote_err(span)?;
+    let prog            = Self::parse_cmds(&opts).promote_err(span)?;
 
     if arg_vec.is_empty() {
       let stream = procio::stdin_sink()?;
-      let ok = Self::run_stream(stream, &prog, span)?;
+      let ok     = Self::run_stream(stream, &prog, span)?;
       return util::with_status(i32::from(!ok));
     }
 
@@ -450,7 +450,7 @@ mod tests {
   #[test]
   fn vice_unknown_long_option_errors() {
     // The `LongWithArg` catch-all now errors instead of silently dropping.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let res = test_input("printf 'x' | vice --backup-ext '.bak' -c 'e'");
     assert!(
       res.is_ok(),

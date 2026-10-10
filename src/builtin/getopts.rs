@@ -33,15 +33,15 @@ struct GetOptsSpec {
   // POSIX optstring, decoded to (option char, whether it takes an argument).
   // getopts has its own parser, so it needs only this, not the internal
   // `OptSpec` model (short/long/key/argc).
-  opts: Vec<(char, bool)>,
+  opts      : Vec<(char, bool)>,
 }
 
 impl GetOptsSpec {
   pub(crate) fn matches(&self, ch: char) -> OptMatch {
     match self.opts.iter().find(|(c, _)| *c == ch) {
-      Some((_, true)) => OptMatch::WantsArg,
+      Some((_, true))  => OptMatch::WantsArg,
       Some((_, false)) => OptMatch::IsMatch,
-      None => OptMatch::NoMatch,
+      None             => OptMatch::NoMatch,
     }
   }
 }
@@ -49,8 +49,8 @@ impl GetOptsSpec {
 impl FromStr for GetOptsSpec {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-    let mut s = s;
-    let mut opts = vec![];
+    let mut s          = s;
+    let mut opts       = vec![];
     let mut silent_err = false;
     if s.starts_with(':') {
       silent_err = true;
@@ -87,7 +87,7 @@ impl super::Builtin for GetOpts {
   /// plain argument and let `getopts_inner` do the parsing.
   fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     let expanded = execute::prepare_argv_with(argv, no_split).promote_err(cmd_span)?;
-    let trace = expanded.iter().map(|(word, _)| word.clone()).collect();
+    let trace    = expanded.iter().map(|(word, _)| word.clone()).collect();
     let words = expanded
       .into_iter()
       .map(|(word, span)| Word::Arg(word, span))
@@ -96,7 +96,7 @@ impl super::Builtin for GetOpts {
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let span = args.span();
+    let     span    = args.span();
     let mut arg_vec = args.arguments();
 
     let Some((arg_string, arg_span)) = arg_vec.next() else {
@@ -163,7 +163,7 @@ impl GetOpts {
     };
     let ch = cur.ch;
 
-    let _ = Shed::vars_mut(|v| v.unset_var("OPTARG"));
+    let _  = Shed::vars_mut(|v| v.unset_var("OPTARG"));
 
     match opts_spec.matches(ch) {
       OptMatch::NoMatch => {
@@ -215,7 +215,7 @@ impl GetOpts {
   fn resolve(argv: &[VarStr]) -> ShResult<Option<OptCursor>> {
     let opt_index = var!("OPTIND").to_str_lossy().parse::<usize>().unwrap_or(1);
     // OPTIND is 1-based
-    let arr_idx = opt_index.saturating_sub(1);
+    let arr_idx   = opt_index.saturating_sub(1);
 
     let Some(arg) = argv.get(arr_idx) else {
       Shed::set_status(1);
@@ -284,7 +284,7 @@ impl GetOpts {
       // Remaining bytes in this arg are the argument: -bVALUE. The option
       // syntax up to here (`-` + flag chars) is single-byte ASCII, so the
       // value begins at byte offset `char_idx + 2` (past `-` and the flag).
-      let arg = &argv[cur.arr_idx];
+      let arg    = &argv[cur.arr_idx];
       let optarg = VarStr::from(&arg.as_bytes()[cur.char_idx + 2..]);
       set_var!("OPTARG", VarKind::string(optarg))?;
       advance_optind(cur.opt_index, 1)?;

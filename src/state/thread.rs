@@ -17,27 +17,27 @@ use crate::{
 };
 
 pub(crate) struct ForkSpec {
-  frame: VarTab,
-  sinks: Sinks,
-  ast: Arc<Ast>,
-  shopts: ShOpts,
-  status: i32,
-  context: Vec<LabelBuilder>,
-  logic: LogTab,
-  timers: Timers,
+  frame      : VarTab,
+  sinks      : Sinks,
+  ast        : Arc<Ast>,
+  shopts     : ShOpts,
+  status     : i32,
+  context    : Vec<LabelBuilder>,
+  logic      : LogTab,
+  timers     : Timers,
   pipe_frames: PipeFrames,
 }
 
 #[derive(Debug)]
 pub(crate) struct StageResult {
-  status: i32,
+  status    : i32,
   var_writes: Vec<(VarName, VarStr)>,
 }
 
 impl Default for StageResult {
   fn default() -> Self {
     Self {
-      status: signal::signal_status(Signal::SIGABRT),
+      status    : signal::signal_status(Signal::SIGABRT),
       var_writes: vec![],
     }
   }
@@ -74,7 +74,7 @@ impl super::Shed {
   }
   pub(crate) fn completion_spec() -> ForkSpec {
     let mut parsed = crate::eval::parse::ParsedSrc::new(":".into());
-    let _ = parsed.parse_src();
+    let     _      = parsed.parse_src();
     Self::fork_spec(Sinks::new(), Arc::new(parsed.into_ast()))
   }
   pub(crate) fn install(spec: ForkSpec) -> Arc<Ast> {

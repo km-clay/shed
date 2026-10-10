@@ -13,14 +13,14 @@ pub(crate) fn levenshtein(left: &[u8], right: &[u8]) -> usize {
    * Given two strings, find the minimum number of edits required for one string to be turned into the other.
    * Useful for check typos, e.g. `gti` -> "Did you mean 'git'?"
    */
-  let m = left.len();
-  let n = right.len();
+  let     m                 = left.len();
+  let     n                 = right.len();
 
   // We are using the Damerau transposition checks, so we need
   // bookkeeping for three rows.
-  let mut prev: Vec<usize> = (0..=n).map(|j| j * EDIT_WEIGHT).collect();
+  let mut prev : Vec<usize> = (0..=n).map(|j| j * EDIT_WEIGHT).collect();
   let mut prev2: Vec<usize> = vec![0usize; n + 1]; // this is the row before prev, used for transposition
-  let mut curr: Vec<usize> = vec![0usize; n + 1];
+  let mut curr : Vec<usize> = vec![0usize; n + 1];
 
   // Since we are tracking three rows, we need an easy way to rotate them
   // as we iterate through the strings. VecDeque will do nicely for this
@@ -51,9 +51,9 @@ pub(crate) fn levenshtein(left: &[u8], right: &[u8]) -> usize {
       } else {
         // Price each edit against its own predecessor. A substitution,
         // deletion, or insertion each cost EDIT_WEIGHT
-        let sub = rows[1][j - 1] + EDIT_WEIGHT; // substitution
-        let del = rows[1][j] + EDIT_WEIGHT; // deletion
-        let ins = rows[2][j - 1] + EDIT_WEIGHT; // insertion
+        let     sub  = rows[1][j - 1] + EDIT_WEIGHT; // substitution
+        let     del  = rows[1][j] + EDIT_WEIGHT; // deletion
+        let     ins  = rows[2][j - 1] + EDIT_WEIGHT; // insertion
         let mut best = min3!(sub, del, ins);
 
         if check_transpose(i, j) {

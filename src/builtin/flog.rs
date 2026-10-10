@@ -18,11 +18,11 @@ use crate::{
 use super::{argv, opt::OptSpec};
 
 struct FlogCtx {
-  level: log::Level,
+  level : log::Level,
   source: VarStr,
-  line: usize,
-  col: usize,
-  now: DateTime<Local>,
+  line  : usize,
+  col   : usize,
+  now   : DateTime<Local>,
 }
 
 enum FlogConv {
@@ -61,10 +61,10 @@ impl StrFmt for LogFmt {
     src: &mut Self::Source,
   ) -> ShResult<Field> {
     Ok(match conv {
-      FlogConv::Level => Field::styled(ui::stylize_loglevel(src.level).into_bytes()),
+      FlogConv::Level  => Field::styled(ui::stylize_loglevel(src.level).into_bytes()),
       FlogConv::Source => Field::string(src.source.clone().into_bytes()),
-      FlogConv::Line => Field::numeric(varstr!("{}", src.line).into_bytes(), None, None),
-      FlogConv::Col => Field::numeric(varstr!("{}", src.col).into_bytes(), None, None),
+      FlogConv::Line   => Field::numeric(varstr!("{}", src.line).into_bytes(), None, None),
+      FlogConv::Col    => Field::numeric(varstr!("{}", src.col).into_bytes(), None, None),
       FlogConv::Time(fmt) => {
         Field::string(util::strops::strftime(&src.now, &fmt.to_str_lossy())?.into_bytes())
       }
@@ -78,9 +78,9 @@ impl super::Builtin for Flog {
     vec![opt!("prefix" | b'p', 1)]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let span = args.span();
-    let source = span.name();
-    let (line, col) = span.line_and_col().unwrap_or((0, 0));
+    let span            = args.span();
+    let source          = span.name();
+    let (line, col)     = span.line_and_col().unwrap_or((0, 0));
 
     let (arg_vec, opts) = args.take_argv();
 
@@ -105,8 +105,8 @@ impl super::Builtin for Flog {
       }
     }
 
-    let (rest, arg_span) = argv::join_raw_args(arg_vec);
-    let mut buf = vec![];
+    let     (rest, arg_span) = argv::join_raw_args(arg_vec);
+    let mut buf              = vec![];
     let mut ctx = FlogCtx {
       level,
       source,

@@ -47,7 +47,7 @@ impl ExpandFlags {
 
 /// Convert internal quote/escape markers into glob-syntax for `glob::Pattern`.
 pub(super) fn markers_to_glob_escapes(s: &SegStream) -> Vec<u8> {
-  let mut out = vec![];
+  let mut out    = vec![];
   let mut cursor = s.cursor();
   while let Some(unit) = cursor.next() {
     match unit {
@@ -56,7 +56,7 @@ pub(super) fn markers_to_glob_escapes(s: &SegStream) -> Vec<u8> {
       // read it as escaping the following byte. Unquoted `*`/`?`/`[` stay raw so
       // they still glob.
       Unit::Byte(b'\\') => out.extend_from_slice(b"\\\\"),
-      Unit::Byte(b) => out.push(b),
+      Unit::Byte(b)     => out.push(b),
       Unit::Mark(m) => match m {
         Marker::Escape => {
           if let Some(next) = cursor.next_byte() {
@@ -108,11 +108,11 @@ fn unescape_with(stream: SegStream, flags: ExpandFlags) -> SegStream {
   }
 
   let mut cursor = stream.cursor();
-  let mut out = SegStream::new();
+  let mut out    = SegStream::new();
 
   let (word_breaks, mut last_was_word_break, mut first_char) = if flags.contains(ExpandFlags::TILDE)
   {
-    let wb = try_var!("COMP_WORDBREAKS").unwrap_or("\"'><=;|&(: ".into());
+    let wb  = try_var!("COMP_WORDBREAKS").unwrap_or("\"'><=;|&(: ".into());
     let ifs = try_var!("IFS").unwrap_or(" \t\n".into());
 
     (Some(wb.chain(ifs)), false, true)
@@ -252,7 +252,7 @@ fn read_varsub(stream: &mut SegCursor, out: &mut SegStream) -> bool {
 fn read_subsh(stream: &mut SegCursor, out: &mut SegStream) {
   out.push_marker(Marker::Subshell);
 
-  let mut peeker = *stream;
+  let mut peeker        = *stream;
   let mut rest: Vec<u8> = vec![];
   while let Some(b) = peeker.next_byte() {
     rest.push(b);
@@ -270,7 +270,7 @@ fn read_subsh(stream: &mut SegCursor, out: &mut SegStream) {
   }
 
   let mut paren_count = 1;
-  let mut qt = QuoteState::default();
+  let mut qt          = QuoteState::default();
   match_loop!(stream.next() => unit, {
     Unit::Byte(b) => match b {
       b'\\' => {
@@ -387,8 +387,8 @@ fn read_dub_quote(stream: &mut SegCursor, out: &mut SegStream) {
 }
 
 pub(crate) fn expand_ansi_c(s: &[u8]) -> Vec<u8> {
-  let input = SegStream::from_bytes(s);
-  let mut out = SegStream::new();
+  let     input = SegStream::from_bytes(s);
+  let mut out   = SegStream::new();
   expand_ansi_c_stream(&mut input.cursor(), &mut out, None);
   out.into_bytes()
 }
@@ -439,7 +439,7 @@ pub(crate) fn read_unicode(stream: &mut SegCursor, out: &mut SegStream, marker: 
   let max = match marker {
     b'u' => 4,
     b'U' => 8,
-    _ => unreachable!("read_unicode called with non-unicode marker"),
+    _    => unreachable!("read_unicode called with non-unicode marker"),
   };
 
   while hex.len() < max {
@@ -652,7 +652,7 @@ pub(crate) fn escape_str(raw: &str) -> String {
 /// this is mainly used for escaping the region of text that is changed during completion
 pub(crate) fn escape_str_bounded(raw: &str, bound: Option<&Range<usize>>) -> String {
   let mut result = String::new();
-  let mut chars = raw.char_indices();
+  let mut chars  = raw.char_indices();
 
   while let Some((i, ch)) = chars.next() {
     if let Some(bound) = &bound
@@ -682,8 +682,8 @@ pub(crate) fn escape_str_bounded(raw: &str, bound: Option<&Range<usize>>) -> Str
 }
 
 pub(crate) fn unescape_math(raw: &[u8]) -> ShResult<SegStream> {
-  let mut cur = SliceCursor::new(raw);
-  let mut out = SegStream::new();
+  let mut cur      = SliceCursor::new(raw);
+  let mut out      = SegStream::new();
   let mut qt_state = QuoteState::default();
 
   match_loop!(cur.next_byte() => ch, {
@@ -752,18 +752,18 @@ fn quote_fmt(
     .chars()
     .any(|c| c.is_ascii_control() && c != '\n' && c != '\t');
   let has_ws_control = s.chars().any(|c| c == '\n' || c == '\t');
-  let has_special = s.chars().any(|c| special_chars.contains(c));
+  let has_special    = s.chars().any(|c| special_chars.contains(c));
 
   if has_hard_control || (has_ws_control && escape_ws_controls) {
     // $'...' ANSI-C quoting: backslashes and all special chars must be escaped
     write!(f, "$'")?;
     for ch in s.chars() {
       match ch {
-        '\\' => write!(f, "\\\\")?,
-        '\'' => write!(f, "\\'")?,
-        '\n' => write!(f, "\\n")?,
-        '\r' => write!(f, "\\r")?,
-        '\t' => write!(f, "\\t")?,
+        '\\'   => write!(f, "\\\\")?,
+        '\''   => write!(f, "\\'")?,
+        '\n'   => write!(f, "\\n")?,
+        '\r'   => write!(f, "\\r")?,
+        '\t'   => write!(f, "\\t")?,
         '\x07' => write!(f, "\\a")?,
         '\x08' => write!(f, "\\b")?,
         '\x0B' => write!(f, "\\v")?,
@@ -830,11 +830,11 @@ pub(crate) fn shell_quote_bytes(bytes: &[u8]) -> Vec<u8> {
 /// `$'...'` branch of [`quote_fmt`]).
 fn push_ansi_c_escaped(out: &mut Vec<u8>, ch: char) {
   match ch {
-    '\\' => out.extend_from_slice(b"\\\\"),
-    '\'' => out.extend_from_slice(b"\\'"),
-    '\n' => out.extend_from_slice(b"\\n"),
-    '\r' => out.extend_from_slice(b"\\r"),
-    '\t' => out.extend_from_slice(b"\\t"),
+    '\\'   => out.extend_from_slice(b"\\\\"),
+    '\''   => out.extend_from_slice(b"\\'"),
+    '\n'   => out.extend_from_slice(b"\\n"),
+    '\r'   => out.extend_from_slice(b"\\r"),
+    '\t'   => out.extend_from_slice(b"\\t"),
     '\x07' => out.extend_from_slice(b"\\a"),
     '\x08' => out.extend_from_slice(b"\\b"),
     '\x0B' => out.extend_from_slice(b"\\v"),
@@ -854,7 +854,7 @@ pub(crate) fn xtrace_quote(s: &str) -> String {
 
 /// Takes a generic quoting function and applies it to the given string
 fn quote<S: AsRef<str>, F: Fn(&str, &mut String) -> std::fmt::Result>(s: S, f: F) -> String {
-  let s_str = s.as_ref();
+  let     s_str  = s.as_ref();
   let mut result = String::new();
   f(s_str, &mut result).unwrap();
   result
@@ -873,7 +873,7 @@ mod tests {
     for seg in &super::unescape_str(s.as_bytes()).stream() {
       match seg {
         StreamSeg::Bytes(b) => out.push_str(&String::from_utf8_lossy(b)),
-        StreamSeg::Mark(m) => out.push(marker_char(*m)),
+        StreamSeg::Mark(m)  => out.push(marker_char(*m)),
       }
     }
     out
@@ -883,16 +883,16 @@ mod tests {
     match m {
       Marker::Quote(Quote::Double) => '\u{fdd0}',
       Marker::Quote(Quote::Single) => '\u{fdd1}',
-      Marker::TildeSub => '\u{fdd2}',
-      Marker::ProcSub(ProcSubKind::In) => '\u{fdd3}',
+      Marker::TildeSub             => '\u{fdd2}',
+      Marker::ProcSub(ProcSubKind::In)  => '\u{fdd3}',
       Marker::ProcSub(ProcSubKind::Out) => '\u{fdd4}',
-      Marker::NullExpand => '\u{fdd5}',
-      Marker::ArgSep => '\u{fdd6}',
-      Marker::Subshell => '\u{fdd7}',
-      Marker::VarSub => '\u{fdd8}',
-      Marker::Escape => '\u{fdd9}',
+      Marker::NullExpand  => '\u{fdd5}',
+      Marker::ArgSep      => '\u{fdd6}',
+      Marker::Subshell    => '\u{fdd7}',
+      Marker::VarSub      => '\u{fdd8}',
+      Marker::Escape      => '\u{fdd9}',
       Marker::ExpandStart => '\u{fde1}',
-      Marker::ExpandEnd => '\u{fde2}',
+      Marker::ExpandEnd   => '\u{fde2}',
     }
   }
   #[allow(dead_code)]
@@ -908,7 +908,7 @@ mod tests {
 
   #[test]
   fn unescape_backslash() {
-    let result = unescape_str("hello\\nworld");
+    let result   = unescape_str("hello\\nworld");
     let expected = format!("hello{}nworld", markers::ESCAPE);
     assert_eq!(result, expected);
   }
@@ -936,49 +936,49 @@ mod tests {
 
   #[test]
   fn unescape_single_quotes() {
-    let result = unescape_str("'hello'");
+    let result   = unescape_str("'hello'");
     let expected = format!("{}hello{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
     assert_eq!(result, expected);
   }
 
   #[test]
   fn unescape_double_quotes() {
-    let result = unescape_str("\"hello\"");
+    let result   = unescape_str("\"hello\"");
     let expected = format!("{}hello{}", markers::DUB_QUOTE, markers::DUB_QUOTE);
     assert_eq!(result, expected);
   }
 
   #[test]
   fn unescape_dollar_single_quote_newline() {
-    let result = unescape_str("$'\\n'");
+    let result   = unescape_str("$'\\n'");
     let expected = format!("{}\n{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
     assert_eq!(result, expected);
   }
 
   #[test]
   fn unescape_dollar_single_quote_tab() {
-    let result = unescape_str("$'\\t'");
+    let result   = unescape_str("$'\\t'");
     let expected = format!("{}\t{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
     assert_eq!(result, expected);
   }
 
   #[test]
   fn unescape_dollar_single_quote_escape() {
-    let result = unescape_str("$'\\e'");
+    let result   = unescape_str("$'\\e'");
     let expected = format!("{}\x1b{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
     assert_eq!(result, expected);
   }
 
   #[test]
   fn unescape_dollar_single_quote_hex() {
-    let result = unescape_str("$'\\x41'");
+    let result   = unescape_str("$'\\x41'");
     let expected = format!("{}A{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
     assert_eq!(result, expected);
   }
 
   #[test]
   fn unescape_dollar_single_quote_backslash() {
-    let result = unescape_str("$'\\\\'");
+    let result   = unescape_str("$'\\\\'");
     let expected = format!("{}\\{}", markers::SNG_QUOTE, markers::SNG_QUOTE);
     assert_eq!(result, expected);
   }

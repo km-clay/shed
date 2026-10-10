@@ -16,12 +16,12 @@ use super::QuoteState;
 /// trailing IFS-whitespace trimmed) becomes the final field, mirroring
 /// `read var1 var2 ...` where the last variable absorbs the rest of the line.
 pub(crate) fn ifs_split(input: &[u8], ifs: &[u8], max: Option<usize>) -> Vec<Vec<u8>> {
-  let is_ws = |b: u8| b.is_ascii_whitespace() && ifs.contains(&b);
-  let is_hard = |b: u8| !b.is_ascii_whitespace() && ifs.contains(&b);
+  let     is_ws                = |b: u8| b.is_ascii_whitespace() && ifs.contains(&b);
+  let     is_hard              = |b: u8| !b.is_ascii_whitespace() && ifs.contains(&b);
 
   let mut fields: Vec<Vec<u8>> = Vec::new();
-  let mut cur: Vec<u8> = Vec::new();
-  let mut bytes = input.iter().copied().enumerate().peekable();
+  let mut cur   : Vec<u8>      = Vec::new();
+  let mut bytes                = input.iter().copied().enumerate().peekable();
 
   while bytes.peek().is_some_and(|&(_, c)| is_ws(c)) {
     bytes.next();
@@ -77,13 +77,13 @@ pub(crate) fn ifs_split(input: &[u8], ifs: &[u8], max: Option<usize>) -> Vec<Vec
 
 pub(crate) fn split_tk(tk: &Tk, pat: &[u8]) -> Vec<Tk> {
   let slice = tk.slice(); // scary! make sure the tk's source input is still alive
-  let base = tk.span.range().start;
+  let base  = tk.span.range().start;
   split_all_with(
     slice.as_bytes(),
     |s| split_at_unescaped(s, pat),
     |start, end| {
       let start = base + start;
-      let end = base + end;
+      let end   = base + end;
       Tk::new(tk.class.clone(), Span::new(start, end, tk.source()))
     },
   )
@@ -149,26 +149,26 @@ pub(crate) fn split_assignment_raw(arg: &[u8]) -> (&[u8], Option<&[u8]>) {
 /// data wants -- an apostrophe in a CSV field should not open a quoted region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct QuotePolicy {
-  pub(crate) esc: Option<u8>,
+  pub(crate) esc      : Option<u8>,
   pub(crate) sng_quote: Option<u8>,
   pub(crate) dub_quote: Option<u8>,
 }
 
 impl QuotePolicy {
   pub(crate) const SHELL: Self = Self {
-    esc: Some(b'\\'),
+    esc      : Some(b'\\'),
     sng_quote: Some(b'\''),
     dub_quote: Some(b'"'),
   };
 
   pub(crate) const ESCAPE: Self = Self {
-    esc: Some(b'\\'),
+    esc      : Some(b'\\'),
     sng_quote: None,
     dub_quote: None,
   };
 
   pub(crate) const LITERAL: Self = Self {
-    esc: None,
+    esc      : None,
     sng_quote: None,
     dub_quote: None,
   };
@@ -205,7 +205,7 @@ pub(crate) fn split_at_match_with(
   policy: QuotePolicy,
 ) -> Option<(usize, usize)> {
   let mut qt_state = QuoteState::default();
-  let mut i = 0;
+  let mut i        = 0;
 
   while i < slice.len() {
     let b = slice[i];
@@ -236,7 +236,7 @@ pub(crate) fn split_at_match_with(
 
 pub(crate) fn pos_is_escaped(slice: &[u8], pos: usize) -> bool {
   let mut escaped = false;
-  let mut i = pos;
+  let mut i       = pos;
   while i > 0 && slice[i - 1] == b'\\' {
     escaped = !escaped;
     i -= 1;
@@ -311,7 +311,7 @@ pub(crate) trait ByteCursor {
 /// For callers that need to scan an in-memory buffer rather than the lexer.
 pub(crate) struct SliceCursor<'a> {
   bytes: &'a [u8],
-  pos: usize,
+  pos  : usize,
 }
 
 impl<'a> SliceCursor<'a> {
@@ -337,7 +337,7 @@ impl<'a> SliceCursor<'a> {
   /// Attempt to run `f` on this cursor, rolling back the position if `f` returns `false`.
   pub(crate) fn attempt<F: FnOnce(&mut Self) -> bool>(&mut self, f: F) -> bool {
     let start = self.pos;
-    let res = f(self);
+    let res   = f(self);
     if !res {
       self.pos = start;
     }
@@ -347,7 +347,7 @@ impl<'a> SliceCursor<'a> {
   /// Attempt to run `f` on this cursor, rolling back the position if `f` returns `false`.
   pub(crate) fn attempt_get<T, F: FnOnce(&mut Self) -> Option<T>>(&mut self, f: F) -> Option<T> {
     let start = self.pos;
-    let res = f(self);
+    let res   = f(self);
     if res.is_none() {
       self.pos = start;
     }
@@ -419,7 +419,7 @@ fn scan_delims<C: ByteCursor>(opener: u8, c: &mut C, mut depth: usize) -> bool {
     b'[' => b']',
     b'<' => b'>',
     // Only ever called with the literals above; a new opener is a caller bug.
-    _ => unreachable!("scan_delims: invalid opener {opener:#x}"),
+    _    => unreachable!("scan_delims: invalid opener {opener:#x}"),
   };
   let mut qt = QuoteState::default();
   match_loop!(c.next_byte() => b, {

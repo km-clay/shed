@@ -13,7 +13,7 @@ use super::{DirStat, load_dir_stats};
 
 struct Sort {
   reverse: bool,
-  kind: SortKind,
+  kind   : SortKind,
 }
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
@@ -36,11 +36,11 @@ impl Builtin for ZdList {
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut quoted = false;
-    let mut json = false;
+    let mut json   = false;
 
     let mut sort = Sort {
       reverse: false,
-      kind: SortKind::Frecency,
+      kind   : SortKind::Frecency,
     };
 
     for opt in args.options() {
@@ -48,14 +48,14 @@ impl Builtin for ZdList {
         // 'reverse' and 'recursive' both share the '-r' shorthand,
         // it means different things on different subcommands.
         "reverse" => sort.reverse = true,
-        "json" => json = true,
-        "quoted" => quoted = true,
+        "json"    => json = true,
+        "quoted"  => quoted = true,
 
         "sort" => match &*opt.value()? {
           b"frecency" => sort.kind = SortKind::Frecency,
-          b"visits" => sort.kind = SortKind::Visits,
-          b"recent" => sort.kind = SortKind::Recent,
-          b"path" => sort.kind = SortKind::Path,
+          b"visits"   => sort.kind = SortKind::Visits,
+          b"recent"   => sort.kind = SortKind::Recent,
+          b"path"     => sort.kind = SortKind::Path,
           val => {
             return Err(sherr!(ParseErr @ opt.span(), "invalid sort kind: {}", val.to_str_lossy()));
           }
@@ -86,13 +86,13 @@ impl Builtin for ZdList {
     }
 
     let default_desc = !matches!(sort.kind, SortKind::Path);
-    let descending = default_desc != sort.reverse;
+    let descending   = default_desc != sort.reverse;
     rows.sort_by(|a, b| {
       let ord = match sort.kind {
         SortKind::Frecency => a.frecency.cmp(&b.frecency),
-        SortKind::Visits => a.visits.cmp(&b.visits),
-        SortKind::Recent => a.last_visit.cmp(&b.last_visit),
-        SortKind::Path => a.path.cmp(&b.path),
+        SortKind::Visits   => a.visits.cmp(&b.visits),
+        SortKind::Recent   => a.last_visit.cmp(&b.last_visit),
+        SortKind::Path     => a.path.cmp(&b.path),
       }
       .then_with(|| a.path.cmp(&b.path)); // tie-breaker
 

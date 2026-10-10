@@ -61,7 +61,7 @@ pub(crate) enum ParamExp {
 fn split_search_repl(rest: SegStream) -> (SegStream, SegStream) {
   match rest.split_once_unescaped(b'/') {
     Some(pair) => pair,
-    None => (rest, SegStream::new()),
+    None       => (rest, SegStream::new()),
   }
 }
 
@@ -73,15 +73,15 @@ pub(crate) fn parse_param_exp(body: &SegStream) -> ShResult<ParamExp> {
   // The operator is markerless ASCII at the very front of the body, so match it
   // against the leading bytes; the operand (which may carry markers) is the
   // remainder stream after the operator is peeled off.
-  let lead = body.to_bytes();
-  let lead_run = body.leading_bytes();
+  let lead      = body.to_bytes();
+  let lead_run  = body.leading_bytes();
 
   match lead.as_slice() {
     b"^^" => return Ok(PE::ToUpperAll),
-    b"^" => return Ok(PE::ToUpperFirst),
+    b"^"  => return Ok(PE::ToUpperFirst),
     b",," => return Ok(PE::ToLowerAll),
-    b"," => return Ok(PE::ToLowerFirst),
-    _ => {}
+    b","  => return Ok(PE::ToLowerFirst),
+    _     => {}
   }
 
   // Handle indirect var expansion: ${!var}
@@ -175,7 +175,7 @@ fn eval_slice_index(
   allow_side_effects: bool,
 ) -> ShResult<Num> {
   let expanded = var::expand_raw_inner(span, &mut stream.cursor(), allow_side_effects, false)?;
-  let bytes = expanded.into_bytes();
+  let bytes    = expanded.into_bytes();
   // An empty index (e.g. an unset variable) is 0, as in an empty arith context.
   if bytes.iter().all(u8::is_ascii_whitespace) {
     return Ok(0);
@@ -200,9 +200,9 @@ fn expand_body_subscripts(
   body: &SegStream,
   allow_side_effects: bool,
 ) -> ShResult<SegStream> {
-  let mut out = SegStream::new();
-  let mut cursor = body.cursor();
-  let mut in_name = true;
+  let mut out      = SegStream::new();
+  let mut cursor   = body.cursor();
+  let mut in_name  = true;
   let mut seen_any = false;
   while let Some(unit) = cursor.next() {
     match unit {
@@ -268,11 +268,11 @@ fn perform_param_expansion_inner(
   // operator against a lossy string view; the operand (the suffix after the
   // operator) keeps its markers and is sliced back off `body` once we know the
   // split point.
-  let body = expand_body_subscripts(span, body, allow_side_effects)?;
-  let body_bytes = body.to_bytes();
-  let raw = String::from_utf8_lossy(&body_bytes);
-  let mut var_name = util::scratch_buf();
-  let mut rest = util::scratch_buf();
+  let     body       = expand_body_subscripts(span, body, allow_side_effects)?;
+  let     body_bytes = body.to_bytes();
+  let     raw        = String::from_utf8_lossy(&body_bytes);
+  let mut var_name   = util::scratch_buf();
+  let mut rest       = util::scratch_buf();
   if raw.starts_with('#') {
     let var_spec = raw.strip_prefix('#').unwrap();
     if var_spec.is_empty() || var_spec == "*" || var_spec == "@" {
@@ -293,7 +293,7 @@ fn perform_param_expansion_inner(
           let var = Shed::vars(|v| v.get_var_meta(parsed.name()));
           return Ok(
             match var.kind() {
-              VarKind::Arr(items) => items.len(),
+              VarKind::Arr(items)      => items.len(),
               VarKind::AssocArr(items) => items.len(),
               _ => 0,
             }
@@ -310,12 +310,12 @@ fn perform_param_expansion_inner(
     let var = Shed::vars(|v| v.get_var_meta(var_spec));
     return Ok(
       match var.kind() {
-        VarKind::Magic(func) => func().unwrap_or_default().chars().count(),
-        VarKind::Str(v) => v.chars().count(),
-        VarKind::Int(i) => varstr!("{i}").chars().count(),
-        VarKind::Arr(items) => items.len(),
+        VarKind::Magic(func)     => func().unwrap_or_default().chars().count(),
+        VarKind::Str(v)          => v.chars().count(),
+        VarKind::Int(i)          => varstr!("{i}").chars().count(),
+        VarKind::Arr(items)      => items.len(),
         VarKind::AssocArr(items) => items.len(),
-        VarKind::Unset => 0,
+        VarKind::Unset           => 0,
       }
       .to_string()
       .into(),
@@ -323,9 +323,9 @@ fn perform_param_expansion_inner(
   }
 
   // Scan for the variable name (may include [index]) and the operator.
-  let mut cur = SliceCursor::new(&body_bytes);
+  let mut cur           = SliceCursor::new(&body_bytes);
   let mut is_glob_index = false;
-  let mut seen_bracket = false;
+  let mut seen_bracket  = false;
   match_loop!(cur.next_byte() => ch, {
     b'[' => {
       // Include brackets as part of the var name
@@ -388,21 +388,21 @@ fn perform_param_expansion_inner(
       parsed.set_index(resolved);
     }
   }
-  let get = |v: &ScopeStack| v.resolve_var(&parsed).unwrap_or_default();
+  let get     = |v: &ScopeStack| v.resolve_var(&parsed).unwrap_or_default();
   let try_get = |v: &ScopeStack| v.resolve_var(&parsed);
 
   let operand = body.split_off_front(var_name.len()).1;
-  let _ = &rest;
+  let _       = &rest;
   if let Ok(expansion) = parse_param_exp(&operand) {
     match expansion {
       ParamExp::ToUpperAll => {
         let value = Shed::vars(get);
-        let new = value.to_ascii_uppercase();
+        let new   = value.to_ascii_uppercase();
         Ok(new.into())
       }
       ParamExp::ToLowerAll => {
         let value = Shed::vars(get);
-        let new = value.to_ascii_lowercase();
+        let new   = value.to_ascii_lowercase();
         Ok(new.into())
       }
       ParamExp::ToUpperFirst => {
@@ -411,9 +411,9 @@ fn perform_param_expansion_inner(
           Ok(value.into())
         } else {
           let first = value.try_slice(..1).unwrap();
-          let rest = value.try_slice(1..).unwrap();
+          let rest  = value.try_slice(1..).unwrap();
 
-          let new = first.to_ascii_uppercase().chain(rest);
+          let new   = first.to_ascii_uppercase().chain(rest);
 
           Ok(new.into())
         }
@@ -424,9 +424,9 @@ fn perform_param_expansion_inner(
           Ok(value.into())
         } else {
           let first = value.try_slice(..1).unwrap();
-          let rest = value.try_slice(1..).unwrap();
+          let rest  = value.try_slice(1..).unwrap();
 
-          let new = first.to_ascii_lowercase().chain(rest);
+          let new   = first.to_ascii_lowercase().chain(rest);
 
           Ok(new.into())
         }
@@ -439,7 +439,7 @@ fn perform_param_expansion_inner(
       }
       ParamExp::DefaultUnset(default) => match Shed::vars(try_get) {
         Some(val) => Ok(val.into()),
-        None => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
+        None      => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
       },
       ParamExp::SetDefaultUnsetOrNull(default) => {
         if let Some(val) = Shed::vars(try_get).filter(|v| !v.is_empty()) {
@@ -469,11 +469,11 @@ fn perform_param_expansion_inner(
       }
       ParamExp::AltSetNotNull(alt) => match Shed::vars(try_get).filter(|v| !v.is_empty()) {
         Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
-        None => Ok(SegStream::new()),
+        None    => Ok(SegStream::new()),
       },
       ParamExp::AltNotNull(alt) => match Shed::vars(try_get) {
         Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
-        None => Ok(SegStream::new()),
+        None    => Ok(SegStream::new()),
       },
       ParamExp::ErrUnsetOrNull(err) => {
         if let Some(val) = Shed::vars(try_get).filter(|v| !v.is_empty()) {
@@ -506,14 +506,14 @@ fn perform_param_expansion_inner(
         }
       }
       ParamExp::SliceOpen(offset) => {
-        let pos = eval_slice_index(span, &offset, allow_side_effects)?;
-        let value = Shed::vars(get);
-        let bytes = value.as_bytes();
+        let pos                = eval_slice_index(span, &offset, allow_side_effects)?;
+        let value              = Shed::vars(get);
+        let bytes              = value.as_bytes();
         let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();
-        let n = starts.len() as Num;
+        let n                  = starts.len() as Num;
 
-        let start = resolve_offset(pos, n) as usize;
-        let start_byte = starts.get(start).copied().unwrap_or(bytes.len());
+        let start              = resolve_offset(pos, n) as usize;
+        let start_byte         = starts.get(start).copied().unwrap_or(bytes.len());
 
         value
           .try_slice(start_byte..bytes.len())
@@ -521,15 +521,15 @@ fn perform_param_expansion_inner(
           .ok_or_else(|| sherr!(ExecFail, "substring expression < 0"))
       }
       ParamExp::SliceClosed(offset, length) => {
-        let pos = eval_slice_index(span, &offset, allow_side_effects)?;
-        let len = eval_slice_index(span, &length, allow_side_effects)?;
-        let value = Shed::vars(get);
-        let bytes = value.as_bytes();
+        let pos                = eval_slice_index(span, &offset, allow_side_effects)?;
+        let len                = eval_slice_index(span, &length, allow_side_effects)?;
+        let value              = Shed::vars(get);
+        let bytes              = value.as_bytes();
         let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();
-        let n = starts.len() as Num;
+        let n                  = starts.len() as Num;
 
-        let start = resolve_offset(pos, n);
-        let start_byte = starts.get(start as usize).copied().unwrap_or(bytes.len());
+        let start              = resolve_offset(pos, n);
+        let start_byte         = starts.get(start as usize).copied().unwrap_or(bytes.len());
 
         // A negative length is an offset from the end of the string; a positive
         // one counts forward from `start`. bash errors if the end lands before
@@ -647,10 +647,10 @@ fn perform_param_expansion_inner(
         let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
           .no_glob()
           .expand_no_split()?;
-        let glob = Shed::meta_mut(|m| m.get_glob(expanded_search.as_bytes()));
+        let     glob            = Shed::meta_mut(|m| m.get_glob(expanded_search.as_bytes()));
         let mut result: Vec<u8> = Vec::new();
-        let mut last_match_end = 0;
-        let mut from = 0;
+        let mut last_match_end  = 0;
+        let mut from            = 0;
 
         while let Some((start, end)) = glob.find(value, from) {
           result.extend_from_slice(&value[last_match_end..start]);
@@ -695,7 +695,7 @@ fn perform_param_expansion_inner(
 
         let pattern = Shed::meta_mut(|m| m.get_glob(expanded_search.as_bytes()));
         if let Some(len) = pattern.match_longest_suffix(value) {
-          let pos = value.len() - len;
+          let     pos    = value.len() - len;
           let mut result = Vec::with_capacity(pos + expanded_replace.as_bytes().len());
           result.extend_from_slice(&value[..pos]);
           result.extend_from_slice(expanded_replace.as_bytes());
@@ -729,7 +729,7 @@ fn perform_param_expansion_inner(
           }
         } else {
           let inner_name = VarName::parse(&inner, allow_side_effects)?;
-          let value = Shed::vars(|v| v.resolve_var(&inner_name).unwrap_or_default());
+          let value      = Shed::vars(|v| v.resolve_var(&inner_name).unwrap_or_default());
           Ok(var!(&value.to_str_lossy()).into())
         }
       }
@@ -1479,7 +1479,7 @@ mod tests {
 
   #[test]
   fn param_set_default_unset_or_null_when_unset() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = test_param_expansion("NEWVAR:=defaultval").unwrap();
     assert_eq!(result, "defaultval");
     // Side effect: variable should now be set.
@@ -1508,7 +1508,7 @@ mod tests {
 
   #[test]
   fn param_alt_set_not_null_unset_returns_empty() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = test_param_expansion("UNSET:+alt").unwrap();
     assert_eq!(result, "");
   }
@@ -1525,7 +1525,7 @@ mod tests {
 
   #[test]
   fn param_err_unset_or_null_when_unset() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = test_param_expansion("UNSET:?missing!");
     assert!(result.is_err());
   }
@@ -1548,7 +1548,7 @@ mod tests {
 
   #[test]
   fn param_err_unset_when_unset() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = test_param_expansion("UNSET?missing");
     assert!(result.is_err());
   }

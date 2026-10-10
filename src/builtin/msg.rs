@@ -17,16 +17,16 @@ impl super::Builtin for Msg {
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let mut system = false;
-    let mut status = false;
-    let mut broadcast = false;
+    let mut system          = false;
+    let mut status          = false;
+    let mut broadcast       = false;
 
-    let (arg_vec, opts) = args.take_argv();
+    let     (arg_vec, opts) = args.take_argv();
 
     for opt in &opts {
       match opt.key() {
-        "system" => system = true,
-        "status" => status = true,
+        "system"    => system = true,
+        "status"    => status = true,
         "broadcast" => broadcast = true,
         _ => {
           return Err(sherr!(ExecFail, "msg: Unexpected flag '{opt}'",).with_code(2));

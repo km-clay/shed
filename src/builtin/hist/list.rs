@@ -46,12 +46,12 @@ impl Builtin for HistList {
     ]
   }
   fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
-    let span = args.span();
-    let (arg_vec, opts) = args.take_argv();
-    let mut query = HistQuery::from_opts(&opts).promote_err(span)?;
+    let     span            = args.span();
+    let     (arg_vec, opts) = args.take_argv();
+    let mut query           = HistQuery::from_opts(&opts).promote_err(span)?;
 
-    let needs_write = query.delete || query.restore;
-    let hist = open_history(span, query.ex_hist, needs_write)?;
+    let     needs_write     = query.delete || query.restore;
+    let     hist            = open_history(span, query.ex_hist, needs_write)?;
 
     for (arg, span) in arg_vec {
       let Ok(id) = arg.to_str_lossy().parse::<i64>() else {
@@ -67,8 +67,8 @@ impl Builtin for HistList {
       return util::with_status(0);
     }
 
-    let entries = query.execute(&hist).promote_err(span)?;
-    let mut out = SinkIo(procio::stdout_sink()?);
+    let     entries = query.execute(&hist).promote_err(span)?;
+    let mut out     = SinkIo(procio::stdout_sink()?);
     query.format_entries(&entries, &mut out).ok();
 
     if query.delete {

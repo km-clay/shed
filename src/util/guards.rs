@@ -24,7 +24,7 @@ use crate::{
 /// the value. Derefs to the value so it stays usable until then. The `Option`s
 /// let `drop` (which only has `&mut self`) move both out to call the `FnOnce`.
 pub(crate) struct ScopeGuard<T, F: FnOnce(T)> {
-  value: Option<T>,
+  value : Option<T>,
   dropfn: Option<F>,
 }
 
@@ -52,7 +52,7 @@ impl<T, F: FnOnce(T)> Drop for ScopeGuard<T, F> {
 /// Run `dropfn(value)` when the returned guard drops.
 pub(crate) fn guard<T, F: FnOnce(T)>(value: T, dropfn: F) -> ScopeGuard<T, F> {
   ScopeGuard {
-    value: Some(value),
+    value : Some(value),
     dropfn: Some(dropfn),
   }
 }
@@ -92,13 +92,13 @@ fn guard_drop(_: ()) {
 /// This calls `Shed::meta_mut` internally.
 /// If this is called inside of another `meta()`/`meta_mut()` call, that is a `RefCell` panic.
 pub(crate) fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
-  let ceiling_guard = scope_ceiling_guard(args);
-  let cwd_guard = cwd_guard();
-  let umask_guard = umask_guard();
-  let shopt_guard = shopt_guard();
-  let logic_guard = logic_guard();
+  let ceiling_guard    = scope_ceiling_guard(args);
+  let cwd_guard        = cwd_guard();
+  let umask_guard      = umask_guard();
+  let shopt_guard      = shopt_guard();
+  let logic_guard      = logic_guard();
   let positional_guard = positional_guard();
-  let fork = Shed::meta_mut(|m| m.enter_fork(false));
+  let fork             = Shed::meta_mut(|m| m.enter_fork(false));
   guard((), move |()| {
     drop(shopt_guard);
     drop(cwd_guard);

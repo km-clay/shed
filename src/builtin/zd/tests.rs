@@ -34,8 +34,8 @@ fn qchars(s: &str) -> Vec<char> {
 
 #[test]
 fn score_dir_exact_path_wins() {
-  let q = qchars("/home/me");
-  let exact = super::fuzzy_score_dir(&"/home/me".into(), &q, false);
+  let q      = qchars("/home/me");
+  let exact  = super::fuzzy_score_dir(&"/home/me".into(), &q, false);
   let longer = super::fuzzy_score_dir(&"/home/me/projects".into(), &q, false);
   assert_eq!(exact, i32::MAX);
   assert!(
@@ -46,10 +46,10 @@ fn score_dir_exact_path_wins() {
 
 #[test]
 fn score_dir_basename_outranks_smeared() {
-  let q = qchars("dev");
+  let q        = qchars("dev");
   // Basename "dev" matches cleanly; the other only matches across parent segments.
   let basename = super::fuzzy_score_dir(&"/a/b/dev".into(), &q, false);
-  let smeared = super::fuzzy_score_dir(&"/d/e/v/zzz".into(), &q, false);
+  let smeared  = super::fuzzy_score_dir(&"/d/e/v/zzz".into(), &q, false);
   assert!(basename > smeared);
 }
 
@@ -151,7 +151,7 @@ fn zd_add_is_idempotent() {
 fn zd_remove_deletes_entry() {
   let _g = TestGuard::new();
   fresh_dir_history();
-  let dir = TempDir::new().unwrap();
+  let dir   = TempDir::new().unwrap();
   let canon = fs::canonicalize(dir.path()).unwrap().display().to_string();
   insert_dir(&canon, 5, 1000);
   test_input(format!("zd remove {}", dir.path().display())).unwrap();
@@ -162,7 +162,7 @@ fn zd_remove_deletes_entry() {
 fn zd_clean_prunes_only_dead_dirs() {
   let _g = TestGuard::new();
   fresh_dir_history();
-  let live = TempDir::new().unwrap();
+  let live       = TempDir::new().unwrap();
   let live_canon = fs::canonicalize(live.path()).unwrap().display().to_string();
   insert_dir(&live_canon, 1, 1000);
   insert_dir("/nonexistent_zz_dir_12345", 1, 1000);
@@ -182,7 +182,7 @@ fn zd_clean_prunes_only_dead_dirs() {
 fn load_dir_entries_skips_missing_dirs() {
   let _g = TestGuard::new();
   fresh_dir_history();
-  let live = TempDir::new().unwrap();
+  let live       = TempDir::new().unwrap();
   let live_canon = fs::canonicalize(live.path()).unwrap().display().to_string();
   insert_dir(&live_canon, 3, 1000);
   insert_dir("/nonexistent_zz_dir_98765", 9, 9999);

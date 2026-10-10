@@ -10,7 +10,7 @@ use super::{
 
 #[derive(Default, Clone, Debug)]
 pub(crate) struct ViVerbatim {
-  sent_cmd: Vec<EditCmd>,
+  sent_cmd    : Vec<EditCmd>,
   repeat_count: u16,
 }
 
@@ -33,10 +33,10 @@ impl EditMode for ViVerbatim {
         log::debug!("Received verbatim key sequence: {seq:?}");
         let cmd = EditCmd {
           register: RegisterName::default(),
-          verb: Some(verb!(Verb::Insert((*seq).into()))),
-          motion: None,
-          raw_seq: seq.to_string(),
-          flags: CmdFlags::EXIT_CUR_MODE,
+          verb    : Some(verb!(Verb::Insert((*seq).into()))),
+          motion  : None,
+          raw_seq : seq.to_string(),
+          flags   : CmdFlags::EXIT_CUR_MODE,
         };
         self.sent_cmd.push(cmd.clone());
         Some(cmd)

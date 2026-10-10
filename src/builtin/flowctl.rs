@@ -26,7 +26,7 @@ enum RaiseConv {
 
 #[derive(Debug)]
 struct RaiseCtx {
-  args: Peekable<vec::IntoIter<(VarStr, Span)>>,
+  args     : Peekable<vec::IntoIter<(VarStr, Span)>>,
   color_map: HashMap<usize, yansi::Color>,
 }
 
@@ -93,7 +93,7 @@ impl StrFmt for RaiseFmt {
         "invalid format specifier: no argument for '%({idx})'",
       ));
     };
-    let color = src.get_color(*idx);
+    let color   = src.get_color(*idx);
     let painted = arg.paint(color);
 
     Ok(Field::styled(varstr!("{painted}").into_bytes()))
@@ -263,18 +263,18 @@ impl super::Builtin for Raise {
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let mut code = 1;
-    let mut kind = None;
+    let mut code  = 1;
+    let mut kind  = None;
     let mut notes = vec![];
-    let span = args.cmd_span();
+    let     span  = args.cmd_span();
 
     for opt in args.options() {
       match opt.key() {
         "code" => {
           let c = opt.value()?;
-          let code_arg = c.parse::<i32>().map_err(
-            |v| sherr!(SyntaxErr @ opt.span(), "Invalid exit code: expected a number, got '{v}'"),
-          )?;
+          let code_arg = c.parse::<i32>().map_err(|v| {
+            sherr!(SyntaxErr @ opt.span(), "Invalid exit code: expected a number, got '{v}'")
+          })?;
 
           code = code_arg;
         }
@@ -302,12 +302,12 @@ impl super::Builtin for Raise {
       .peekable();
 
     let mut ctx = RaiseCtx {
-      args: arg_iter,
+      args     : arg_iter,
       color_map: HashMap::default(),
     };
 
     while let Some((fmt, span)) = ctx.args.next() {
-      let f = strops::StrFormatter::parse(&RaiseFmt, &fmt).promote_err(span)?;
+      let     f   = strops::StrFormatter::parse(&RaiseFmt, &fmt).promote_err(span)?;
       let mut buf = vec![];
       f.render(&mut ctx, &mut buf).promote_err(span)?;
       message_parts.push(buf);
@@ -442,7 +442,7 @@ mod tests {
   fn continue_skips_iteration() {
     let guard = TestGuard::new();
     test_input("for i in 1 2 3; do if [[ $i == 2 ]]; then continue; fi; echo $i; done").unwrap();
-    let out = guard.read_output();
+    let out              = guard.read_output();
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines, vec!["1", "3"]);
   }

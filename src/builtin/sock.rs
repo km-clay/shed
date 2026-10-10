@@ -77,12 +77,12 @@ fn socket_error(op: &str, err: &io::Error) -> ShErr {
   };
 
   match err.kind() {
-    io::ErrorKind::NotFound => coded("Address not found", "address not found", 3),
+    io::ErrorKind::NotFound          => coded("Address not found", "address not found", 3),
     io::ErrorKind::ConnectionRefused => coded("Connection refused", "connection refused", 4),
-    io::ErrorKind::AddrInUse => coded("Address in use", "address in use", 5),
-    io::ErrorKind::TimedOut => coded("Connection timed out", "connection timed out", 6),
-    io::ErrorKind::PermissionDenied => coded("Permission denied", "permission denied", 7),
-    io::ErrorKind::ConnectionReset => coded("Connection reset", "connection reset", 8),
+    io::ErrorKind::AddrInUse         => coded("Address in use", "address in use", 5),
+    io::ErrorKind::TimedOut          => coded("Connection timed out", "connection timed out", 6),
+    io::ErrorKind::PermissionDenied  => coded("Permission denied", "permission denied", 7),
+    io::ErrorKind::ConnectionReset   => coded("Connection reset", "connection reset", 8),
     io::ErrorKind::ConnectionAborted => coded("Connection aborted", "connection aborted", 9),
 
     _ => match err.raw_os_error() {
@@ -97,7 +97,7 @@ fn socket_error(op: &str, err: &io::Error) -> ShErr {
 #[cfg(linux_like)]
 fn connect_abstract(name: &str) -> io::Result<OwnedFd> {
   // connect to abstract socket
-  let addr = SocketAddr::from_abstract_name(name.as_bytes())?;
+  let addr   = SocketAddr::from_abstract_name(name.as_bytes())?;
   let stream = UnixStream::connect_addr(&addr)?;
 
   Ok(stream.into())
@@ -105,7 +105,7 @@ fn connect_abstract(name: &str) -> io::Result<OwnedFd> {
 
 #[cfg(linux_like)]
 fn bind_abstract(name: &str) -> io::Result<OwnedFd> {
-  let addr = SocketAddr::from_abstract_name(name.as_bytes())?;
+  let addr     = SocketAddr::from_abstract_name(name.as_bytes())?;
   let listener = UnixListener::bind_addr(&addr)?;
 
   Ok(listener.into())
@@ -165,7 +165,7 @@ impl UnixAddr {
   pub(crate) fn connect(self) -> io::Result<OwnedFd> {
     match self {
       UnixAddr::Abstract(var_str) => connect_abstract(&var_str.to_str_lossy()),
-      UnixAddr::Path(path_buf) => UnixStream::connect(&path_buf).map(OwnedFd::from),
+      UnixAddr::Path(path_buf)    => UnixStream::connect(&path_buf).map(OwnedFd::from),
     }
   }
   fn poke(&self) -> io::Result<bool> {
@@ -188,7 +188,7 @@ impl UnixAddr {
 
     let poke_result = match connect(probe.as_raw_fd(), &addr) {
       Ok(()) | Err(Errno::EAGAIN | Errno::EINPROGRESS) => true,
-      Err(Errno::ECONNREFUSED | Errno::ENOENT) => false,
+      Err(Errno::ECONNREFUSED | Errno::ENOENT)         => false,
       Err(e) => return Err(io::Error::from_raw_os_error(e as i32)),
     };
 
@@ -269,18 +269,18 @@ impl SockTarget {
 }
 
 struct SockOpts {
-  target: SockTarget,
-  fd_var: Option<VarStr>,
+  target : SockTarget,
+  fd_var : Option<VarStr>,
   oneshot: bool,
 }
 
 impl SockOpts {
   fn from_opts(opts: &[Opt]) -> ShResult<Self> {
     let mut unix_addr = None;
-    let mut tcp_addr = None;
-    let mut tcp_port = None;
-    let mut fd_var = None;
-    let mut oneshot = false;
+    let mut tcp_addr  = None;
+    let mut tcp_port  = None;
+    let mut fd_var    = None;
+    let mut oneshot   = false;
 
     for opt in opts {
       match opt.key() {
@@ -288,7 +288,7 @@ impl SockOpts {
           let arg = opt.value()?;
           let addr = match arg.strip_prefix(b"@") {
             Some(name) => UnixAddr::Abstract(name.into()),
-            None => UnixAddr::Path(PathBuf::from(arg)),
+            None       => UnixAddr::Path(PathBuf::from(arg)),
           };
           unix_addr = Some(addr);
         }
@@ -356,8 +356,8 @@ fn install_socket_fd(
   var_name: Option<VarStr>,
   default_var: &str,
 ) -> ShResult<()> {
-  let staged = procio::move_high(owned)?;
-  let fd = target_fd.unwrap_or_else(|| staged.as_raw_fd());
+  let staged              = procio::move_high(owned)?;
+  let fd                  = target_fd.unwrap_or_else(|| staged.as_raw_fd());
   let sink: Arc<dyn Sink> = Arc::new(OsSink::new(staged));
   Shed::sinks(|s| s.clobber(fd, sink));
 
@@ -382,10 +382,10 @@ impl super::Builtin for Accept {
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let mut var = None;
-    let (arg_vec, opts) = args.take_argv();
-    let mut argv_iter = arg_vec.into_iter();
-    let cmd_span = args.cmd_span();
+    let mut var             = None;
+    let     (arg_vec, opts) = args.take_argv();
+    let mut argv_iter       = arg_vec.into_iter();
+    let     cmd_span        = args.cmd_span();
 
     for opt in opts {
       match opt.key() {
@@ -664,7 +664,7 @@ mod tests {
     let path = temp_sock_path(tag);
     std::fs::remove_file(&path).ok();
     let listener = UnixListener::bind(&path).unwrap();
-    let cleanup = path.clone();
+    let cleanup  = path.clone();
     g.add_cleanup(move || {
       std::fs::remove_file(&cleanup).ok();
     });
@@ -681,8 +681,8 @@ mod tests {
 
   #[test]
   fn sock_write_reaches_peer() {
-    let mut g = TestGuard::new();
-    let (listener, path) = bind_listener(&mut g, "write");
+    let mut g                = TestGuard::new();
+    let     (listener, path) = bind_listener(&mut g, "write");
 
     test_input(format!(
       "sock -U {} -v conn\nprintf 'ping' >&$conn",
@@ -694,7 +694,7 @@ mod tests {
     let (mut conn, _) = listener.accept().unwrap();
     conn.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     let mut buf = [0u8; 16];
-    let n = conn.read(&mut buf).unwrap();
+    let     n   = conn.read(&mut buf).unwrap();
     assert_eq!(&buf[..n], b"ping");
 
     test_input("eval \"exec $conn>&-\"").ok();
@@ -702,8 +702,8 @@ mod tests {
 
   #[test]
   fn sock_reads_data_from_peer() {
-    let mut g = TestGuard::new();
-    let (listener, path) = bind_listener(&mut g, "read");
+    let mut g                = TestGuard::new();
+    let     (listener, path) = bind_listener(&mut g, "read");
 
     test_input(format!("sock -U {} -v conn", path.display())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -727,8 +727,8 @@ mod tests {
 
   #[test]
   fn sock_oneshot_round_trips() {
-    let mut g = TestGuard::new();
-    let (listener, path) = bind_listener(&mut g, "oneshot");
+    let mut g                = TestGuard::new();
+    let     (listener, path) = bind_listener(&mut g, "oneshot");
 
     let server = std::thread::spawn(move || {
       let (mut conn, _) = listener.accept().unwrap();
@@ -751,8 +751,8 @@ mod tests {
 
   #[test]
   fn sock_oneshot_reads_message_from_stdin() {
-    let mut g = TestGuard::new();
-    let (listener, path) = bind_listener(&mut g, "oneshot_stdin");
+    let mut g                = TestGuard::new();
+    let     (listener, path) = bind_listener(&mut g, "oneshot_stdin");
 
     let server = std::thread::spawn(move || {
       let (mut conn, _) = listener.accept().unwrap();
@@ -772,12 +772,12 @@ mod tests {
 
   #[test]
   fn sock_oneshot_streams_full_response() {
-    let mut g = TestGuard::new();
-    let (listener, path) = bind_listener(&mut g, "oneshot_stream");
+    let mut g                = TestGuard::new();
+    let     (listener, path) = bind_listener(&mut g, "oneshot_stream");
 
     // A response larger than one read buffer, to prove the relay loops to EOF
     // rather than emitting a single chunk (and never truncates).
-    let payload = "x".repeat(20_000);
+    let     payload          = "x".repeat(20_000);
     let server = std::thread::spawn(move || {
       let (mut conn, _) = listener.accept().unwrap();
       conn.set_read_timeout(Some(Duration::from_secs(2))).ok();
@@ -808,9 +808,9 @@ mod tests {
 
   #[test]
   fn sock_explicit_fd_collision() {
-    let mut g = TestGuard::new();
-    let (listener, path) = bind_listener(&mut g, "collision");
-    let fd = lowest_free_fd();
+    let mut g                = TestGuard::new();
+    let     (listener, path) = bind_listener(&mut g, "collision");
+    let     fd               = lowest_free_fd();
     if fd >= 10 {
       return; // no free user-range fd in this env
     }
@@ -825,7 +825,7 @@ mod tests {
     let (mut conn, _) = listener.accept().unwrap();
     conn.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     let mut buf = [0u8; 16];
-    let n = conn.read(&mut buf).unwrap();
+    let     n   = conn.read(&mut buf).unwrap();
     assert_eq!(&buf[..n], b"ping");
 
     test_input(format!("exec {fd}>&-")).ok();
@@ -835,8 +835,8 @@ mod tests {
 
   #[test]
   fn sock_auto_alloc_sets_shed_conn() {
-    let mut g = TestGuard::new();
-    let (_listener, path) = bind_listener(&mut g, "auto");
+    let mut g                 = TestGuard::new();
+    let     (_listener, path) = bind_listener(&mut g, "auto");
 
     test_input(format!("sock -U {}\necho \"c=$SHED_CONN\"", path.display())).unwrap();
     let out = g.read_output();
@@ -852,8 +852,8 @@ mod tests {
 
   #[test]
   fn sock_v_flag_sets_named_var() {
-    let mut g = TestGuard::new();
-    let (_listener, path) = bind_listener(&mut g, "vflag");
+    let mut g                 = TestGuard::new();
+    let     (_listener, path) = bind_listener(&mut g, "vflag");
 
     test_input(format!(
       "sock -U {} -v myconn\necho \"c=$myconn\"",
@@ -873,9 +873,9 @@ mod tests {
 
   #[test]
   fn sock_explicit_fd_does_not_set_shed_conn() {
-    let mut g = TestGuard::new();
-    let (_listener, path) = bind_listener(&mut g, "noconn");
-    let fd = lowest_free_fd();
+    let mut g                 = TestGuard::new();
+    let     (_listener, path) = bind_listener(&mut g, "noconn");
+    let     fd                = lowest_free_fd();
     if fd >= 10 {
       return; // no free user-range fd in this env
     }
@@ -947,12 +947,12 @@ mod tests {
     #[cfg(linux_like)]
     use std::os::unix::net::SocketAddr;
 
-    let _g = TestGuard::new();
-    let name = format!("shed_abs_{}", uniq());
-    let addr = SocketAddr::from_abstract_name(name.as_bytes()).unwrap();
+    let _g       = TestGuard::new();
+    let name     = format!("shed_abs_{}", uniq());
+    let addr     = SocketAddr::from_abstract_name(name.as_bytes()).unwrap();
     let listener = UnixListener::bind_addr(&addr).unwrap();
 
-    let fd = lowest_free_fd();
+    let fd       = lowest_free_fd();
     if fd >= 10 {
       return; // no free user-range fd in this env
     }
@@ -965,7 +965,7 @@ mod tests {
     let (mut conn, _) = listener.accept().unwrap();
     conn.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     let mut buf = [0u8; 16];
-    let n = conn.read(&mut buf).unwrap();
+    let     n   = conn.read(&mut buf).unwrap();
     assert_eq!(&buf[..n], b"abs");
 
     test_input(format!("exec {fd}>&-")).ok();

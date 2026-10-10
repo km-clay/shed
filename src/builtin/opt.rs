@@ -20,8 +20,8 @@ impl std::fmt::Debug for Word {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       Word::Arg(word, _) => write!(f, "Arg({word:?})"),
-      Word::Opt(opt) => write!(f, "Opt({opt:?})"),
-      Word::Sep(_) => write!(f, "Sep"),
+      Word::Opt(opt)     => write!(f, "Opt({opt:?})"),
+      Word::Sep(_)       => write!(f, "Sep"),
     }
   }
 }
@@ -51,7 +51,7 @@ impl From<Vec<(VarStr, Span)>> for Parsed {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Opt {
-  key: VarStr,
+  key : VarStr,
   span: Span,
   args: Vec<(VarStr, Span)>,
 }
@@ -81,7 +81,7 @@ impl Opt {
   /// the canonical option key; `args` are its argument values (empty for a flag).
   pub(crate) fn for_test(key: &str, args: &[&str]) -> Self {
     Opt {
-      key: key.into(),
+      key : key.into(),
       span: Span::default(),
       args: args.iter().map(|&a| (a.into(), Span::default())).collect(),
     }
@@ -101,10 +101,10 @@ impl Display for Opt {
 
 #[derive(Default, Debug)]
 pub(crate) struct OptSpec {
-  short: Option<u8>,    // form like '-a'
-  long: Option<VarStr>, // form like '--arg'
-  key: VarStr,          // internal name used for matching
-  argc: usize,          // number of arguments the option takes
+  short: Option<u8>,     // form like '-a'
+  long : Option<VarStr>, // form like '--arg'
+  key  : VarStr,         // internal name used for matching
+  argc : usize,          // number of arguments the option takes
 }
 
 impl OptSpec {
@@ -207,7 +207,7 @@ fn parse_opts_inner(
   // Expand tokens and flatten via get_words, preserving spans
   let mut expanded_words = vec![];
   for tk in tokens {
-    let tk = tk.clone();
+    let tk   = tk.clone();
     let span = tk.span;
     for word in tk.expand_to_words()? {
       expanded_words.push((word, span));
@@ -221,7 +221,7 @@ fn parse_opts_inner(
     .collect();
 
   let mut words_iter = expanded_words.into_iter().peekable();
-  let mut words = vec![];
+  let mut words      = vec![];
 
   while let Some((word, span)) = words_iter.next() {
     // separator, denotes end of options (unless the builtin keeps `--` literal)
@@ -298,8 +298,8 @@ fn parse_opts_inner(
 
 /// Split `tokens` into parsed options and the *raw*, unexpanded operand tokens.
 pub(super) fn parse_opts_raw(tokens: &[Tk], specs: &[OptSpec]) -> (Vec<Opt>, Vec<Tk>) {
-  let mut opts = vec![];
-  let mut operands = vec![];
+  let mut opts        = vec![];
+  let mut operands    = vec![];
   let mut end_of_opts = false;
 
   for tk in tokens {
@@ -326,7 +326,7 @@ pub(super) fn parse_opts_raw(tokens: &[Tk], specs: &[OptSpec]) -> (Vec<Opt>, Vec
         for byte in c.bytes() {
           let spec = specs.iter().find(|s| s.is_short_match(byte)).unwrap();
           opts.push(Opt {
-            key: spec.key.clone(),
+            key : spec.key.clone(),
             span: tk.span,
             args: vec![],
           });
@@ -409,7 +409,7 @@ where
     let word = word.to_str_lossy();
     match word.chars().next() {
       Some('-' | '+') => {}
-      _ => break, // first operand — leave it in `words`
+      _               => break, // first operand — leave it in `words`
     }
     if word == "-" {
       break; // a lone `-` is an operand, not an option
@@ -423,8 +423,8 @@ where
     }
 
     words.next(); // commit: it's a short cluster or `-o`
-    let on = word.starts_with('-');
-    let mut cluster = word[1..].chars().collect::<Vec<_>>().into_iter().peekable();
+    let     on              = word.starts_with('-');
+    let mut cluster         = word[1..].chars().collect::<Vec<_>>().into_iter().peekable();
     let mut pending: Vec<F> = vec![];
 
     while let Some(ch) = cluster.next() {
@@ -433,12 +433,12 @@ where
         continue;
       }
       match classify(ch) {
-        Role::Set(f) => pending.push(f),
+        Role::Set(f)     => pending.push(f),
         Role::Invocation => invocation(ch, None, words, span)?,
         Role::InvocationArg => {
           // getopt rule: leftover cluster chars are this option's argument.
           let attached: String = cluster.by_ref().collect();
-          let attached = (!attached.is_empty()).then(|| VarStr::from(attached));
+          let attached         = (!attached.is_empty()).then(|| VarStr::from(attached));
           invocation(ch, attached, words, span)?;
           break; // an arg-taking option ends the cluster
         }

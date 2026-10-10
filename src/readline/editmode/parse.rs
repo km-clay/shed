@@ -48,8 +48,8 @@ type Validator = fn(Option<&Verb>, Option<&Motion>) -> CmdState;
 #[derive(Clone, Debug)]
 pub(crate) struct ViParser {
   motion_callback: Option<MotionCallback>,
-  verb_callback: Option<VerbCallback>,
-  validator: Validator,
+  verb_callback  : Option<VerbCallback>,
+  validator      : Validator,
 }
 
 impl ViParser {
@@ -67,13 +67,13 @@ impl ViParser {
   pub(crate) fn try_parse(&self, pending_seq: &str) -> ParseResult {
     use CallbackResult as C;
     use ParseResult as P;
-    let mut chars = pending_seq.chars().peekable();
-    let chars_iter = &mut chars;
+    let mut chars       = pending_seq.chars().peekable();
+    let     chars_iter  = &mut chars;
 
-    let register = Self::reg_parse(chars_iter);
+    let     register    = Self::reg_parse(chars_iter);
 
     let mut chars_clone = chars_iter.clone();
-    let verb_count = Self::parse_count(&mut chars_clone).unwrap_or(1);
+    let     verb_count  = Self::parse_count(&mut chars_clone).unwrap_or(1);
     let verb = match self.parse_verb(&mut chars_clone, verb_count) {
       C::Partial(verb) => {
         *chars_iter = chars_clone;
@@ -346,24 +346,24 @@ impl ViParser {
     let bound = match bound_ch {
       'i' => Bound::Inside,
       'a' => Bound::Around,
-      _ => return C::no_match(),
+      _   => return C::no_match(),
     };
     let Some(next_ch) = chars.next() else {
       return C::pending();
     };
     let obj = match next_ch {
-      'w' => TextObj::Word(Word::Normal, bound),
-      'W' => TextObj::Word(Word::Big, bound),
-      's' => TextObj::WholeSentence(bound),
-      'p' => TextObj::WholeParagraph(bound),
-      '"' => TextObj::DoubleQuote(bound),
-      '\'' => TextObj::SingleQuote(bound),
-      '`' => TextObj::BacktickQuote(bound),
+      'w'             => TextObj::Word(Word::Normal, bound),
+      'W'             => TextObj::Word(Word::Big, bound),
+      's'             => TextObj::WholeSentence(bound),
+      'p'             => TextObj::WholeParagraph(bound),
+      '"'             => TextObj::DoubleQuote(bound),
+      '\''            => TextObj::SingleQuote(bound),
+      '`'             => TextObj::BacktickQuote(bound),
       '(' | ')' | 'b' => TextObj::Paren(bound),
       '{' | '}' | 'B' => TextObj::Brace(bound),
-      '[' | ']' => TextObj::Bracket(bound),
-      '<' | '>' => TextObj::Angle(bound),
-      _ => return C::invalid(),
+      '[' | ']'       => TextObj::Bracket(bound),
+      '<' | '>'       => TextObj::Angle(bound),
+      _               => return C::invalid(),
     };
     C::partial(motion!(count, Motion::TextObj(obj)))
   }
@@ -565,7 +565,7 @@ impl ViParser {
           match dir {
             '/' => Verb::SearchMode,
             '?' => Verb::RevSearchMode,
-            _ => unreachable!(),
+            _   => unreachable!(),
           }
         ));
         C::complete(EditCmd {
@@ -578,7 +578,7 @@ impl ViParser {
   }
   fn reg_parse(chars: &mut Peekable<Chars<'_>>) -> RegisterName {
     let chars_clone = chars.clone();
-    let _count = Self::parse_count(chars);
+    let _count      = Self::parse_count(chars);
 
     let Some('"') = chars.peek() else {
       *chars = chars_clone;

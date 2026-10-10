@@ -258,12 +258,12 @@ mod query_tests {
   /// deterministic where they need to be.
   fn entry(cmd: &str) -> HistEntry {
     HistEntry {
-      runtime: StdDuration::from_micros(0),
+      runtime  : StdDuration::from_micros(0),
       timestamp: UNIX_EPOCH + StdDuration::from_secs(1_700_000_000),
-      command: cmd.into(),
-      cwd: "/tmp".into(),
-      status: 0,
-      token: Uuid::new_v4(),
+      command  : cmd.into(),
+      cwd      : "/tmp".into(),
+      status   : 0,
+      token    : Uuid::new_v4(),
     }
   }
 
@@ -298,9 +298,9 @@ mod query_tests {
 
   #[test]
   fn execute_no_conditions_returns_all_entries() {
-    let _g = TestGuard::new();
-    let h = hist_with("exec_all", vec![entry("a"), entry("b"), entry("c")]);
-    let q = HistQuery::new();
+    let _g      = TestGuard::new();
+    let h       = hist_with("exec_all", vec![entry("a"), entry("b"), entry("c")]);
+    let q       = HistQuery::new();
     let results = q.execute(&h).unwrap();
     assert_eq!(results.len(), 3);
   }
@@ -455,9 +455,9 @@ mod query_tests {
 
   #[test]
   fn execute_duration_invalid_errors() {
-    let _g = TestGuard::new();
-    let h = hist_with("exec_dur_bad", vec![entry("x")]);
-    let mut q = HistQuery::new();
+    let     _g = TestGuard::new();
+    let     h  = hist_with("exec_dur_bad", vec![entry("x")]);
+    let mut q  = HistQuery::new();
     q.duration_gt = (Some("not-a-duration".into()), false);
     let result = q.execute(&h);
     assert!(result.is_err());
@@ -569,7 +569,7 @@ mod query_tests {
       "exec_order",
       vec![entry("one"), entry("two"), entry("three")],
     );
-    let q = HistQuery::new();
+    let q       = HistQuery::new();
     let results = q.execute(&h).unwrap();
     assert_eq!(results[0].1.command, "one");
     assert_eq!(results[2].1.command, "three");
@@ -577,9 +577,9 @@ mod query_tests {
 
   #[test]
   fn execute_reverse_keeps_desc_order() {
-    let _g = TestGuard::new();
-    let h = hist_with("exec_rev", vec![entry("one"), entry("two"), entry("three")]);
-    let mut q = HistQuery::new();
+    let     _g = TestGuard::new();
+    let     h  = hist_with("exec_rev", vec![entry("one"), entry("two"), entry("three")]);
+    let mut q  = HistQuery::new();
     q.reverse = true;
     let results = q.execute(&h).unwrap();
     assert_eq!(results[0].1.command, "three");
@@ -611,9 +611,9 @@ mod query_tests {
 
   #[test]
   fn execute_invalid_after_date_errors() {
-    let _g = TestGuard::new();
-    let h = hist_with("exec_bad_date", vec![entry("x")]);
-    let mut q = HistQuery::new();
+    let     _g = TestGuard::new();
+    let     h  = hist_with("exec_bad_date", vec![entry("x")]);
+    let mut q  = HistQuery::new();
     q.after = (Some("not-a-real-date-zzz".into()), false);
     let result = q.execute(&h);
     assert!(result.is_err());
@@ -727,9 +727,9 @@ mod hist_builtin_execute_tests {
 
   #[test]
   fn hist_ex_uses_ex_history_table() {
-    let g = TestGuard::new();
+    let g      = TestGuard::new();
     let normal = fresh_history(MAIN_HIST_TABLE_NAME);
-    let ex = fresh_history("ex_history");
+    let ex     = fresh_history("ex_history");
     normal.push(": normal-entry").unwrap();
     ex.push(": ex-entry").unwrap();
     test_input("hist --ex").unwrap();
@@ -807,7 +807,7 @@ mod hist_builtin_execute_tests {
     // so once the first table bumped it to USER_VERSION, every later table on
     // the same connection skipped its CREATE TABLE and silently never
     // persisted. Simulate startup order on one shared connection.
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let conn = db::get_db_conn().expect("test db conn");
     {
       let c = conn.lock().unwrap();
@@ -882,9 +882,9 @@ mod hist_builtin_execute_tests {
 
   #[test]
   fn hist_import_adds_entries_from_bash_format_file() {
-    let g = TestGuard::new();
-    let _h = fresh_history(MAIN_HIST_TABLE_NAME);
-    let dir = TempDir::new().unwrap();
+    let g    = TestGuard::new();
+    let _h   = fresh_history(MAIN_HIST_TABLE_NAME);
+    let dir  = TempDir::new().unwrap();
     let path = dir.path().join(".bash_history");
     fs::write(
       &path,
@@ -902,13 +902,13 @@ mod hist_builtin_execute_tests {
 
   #[test]
   fn hist_export_import_round_trips_dag_and_branches() {
-    let g = TestGuard::new();
+    let g      = TestGuard::new();
     let main_h = fresh_branched();
     main_h.push(": on-main").unwrap();
 
     test_input("hist branch feat").unwrap();
     g.read_output();
-    let conn = db::get_db_conn().unwrap();
+    let conn   = db::get_db_conn().unwrap();
     let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
     feat_h.push(": feat-work").unwrap();
     test_input("hist merge feat").unwrap();
@@ -917,7 +917,7 @@ mod hist_builtin_execute_tests {
     test_input("hist export").unwrap();
     let dump = g.read_output();
 
-    let dir = TempDir::new().unwrap();
+    let dir  = TempDir::new().unwrap();
     let path = dir.path().join("backup.json");
     fs::write(&path, &dump).unwrap();
 
@@ -971,7 +971,7 @@ mod hist_builtin_execute_tests {
 
     test_input("hist export").unwrap();
     let dump = g.read_output();
-    let dir = TempDir::new().unwrap();
+    let dir  = TempDir::new().unwrap();
     let path = dir.path().join("backup.json");
     fs::write(&path, &dump).unwrap();
 
@@ -1014,7 +1014,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_checkout_switches_session_branch() {
     let _g = TestGuard::new();
-    let h = fresh_branched();
+    let h  = fresh_branched();
     h.push(": x").unwrap();
 
     test_input("hist branch feat").unwrap();
@@ -1026,7 +1026,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn hist_checkout_nonexistent_errors_and_stays_put() {
     let _g = TestGuard::new();
-    let h = fresh_branched();
+    let h  = fresh_branched();
     h.push(": x").unwrap();
 
     test_input("hist checkout nope").ok();
@@ -1040,7 +1040,7 @@ mod hist_builtin_execute_tests {
 
   #[test]
   fn hist_list_is_scoped_to_current_branch() {
-    let g = TestGuard::new();
+    let g      = TestGuard::new();
     let main_h = fresh_branched();
     main_h.push(": shared").unwrap();
 
@@ -1048,7 +1048,7 @@ mod hist_builtin_execute_tests {
     test_input("hist branch feat").unwrap();
 
     // push a feat-only entry on a feat-bound handle (test_input doesn't record)
-    let conn = db::get_db_conn().unwrap();
+    let conn   = db::get_db_conn().unwrap();
     let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
     feat_h.push(": feat-only").unwrap();
 
@@ -1080,7 +1080,7 @@ mod hist_builtin_execute_tests {
 
   #[test]
   fn hist_merge_brings_in_other_branch_and_hides_node() {
-    let g = TestGuard::new();
+    let g      = TestGuard::new();
     let main_h = fresh_branched();
     main_h.push(": on-main").unwrap();
 
@@ -1088,7 +1088,7 @@ mod hist_builtin_execute_tests {
     g.read_output();
 
     // feat-only work on a feat-bound handle
-    let conn = db::get_db_conn().unwrap();
+    let conn   = db::get_db_conn().unwrap();
     let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
     feat_h.push(": feat-work").unwrap();
 
@@ -1127,7 +1127,7 @@ mod hist_builtin_execute_tests {
     // main: a ← b ← c   feat: a ← b ← feat-x   (ids interleave: a,b,feat-x,c)
     // Deleting shared `b` must stitch each lineage to `a` — NOT re-chain by id,
     // which would wrongly make main's `c` point at feat's `feat-x`.
-    let g = TestGuard::new();
+    let g      = TestGuard::new();
     let main_h = fresh_branched();
     main_h.push(": a").unwrap();
     main_h.push(": b").unwrap();
@@ -1135,7 +1135,7 @@ mod hist_builtin_execute_tests {
     test_input("hist branch feat").unwrap();
     g.read_output();
 
-    let conn = db::get_db_conn().unwrap();
+    let conn   = db::get_db_conn().unwrap();
     let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
     feat_h.push(": feat-x").unwrap(); // id after b, on feat
 
@@ -1175,14 +1175,14 @@ mod hist_builtin_execute_tests {
   fn hist_merge_divergent_creates_hidden_node() {
     // main and feat both advance past the fork, so neither tip is an ancestor
     // of the other → a real merge node (not a fast-forward).
-    let g = TestGuard::new();
+    let g      = TestGuard::new();
     let main_h = fresh_branched();
     main_h.push(": base").unwrap();
 
     test_input("hist branch feat").unwrap();
     g.read_output();
 
-    let conn = db::get_db_conn().unwrap();
+    let conn   = db::get_db_conn().unwrap();
     let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
     feat_h.push(": feat-x").unwrap();
 
@@ -1233,7 +1233,7 @@ mod hist_builtin_execute_tests {
 
   #[test]
   fn hist_checkout_orphan_starts_disconnected() {
-    let g = TestGuard::new();
+    let g      = TestGuard::new();
     let main_h = fresh_branched();
     main_h.push(": on-main").unwrap();
 
@@ -1249,7 +1249,7 @@ mod hist_builtin_execute_tests {
       "orphan reached main's history: {out:?}"
     );
 
-    let conn = db::get_db_conn().unwrap();
+    let conn   = db::get_db_conn().unwrap();
     let void_h = History::new(conn, MAIN_HIST_TABLE_NAME, "void").unwrap();
     void_h.push(": fresh-start").unwrap();
 
@@ -1270,7 +1270,7 @@ mod hist_builtin_execute_tests {
     // Regression: shed_history and ex_history both used branch `main`, sharing
     // one `branches` row, so an ex push clobbered shed's head and the next shed
     // push became a fresh root. Now `branches` is keyed by (table_name, name).
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let conn = db::get_db_conn().unwrap();
     {
       let c = conn.lock().unwrap();
@@ -1282,9 +1282,9 @@ mod hist_builtin_execute_tests {
     }
     Shed::set_hist_branch("main".to_string());
     let shed = History::new(conn.clone(), MAIN_HIST_TABLE_NAME, "main").unwrap();
-    let ex = History::new(conn.clone(), "ex_history", "main").unwrap();
+    let ex   = History::new(conn.clone(), "ex_history", "main").unwrap();
 
-    let a = shed.push(": shed-a").unwrap().unwrap();
+    let a    = shed.push(": shed-a").unwrap().unwrap();
     ex.push(": ex-x").unwrap(); // used to clobber shed's shared 'main' head
     shed.push(": shed-b").unwrap();
 
@@ -1309,7 +1309,7 @@ mod hist_builtin_execute_tests {
   fn init_db_repairs_fragmented_linear_history() {
     // A linear timeline with more than one NULL-parent root is the signature of
     // the release bug; init_db should re-chain it by id order on next open.
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let conn = db::get_db_conn().unwrap();
     {
       let c = conn.lock().unwrap();
@@ -1380,7 +1380,7 @@ mod hist_builtin_execute_tests {
 
   #[test]
   fn hist_branch_delete_merged_unmerged_and_current() {
-    let g = TestGuard::new();
+    let g      = TestGuard::new();
     let main_h = fresh_branched();
     main_h.push(": base").unwrap();
 
@@ -1403,7 +1403,7 @@ mod hist_builtin_execute_tests {
     // an unmerged branch (has a commit main lacks) → -d refuses, -D forces
     test_input("hist branch feat").unwrap();
     g.read_output();
-    let conn = db::get_db_conn().unwrap();
+    let conn   = db::get_db_conn().unwrap();
     let feat_h = History::new(conn, MAIN_HIST_TABLE_NAME, "feat").unwrap();
     feat_h.push(": feat-only").unwrap();
 
@@ -1440,7 +1440,7 @@ mod hist_builtin_execute_tests {
   #[test]
   fn delete_branch_nonexistent_errors() {
     let _g = TestGuard::new();
-    let h = fresh_branched();
+    let h  = fresh_branched();
     h.push(": x").unwrap();
     assert!(
       h.delete_branch("ghost", false).is_err(),
@@ -1450,12 +1450,12 @@ mod hist_builtin_execute_tests {
 
   #[test]
   fn delete_branch_keeps_entries_removes_pointer() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let main_h = fresh_branched();
     main_h.push(": base").unwrap();
     main_h.create_branch("feat").unwrap();
 
-    let conn = db::get_db_conn().unwrap();
+    let conn   = db::get_db_conn().unwrap();
     let feat_h = History::new(conn.clone(), MAIN_HIST_TABLE_NAME, "feat").unwrap();
     feat_h.push(": feat-only").unwrap();
 
@@ -1484,9 +1484,9 @@ mod hist_builtin_execute_tests {
 
   #[test]
   fn delete_branch_logs_reflog_with_recoverable_head() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let main_h = fresh_branched();
-    let base = main_h.push(": base").unwrap().unwrap();
+    let base   = main_h.push(": base").unwrap().unwrap();
     main_h.create_branch("temp").unwrap(); // temp.head == base (merged: never advanced)
 
     main_h.delete_branch("temp", false).unwrap();

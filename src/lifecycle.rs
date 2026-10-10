@@ -48,29 +48,29 @@ use super::{
 #[derive(Debug, Default)]
 pub(super) struct ShedArgs {
   /// Evaluate the given string as a command and exit (`-c`)
-  pub(super) command: Option<String>,
+  pub(super) command     : Option<String>,
   /// Script path and positional arguments
-  pub(super) script_args: Vec<String>,
+  pub(super) script_args : Vec<String>,
   /// Print version info (`--version`)
-  pub(super) version: bool,
+  pub(super) version     : bool,
   /// Start the shell in interactive mode (`-i`)
-  pub(super) interactive: bool,
+  pub(super) interactive : bool,
   /// Force an interactive prompt, regardless of command input (`-I`)
   pub(super) force_prompt: bool,
   /// Read input from stdin (`-s`)
-  pub(super) stdin: bool,
+  pub(super) stdin       : bool,
   /// Start the shell as a login shell (sources .`shed_profile`)
-  pub(super) login_shell: bool,
+  pub(super) login_shell : bool,
   /// Print the welcome message after arriving at the prompt (`-w`)
-  pub(super) welcome: bool,
+  pub(super) welcome     : bool,
   /// Skip sourcing runtime command files (`--no-rc`)
-  pub(super) no_rc: bool,
+  pub(super) no_rc       : bool,
   /// Provide the path to the runtime commands file (`--rc-path`)
-  pub(super) rc_path: Option<String>,
+  pub(super) rc_path     : Option<String>,
   /// Input is read as a keymap for the line editor (`--edit-script`)
-  pub(super) edit_script: bool,
+  pub(super) edit_script : bool,
   /// `group.name=value` shopt assignments to apply at startup (`--shopt`)
-  pub(super) shopts: Vec<String>,
+  pub(super) shopts      : Vec<String>,
 }
 
 /// Print a short usage synopsis for `--help`.
@@ -101,10 +101,10 @@ fn print_usage() {
 /// the source repository. Metadata is sourced from `Cargo.toml` so it stays in
 /// sync with the package.
 pub(crate) fn print_about() {
-  let cargo_ver = env!("CARGO_PKG_VERSION");
+  let cargo_ver     = env!("CARGO_PKG_VERSION");
   let cargo_authors = env!("CARGO_PKG_AUTHORS");
   let cargo_license = env!("CARGO_PKG_LICENSE");
-  let cargo_repo = env!("CARGO_PKG_REPOSITORY");
+  let cargo_repo    = env!("CARGO_PKG_REPOSITORY");
   outln!(
     "\x1b[1;4mshed\x1b[0m {cargo_ver}\n\n\
      An experimental POSIX shell focused on interactive user experience,\n\
@@ -181,7 +181,7 @@ where
     }
     "--login" | "--login-shell" => cfg.login_shell = true,
     "--welcome" => cfg.welcome = true,
-    "--no-rc" => cfg.no_rc = true,
+    "--no-rc"   => cfg.no_rc = true,
     "--rc-path" => {
       let val = words
         .next()
@@ -191,9 +191,9 @@ where
     }
     "--edit-script" | "--script" => cfg.edit_script = true,
     "--shopt" => {
-      let val = words.next().map(|(w, _)| w.to_string()).ok_or_else(
-        || sherr!(ParseErr @ span, "shed: --shopt requires a group.name=value argument"),
-      )?;
+      let val = words.next().map(|(w, _)| w.to_string()).ok_or_else(|| {
+        sherr!(ParseErr @ span, "shed: --shopt requires a group.name=value argument")
+      })?;
       cfg.shopts.push(val);
     }
     other => return Err(sherr!(ParseErr @ span, "shed: unrecognized option '{other}'")),
@@ -362,7 +362,7 @@ fn setup_panic_handler() {
 
     if let Some(mut log_file) = log_file {
       let backtrace = std::backtrace::Backtrace::force_capture();
-      let _ = write!(log_file, "{time} - {info}\n\n\nBacktrace:\n{backtrace:#?}");
+      let _         = write!(log_file, "{time} - {info}\n\n\nBacktrace:\n{backtrace:#?}");
     }
 
     // call the default panic hook

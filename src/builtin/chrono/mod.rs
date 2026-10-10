@@ -27,13 +27,13 @@ const NANOS_PER_SEC: i128 = 1_000_000_000;
 
 fn nanos_for(date: DateTime<Utc>) -> i128 {
   let seconds = i128::from(date.timestamp());
-  let nanos = i128::from(date.timestamp_subsec_nanos());
+  let nanos   = i128::from(date.timestamp_subsec_nanos());
   seconds * NANOS_PER_SEC + nanos
 }
 
 fn nanos_of(ts: libc::timespec) -> i128 {
   let seconds = i128::from(ts.tv_sec);
-  let nanos = i128::from(ts.tv_nsec);
+  let nanos   = i128::from(ts.tv_nsec);
   seconds * NANOS_PER_SEC + nanos
 }
 
@@ -52,7 +52,7 @@ fn timespec_for(date: DateTime<Utc>) -> libc::timespec {
 }
 
 fn timespec_for_nanos(nanos: i128) -> libc::timespec {
-  let tv_sec = i64::try_from(nanos.div_euclid(NANOS_PER_SEC)).unwrap_or(i64::MAX);
+  let tv_sec   = i64::try_from(nanos.div_euclid(NANOS_PER_SEC)).unwrap_or(i64::MAX);
   let tv_nanos = nanos.rem_euclid(NANOS_PER_SEC) as i64;
 
   libc::timespec {
@@ -110,7 +110,7 @@ fn nap(clock: libc::clockid_t, deadline: &libc::timespec) -> i32 {
 fn sleep_until(clock: libc::clockid_t, deadline: &libc::timespec) -> ShResult<()> {
   loop {
     match nap(clock, deadline) {
-      0 => break,
+      0           => break,
       libc::EINTR => signal::check_signals()?,
       e => {
         let err = std::io::Error::from_raw_os_error(e);
@@ -234,29 +234,28 @@ impl StrFmt for DurFmt {
     })
   }
 
-  #[rustfmt::skip]
   fn render(
     &self,
     conv: &Self::Conv,
     field: &FieldParams,
     src: &mut Self::Source,
   ) -> ShResult<Field> {
-    const NANOS_PER_MICRO   : u128 = 1_000;
-    const NANOS_PER_MILLI   : u128 = 1_000 * NANOS_PER_MICRO;
-    const NANOS_PER_SEC     : u128 = 1_000 * NANOS_PER_MILLI;
-    const NANOS_PER_MIN     : u128 = 60    * NANOS_PER_SEC;
-    const NANOS_PER_HOUR    : u128 = 60    * NANOS_PER_MIN;
-    const NANOS_PER_DAY     : u128 = 24    * NANOS_PER_HOUR;
-    const NANOS_PER_WEEK    : u128 = 7     * NANOS_PER_DAY;
-    const NANOS_PER_MONTH   : u128 = 30    * NANOS_PER_DAY; // roughly
-    const NANOS_PER_YEAR    : u128 = 365   * NANOS_PER_DAY; // roughly
-    const NANOS_PER_DECADE  : u128 = 10    * NANOS_PER_YEAR;
-    const NANOS_PER_CENTURY : u128 = 10    * NANOS_PER_DECADE;
-    const NANOS_PER_MILLENNIUM: u128 = 10  * NANOS_PER_CENTURY;
+    const NANOS_PER_MICRO: u128 = 1_000;
+    const NANOS_PER_MILLI: u128 = 1_000 * NANOS_PER_MICRO;
+    const NANOS_PER_SEC: u128 = 1_000 * NANOS_PER_MILLI;
+    const NANOS_PER_MIN: u128 = 60 * NANOS_PER_SEC;
+    const NANOS_PER_HOUR: u128 = 60 * NANOS_PER_MIN;
+    const NANOS_PER_DAY: u128 = 24 * NANOS_PER_HOUR;
+    const NANOS_PER_WEEK: u128 = 7 * NANOS_PER_DAY;
+    const NANOS_PER_MONTH: u128 = 30 * NANOS_PER_DAY; // roughly
+    const NANOS_PER_YEAR: u128 = 365 * NANOS_PER_DAY; // roughly
+    const NANOS_PER_DECADE: u128 = 10 * NANOS_PER_YEAR;
+    const NANOS_PER_CENTURY: u128 = 10 * NANOS_PER_DECADE;
+    const NANOS_PER_MILLENNIUM: u128 = 10 * NANOS_PER_CENTURY;
 
-    let signed = i128::from(src.num_seconds()) * 1_000_000_000 + i128::from(src.subsec_nanos());
+    let signed   = i128::from(src.num_seconds()) * 1_000_000_000 + i128::from(src.subsec_nanos());
     let negative = signed < 0;
-    let nanos = signed.unsigned_abs();
+    let nanos    = signed.unsigned_abs();
 
     let n = match conv {
       DurConv::TotalMillennia => nanos / NANOS_PER_MILLENNIUM,
@@ -266,40 +265,39 @@ impl StrFmt for DurFmt {
       DurConv::TotalMonths    => nanos / NANOS_PER_MONTH,
       DurConv::TotalWeeks     => nanos / NANOS_PER_WEEK,
       DurConv::TotalDays      => nanos / NANOS_PER_DAY,
-      DurConv::TotalHours  => nanos / NANOS_PER_HOUR,
-      DurConv::TotalMins   => nanos / NANOS_PER_MIN,
-      DurConv::TotalSecs   => nanos / NANOS_PER_SEC,
-      DurConv::TotalMillis => nanos / NANOS_PER_MILLI,
-      DurConv::TotalMicros => nanos / NANOS_PER_MICRO,
-      DurConv::TotalNanos  => nanos,
+      DurConv::TotalHours     => nanos / NANOS_PER_HOUR,
+      DurConv::TotalMins      => nanos / NANOS_PER_MIN,
+      DurConv::TotalSecs      => nanos / NANOS_PER_SEC,
+      DurConv::TotalMillis    => nanos / NANOS_PER_MILLI,
+      DurConv::TotalMicros    => nanos / NANOS_PER_MICRO,
+      DurConv::TotalNanos     => nanos,
 
-      DurConv::Millennia =>  nanos / NANOS_PER_MILLENNIUM,
+      DurConv::Millennia => nanos / NANOS_PER_MILLENNIUM,
       DurConv::Centuries => (nanos % NANOS_PER_MILLENNIUM) / NANOS_PER_CENTURY,
       DurConv::Decades   => (nanos % NANOS_PER_CENTURY) / NANOS_PER_DECADE,
-      DurConv::Years     => (nanos % NANOS_PER_DECADE ) / NANOS_PER_YEAR,
+      DurConv::Years     => (nanos % NANOS_PER_DECADE) / NANOS_PER_YEAR,
       // 365 is not a multiple of 30 and 30 is not a multiple of 7, so each of
       // these takes the remainder left by the unit above it rather than the
       // remainder of its own next-larger unit.
-      DurConv::Months    =>   nanos % NANOS_PER_YEAR    / NANOS_PER_MONTH,
-      DurConv::Weeks     =>  (nanos % NANOS_PER_YEAR)
-                                   % NANOS_PER_MONTH    / NANOS_PER_WEEK,
-      DurConv::DaysModWeeks  => ((nanos % NANOS_PER_YEAR)
-                                   % NANOS_PER_MONTH)
-                                   % NANOS_PER_WEEK     / NANOS_PER_DAY,
-      DurConv::DaysModMonths => ((nanos % NANOS_PER_YEAR)
-                                   % NANOS_PER_MONTH)
-                                   / NANOS_PER_DAY,
-      DurConv::Hours     => (nanos % NANOS_PER_DAY     ) / NANOS_PER_HOUR,
-      DurConv::Mins      => (nanos % NANOS_PER_HOUR    ) / NANOS_PER_MIN,
-      DurConv::Secs      => (nanos % NANOS_PER_MIN     ) / NANOS_PER_SEC,
+      DurConv::Months    => nanos % NANOS_PER_YEAR / NANOS_PER_MONTH,
+      DurConv::Weeks     => (nanos % NANOS_PER_YEAR) % NANOS_PER_MONTH / NANOS_PER_WEEK,
+
+      DurConv::DaysModMonths => ((nanos % NANOS_PER_YEAR) % NANOS_PER_MONTH) / NANOS_PER_DAY,
+      DurConv::Hours         => (nanos % NANOS_PER_DAY) / NANOS_PER_HOUR,
+      DurConv::Mins          => (nanos % NANOS_PER_HOUR) / NANOS_PER_MIN,
+      DurConv::Secs          => (nanos % NANOS_PER_MIN) / NANOS_PER_SEC,
 
       DurConv::Millis => (nanos % NANOS_PER_SEC) / NANOS_PER_MILLI,
       DurConv::Micros => (nanos % NANOS_PER_SEC) / NANOS_PER_MICRO,
-      DurConv::Nanos  =>  nanos % NANOS_PER_SEC,
+      DurConv::Nanos  => nanos % NANOS_PER_SEC,
+
+      DurConv::DaysModWeeks => {
+        ((nanos % NANOS_PER_YEAR) % NANOS_PER_MONTH) % NANOS_PER_WEEK / NANOS_PER_DAY
+      }
 
       DurConv::Status => {
         let Some(running) = self.running else {
-          return Err(sherr!(ExecFail, "timer status can only be formatted with `chrono timer`"))
+          return Err(sherr!(ExecFail, "timer status can only be formatted with `chrono timer`"));
         };
         let status = if running { "running" } else { "stopped" };
 
@@ -313,7 +311,7 @@ impl StrFmt for DurFmt {
       DurConv::Millis => 3,
       DurConv::Micros => 6,
       DurConv::Nanos  => 9,
-      _ => 1,
+      _               => 1,
     };
 
     let body = if field.width().is_some() {

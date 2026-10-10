@@ -10,9 +10,9 @@ use super::opt::{Opt, OptSpec};
 
 #[derive(Debug, Default)]
 pub(crate) struct StashOpts {
-  pub to_save: Vec<StashedCmd>,
-  pub to_delete: Vec<VarStr>,
-  pub list: bool,
+  pub to_save   : Vec<StashedCmd>,
+  pub to_delete : Vec<VarStr>,
+  pub list      : bool,
   pub only_named: bool,
   pub only_stack: bool,
 }
@@ -52,10 +52,10 @@ impl StashOpts {
         "delete" => {
           new.to_delete.push(opt.value()?);
         }
-        "list" => new.list = true,
+        "list"  => new.list = true,
         "stack" => new.only_stack = true,
         "named" => new.only_named = true,
-        _ => return Err(sherr!(ParseErr, "unexpected option {opt} in stash").with_code(2)),
+        _       => return Err(sherr!(ParseErr, "unexpected option {opt} in stash").with_code(2)),
       }
     }
 
@@ -75,12 +75,12 @@ impl super::Builtin for StashBuiltin {
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let span = args.span();
-    let is_empty = args.no_options();
-    let (_, opts) = args.take_argv();
+    let span       = args.span();
+    let is_empty   = args.no_options();
+    let (_, opts)  = args.take_argv();
 
     let stash_opts = StashOpts::from_opts(&opts).promote_err(span)?;
-    let stash = Stash::new().promote_err(span)?;
+    let stash      = Stash::new().promote_err(span)?;
 
     for cmd in stash_opts.to_save {
       stash.stash_cmd(&cmd).promote_err(span)?;
@@ -120,12 +120,12 @@ mod stash_builtin_tests {
 
   #[test]
   fn no_opts_dispatches_to_list() {
-    let g = TestGuard::new();
+    let g     = TestGuard::new();
     let stash = fresh_stash();
     stash
       .stash_cmd(&StashedCmd {
-        name: Some("test_name".into()),
-        buffer: "stashed buffer".into(),
+        name      : Some("test_name".into()),
+        buffer    : "stashed buffer".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();
@@ -140,19 +140,19 @@ mod stash_builtin_tests {
     // Regression: `get_named` used `LIKE` (ASCII-case-insensitive) while save
     // dedups with `=` (case-sensitive), so `Foo` and `foo` were distinct rows
     // but `pop foo` returned the older `Foo`.
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let stash = fresh_stash();
     stash
       .stash_cmd(&StashedCmd {
-        name: Some("Foo".into()),
-        buffer: "A".into(),
+        name      : Some("Foo".into()),
+        buffer    : "A".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();
     stash
       .stash_cmd(&StashedCmd {
-        name: Some("foo".into()),
-        buffer: "B".into(),
+        name      : Some("foo".into()),
+        buffer    : "B".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();
@@ -163,12 +163,12 @@ mod stash_builtin_tests {
   #[test]
   fn get_named_treats_underscore_literally() {
     // `_` is a LIKE wildcard; with exact match it must be literal.
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let stash = fresh_stash();
     stash
       .stash_cmd(&StashedCmd {
-        name: Some("my_fix".into()),
-        buffer: "X".into(),
+        name      : Some("my_fix".into()),
+        buffer    : "X".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();
@@ -178,12 +178,12 @@ mod stash_builtin_tests {
 
   #[test]
   fn list_flag_prints_stashes() {
-    let g = TestGuard::new();
+    let g     = TestGuard::new();
     let stash = fresh_stash();
     stash
       .stash_cmd(&StashedCmd {
-        name: Some("list_me".into()),
-        buffer: "buf".into(),
+        name      : Some("list_me".into()),
+        buffer    : "buf".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();
@@ -196,12 +196,12 @@ mod stash_builtin_tests {
   fn short_l_flag_prints_stashes() {
     // Regression: `-l` parsed at the getopt layer but had no arm in
     // from_opts, so it always errored with "unexpected option".
-    let g = TestGuard::new();
+    let g     = TestGuard::new();
     let stash = fresh_stash();
     stash
       .stash_cmd(&StashedCmd {
-        name: Some("list_me_short".into()),
-        buffer: "buf".into(),
+        name      : Some("list_me_short".into()),
+        buffer    : "buf".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();
@@ -215,12 +215,12 @@ mod stash_builtin_tests {
 
   #[test]
   fn dash_d_deletes_by_name() {
-    let g = TestGuard::new();
+    let g     = TestGuard::new();
     let stash = fresh_stash();
     stash
       .stash_cmd(&StashedCmd {
-        name: Some("kill_me".into()),
-        buffer: "buf".into(),
+        name      : Some("kill_me".into()),
+        buffer    : "buf".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();
@@ -233,12 +233,12 @@ mod stash_builtin_tests {
 
   #[test]
   fn long_delete_deletes_by_name() {
-    let g = TestGuard::new();
+    let g     = TestGuard::new();
     let stash = fresh_stash();
     stash
       .stash_cmd(&StashedCmd {
-        name: Some("gone".into()),
-        buffer: "buf".into(),
+        name      : Some("gone".into()),
+        buffer    : "buf".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();
@@ -253,21 +253,21 @@ mod stash_builtin_tests {
 
   #[test]
   fn stack_filter_shows_only_stack_entries() {
-    let g = TestGuard::new();
+    let g     = TestGuard::new();
     let stash = fresh_stash();
     // A stacked (unnamed) entry.
     stash
       .stash_cmd(&StashedCmd {
-        name: None,
-        buffer: "stack_buf".into(),
+        name      : None,
+        buffer    : "stack_buf".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();
     // A named entry.
     stash
       .stash_cmd(&StashedCmd {
-        name: Some("named_one".into()),
-        buffer: "named_buf".into(),
+        name      : Some("named_one".into()),
+        buffer    : "named_buf".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();
@@ -280,19 +280,19 @@ mod stash_builtin_tests {
 
   #[test]
   fn named_filter_shows_only_named_entries() {
-    let g = TestGuard::new();
+    let g     = TestGuard::new();
     let stash = fresh_stash();
     stash
       .stash_cmd(&StashedCmd {
-        name: None,
-        buffer: "anon_buf".into(),
+        name      : None,
+        buffer    : "anon_buf".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();
     stash
       .stash_cmd(&StashedCmd {
-        name: Some("the_name".into()),
-        buffer: "named_buf".into(),
+        name      : Some("the_name".into()),
+        buffer    : "named_buf".into(),
         cursor_pos: "0".into(),
       })
       .unwrap();

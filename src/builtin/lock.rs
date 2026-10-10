@@ -12,7 +12,6 @@ use super::opt::OptSpec;
 
 pub(super) struct Lock;
 impl super::Builtin for Lock {
-  #[rustfmt::skip]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("nonblock" | b'n'),
@@ -56,8 +55,8 @@ impl super::Builtin for Lock {
       0
     };
     let op = match (args.has_opt("unlock"), args.has_opt("shared")) {
-      (true, _) => libc::LOCK_UN,
-      (false, true) => libc::LOCK_SH | nonblock,
+      (true, _)      => libc::LOCK_UN,
+      (false, true)  => libc::LOCK_SH | nonblock,
       (false, false) => libc::LOCK_EX | nonblock,
     };
 
@@ -68,7 +67,7 @@ impl super::Builtin for Lock {
 
       let err = std::io::Error::last_os_error();
       match err.raw_os_error() {
-        Some(libc::EINTR) => signal::check_signals()?,
+        Some(libc::EINTR)       => signal::check_signals()?,
         // contention under `-n`, not a failure
         Some(libc::EWOULDBLOCK) => return util::with_status(1),
         _ => return Err(sherr!(ExecFail @ span, "fd {fd}: {err}").with_code(1)),

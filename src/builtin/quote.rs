@@ -138,7 +138,7 @@ impl super::Builtin for Unquote {
     .map_or_else(|| super::join_raw_args(arg_vec).0, VarStr::from);
 
     let mut target = None;
-    let mut delim = "\n".into();
+    let mut delim  = "\n".into();
 
     for opt in opts {
       match opt.key() {
@@ -188,9 +188,9 @@ impl super::Builtin for Unquote {
 
 pub(crate) fn unquote_raw(s: &[u8]) -> ShResult<Vec<Vec<u8>>> {
   let mut fields: Vec<Vec<u8>> = vec![];
-  let mut field: Vec<u8> = Vec::new();
-  let mut bytes = s.iter().copied().peekable();
-  let mut started = false;
+  let mut field : Vec<u8>      = Vec::new();
+  let mut bytes                = s.iter().copied().peekable();
+  let mut started              = false;
 
   match_loop!(bytes.next() => ch, {
     b'\\' => {

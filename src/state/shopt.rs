@@ -76,7 +76,7 @@ pub(crate) fn xtrace_line(rendered: &str) {
     .map(|c| varstr!("{c}"))
     .unwrap_or_default();
 
-  let depth = Shed::meta(MetaTab::xtrace_depth);
+  let depth  = Shed::meta(MetaTab::xtrace_depth);
   let prefix = prefix_char.to_str_lossy().repeat(depth);
 
   let output = varstr!("{prefix}{ps4}{rendered}");
@@ -147,24 +147,24 @@ two_way_display! {ShedBellStyle,
 
 #[derive(Clone, Debug)]
 pub(crate) struct ShOpts {
-  pub core: ShOptCore,
-  pub history: ShOptHist,
-  pub line: ShOptLine,
-  pub set: ShOptSet,
-  pub prompt: ShOptPrompt,
+  pub core     : ShOptCore,
+  pub history  : ShOptHist,
+  pub line     : ShOptLine,
+  pub set      : ShOptSet,
+  pub prompt   : ShOptPrompt,
   pub highlight: ShOptHighlight,
-  pub statline: ShOptStatLine,
+  pub statline : ShOptStatLine,
 }
 
 impl Default for ShOpts {
   fn default() -> Self {
-    let core = ShOptCore::default();
-    let history = ShOptHist::default();
-    let line = ShOptLine::default();
-    let set = ShOptSet::default();
-    let prompt = ShOptPrompt::default();
+    let core      = ShOptCore::default();
+    let history   = ShOptHist::default();
+    let line      = ShOptLine::default();
+    let set       = ShOptSet::default();
+    let prompt    = ShOptPrompt::default();
     let highlight = ShOptHighlight::default();
-    let statline = ShOptStatLine::default();
+    let statline  = ShOptStatLine::default();
 
     Self {
       core,
@@ -294,13 +294,13 @@ impl ShOpts {
     let remainder = query.collect::<Vec<_>>().join(".");
 
     match key {
-      "core" => self.core.set(&remainder, val)?,
-      "history" => self.history.set(&remainder, val)?,
-      "line" => self.line.set(&remainder, val)?,
-      "set" => self.set.set(&remainder, val)?,
-      "prompt" => self.prompt.set(&remainder, val)?,
+      "core"      => self.core.set(&remainder, val)?,
+      "history"   => self.history.set(&remainder, val)?,
+      "line"      => self.line.set(&remainder, val)?,
+      "set"       => self.set.set(&remainder, val)?,
+      "prompt"    => self.prompt.set(&remainder, val)?,
       "highlight" => self.highlight.set(&remainder, val)?,
-      "statline" => self.statline.set(&remainder, val)?,
+      "statline"  => self.statline.set(&remainder, val)?,
       _ => {
         return Err(sherr!(SyntaxErr, "shopt: Unknown shopt set '{}'", key,));
       }
@@ -319,14 +319,14 @@ impl ShOpts {
     let remainder = query.collect::<Vec<_>>().join(".");
 
     match key {
-      "core" => self.core.get(&remainder),
-      "history" => self.history.get(&remainder),
-      "line" => self.line.get(&remainder),
-      "set" => self.set.get(&remainder),
-      "prompt" => self.prompt.get(&remainder),
+      "core"      => self.core.get(&remainder),
+      "history"   => self.history.get(&remainder),
+      "line"      => self.line.get(&remainder),
+      "set"       => self.set.get(&remainder),
+      "prompt"    => self.prompt.get(&remainder),
       "highlight" => self.highlight.get(&remainder),
-      "statline" => self.statline.get(&remainder),
-      _ => Err(sherr!(SyntaxErr, "shopt: Unknown shopt set '{}'", key,)),
+      "statline"  => self.statline.get(&remainder),
+      _           => Err(sherr!(SyntaxErr, "shopt: Unknown shopt set '{}'", key,)),
     }
   }
 }
@@ -478,7 +478,7 @@ pub(crate) enum PipeStyle {
 impl Display for PipeStyle {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      Self::Fork => write!(f, "fork"),
+      Self::Fork   => write!(f, "fork"),
       Self::Thread => write!(f, "thread"),
     }
   }
@@ -627,7 +627,7 @@ impl FromStr for ReadLimit {
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match strops::parse_size(s) {
       Err(e) => Err(e),
-      Ok(0) => Err(sherr!(SyntaxErr, "invalid read limit value '{s}'")),
+      Ok(0)  => Err(sherr!(SyntaxErr, "invalid read limit value '{s}'")),
 
       Ok(n) => Ok(ReadLimit(n)),
     }
@@ -697,17 +697,17 @@ impl FromStr for IdleTime {
         .map(IdleTime)
         .map_err(|_| sherr!(SyntaxErr, "invalid idle time value '{s}'"));
     }
-    let split = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    let split           = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
     let (num_str, unit) = s.split_at(split);
     let n: u64 = num_str
       .parse()
       .map_err(|_| sherr!(SyntaxErr, "invalid idle time value '{s}'"))?;
     let dur = match unit {
       "ms" => Duration::from_millis(n),
-      "s" => Duration::from_secs(n),
-      "m" => Duration::from_secs(n.saturating_mul(60)),
-      "h" => Duration::from_secs(n.saturating_mul(3600)),
-      _ => return Err(sherr!(SyntaxErr, "invalid idle time unit in '{s}'")),
+      "s"  => Duration::from_secs(n),
+      "m"  => Duration::from_secs(n.saturating_mul(60)),
+      "h"  => Duration::from_secs(n.saturating_mul(3600)),
+      _    => return Err(sherr!(SyntaxErr, "invalid idle time unit in '{s}'")),
     };
     Ok(IdleTime(dur))
   }
@@ -915,15 +915,15 @@ mod tests {
 
   #[test]
   fn query_set_returns_none() {
-    let mut opts = ShOpts::default();
-    let result = opts.query("core.autocd=true").unwrap();
+    let mut opts   = ShOpts::default();
+    let     result = opts.query("core.autocd=true").unwrap();
     assert!(result.is_none());
     assert!(opts.core.autocd);
   }
 
   #[test]
   fn query_get_returns_some() {
-    let opts = ShOpts::default();
+    let opts   = ShOpts::default();
     let result = opts.get("core.dotglob").unwrap();
     assert!(result.is_some());
     let text = result.unwrap();
@@ -955,7 +955,7 @@ mod tests {
 
   #[test]
   fn get_category_lists_all() {
-    let opts = ShOpts::default();
+    let opts        = ShOpts::default();
     let core_output = opts.get("core").unwrap().unwrap();
     assert!(core_output.contains("dotglob"));
     assert!(core_output.contains("autocd"));
@@ -992,7 +992,7 @@ mod tests {
   fn idle_time_parses_float_as_seconds() {
     let t: IdleTime = "1.5".parse().unwrap();
     // Use sub-second precision via from_secs_f64.
-    let expected = Duration::from_secs_f64(1.5);
+    let expected    = Duration::from_secs_f64(1.5);
     assert_eq!(t.0, expected);
   }
 

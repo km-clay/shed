@@ -43,7 +43,7 @@ impl super::Dispatcher {
     let NdRule::FuncDef { name, body, ctx } = &tree[func_def].class else {
       unreachable!()
     };
-    let body = tree.break_off(*body);
+    let body      = tree.break_off(*body);
 
     let func_name = tree[*name].span.slice();
     let func_name = func_name.as_bytes();
@@ -73,8 +73,8 @@ impl super::Dispatcher {
   /// Handles setup for function execution, including variable assignments, redirections, and error handling.
   /// Also adds a stack trace frame for the function call to be used in `shed`'s error reporting
   pub(super) fn exec_func(&mut self, tree: &Ast, func_id: NodeId) -> ShResult<()> {
-    let func = &tree[func_id];
-    let fork_ctx = Shed::meta_mut(MetaTab::take_fork);
+    let func         = &tree[func_id];
+    let fork_ctx     = Shed::meta_mut(MetaTab::take_fork);
     let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(fork_ctx));
 
     if fork_ctx {
@@ -148,14 +148,14 @@ impl super::Dispatcher {
 
     let caller_contexts: Vec<_> = tree[func.context].to_vec();
 
-    let label_name = func_name.clone();
+    let label_name              = func_name.clone();
     let call_ctx = error::get_context(
       LabelMsg::lazy(move || styled_format!("in call to function '{}'", &label_name).into()),
       blame,
     );
 
     let max_depth = Shed::shopts(|s| s.core.max_recurse_depth);
-    let depth = Shed::meta(MetaTab::func_depth);
+    let depth     = Shed::meta(MetaTab::func_depth);
     if depth > max_depth {
       return Err(sherr!(
           InternalErr @ blame,
@@ -170,7 +170,7 @@ impl super::Dispatcher {
 
     let redirs = RedirSet::from(&tree[func.redirs]);
     let _guard = match Sinks::try_apply_set(&redirs, false) {
-      Ok(g) => g,
+      Ok(g)  => g,
       Err(e) => return e.report_or_propagate(tree.span_for(func_id)),
     };
 
@@ -182,7 +182,7 @@ impl super::Dispatcher {
 
     let _ctx_frame = Shed::push_call_frame(frame);
 
-    let argv = super::prepare_argv(&tree[*argv]).try_blame(blame)?;
+    let argv       = super::prepare_argv(&tree[*argv]).try_blame(blame)?;
 
     if !func.flags.contains(NdFlags::NO_TRACE) {
       shopt::xtrace_print(&argv);
@@ -198,7 +198,7 @@ impl super::Dispatcher {
       }
     }
 
-    let _guard = guards::function_scope_guard(Some(argv));
+    let _guard      = guards::function_scope_guard(Some(argv));
     let _func_guard = Shed::meta_mut(MetaTab::enter_func);
 
     // getopts OPTIND variable

@@ -107,18 +107,18 @@ thread_local! {
 /// Load-bearing struct. Used extensively throughout the codebase for slicing shell input for various reasons (error reporting, tab completion, etc)
 #[derive(Clone, PartialEq, Copy, Debug)]
 pub(crate) struct Span {
-  start: usize,
-  end: usize,
-  pos: Option<Pos>,
+  start : usize,
+  end   : usize,
+  pos   : Option<Pos>,
   source: SourceId,
 }
 
 impl Default for Span {
   fn default() -> Self {
     Self {
-      start: 0,
-      end: 0,
-      pos: None,
+      start : 0,
+      end   : 0,
+      pos   : None,
       source: SourceId::NONE,
     }
   }
@@ -154,7 +154,7 @@ impl Span {
     let Some(text) = self.try_slice() else {
       return *self;
     };
-    let bytes = text.as_bytes();
+    let bytes   = text.as_bytes();
     let leading = bytes.iter().take_while(|b| b.is_ascii_whitespace()).count();
     let trailing = bytes
       .iter()
@@ -162,7 +162,7 @@ impl Span {
       .take_while(|b| b.is_ascii_whitespace())
       .count();
     let start = self.start + leading;
-    let end = self.end.saturating_sub(trailing).max(start);
+    let end   = self.end.saturating_sub(trailing).max(start);
     Span::new(start, end, self.source)
   }
   pub(crate) fn merge_inplace(&mut self, other: Span) {
@@ -237,7 +237,7 @@ impl Span {
 
   pub(crate) fn shift_by(&mut self, delta: isize) {
     let new_start = self.start as isize + delta;
-    let new_end = self.end as isize + delta;
+    let new_end   = self.end as isize + delta;
     debug_assert!(new_start >= 0 && new_end >= 0, "shift_by underflow");
     self.start = new_start as usize;
     self.end = new_end as usize;
@@ -298,7 +298,7 @@ pub(crate) enum TkRule {
   Comment,
   HereDoc {
     start_delim: Box<Span>,
-    end_delim: Option<Box<Span>>, // is None if not found when lexing unfinished input
+    end_delim  : Option<Box<Span>>, // is None if not found when lexing unfinished input
   },
 
   /// These are only used as an intermediate state for tokens that are in the process of being expanded.
@@ -326,7 +326,7 @@ impl Default for TkRule {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub(crate) struct Tk {
   pub class: TkRule,
-  pub span: Span,
+  pub span : Span,
   pub flags: TkFlags,
 }
 
@@ -341,8 +341,8 @@ impl Tk {
   /// Returns a new string with the token's span replaced by the given string.
   pub(crate) fn replaced(&self, other: &str) -> String {
     let mut content = self.span.text().to_string();
-    let start = self.span.start();
-    let end = self.span.end();
+    let     start   = self.span.start();
+    let     end     = self.span.end();
     content.replace_range(start..end, other);
     content
   }
@@ -393,17 +393,17 @@ impl Tk {
   /// returns a new `Tk` instead of mutating in-place. Altering spans directly
   /// feels like a potential footgun.
   pub(crate) fn strip_arith_header(&self) -> ShResult<Self> {
-    let slice = self.slice();
-    let s = slice.as_bytes();
+    let slice   = self.slice();
+    let s       = slice.as_bytes();
     let trimmed = s.trim();
 
     if trimmed.len() < 4 || !trimmed.starts_with(b"((") || !trimmed.ends_with(b"))") {
       return Err(sherr!(ParseErr @ self.span, "malformed arithmetic for-loop header"));
     }
 
-    let base = self.span.start;
+    let base  = self.span.start;
     let start = base + (s.len() - s.trim_start().len()) + 2;
-    let end = base + (s.trim_end().len()) - 2;
+    let end   = base + (s.trim_end().len()) - 2;
 
     Ok(Self::new(
       self.class.clone(),
@@ -476,9 +476,9 @@ bitflags! {
 pub(crate) fn clean_input(input: &[u8]) -> VarStr {
   // PERF: Profile this function to see if it has any
   // meaningful impact on lex speed.
-  let mut bytes = SliceCursor::new(input);
-  let mut output = vec![];
-  let mut quotes = QuoteState::default();
+  let mut bytes      = SliceCursor::new(input);
+  let mut output     = vec![];
+  let mut quotes     = QuoteState::default();
   let mut in_comment = false;
   // FIFO queue: heredocs on the same line are consumed in order
   let mut heredoc_queue: VecDeque<VarStr> = VecDeque::new();
@@ -676,7 +676,7 @@ impl<'a> LexStream<'a> {
   pub(crate) fn sub_lex(source: &'a SourceHandle, range: Range<usize>, flags: LexFlags) -> Self {
     let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
     let start = range.start.min(source.len());
-    let end = range.end.min(source.len());
+    let end   = range.end.min(source.len());
     Self {
       flags,
       source,
@@ -706,12 +706,12 @@ impl<'a> LexStream<'a> {
     let start = match range.start_bound() {
       Bound::Included(&start) => start,
       Bound::Excluded(&start) => start + 1,
-      Bound::Unbounded => 0,
+      Bound::Unbounded        => 0,
     };
     let end = match range.end_bound() {
       Bound::Included(&end) => end + 1,
       Bound::Excluded(&end) => end,
-      Bound::Unbounded => self.end,
+      Bound::Unbounded      => self.end,
     };
     self.source.get(start..end)
   }
@@ -1000,9 +1000,9 @@ impl<'a> LexStream<'a> {
   /// `self.heredoc_skip` is used to track the end of the last heredoc body,
   /// so that the next heredoc can start reading from there.
   fn read_heredoc(&mut self) -> ShResult<Tk> {
-    let start = self.cursor;
-    let mut flags = TkFlags::empty();
-    let mut delim = util::scratch_buf();
+    let     start    = self.cursor;
+    let mut flags    = TkFlags::empty();
+    let mut delim    = util::scratch_buf();
     let mut qt_state = QuoteState::default();
 
     // lets read the delimiter.
@@ -1073,7 +1073,7 @@ impl<'a> LexStream<'a> {
       ($delim_start:expr) => {{
         // well formed, found both delimiters
         let start_delim = Box::new(self.get_span(start..delim_end));
-        let end_delim = Box::new(self.get_span($delim_start..self.cursor));
+        let end_delim   = Box::new(self.get_span($delim_start..self.cursor));
         let rule = TkRule::HereDoc {
           start_delim,
           end_delim: Some(end_delim),
@@ -1102,9 +1102,9 @@ impl<'a> LexStream<'a> {
     // Read lines until we find one that matches the delimiter exactly
     // We don't care about the actual content of these lines nor do we store them anywhere.
     // We just check to see if it matches the delimiter.
-    let mut line = util::scratch_buf();
+    let mut line         = util::scratch_buf();
     let mut leading_tabs = true;
-    let strip_tabs = flags.contains(TkFlags::TAB_HEREDOC);
+    let     strip_tabs   = flags.contains(TkFlags::TAB_HEREDOC);
     while let Some(b) = self.next_byte() {
       if strip_tabs && leading_tabs && b == b'\t' {
         continue;
@@ -1149,7 +1149,7 @@ impl<'a> LexStream<'a> {
   ///
   /// This is responsible for most of the tokens that get created
   fn read_string(&mut self) -> ShResult<Tk> {
-    let start = self.cursor;
+    let start           = self.cursor;
     let can_be_subshell = self.peek_byte() == Some(b'(');
 
     match_loop!(self.peek_byte() => b, {
@@ -1394,7 +1394,7 @@ impl<'a> LexStream<'a> {
     }
 
     let slice = new_tk.slice();
-    let text = slice.as_bytes();
+    let text  = slice.as_bytes();
     let is_cmd = self.flags.contains(LexFlags::NEXT_IS_CMD)
       && !self.flags.contains(LexFlags::NEXT_IS_REDIR)
       && !self.flags.contains(LexFlags::CASE_PAT_EXPECTED);
@@ -1636,7 +1636,7 @@ impl Iterator for LexStream<'_> {
     let token = match self.byte_at(self.cursor).unwrap() {
       b'\r' | b'\n' | b';' => {
         // this ends a statement
-        let ch = self.byte_at(self.cursor).unwrap();
+        let ch     = self.byte_at(self.cursor).unwrap();
         let ch_idx = self.cursor;
         self.inc_cursor(1);
         let mut heredoc_skipped = false;
@@ -1707,9 +1707,9 @@ impl Iterator for LexStream<'_> {
       {
         // negation keyword
         self.inc_cursor(1);
-        let tk_type = TkRule::Bang;
+        let     tk_type = TkRule::Bang;
 
-        let mut tk = self.get_token((self.cursor - 1)..self.cursor, tk_type);
+        let mut tk      = self.get_token((self.cursor - 1)..self.cursor, tk_type);
         tk.flags |= TkFlags::KEYWORD;
         tk
       }
@@ -1775,7 +1775,7 @@ impl Iterator for LexStream<'_> {
         // ok nothing else matched, so it's probably a word
         if let Some(tk_result) = self.read_redir() {
           let tk = match tk_result {
-            Ok(t) => t,
+            Ok(t)  => t,
             Err(e) => return Some(Err(e)),
           };
           // we gotta check to see if this wants a file target or not
@@ -1846,8 +1846,8 @@ pub(crate) fn scan_cmd_sub_body(body: &[u8]) -> Option<usize> {
   let mut prefixed = Vec::with_capacity(body.len() + 1);
   prefixed.push(b'(');
   prefixed.extend_from_slice(body);
-  let handle = state::register_source(prefixed);
-  let mut lex = LexStream::new(&handle, LexFlags::LEX_UNFINISHED);
+  let     handle  = state::register_source(prefixed);
+  let mut lex     = LexStream::new(&handle, LexFlags::LEX_UNFINISHED);
   let mut entered = false;
   while let Some(tk) = lex.next() {
     let tk = tk.ok()?;
@@ -1903,7 +1903,7 @@ mod tests {
   #[test]
   fn for_in_marks_in_keyword() {
     let handle = state::register_source("for x in a b");
-    let toks = lex_toks(&handle);
+    let toks   = lex_toks(&handle);
     let in_tok = toks
       .iter()
       .find(|t| t.slice().to_str_lossy() == "in")
@@ -1929,7 +1929,7 @@ mod tests {
   #[test]
   fn heredoc_body_skipped_before_trailing_command() {
     let handle = state::register_source("cat <<EOF\nbody\nEOF\necho after");
-    let toks = lex_toks(&handle);
+    let toks   = lex_toks(&handle);
     let texts: Vec<String> = toks
       .into_iter()
       .filter(|t| t.class == TkRule::Str)
@@ -1953,7 +1953,7 @@ mod tests {
     // second check only looked at brace groups and let the parser report a
     // different error later. Lexed with empty (non-tolerant) flags so the
     // unclosed structure is an error rather than tolerated.
-    let input = b"(echo hi ";
+    let input  = b"(echo hi ";
     let handle = state::register_source(input.as_slice());
     let err = LexStream::new(&handle, LexFlags::empty())
       .find_map(Result::err)
@@ -1969,7 +1969,7 @@ mod tests {
   fn unclosed_subshell_no_trailing_ws_errors_at_lexer() {
     // Control: the no-trailing-whitespace case was already caught by the first
     // EOF check and must keep the same error after the unify.
-    let input = b"(echo hi ";
+    let input  = b"(echo hi ";
     let handle = state::register_source(input.as_slice());
     let err = LexStream::new(&handle, LexFlags::empty())
       .find_map(Result::err)
@@ -2040,7 +2040,7 @@ mod tests {
   #[test]
   fn bang_followed_by_bang_is_word() {
     // `!!` is the hist-exp "last command" — not two Bang operators.
-    let classes = lex_classes("!!");
+    let classes    = lex_classes("!!");
     let bang_count = classes.iter().filter(|c| matches!(c, TkRule::Bang)).count();
     assert!(
       bang_count <= 1,

@@ -89,8 +89,8 @@ impl Ord for Pos {
   fn cmp(&self, other: &Self) -> Ordering {
     match self.row.cmp(&other.row) {
       Ordering::Greater => Ordering::Greater,
-      Ordering::Less => Ordering::Less,
-      Ordering::Equal => self.col.cmp(&other.col),
+      Ordering::Less    => Ordering::Less,
+      Ordering::Equal   => self.col.cmp(&other.col),
     }
   }
 }

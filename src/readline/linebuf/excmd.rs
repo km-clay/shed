@@ -188,9 +188,9 @@ impl super::LineBuf {
     nested: &ExNode,
     range: Option<AddressRange>,
   ) -> ShResult<()> {
-    let range = range.unwrap_or_else(AddressRange::all_lines);
+    let range      = range.unwrap_or_else(AddressRange::all_lines);
     let constraint = range.as_motion();
-    let lines = self.get_matching_lines(&constraint, pat, negated)?;
+    let lines      = self.get_matching_lines(&constraint, pat, negated)?;
 
     let nested_cmd = EditCmd {
       verb: Some(verb!(Verb::ExCmd(nested.clone()))),
@@ -265,7 +265,7 @@ impl super::LineBuf {
           status_msg!("Buffer is empty, nothing to stash");
           return Ok(());
         }
-        let name = arg.clone().filter(|a| !a.to_str_lossy().trim().is_empty());
+        let name   = arg.clone().filter(|a| !a.to_str_lossy().trim().is_empty());
         let buffer = self.to_string();
         let (s, e) = (self.row(), self.col());
 
@@ -407,8 +407,8 @@ impl super::LineBuf {
           return Ok(());
         };
 
-        let lines = Lines::to_lines(&buffer.to_str_lossy());
-        let num_lines = lines.len();
+        let lines      = Lines::to_lines(&buffer.to_str_lossy());
+        let num_lines  = lines.len();
         let line_range = self.row()..self.row() + num_lines;
 
         self.insert_lines_at(self.cursor.pos, lines);
@@ -450,7 +450,7 @@ impl super::LineBuf {
           return Ok(());
         };
 
-        let curr_buf = self.to_string();
+        let curr_buf    = self.to_string();
         let curr_cursor = (self.row(), self.col());
 
         // Write the current buffer back into the stash slot.
@@ -578,7 +578,7 @@ impl super::LineBuf {
         #[expect(clippy::naive_bytecount)] // cold path, don't need an entire dependency for this
         let lines = bytes.iter().filter(|&&b| b == b'\n').count();
 
-        let len = bytes.len() as u64;
+        let     len  = bytes.len() as u64;
         let mut size = String::new();
 
         strops::format_size(len, &mut size)?;
@@ -592,9 +592,9 @@ impl super::LineBuf {
         return Ok(());
       }
       WriteDest::Cmd(cmd) => {
-        let buf = self.to_string();
+        let buf                 = self.to_string();
         let sink: Arc<dyn Sink> = Arc::new(BufSink::from_bytes(buf.as_bytes()));
-        let _guard = Sinks::apply_sink(sink, STDIN_FILENO)?;
+        let _guard              = Sinks::apply_sink(sink, STDIN_FILENO)?;
 
         autocmd!(PreCmd);
         {
@@ -617,9 +617,9 @@ impl super::LineBuf {
             return;
           }
         };
-        let line_count = contents.lines().count();
-        let byte_count = contents.len();
-        let mut size = String::new();
+        let     line_count = contents.lines().count();
+        let     byte_count = contents.len();
+        let mut size       = String::new();
         strops::format_size(byte_count as u64, &mut size).ok();
         status_msg!("Read {line_count} lines [{size}] from '{display_path}'",);
         let realpath = paths::lex_normalize_path(path_buf);
@@ -649,7 +649,7 @@ impl super::LineBuf {
       system_msg!("$EDITOR is unset. Aborting edit.");
       Ok(())
     } else {
-      let args = paths.iter().map(|p| format!("{}", p.display())).join(" ");
+      let args  = paths.iter().map(|p| format!("{}", p.display())).join(" ");
       let input = format!("$EDITOR {args}");
 
       execute::exec_int(input.into(), Some(get_entry_name()))
@@ -679,7 +679,7 @@ impl super::LineBuf {
     let output = self
       .run_shell_cmd(sh_cmd, Some(&input))?
       .unwrap_or_default();
-    let trimmed = output.strip_suffix('\n').unwrap_or(&output);
+    let trimmed   = output.strip_suffix('\n').unwrap_or(&output);
     let new_lines = Lines::to_lines(trimmed);
     self.lines.0.splice(s..s, new_lines.0);
 
@@ -691,12 +691,12 @@ impl super::LineBuf {
     vars.insert("BUFFER".into());
     vars.insert("CURSOR".into());
     vars.insert("ANCHOR".into());
-    let _guard = guards::var_ctx_guard(vars);
+    let     _guard         = guards::var_ctx_guard(vars);
 
-    let mut buf: VarStr = self.to_string().into();
-    let cursor_raw = self.cursor_to_flat();
+    let mut buf   : VarStr = self.to_string().into();
+    let     cursor_raw     = self.cursor_to_flat();
     let mut cursor: VarStr = cursor_raw.to_string().into();
-    let mut anchor = self.anchor_to_flat();
+    let mut anchor         = self.anchor_to_flat();
 
     Shed::vars_mut(|v| -> ShResult<()> {
       v.set_var("BUFFER", VarKind::string(buf.clone()), VarFlags::EXPORT)?;
@@ -773,7 +773,7 @@ impl super::LineBuf {
 
   fn ex_expand(&mut self, cmd: &EditCmd, range: Option<AddressRange>, bang: bool) -> ShResult<()> {
     let range = range.unwrap_or_else(AddressRange::all_lines); // expands entire buffer
-    let verb = if bang { Verb::ExpandAll } else { Verb::Expand };
+    let verb  = if bang { Verb::ExpandAll } else { Verb::Expand };
 
     self.replace_verb(cmd, verb, &range)
   }
@@ -796,7 +796,7 @@ impl super::LineBuf {
 
   fn replace_verb(&mut self, cmd: &EditCmd, verb: Verb, range: &AddressRange) -> ShResult<()> {
     // TODO: this can probably be performed way before we get here
-    let verb = Some(verb!(verb));
+    let verb   = Some(verb!(verb));
     let motion = Some(motion!(range.as_motion()));
 
     let new_cmd = EditCmd {
@@ -817,9 +817,9 @@ impl super::LineBuf {
   pub(crate) fn lines_for_ex_node(&self, node: &ExNode) -> ShResult<Vec<usize>> {
     match &node.kind {
       ExNdRule::Global { pat, nested } => {
-        let range = node.address.clone().unwrap_or_else(AddressRange::all_lines);
+        let range      = node.address.clone().unwrap_or_else(AddressRange::all_lines);
         let constraint = range.as_motion();
-        let outer = self.get_matching_lines(&constraint, pat, node.bang)?;
+        let outer      = self.get_matching_lines(&constraint, pat, node.bang)?;
 
         // If the nested node also narrows the set (another Global), intersect.
         // Otherwise the outer match is the answer.
@@ -848,8 +848,8 @@ impl super::LineBuf {
         Ok(vec![line])
       }
       Some(AddressRange::Range(s, e)) => {
-        let s = self.resolve_line_addr(s)?.unwrap_or(self.row());
-        let e = self.resolve_line_addr(e)?.unwrap_or(self.row());
+        let s      = self.resolve_line_addr(s)?.unwrap_or(self.row());
+        let e      = self.resolve_line_addr(e)?.unwrap_or(self.row());
         let (s, e) = util::ordered(s, e);
         Ok((s..=e).collect())
       }
@@ -874,8 +874,8 @@ fn merge_repeat_addr(new_cmd: &EditCmd, saved: &EditCmd) -> Option<EditCmd> {
 
   let new_node = ExNode {
     address: new_address,
-    bang: saved_node.bang,
-    kind: saved_node.kind.clone(),
+    bang   : saved_node.bang,
+    kind   : saved_node.kind.clone(),
   };
 
   Some(EditCmd {
@@ -901,7 +901,7 @@ mod tests {
 
   #[test]
   fn stash_push_clears_buffer_and_persists_to_stack() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = make_buf("echo hello");
     buf.ex_stash(&StashArgs::Push(None)).unwrap();
     assert_eq!(buf.to_string(), "", "push should clear the buffer");
@@ -912,7 +912,7 @@ mod tests {
 
   #[test]
   fn stash_push_named_does_not_increase_stack_count() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = make_buf("named cmd");
     buf
       .ex_stash(&StashArgs::Push(Some("my_name".into())))
@@ -928,7 +928,7 @@ mod tests {
 
   #[test]
   fn stash_push_on_empty_buffer_is_noop() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = LineBuf::default();
     buf.ex_stash(&StashArgs::Push(None)).unwrap();
     let stash = Stash::new().unwrap();
@@ -939,7 +939,7 @@ mod tests {
 
   #[test]
   fn stash_pop_restores_buffer_and_removes_from_stack() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = make_buf("first cmd");
     buf.ex_stash(&StashArgs::Push(None)).unwrap();
     assert_eq!(buf.to_string(), "");
@@ -952,7 +952,7 @@ mod tests {
 
   #[test]
   fn stash_pop_empty_is_noop() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = make_buf("starting content");
     buf.ex_stash(&StashArgs::Pop(None)).unwrap();
     // Buffer untouched when there's nothing to pop.
@@ -961,7 +961,7 @@ mod tests {
 
   #[test]
   fn stash_pop_by_index() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = make_buf("entry one");
     buf.ex_stash(&StashArgs::Push(None)).unwrap();
     buf.set_buffer("entry two");
@@ -978,7 +978,7 @@ mod tests {
 
   #[test]
   fn stash_drop_removes_entry_without_touching_buffer() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = make_buf("to be stashed");
     buf.ex_stash(&StashArgs::Push(None)).unwrap();
     buf.set_buffer("current work");
@@ -997,7 +997,7 @@ mod tests {
 
   #[test]
   fn stash_apply_named_replaces_buffer_but_keeps_entry() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = make_buf("saved cmd");
     buf.ex_stash(&StashArgs::Push(Some("snap".into()))).unwrap();
     buf.set_buffer("now editing");
@@ -1014,7 +1014,7 @@ mod tests {
 
   #[test]
   fn stash_apply_unknown_name_is_noop() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = make_buf("current");
     buf
       .ex_stash(&StashArgs::Apply(Some("nope_doesnt_exist".into())))
@@ -1026,7 +1026,7 @@ mod tests {
 
   #[test]
   fn stash_insert_pastes_into_existing_buffer() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = make_buf("stash content");
     buf
       .ex_stash(&StashArgs::Push(Some("piece".into())))
@@ -1048,7 +1048,7 @@ mod tests {
 
   #[test]
   fn stash_list_does_not_panic_on_empty_or_populated_stash() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = make_buf("");
     // Empty case — should post a "no entries" status_msg, not panic.
     buf.ex_stash(&StashArgs::List(None)).unwrap();
@@ -1089,7 +1089,7 @@ mod tests {
       if !has_cmd("cat") {
         return;
       }
-      let _g = TestGuard::new();
+      let     _g  = TestGuard::new();
       let mut buf = make_buf("");
       let out = buf
         .run_shell_cmd("cat", Some("hello-from-stdin\n"))
@@ -1102,7 +1102,7 @@ mod tests {
     fn with_empty_stdin_runs_command() {
       // `echo` is a shell builtin in shed, so no external binary is
       // required here — no `has_cmd` guard needed.
-      let _g = TestGuard::new();
+      let     _g  = TestGuard::new();
       let mut buf = make_buf("");
       let out = buf
         .run_shell_cmd("echo captured", Some(""))
@@ -1122,9 +1122,9 @@ mod tests {
 
     #[test]
     fn without_stdin_returns_none() {
-      let _g = TestGuard::new();
-      let mut buf = make_buf("original");
-      let result = buf.run_shell_cmd("BUFFER=stays", None).unwrap();
+      let     _g     = TestGuard::new();
+      let mut buf    = make_buf("original");
+      let     result = buf.run_shell_cmd("BUFFER=stays", None).unwrap();
       assert_eq!(result, None);
     }
 
@@ -1132,7 +1132,7 @@ mod tests {
 
     #[test]
     fn buffer_var_set_in_shell_cmd_updates_linebuf() {
-      let _g = TestGuard::new();
+      let     _g  = TestGuard::new();
       let mut buf = make_buf("original");
       // The command runs in the current shell process; assigning
       // BUFFER updates the shell var, which the function reads back.
@@ -1144,7 +1144,7 @@ mod tests {
 
     #[test]
     fn cursor_var_set_to_valid_pos_moves_cursor() {
-      let _g = TestGuard::new();
+      let     _g  = TestGuard::new();
       let mut buf = make_buf("abcdef");
       buf.set_cursor_from_flat(0);
       buf.run_shell_cmd("CURSOR=3", None).unwrap();
@@ -1153,7 +1153,7 @@ mod tests {
 
     #[test]
     fn cursor_var_invalid_falls_back_to_original_position() {
-      let _g = TestGuard::new();
+      let     _g  = TestGuard::new();
       let mut buf = make_buf("abcdef");
       buf.set_cursor_from_flat(2);
       // 'garbage' isn't a valid flat index or row:col → falls back.
@@ -1165,7 +1165,7 @@ mod tests {
 
     #[test]
     fn buffer_and_cursor_replacement_together() {
-      let _g = TestGuard::new();
+      let     _g  = TestGuard::new();
       let mut buf = make_buf("original");
       buf.run_shell_cmd("BUFFER=replaced;CURSOR=4", None).unwrap();
       assert_eq!(buf.to_string(), "replaced");
@@ -1180,7 +1180,7 @@ mod tests {
       // (it's exported) but its writes to BUFFER stay in the child's
       // env and never reach the parent's shell vars. So the parent
       // restores the original buffer regardless of what the child did.
-      let _g = TestGuard::new();
+      let     _g  = TestGuard::new();
       let mut buf = make_buf("stays_the_same");
       buf
         .run_shell_cmd("BUFFER=should_not_leak", Some(""))
@@ -1197,8 +1197,8 @@ mod tests {
 
     #[test]
     fn write_to_file_creates_and_truncates() {
-      let _g = TestGuard::new();
-      let dir = tempfile::TempDir::new().unwrap();
+      let _g   = TestGuard::new();
+      let dir  = tempfile::TempDir::new().unwrap();
       let path = dir.path().join("out.txt");
       // Pre-existing content should be truncated.
       std::fs::write(&path, "OLD_CONTENT_TO_BE_OVERWRITTEN").unwrap();
@@ -1210,18 +1210,18 @@ mod tests {
 
     #[test]
     fn write_to_file_creates_when_missing() {
-      let _g = TestGuard::new();
-      let dir = tempfile::TempDir::new().unwrap();
-      let path = dir.path().join("newfile.txt");
-      let mut buf = make_buf("hello");
+      let     _g   = TestGuard::new();
+      let     dir  = tempfile::TempDir::new().unwrap();
+      let     path = dir.path().join("newfile.txt");
+      let mut buf  = make_buf("hello");
       buf.ex_write(&WriteDest::File(Some(path.clone()))).unwrap();
       assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello\n");
     }
 
     #[test]
     fn write_to_file_append_does_not_truncate() {
-      let _g = TestGuard::new();
-      let dir = tempfile::TempDir::new().unwrap();
+      let _g   = TestGuard::new();
+      let dir  = tempfile::TempDir::new().unwrap();
       let path = dir.path().join("append.txt");
       std::fs::write(&path, "first\n").unwrap();
       let mut buf = make_buf("second");
@@ -1236,10 +1236,10 @@ mod tests {
     fn write_to_file_in_unwritable_dir_is_silent_ok() {
       // Pinning current behavior: ex_write swallows open errors and
       // returns Ok (the user sees a system_msg about it).
-      let _g = TestGuard::new();
-      let mut buf = make_buf("anything");
-      let bad_path = std::path::PathBuf::from("/this/does/not/exist/xyz/out.txt");
-      let res = buf.ex_write(&WriteDest::File(Some(bad_path)));
+      let     _g       = TestGuard::new();
+      let mut buf      = make_buf("anything");
+      let     bad_path = std::path::PathBuf::from("/this/does/not/exist/xyz/out.txt");
+      let     res      = buf.ex_write(&WriteDest::File(Some(bad_path)));
       assert!(res.is_ok());
     }
 
@@ -1256,8 +1256,8 @@ mod tests {
 
     #[test]
     fn read_file_inserts_contents_into_buffer() {
-      let _g = TestGuard::new();
-      let dir = tempfile::TempDir::new().unwrap();
+      let _g   = TestGuard::new();
+      let dir  = tempfile::TempDir::new().unwrap();
       let path = dir.path().join("in.txt");
       std::fs::write(&path, "line one\nline two\n").unwrap();
       let mut buf = make_buf("");
@@ -1271,9 +1271,9 @@ mod tests {
     fn read_missing_file_is_silent_ok() {
       // Non-existent paths are not errors — `system_msg!` informs the
       // user and the function returns Ok with the buffer untouched.
-      let _g = TestGuard::new();
-      let mut buf = make_buf("original");
-      let bad_path = std::path::PathBuf::from("/this/does/not/exist/zzz.txt");
+      let     _g       = TestGuard::new();
+      let mut buf      = make_buf("original");
+      let     bad_path = std::path::PathBuf::from("/this/does/not/exist/zzz.txt");
       buf.ex_read(&ReadSrc::File(bad_path));
       assert_eq!(buf.to_string(), "original");
     }
@@ -1282,8 +1282,8 @@ mod tests {
     fn read_directory_path_is_silent_ok() {
       // path.is_file() returns false for a directory → same not-a-file
       // branch as a missing path.
-      let _g = TestGuard::new();
-      let dir = tempfile::TempDir::new().unwrap();
+      let     _g  = TestGuard::new();
+      let     dir = tempfile::TempDir::new().unwrap();
       let mut buf = make_buf("untouched");
       buf.ex_read(&ReadSrc::File(dir.path().to_path_buf()));
       assert_eq!(buf.to_string(), "untouched");
@@ -1294,8 +1294,8 @@ mod tests {
       // ex_read sets self.indent_cache = None as part of the successful
       // path. We pin this by reading something in and checking the
       // cache afterward.
-      let _g = TestGuard::new();
-      let dir = tempfile::TempDir::new().unwrap();
+      let _g   = TestGuard::new();
+      let dir  = tempfile::TempDir::new().unwrap();
       let path = dir.path().join("c.txt");
       std::fs::write(&path, "x").unwrap();
       let mut buf = make_buf("");
@@ -1319,7 +1319,7 @@ mod tests {
     /// side effects the shell command itself causes.
     #[test]
     fn no_motion_runs_command_without_replacing_lines() {
-      let _g = TestGuard::new();
+      let     _g  = TestGuard::new();
       let mut buf = make_buf("first\nsecond\nthird");
       // Assigning BUFFER inside the no-stdin path updates the linebuf
       // via run_shell_cmd's read-back. Use it to confirm the command
@@ -1339,7 +1339,7 @@ mod tests {
       if !has_cmd("tr") {
         return;
       }
-      let _g = TestGuard::new();
+      let     _g  = TestGuard::new();
       let mut buf = make_buf("alpha\nbeta\ngamma");
       buf
         .ex_shell_cmd(
@@ -1357,7 +1357,7 @@ mod tests {
       if !has_cmd("tr") {
         return;
       }
-      let _g = TestGuard::new();
+      let     _g  = TestGuard::new();
       let mut buf = make_buf("alpha\nbeta\ngamma");
       buf
         .ex_shell_cmd(

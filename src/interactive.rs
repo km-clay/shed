@@ -137,8 +137,8 @@ impl From<&ShedPollTimeout> for PollTimeout {
       ShedPollTimeout::Override(poll_timeout) | ShedPollTimeout::IdleTimeout(poll_timeout) => {
         *poll_timeout
       }
-      ShedPollTimeout::Null => PollTimeout::NONE,
-      ShedPollTimeout::Zero => PollTimeout::ZERO,
+      ShedPollTimeout::Null          => PollTimeout::NONE,
+      ShedPollTimeout::Zero          => PollTimeout::ZERO,
       ShedPollTimeout::PendingKeymap => PollTimeout::from(1000u16),
     }
   }
@@ -276,7 +276,7 @@ pub(super) fn shed_interactive(
     return run_script_keys(&mut readline, keys);
   }
 
-  let mut vi_mode = shopt!(set.vi);
+  let mut vi_mode     = shopt!(set.vi);
   let mut socket_mode = ShedSocket::mode();
 
   let mut poll_fds: SmallVec<[PollFd; 2]> = SmallVec::new();
@@ -286,7 +286,7 @@ pub(super) fn shed_interactive(
     QUIT_CODE.store(1, Ordering::SeqCst);
     return Err(sherr!(CleanExit(1), "terminal access failed",));
   };
-  let tty_poll = PollFd::new(unsafe { BorrowedFd::borrow_raw(tty_fd) }, PollFlags::POLLIN);
+  let tty_poll  = PollFd::new(unsafe { BorrowedFd::borrow_raw(tty_fd) }, PollFlags::POLLIN);
 
   let socket_fd = Shed::get_socket().map(|s| s.as_raw_fd());
   let socket_poll =
@@ -303,7 +303,7 @@ pub(super) fn shed_interactive(
       &mut socket_mode,
     )? {
       LoopAction::Continue => (),
-      LoopAction::Break => return Ok(()),
+      LoopAction::Break    => return Ok(()),
     }
   }
 }
@@ -465,7 +465,7 @@ fn shed_loop_iter(
       // read data here, process it below
       if let Err(e) = Shed::term_mut(Terminal::read) {
         match e.kind() {
-          ShErrKind::LoopBreak(_) => return Ok(LoopAction::Break),
+          ShErrKind::LoopBreak(_)    => return Ok(LoopAction::Break),
           ShErrKind::LoopContinue(_) => return Ok(LoopAction::Continue),
           _ => {
             e.print_error();
@@ -504,7 +504,7 @@ fn shed_loop_iter(
   }
 
   // Process the input that we read above
-  let keys = Shed::term_mut(Terminal::drain_keys);
+  let keys  = Shed::term_mut(Terminal::drain_keys);
   let event = readline.process_input(keys);
 
   if let LoopAction::Break = handle_readline_event(readline, event)? {
@@ -608,7 +608,7 @@ fn handle_readline_event(
 
       let no_hist_save = Shed::meta_mut(MetaTab::no_hist_save);
       let was_func_def = Shed::meta_mut(MetaTab::take_last_was_func_def);
-      let nolog = was_func_def && shopt!(set.nolog);
+      let nolog        = was_func_def && shopt!(set.nolog);
 
       let should_write = shopt!(history.auto_save) && !nolog && !no_hist_save && !input.is_empty();
       let hist_update_start = Instant::now();
@@ -702,7 +702,7 @@ pub(crate) fn run_prompt_command(
   if let Some((row, col)) = position {
     exec_term!(TermCtl::Cursor(CursorCtl::Absolute {
       row: row.0 as u16,
-      col: col.0 as u16
+      col: col.0 as u16,
     }))
     .ok();
   }
@@ -744,7 +744,7 @@ pub(crate) fn run_prompt_command(
 /// If there's an exact match, fire it; otherwise flush as normal keys.
 fn resolve_keymap(readline: &mut ShedLine) -> ShResult<()> {
   let keymap_flags = readline.curr_keymap_flags();
-  let matches = Shed::logic(|l| l.keymaps_filtered(keymap_flags, readline.pending_keymap()));
+  let matches      = Shed::logic(|l| l.keymaps_filtered(keymap_flags, readline.pending_keymap()));
   let exact = matches
     .iter()
     .find(|km| km.compare(readline.pending_keymap()) == KeyMapMatch::IsExact);
@@ -752,7 +752,7 @@ fn resolve_keymap(readline: &mut ShedLine) -> ShResult<()> {
   if let Some(km) = exact {
     // exact match, run it
     let action = km.action_expanded();
-    let remap = km.remap;
+    let remap  = km.remap;
     readline.pending_keymap_mut().clear();
     readline.replay_keys(action, remap)?;
   } else {
@@ -792,9 +792,9 @@ mod tests {
 
   impl LoopHarness {
     fn new() -> Self {
-      let g = TestGuard::new();
+      let g        = TestGuard::new();
       let readline = ShedLine::new_no_hist(Prompt::default()).unwrap();
-      let tty_fd = Shed::term(|t| t.tty().map(|fd| fd.as_raw_fd())).unwrap();
+      let tty_fd   = Shed::term(|t| t.tty().map(|fd| fd.as_raw_fd())).unwrap();
       let tty_poll = PollFd::new(unsafe { BorrowedFd::borrow_raw(tty_fd) }, PollFlags::POLLIN);
       // Put the tty in raw mode up-front so subsequent type_chars writes
       // aren't intercepted by the kernel's cooked-mode special chars
@@ -871,7 +871,7 @@ mod tests {
   fn loop_iter_consumes_typed_char_into_buffer() {
     let mut h = LoopHarness::emacs();
     h.type_chars(b"x");
-    let action = h.iterate().unwrap();
+    let action  = h.iterate().unwrap();
     let content = h.editor_content();
     assert!(matches!(action, LoopAction::Continue));
     assert_eq!(content, "x");
@@ -896,7 +896,7 @@ mod tests {
       h.type_chars(b"not empty");
       h.type_chars(b"\x01"); // ctrl+a (beginning of line)
       h.type_chars(b"\x04"); // ctrl+d (delete char under cursor)
-      let action = h.iterate().unwrap();
+      let action  = h.iterate().unwrap();
       let content = h.editor_content();
       assert!(matches!(action, LoopAction::Continue));
       assert_eq!(content, "ot empty");
@@ -995,10 +995,10 @@ mod tests {
     // hold the 'j' KeyEvent waiting for the next key to disambiguate.
     Shed::logic_mut(|l| {
       l.insert_keymap(KeyMap {
-        flags: KeyMapFlags::EMACS,
-        keys: "jk".into(),
+        flags : KeyMapFlags::EMACS,
+        keys  : "jk".into(),
         action: "<esc>".into(),
-        remap: false,
+        remap : false,
       });
     });
 
@@ -1045,11 +1045,11 @@ mod tests {
   use crate::keys::KeyMapFlags;
 
   fn fresh_readline() -> (ShedLine, TestGuard) {
-    let g = TestGuard::new();
+    let     g        = TestGuard::new();
     let mut readline = ShedLine::new_no_hist(Prompt::default()).unwrap();
     // print_line needs interactive guard to write properly; mirror what
     // the loop sets up.
-    let _guard = Shed::term_mut(|t| t.interactive_guard(true));
+    let     _guard   = Shed::term_mut(|t| t.interactive_guard(true));
     // Disable any leftover keymaps from prior tests.
     Shed::logic_mut(|l| {
       // We can't easily clear all keymaps; just reset to known state by
@@ -1081,10 +1081,10 @@ mod tests {
     // Default mode is Emacs (vi shopt off), so the keymap must have
     // EMACS flag to be considered.
     let km = KeyMap {
-      flags: KeyMapFlags::EMACS,
-      keys: "ab".into(),
+      flags : KeyMapFlags::EMACS,
+      keys  : "ab".into(),
       action: "xy".into(),
-      remap: false,
+      remap : false,
     };
     Shed::logic_mut(|l| l.insert_keymap(km));
     // Feed the pending bytes that match.
@@ -1112,7 +1112,7 @@ mod tests {
   #[test]
   fn handle_event_eof_returns_true() {
     let (mut readline, _g) = fresh_readline();
-    let should_exit = handle_readline_event(&mut readline, Ok(ReadlineEvent::Eof)).unwrap();
+    let should_exit        = handle_readline_event(&mut readline, Ok(ReadlineEvent::Eof)).unwrap();
     assert!(matches!(should_exit, LoopAction::Break));
   }
 
@@ -1126,16 +1126,16 @@ mod tests {
   #[test]
   fn handle_event_err_clean_exit_returns_true() {
     let (mut readline, _g) = fresh_readline();
-    let err = ShErr::new(ShErrKind::CleanExit(0), crate::eval::lex::Span::default());
-    let should_exit = handle_readline_event(&mut readline, Err(err)).unwrap();
+    let err                = ShErr::new(ShErrKind::CleanExit(0), crate::eval::lex::Span::default());
+    let should_exit        = handle_readline_event(&mut readline, Err(err)).unwrap();
     assert!(matches!(should_exit, LoopAction::Break));
   }
 
   #[test]
   fn handle_event_err_other_returns_false() {
     let (mut readline, _g) = fresh_readline();
-    let err = ShErr::new(ShErrKind::ParseErr, crate::eval::lex::Span::default());
-    let should_exit = handle_readline_event(&mut readline, Err(err)).unwrap();
+    let err                = ShErr::new(ShErrKind::ParseErr, crate::eval::lex::Span::default());
+    let should_exit        = handle_readline_event(&mut readline, Err(err)).unwrap();
     assert!(matches!(should_exit, LoopAction::Continue));
   }
 
@@ -1170,7 +1170,7 @@ mod tests {
   fn run_script_keys_types_into_editor_buffer() {
     let (mut readline, _g) = fresh_readline();
     // Type "abc" with no Enter — chars go into the editor buffer.
-    let keys = expand_keymap("abc");
+    let keys               = expand_keymap("abc");
     run_script_keys(&mut readline, keys).unwrap();
     assert_eq!(readline.editor().to_string(), "abc");
   }
@@ -1180,7 +1180,7 @@ mod tests {
     let (mut readline, g) = fresh_readline();
     // After Enter we should hit the Line event arm; the command runs
     // via handle_readline_event and the editor buffer is reset.
-    let keys = expand_keymap("echo run_script_keys_hello<CR>");
+    let keys              = expand_keymap("echo run_script_keys_hello<CR>");
     run_script_keys(&mut readline, keys).unwrap();
     let out = g.read_output();
     assert!(

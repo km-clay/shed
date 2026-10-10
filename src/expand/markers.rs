@@ -45,21 +45,21 @@ mod tests {
   #[test]
   fn powerline_glyph_survives_strip() {
     let powerline = "\u{e0b0}";
-    let stripped = strip_markers(powerline);
+    let stripped  = strip_markers(powerline);
     assert_eq!(stripped, powerline);
   }
 
   #[test]
   fn nerd_font_icon_survives_strip() {
     let nerd_font = "\u{f0226}";
-    let stripped = strip_markers(nerd_font);
+    let stripped  = strip_markers(nerd_font);
     assert_eq!(stripped, nerd_font);
   }
 
   #[test]
   fn apple_logo_survives_strip() {
     let apple_logo = "\u{f8ff}";
-    let stripped = strip_markers(apple_logo);
+    let stripped   = strip_markers(apple_logo);
     assert_eq!(stripped, apple_logo);
   }
 }

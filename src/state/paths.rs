@@ -28,9 +28,9 @@ use super::var;
 /// checked. The common "nothing changed" case costs one stat per directory
 /// plus one stat per cached file.
 pub(crate) struct PathCache {
-  name: String,
+  name    : String,
   path_raw: VarStr,
-  entries: HashMap<PathBuf, EntryCache>,
+  entries : HashMap<PathBuf, EntryCache>,
 }
 
 /// Cached state for one entry from the path list. Directory entries hold a
@@ -39,7 +39,7 @@ pub(crate) struct PathCache {
 enum EntryCache {
   Dir {
     dir_mtime: SystemTime,
-    files: HashMap<PathBuf, SystemTime>,
+    files    : HashMap<PathBuf, SystemTime>,
   },
   File(SystemTime),
 }
@@ -74,7 +74,7 @@ fn build_entry(path: &Path) -> EntryCache {
   if path.is_dir() {
     EntryCache::Dir {
       dir_mtime: mtime_of(path),
-      files: collect_files_in_dir(path),
+      files    : collect_files_in_dir(path),
     }
   } else {
     EntryCache::File(mtime_of(path))
@@ -84,7 +84,7 @@ fn build_entry(path: &Path) -> EntryCache {
 impl PathCache {
   pub(crate) fn new(name: String) -> Self {
     let path_raw = var!(&name);
-    let entries = Self::build_entries(&path_raw.to_str_lossy());
+    let entries  = Self::build_entries(&path_raw.to_str_lossy());
     Self {
       name,
       path_raw,
@@ -195,7 +195,7 @@ pub(crate) fn path_list_entries(path_list: &str) -> impl Iterator<Item = std::fs
 }
 
 pub(crate) fn is_executable_file(entry: &std::fs::DirEntry) -> bool {
-  let ft = entry.file_type().ok();
+  let ft         = entry.file_type().ok();
   let is_symlink = ft.is_some_and(|t| t.is_symlink());
   let meta = if is_symlink {
     std::fs::metadata(entry.path())
@@ -222,7 +222,7 @@ pub(crate) fn lex_normalize_path(path: &Path) -> PathBuf {
           out.pop();
         }
         Some(Component::RootDir | Component::Prefix(_)) => {}
-        Some(Component::ParentDir) | None => out.push(comp),
+        Some(Component::ParentDir) | None               => out.push(comp),
         Some(Component::CurDir) => unreachable!(),
       },
       _ => out.push(comp),
@@ -366,9 +366,9 @@ mod xdg_resolver_tests {
     use std::fs;
     let old_dir = tempfile::TempDir::new().unwrap();
     let new_dir = tempfile::TempDir::new().unwrap();
-    let old_db = old_dir.path().join("shed").join("shed_hist.db");
+    let old_db  = old_dir.path().join("shed").join("shed_hist.db");
     // New location's parent doesn't exist yet — relocate must create it.
-    let new_db = new_dir.path().join("shed").join("shed_hist.db");
+    let new_db  = new_dir.path().join("shed").join("shed_hist.db");
 
     fs::create_dir_all(old_db.parent().unwrap()).unwrap();
     fs::write(&old_db, b"legacy-db-contents").unwrap();
@@ -418,8 +418,8 @@ mod xdg_resolver_tests {
 
   #[test]
   fn rc_file_path_shed_rc_env_var_overrides_everything() {
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g   = TestGuard::new();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("explicit.rc");
     std::fs::write(&path, "").unwrap();
     set_var("SHED_RC", &path.to_string_lossy());
@@ -438,7 +438,7 @@ mod xdg_resolver_tests {
     let _g = TestGuard::new();
     unset_var("SHED_RC");
     let home = tempfile::TempDir::new().unwrap();
-    let xdg = tempfile::TempDir::new().unwrap();
+    let xdg  = tempfile::TempDir::new().unwrap();
     set_var("HOME", &home.path().to_string_lossy());
     set_var("XDG_CONFIG_HOME", &xdg.path().to_string_lossy());
 
@@ -455,7 +455,7 @@ mod xdg_resolver_tests {
     let _g = TestGuard::new();
     unset_var("SHED_RC");
     let home = tempfile::TempDir::new().unwrap();
-    let xdg = tempfile::TempDir::new().unwrap();
+    let xdg  = tempfile::TempDir::new().unwrap();
     set_var("HOME", &home.path().to_string_lossy());
     set_var("XDG_CONFIG_HOME", &xdg.path().to_string_lossy());
 
@@ -470,7 +470,7 @@ mod xdg_resolver_tests {
     let _g = TestGuard::new();
     unset_var("SHED_RC");
     let home = tempfile::TempDir::new().unwrap();
-    let xdg = tempfile::TempDir::new().unwrap();
+    let xdg  = tempfile::TempDir::new().unwrap();
     set_var("HOME", &home.path().to_string_lossy());
     set_var("XDG_CONFIG_HOME", &xdg.path().to_string_lossy());
 

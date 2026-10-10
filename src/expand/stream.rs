@@ -20,7 +20,7 @@ impl SegStream {
   /// Convert `Marker::ArgSep` and `Marker::NullExpand` back into markers from
   /// their byte-sentinel representation, so a serialized value round-trips.
   pub(crate) fn from_split_value(bytes: &[u8]) -> Self {
-    let mut out = SegStream::new();
+    let mut out  = SegStream::new();
     let mut rest = bytes;
 
     // The markers are \xEF\xB7\x96 (ARG_SEP) and \xEF\xB7\x95 (NULL_EXPAND), so
@@ -30,7 +30,7 @@ impl SegStream {
         .then(|| match rest[ef + 2] {
           0x96 => Some(Marker::ArgSep),
           0x95 => Some(Marker::NullExpand),
-          _ => None,
+          _    => None,
         })
         .flatten();
 
@@ -88,9 +88,9 @@ impl SegStream {
     if self.bytes.find_byte(0xEF).is_none() {
       return self;
     }
-    let mut out = SegStream::new();
+    let mut out          = SegStream::new();
     let mut run: Vec<u8> = Vec::new();
-    let mut cursor = self.cursor();
+    let mut cursor       = self.cursor();
     while let Some(unit) = cursor.next() {
       match unit {
         Unit::Byte(b) => run.push(b),
@@ -163,7 +163,7 @@ impl SegStream {
   #[cfg(test)]
   pub(crate) fn stream(&self) -> Vec<StreamSeg> {
     let mut out: Vec<StreamSeg> = vec![];
-    let mut cur = self.cursor();
+    let mut cur                 = self.cursor();
     while let Some(unit) = cur.next() {
       match unit {
         Unit::Byte(b) => match out.last_mut() {
@@ -230,7 +230,7 @@ impl SegStream {
   pub(crate) fn split_once_unescaped(&self, sep: u8) -> Option<(SegStream, SegStream)> {
     let mut before = SegStream::new();
     let mut cursor = self.cursor();
-    let mut qt = QuoteState::default();
+    let mut qt     = QuoteState::default();
     while let Some(unit) = cursor.next() {
       match unit {
         Unit::Mark(Marker::Escape) => {
@@ -263,7 +263,7 @@ impl SegStream {
   /// remainder), returning `(front_bytes, remainder)`. Used to strip an ASCII
   /// operator prefix off a parameter-expansion operand.
   pub(crate) fn split_off_front(&self, n: usize) -> (Vec<u8>, SegStream) {
-    let cut = n.min(self.bytes.len());
+    let cut   = n.min(self.bytes.len());
     let front = self.bytes[..cut].to_vec();
     let rest = SegStream {
       bytes: self.bytes[cut..].to_vec(),
@@ -291,8 +291,8 @@ impl SegStream {
 pub(crate) struct SegCursor<'a> {
   bytes: &'a [u8],
   marks: &'a [(usize, Marker)],
-  bpos: usize, // next byte index
-  mpos: usize, // next marker index
+  bpos : usize, // next byte index
+  mpos : usize, // next marker index
 }
 
 impl<'a> SegCursor<'a> {

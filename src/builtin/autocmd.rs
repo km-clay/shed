@@ -20,7 +20,7 @@ impl super::Builtin for AutoCmdBuiltin {
     true
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let clear = args.options().any(|opt| opt.key() == "clear");
+    let     clear   = args.options().any(|opt| opt.key() == "clear");
 
     let mut arg_vec = args.arguments();
 

@@ -338,9 +338,9 @@ vi_test! {
 
 fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
   Shed::shopts_mut(|o| o.set.vi = true);
-  let g = TestGuard::new();
+  let g      = TestGuard::new();
   let prompt = Prompt::default();
-  let vi = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
+  let vi     = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
 
   (vi, g)
 }
@@ -409,7 +409,7 @@ fn vi_auto_indent_siblings() {
 fn vi_auto_indent_funcdef() {
   let (mut vi, _g) = test_vi("");
 
-  let bytes = b"func_def() {}";
+  let bytes        = b"func_def() {}";
   Shed::term_mut(|t| t.feed_bytes(bytes));
   let keys = Shed::term_mut(Terminal::drain_keys);
   vi.process_input(keys).unwrap();
@@ -425,7 +425,7 @@ fn vi_auto_indent_funcdef() {
 fn vi_auto_indent_empty_body() {
   let (mut vi, _g) = test_vi("");
 
-  let bytes = b"if true; then";
+  let bytes        = b"if true; then";
   Shed::term_mut(|t| t.feed_bytes(bytes));
   let keys = Shed::term_mut(Terminal::drain_keys);
   vi.process_input(keys).unwrap();
@@ -440,7 +440,7 @@ fn vi_auto_indent_empty_body() {
 fn vi_func_def_is_finished() {
   let (mut vi, _g) = test_vi("");
 
-  let bytes = b"func_def() {\r}\r";
+  let bytes        = b"func_def() {\r}\r";
   Shed::term_mut(|t| t.feed_bytes(bytes));
   let keys = Shed::term_mut(Terminal::drain_keys);
   vi.process_input(keys).unwrap();
@@ -451,7 +451,7 @@ fn vi_func_def_is_finished() {
 fn case_stmt_is_finished() {
   let (mut vi, _g) = test_vi("");
 
-  let bytes = b"case foo in\rfoo)\rcase bar in\rbar)\recho foo\r;;\resac\r;;\resac\r";
+  let bytes        = b"case foo in\rfoo)\rcase bar in\rbar)\recho foo\r;;\resac\r;;\resac\r";
   Shed::term_mut(|t| t.feed_bytes(bytes));
   let keys = Shed::term_mut(Terminal::drain_keys);
   vi.process_input(keys).unwrap();
@@ -559,10 +559,10 @@ use crate::readline::history::History;
 
 #[test]
 fn hist_push_returns_id() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_push_id", &Shed::hist_branch());
-  let id1 = hist.push("cmd1").unwrap();
-  let id2 = hist.push("cmd2").unwrap();
+  let id1  = hist.push("cmd1").unwrap();
+  let id2  = hist.push("cmd2").unwrap();
   assert!(id1.is_some());
   assert!(id2.is_some());
   assert_ne!(id1, id2);
@@ -570,16 +570,16 @@ fn hist_push_returns_id() {
 
 #[test]
 fn hist_push_empty_returns_none() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_push_empty", &Shed::hist_branch());
-  let id = hist.push("").unwrap();
+  let id   = hist.push("").unwrap();
   assert!(id.is_none());
   assert_eq!(hist.entry_count(), 0);
 }
 
 #[test]
 fn hist_entry_count() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_count", &Shed::hist_branch());
   assert_eq!(hist.entry_count(), 0);
   hist.push("cmd1").unwrap();
@@ -591,7 +591,7 @@ fn hist_entry_count() {
 
 #[test]
 fn hist_last_id() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_last_id", &Shed::hist_branch());
   assert_eq!(hist.last_id(), 0);
   hist.push("cmd1").unwrap();
@@ -602,7 +602,7 @@ fn hist_last_id() {
 
 #[test]
 fn hist_last_returns_most_recent() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_last", &Shed::hist_branch());
   assert!(hist.last().is_none());
   hist.push("first").unwrap();
@@ -613,7 +613,7 @@ fn hist_last_returns_most_recent() {
 
 #[test]
 fn hist_query_with_filter() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_query_filter", &Shed::hist_branch());
   hist.push("echo foo").unwrap();
   hist.push("ls -la").unwrap();
@@ -632,7 +632,7 @@ fn hist_query_with_filter() {
 
 #[test]
 fn hist_query_range() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_query_range", &Shed::hist_branch());
   hist.push("cmd1").unwrap();
   hist.push("cmd2").unwrap();
@@ -647,7 +647,7 @@ fn hist_query_range() {
 
 #[test]
 fn hist_ids_are_sequential() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_sequential", &Shed::hist_branch());
   hist.push("a").unwrap();
   hist.push("b").unwrap();
@@ -663,7 +663,7 @@ fn hist_ids_are_sequential() {
 
 #[test]
 fn hist_delete_removes_entries() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_delete", &Shed::hist_branch());
   hist.push("echo foo").unwrap();
   hist.push("echo bar").unwrap();
@@ -683,7 +683,7 @@ fn hist_delete_purges_search_cache_no_resurrect() {
   // Regression: a delete refreshed only the scroll cache (HIST_ENTRIES), so the
   // deleted command lingered in the search cache (SEARCH_ENTRIES / Ctrl-R) and
   // was resurrected into scroll history by merge_search_entries.
-  let _g = TestGuard::new();
+  let     _g   = TestGuard::new();
   let mut hist = History::empty("test_delete_search_cache", &Shed::hist_branch());
   hist.push("keep one").unwrap();
   hist.push("secret token").unwrap();
@@ -738,12 +738,12 @@ fn sync_picks_up_command_in_watermark_second() {
   // current watermark was excluded by the strict `>` and — once local activity
   // advanced the watermark past that second — missed for the rest of the
   // session. `query_since` now uses `>=`, so the boundary second is included.
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_watermark_same_second", &Shed::hist_branch());
 
   // Another session recorded this command at second `t`; our search cache
   // doesn't have it yet.
-  let t = 1_721_234_567;
+  let t    = 1_721_234_567;
   hist.insert_raw_for_test("deploy --prod", t);
 
   // Our watermark sits exactly at `t` (e.g. the load snapshot's newest second).
@@ -761,7 +761,7 @@ fn sync_picks_up_command_in_watermark_second() {
 
 #[test]
 fn trim_removes_deleted_commands_not_front_of_cache() {
-  let _g = TestGuard::new();
+  let     _g   = TestGuard::new();
   let mut hist = History::empty("test_trim_match", &Shed::hist_branch());
   hist.set_max_size_for_test(3);
 
@@ -795,7 +795,7 @@ fn trim_removes_deleted_commands_not_front_of_cache() {
 
 #[test]
 fn push_allocates_id_from_db_max_not_stale() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_push_id_alloc", &Shed::hist_branch());
 
   // Another session committed id 100 out of band (row count is 1, max id 100).
@@ -812,7 +812,7 @@ fn push_allocates_id_from_db_max_not_stale() {
 
 #[test]
 fn hist_delete_reids_contiguously() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_reid", &Shed::hist_branch());
   hist.push("cmd1").unwrap();
   hist.push("cmd2").unwrap();
@@ -830,7 +830,7 @@ fn hist_delete_reids_contiguously() {
 
 #[test]
 fn hist_delete_creates_backup() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_backup", &Shed::hist_branch());
   hist.push("echo foo").unwrap();
   hist.push("echo bar").unwrap();
@@ -845,7 +845,7 @@ fn hist_delete_creates_backup() {
 
 #[test]
 fn hist_restore_recovers_deleted_entries() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_restore", &Shed::hist_branch());
   hist.push("echo foo").unwrap();
   hist.push("echo bar").unwrap();
@@ -864,7 +864,7 @@ fn hist_restore_recovers_deleted_entries() {
 
 #[test]
 fn hist_restore_preserves_new_entries() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_restore_new", &Shed::hist_branch());
   hist.push("cmd1").unwrap();
   hist.push("cmd2").unwrap();
@@ -882,7 +882,7 @@ fn hist_restore_preserves_new_entries() {
   assert_eq!(hist.entry_count(), 4);
 
   // all commands should be present, ordered by timestamp
-  let entries = hist.query("ORDER BY id ASC", &[]).unwrap();
+  let entries         = hist.query("ORDER BY id ASC", &[]).unwrap();
   let cmds: Vec<&str> = entries.iter().map(|(_, e)| e.command.as_str()).collect();
   assert!(cmds.contains(&"cmd1"));
   assert!(cmds.contains(&"cmd2"));
@@ -892,7 +892,7 @@ fn hist_restore_preserves_new_entries() {
 
 #[test]
 fn hist_restore_no_backup_errors() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_no_backup", &Shed::hist_branch());
   hist.push("echo foo").unwrap();
 
@@ -901,7 +901,7 @@ fn hist_restore_no_backup_errors() {
 
 #[test]
 fn hist_restore_ids_are_contiguous() {
-  let _g = TestGuard::new();
+  let _g   = TestGuard::new();
   let hist = History::empty("test_restore_ids", &Shed::hist_branch());
   hist.push("cmd1").unwrap();
   hist.push("cmd2").unwrap();
@@ -1009,8 +1009,8 @@ fn alias_no_expand_when_disabled() {
     l.insert_alias("gc", &"git commit".into(), Span::default());
   });
 
-  let prompt = Prompt::default();
-  let mut line = ShedLine::new_no_hist(prompt).unwrap();
+  let     prompt = Prompt::default();
+  let mut line   = ShedLine::new_no_hist(prompt).unwrap();
 
   Shed::term_mut(|t| t.feed_bytes(b"gc "));
   let keys = Shed::term_mut(Terminal::drain_keys);
@@ -1031,8 +1031,8 @@ fn alias_no_inline_expand_when_disabled() {
     l.insert_alias("gc", &"git commit".into(), Span::default());
   });
 
-  let prompt = Prompt::default();
-  let mut line = ShedLine::new_no_hist(prompt).unwrap();
+  let     prompt = Prompt::default();
+  let mut line   = ShedLine::new_no_hist(prompt).unwrap();
 
   Shed::term_mut(|t| t.feed_bytes(b"gc"));
   let keys = Shed::term_mut(Terminal::drain_keys);
@@ -1220,12 +1220,12 @@ hint_test! {
 
 fn test_emacs(initial: &str) -> (ShedLine, TestGuard) {
   Shed::shopts_mut(|o| o.set.vi = false);
-  let g = TestGuard::new();
-  let prompt = Prompt::default();
-  let mut em = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
+  let     g      = TestGuard::new();
+  let     prompt = Prompt::default();
+  let mut em     = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
   // Place cursor at end-of-buffer — matches what a real interactive
   // emacs session looks like just after the user has finished typing.
-  let end = em.core.editor.to_string().chars().count();
+  let     end    = em.core.editor.to_string().chars().count();
   em.core.editor.edit(|e| e.set_cursor_from_flat(end));
   (em, g)
 }
@@ -1328,9 +1328,9 @@ mod handle_completion_key {
   use crate::readline::complete::{Candidate, FuzzyCompleter};
 
   fn fresh_line(initial: &str) -> (ShedLine, TestGuard) {
-    let g = TestGuard::new();
+    let g      = TestGuard::new();
     let prompt = Prompt::default();
-    let line = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
+    let line   = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
     (line, g)
   }
 
@@ -1446,7 +1446,7 @@ mod handle_completion_key {
     // returns Dismiss when Enter is pressed → handle_completion_key
     // clears completer.
     let (mut line, _g) = fresh_line("");
-    let comp = FuzzyCompleter::default(); // no candidates activated
+    let comp           = FuzzyCompleter::default(); // no candidates activated
     line.completer = Some(Box::new(comp));
     let ret = line.handle_completion_key(&key!(Enter)).unwrap();
     assert!(ret);
@@ -1654,9 +1654,9 @@ mod handle_hist_search_key {
   use crate::readline::complete::{Candidate, FuzzySelector};
 
   fn fresh_line() -> (ShedLine, TestGuard) {
-    let g = TestGuard::new();
+    let g      = TestGuard::new();
     let prompt = Prompt::default();
-    let line = ShedLine::new_no_hist(prompt).unwrap();
+    let line   = ShedLine::new_no_hist(prompt).unwrap();
     (line, g)
   }
 
@@ -1776,10 +1776,10 @@ mod handle_key_dispatch {
 
   fn fresh_emacs(initial: &str) -> (ShedLine, TestGuard) {
     Shed::shopts_mut(|o| o.set.vi = false);
-    let g = TestGuard::new();
-    let prompt = Prompt::default();
-    let mut line = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
-    let end = line.core.editor.to_string().chars().count();
+    let     g      = TestGuard::new();
+    let     prompt = Prompt::default();
+    let mut line   = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
+    let     end    = line.core.editor.to_string().chars().count();
     line.core.editor.edit(|e| e.set_cursor_from_flat(end));
     (line, g)
   }
@@ -1789,7 +1789,7 @@ mod handle_key_dispatch {
   #[test]
   fn ctrl_d_on_empty_buffer_returns_eof() {
     let (mut line, _g) = fresh_emacs("");
-    let res = line.handle_key(&key!(Ctrl + 'd')).unwrap();
+    let res            = line.handle_key(&key!(Ctrl + 'd')).unwrap();
     assert!(matches!(res, Some(ReadlineEvent::Eof)));
   }
 
@@ -1835,7 +1835,7 @@ mod handle_key_dispatch {
     // submit() should return ReadlineEvent::Line("") for an empty
     // buffer (the loop layer handles the empty case).
     let (mut line, _g) = fresh_emacs("");
-    let res = line.handle_key(&key!(Enter)).unwrap();
+    let res            = line.handle_key(&key!(Enter)).unwrap();
     match res {
       Some(ReadlineEvent::Line(s)) => assert_eq!(s, ""),
       other => panic!("expected Line(\"\"), got {other:?}"),
@@ -1845,7 +1845,7 @@ mod handle_key_dispatch {
   #[test]
   fn enter_on_simple_command_submits_line() {
     let (mut line, _g) = fresh_emacs("echo hi");
-    let res = line.handle_key(&key!(Enter)).unwrap();
+    let res            = line.handle_key(&key!(Enter)).unwrap();
     match res {
       Some(ReadlineEvent::Line(s)) => assert_eq!(s, "echo hi"),
       other => panic!("expected Line(\"echo hi\"), got {other:?}"),
@@ -1857,8 +1857,8 @@ mod handle_key_dispatch {
   #[test]
   fn typing_a_char_grows_buffer_returns_none() {
     let (mut line, _g) = fresh_emacs("");
-    let key = KeyEvent(KeyCode::Char('x'), ModKeys::NONE);
-    let res = line.handle_key(&key).unwrap();
+    let key            = KeyEvent(KeyCode::Char('x'), ModKeys::NONE);
+    let res            = line.handle_key(&key).unwrap();
     assert!(res.is_none());
     assert_eq!(line.core.editor.to_string(), "x");
   }
@@ -1919,7 +1919,7 @@ mod readline_mod_coverage {
     // Covers should_grab_history (LineUp + col 0) and scroll_history
     // (entry-loaded branch). Buffer starts empty, Up arrow should
     // replace it with the most recent history entry.
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut ed = simple_editor_with_history(&["first", "second"]);
     ed.handle_key(KeyEvent(KeyCode::Up, ModKeys::NONE)).unwrap();
     assert_eq!(ed.buf.to_string(), "second");
@@ -1928,7 +1928,7 @@ mod readline_mod_coverage {
   #[test]
   fn simple_editor_down_on_last_line_restores_pending() {
     // After scrolling up then down past pending, pending is restored.
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut ed = simple_editor_with_history(&["first", "second"]);
     // Seed pending with current buffer content
     ed.buf.set_buffer("pending_input");
@@ -1943,7 +1943,7 @@ mod readline_mod_coverage {
   #[test]
   fn simple_editor_ctrl_d_on_empty_resolves_to_endoffile() {
     // Covers the EndOfFile branch of handle_key's Ctrl+D resolution.
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut ed = SimpleEditor::new(None);
     // Empty buffer + Ctrl+D → resolves to EndOfFile, lines.clear() runs
     ed.handle_key(key!(Ctrl + 'd')).unwrap();
@@ -1953,7 +1953,7 @@ mod readline_mod_coverage {
   #[test]
   fn simple_editor_ctrl_d_on_nonempty_resolves_to_delete() {
     // Covers the Delete branch of handle_key's Ctrl+D resolution.
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut ed = SimpleEditor::new(None);
     ed.buf.set_buffer("hello");
     ed.buf.set_cursor_from_flat(0);
@@ -1974,9 +1974,9 @@ mod readline_mod_coverage {
 
   #[test]
   fn statline_new_reads_shopt_strings() {
-    let _g = TestGuard::new();
-    let mut sl = with_statline_strings("LEFT", "MID", "RIGHT", StatusLine::new);
-    let (l, m, r) = sl.parts();
+    let     _g        = TestGuard::new();
+    let mut sl        = with_statline_strings("LEFT", "MID", "RIGHT", StatusLine::new);
+    let     (l, m, r) = sl.parts();
     assert_eq!(l, "LEFT");
     assert_eq!(m, "MID");
     assert_eq!(r, "RIGHT");
@@ -1984,9 +1984,9 @@ mod readline_mod_coverage {
 
   #[test]
   fn statline_render_pads_between_parts_when_room() {
-    let _g = TestGuard::new();
-    let mut sl = with_statline_strings("L", "M", "R", StatusLine::new);
-    let out = sl.render(11);
+    let     _g  = TestGuard::new();
+    let mut sl  = with_statline_strings("L", "M", "R", StatusLine::new);
+    let     out = sl.render(11);
     // Lengths: L=1, M=1, R=1, leftover = 11 - 3 = 8.
     // pad_lm = 4, pad_mr = 4 → "L    M    R" (11 cols).
     assert_eq!(out, "L    M    R");
@@ -1995,9 +1995,9 @@ mod readline_mod_coverage {
 
   #[test]
   fn statline_render_truncates_middle_when_too_narrow() {
-    let _g = TestGuard::new();
-    let mut sl = with_statline_strings("", "MIDDLE_TEXT", "R", StatusLine::new);
-    let out = sl.render(6);
+    let     _g  = TestGuard::new();
+    let mut sl  = with_statline_strings("", "MIDDLE_TEXT", "R", StatusLine::new);
+    let     out = sl.render(6);
     // Right takes 1 col → 5 left for middle → middle gets ellipsis-truncated.
     assert!(out.ends_with('R'), "render = {out:?}");
     // The truncated middle should not contain the full word.
@@ -2006,9 +2006,9 @@ mod readline_mod_coverage {
 
   #[test]
   fn statline_refresh_marks_dirty_and_parts_refreshes() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut sl = with_statline_strings("A", "B", "C", StatusLine::new);
-    let _ = sl.parts(); // prime
+    let     _  = sl.parts(); // prime
     // Change the underlying shopt; parts() shouldn't see it yet.
     Shed::shopts_mut(|o| o.statline.left_string = "Z".to_string());
     {
@@ -2041,10 +2041,10 @@ mod readline_mod_coverage {
 
   #[test]
   fn prompt_new_falls_back_to_default_when_ps1_unset() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     // PS1 should be unset for this test (TestGuard clears env).
-    let _ = Shed::vars_mut(|v| v.unset_var("PS1"));
-    let mut p = Prompt::new();
+    let     _  = Shed::vars_mut(|v| v.unset_var("PS1"));
+    let mut p  = Prompt::new();
     // Default PS1 expands; it's non-empty.
     assert!(!p.get_ps1().is_empty());
     assert!(p.psr_expanded.is_none());
@@ -2054,17 +2054,17 @@ mod readline_mod_coverage {
 
   fn fresh_emacs_line() -> (ShedLine, TestGuard) {
     Shed::shopts_mut(|o| o.set.vi = false);
-    let g = TestGuard::new();
+    let g      = TestGuard::new();
     let prompt = Prompt::default();
-    let line = ShedLine::new_no_hist(prompt).unwrap();
+    let line   = ShedLine::new_no_hist(prompt).unwrap();
     (line, g)
   }
 
   #[test]
   fn reset_active_widget_with_completer_keeps_it_active_and_marks_redraw() {
     use crate::readline::complete::{Candidate, FuzzyCompleter};
-    let (mut line, _g) = fresh_emacs_line();
-    let mut comp = FuzzyCompleter::default();
+    let     (mut line, _g) = fresh_emacs_line();
+    let mut comp           = FuzzyCompleter::default();
     comp
       .selector
       .activate(vec![Candidate::from("alpha".to_string())]);
@@ -2096,10 +2096,10 @@ mod readline_mod_coverage {
     // StartOfLine binding for Ctrl+A so that pressing it goes to EOL.
     Shed::logic_mut(|l| {
       l.insert_keymap(KeyMap {
-        flags: KeyMapFlags::EMACS,
-        keys: "<C-a>".into(),
+        flags : KeyMapFlags::EMACS,
+        keys  : "<C-a>".into(),
         action: "<C-e>".into(),
-        remap: false,
+        remap : false,
       });
     });
     line.handle_keymap(&key!(Ctrl + 'a')).unwrap();
@@ -2291,7 +2291,7 @@ mod readline_mod_coverage {
     // future refactor that fixes the count plumbing fails this assertion
     // intentionally.
     let (mut vi, _g) = test_vi("one two three four five");
-    let keys = expand_keymap("<Esc>0dw3.");
+    let keys         = expand_keymap("<Esc>0dw3.");
     vi.process_input(keys).unwrap();
     assert_eq!(vi.core.editor.to_string(), "three four five");
   }
@@ -2312,10 +2312,10 @@ mod keymap_implied_submit {
   fn register(keys: &str, action: &str) {
     Shed::logic_mut(|l| {
       l.insert_keymap(KeyMap {
-        flags: KeyMapFlags::NORMAL,
-        keys: keys.into(),
+        flags : KeyMapFlags::NORMAL,
+        keys  : keys.into(),
         action: action.into(),
-        remap: false,
+        remap : false,
       });
     });
   }
@@ -2357,10 +2357,10 @@ mod normal_command_mappings {
   fn register(keys: &str, action: &str) {
     Shed::logic_mut(|l| {
       l.insert_keymap(KeyMap {
-        flags: KeyMapFlags::NORMAL,
-        keys: keys.into(),
+        flags : KeyMapFlags::NORMAL,
+        keys  : keys.into(),
         action: action.into(),
-        remap: false,
+        remap : false,
       });
     });
   }

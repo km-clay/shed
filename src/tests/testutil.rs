@@ -42,7 +42,7 @@ macro_rules! assert_output {
 #[macro_export]
 macro_rules! assert_output_bytes {
   ($guard:expr, $expected:expr) => {{
-    let output = $guard.read_output_bytes();
+    let output          = $guard.read_output_bytes();
     let expected: &[u8] = $expected;
     assert_eq!(output, expected);
   }};
@@ -155,8 +155,8 @@ impl Drop for FuncScope {
 
 pub(crate) struct TestGuard {
   redir_guard: Option<RedirGuard>,
-  old_cwd: PathBuf,
-  saved_env: HashMap<String, String>,
+  old_cwd    : PathBuf,
+  saved_env  : HashMap<String, String>,
 
   pty_slave: Option<OwnedFd>,
   pty_master: Option<OwnedFd>,
@@ -172,10 +172,10 @@ impl TestGuard {
   pub(crate) fn new() -> Self {
     db::register_fork_marker();
     let pty = openpty(None, None).unwrap();
-    let (pty_master, pty_slave) = (pty.master, pty.slave);
-    let master_raw = pty_master.as_raw_fd();
+    let     (pty_master, pty_slave) = (pty.master, pty.slave);
+    let     master_raw              = pty_master.as_raw_fd();
 
-    let mut attrs = tcgetattr(&pty_slave).unwrap();
+    let mut attrs                   = tcgetattr(&pty_slave).unwrap();
     attrs.output_flags &= !OutputFlags::ONLCR;
     tcsetattr(&pty_slave, SetArg::TCSANOW, &attrs).unwrap();
 
@@ -185,13 +185,13 @@ impl TestGuard {
     // will cause the test to hang if we try to do everything on one thread.
     // if we attempt to do this synchronously, we have to do both the reading and the writing.
     // we can't read if we're blocked on writing to a full pty buffer.
-    let output = Arc::new((Mutex::new(vec![]), Condvar::new()));
+    let output       = Arc::new((Mutex::new(vec![]), Condvar::new()));
     let output_clone = Arc::clone(&output);
-    let reader_done = Arc::new(AtomicBool::new(false));
-    let done_clone = Arc::clone(&reader_done);
+    let reader_done  = Arc::new(AtomicBool::new(false));
+    let done_clone   = Arc::clone(&reader_done);
     let read_handle = std::thread::spawn(move || {
-      let mut buf = [0u8; 4096];
-      let master = unsafe { BorrowedFd::borrow_raw(master_raw) };
+      let mut buf    = [0u8; 4096];
+      let     master = unsafe { BorrowedFd::borrow_raw(master_raw) };
       loop {
         let mut fds = [PollFd::new(master, PollFlags::POLLIN)];
         match poll(&mut fds, PollTimeout::from(250u16)) {
@@ -221,7 +221,7 @@ impl TestGuard {
             }
           }
           Err(Errno::EINTR) => (), // a signal interrupted poll; retry
-          Err(_) => break,
+          Err(_)            => break,
         }
       }
     });
@@ -236,8 +236,8 @@ impl TestGuard {
     .into();
     let redir_guard = Sinks::apply_set(&redirs).unwrap();
 
-    let old_cwd = env::current_dir().unwrap();
-    let saved_env = env::vars().collect();
+    let old_cwd     = env::current_dir().unwrap();
+    let saved_env   = env::vars().collect();
     state::Shed::save_state();
     let scrub_keys = [
       "SHED_HPATH",
@@ -348,13 +348,13 @@ impl TestGuard {
       let _ = nix::unistd::write(slave.as_fd(), TEST_OUTPUT_SENTINEL);
     }
 
-    let (mu, cv) = &*self.output;
-    let mut buf = mu.lock().unwrap();
+    let     (mu, cv) = &*self.output;
+    let mut buf      = mu.lock().unwrap();
 
     // 2-second deadline is a "your test deadlocked" backstop, not a
     // tuning knob. In normal operation we exit as soon as the sentinel
     // arrives (typically sub-millisecond).
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let     deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     while find_subsequence(&buf, TEST_OUTPUT_SENTINEL).is_none() {
       let now = std::time::Instant::now();
       if now >= deadline {
@@ -368,7 +368,7 @@ impl TestGuard {
     let sentinel_pos = find_subsequence(&buf, TEST_OUTPUT_SENTINEL);
     let (end, drain_to) = match sentinel_pos {
       Some(pos) => (pos, pos + TEST_OUTPUT_SENTINEL.len()),
-      None => (buf.len(), buf.len()),
+      None      => (buf.len(), buf.len()),
     };
     let res = buf[..end].to_vec();
     buf.drain(..drain_to);
@@ -431,11 +431,11 @@ impl Ast {
     &self,
     expected: &mut impl Iterator<Item = NdKind>,
   ) -> Result<(), String> {
-    let root = self.get_root().expect("assert_structure: AST has no root");
+    let     root           = self.get_root().expect("assert_structure: AST has no root");
     let mut full_structure = vec![];
-    let mut before = vec![];
-    let mut after = vec![];
-    let mut offender = None;
+    let mut before         = vec![];
+    let mut after          = vec![];
+    let mut offender       = None;
 
     self.walk_tree(root, &mut |id, tree| {
       let expected_rule = expected.next();

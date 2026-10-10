@@ -25,8 +25,8 @@ impl Builtin for HistBranch {
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let force_delete = args.has_opt("force-delete");
-    let delete = force_delete || args.has_opt("delete");
-    let name = args.arguments().next();
+    let delete       = force_delete || args.has_opt("delete");
+    let name         = args.arguments().next();
 
     if delete {
       let Some((name, span)) = name else {
@@ -44,7 +44,7 @@ impl Builtin for HistBranch {
       status_msg!("hist: created branch {name}");
     } else {
       // no argument, list branches instead
-      let hist = open_history(args.cmd_span(), false, false)?;
+      let hist    = open_history(args.cmd_span(), false, false)?;
       let current = Shed::hist_branch();
       for b in hist.list_branches()? {
         let marker = if b == current { "* " } else { "  " };

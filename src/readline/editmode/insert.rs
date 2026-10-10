@@ -15,9 +15,9 @@ use super::{
 
 #[derive(Default, Debug)]
 pub(crate) struct ViInsert {
-  cmds: Vec<EditCmd>,
-  normal: Option<ViNormal>,
-  pending_cmd: EditCmd,
+  cmds        : Vec<EditCmd>,
+  normal      : Option<ViNormal>,
+  pending_cmd : EditCmd,
   repeat_count: u16,
 }
 
@@ -104,10 +104,10 @@ impl EditMode for ViInsert {
       }
       E(K::ExMode, _) => Some(EditCmd {
         register: RegisterName::default(),
-        verb: Some(verb!(Verb::ExMode)),
-        motion: None,
-        raw_seq: String::new(),
-        flags: CmdFlags::default(),
+        verb    : Some(verb!(Verb::ExMode)),
+        motion  : None,
+        raw_seq : String::new(),
+        flags   : CmdFlags::default(),
       }),
       E(K::Verbatim(seq), _) => {
         self

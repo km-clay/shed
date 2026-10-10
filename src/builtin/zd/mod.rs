@@ -33,9 +33,10 @@ use list::ZdList;
 use remove::ZdRemove;
 
 pub(super) struct Zd;
-#[rustfmt::skip]
 impl BuiltinRouter for Zd {
-  fn name(&self) -> &'static str { "zd" }
+  fn name(&self) -> &'static str {
+    "zd"
+  }
 
   fn default_sub(&self) -> Option<&'static dyn Builtin> {
     Some(&ZdJump)
@@ -66,10 +67,10 @@ impl BuiltinRouter for Zd {
 }
 
 pub(super) struct DirStat {
-  path: String,
-  visits: i64,
+  path      : String,
+  visits    : i64,
   last_visit: i64,
-  frecency: i32,
+  frecency  : i32,
 }
 
 pub(super) fn query_dir_stats(conn: &Connection) -> Vec<DirStat> {
@@ -116,16 +117,16 @@ pub(super) fn load_dir_stats() -> Vec<DirStat> {
 /// the underline lands on (e.g.) the "dev" in ".../dev-shells" rather than being
 /// smeared across parent segments. Falls back to the default full-path match.
 pub(super) fn highlight_dir(display: &str, query: &str) -> Option<Vec<usize>> {
-  let base = Path::new(display).file_name()?.to_str()?;
+  let base      = Path::new(display).file_name()?.to_str()?;
   // char offset of the basename within the display string (positions are chars).
-  let offset = display.chars().count() - base.chars().count();
+  let offset    = display.chars().count() - base.chars().count();
   let positions = readline::match_positions(base, query);
   (!positions.is_empty()).then(|| positions.into_iter().map(|p| p + offset).collect())
 }
 
 pub(super) fn fuzzy_score_dir(cand: &Candidate, chars: &[char], penalize_len_diff: bool) -> i32 {
   let content = cand.content();
-  let path = Path::new(content);
+  let path    = Path::new(content);
 
   // An exact path match is unambiguous, so it always wins. This breaks ties like
   // "/home/me" vs "/home/me/projects" for the query "/home/me", where the matched
@@ -139,7 +140,7 @@ pub(super) fn fuzzy_score_dir(cand: &Candidate, chars: &[char], penalize_len_dif
   // parent directories. Double-counting the basename is the point.
   if let Some(base) = path.file_name().and_then(|b| b.to_str()) {
     let base_score = readline::fuzzy_match_score(&base.into(), chars, penalize_len_diff);
-    let full = readline::fuzzy_match_score(cand, chars, penalize_len_diff);
+    let full       = readline::fuzzy_match_score(cand, chars, penalize_len_diff);
     if base_score > i32::MIN && full > i32::MIN {
       return full.saturating_add(base_score);
     }
@@ -186,8 +187,8 @@ pub(super) fn collect_subdirs(root: &Path, depth: Option<usize>, out: &mut Vec<S
 /// frequent directories rank highest; old ones keep a small baseline weight.
 pub(super) fn dir_frecency(visits: i64, age_secs: i64) -> i32 {
   let factor = match age_secs {
-    s if s < 3_600 => 4,   // within the hour
-    s if s < 86_400 => 3,  // within the day
+    s if s < 3_600   => 4, // within the hour
+    s if s < 86_400  => 3, // within the day
     s if s < 604_800 => 2, // within the week
     _ => 1,
   };

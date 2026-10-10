@@ -94,7 +94,7 @@ mod shell_intro_2_1 {
 
   #[test]
   fn test_input_script() {
-    let g = TestGuard::new();
+    let     g    = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "echo hello world; echo $1 $2").unwrap();
     let input = input::read_script(file.path()).unwrap();
@@ -104,7 +104,7 @@ mod shell_intro_2_1 {
 
   #[test]
   fn test_input_dash_c() {
-    let g = TestGuard::new();
+    let g    = TestGuard::new();
     let args = vec!["foo".into(), "bar".into(), "biz".into()];
     exec_dash_c("echo hello world; echo $0 $1 $2", args).unwrap();
     assert_output!(g, "hello world\nfoo bar biz\n");
@@ -171,7 +171,7 @@ mod shell_intro_2_1 {
 
   #[test]
   fn dash_c_star_expansion_quoted_joins_with_ifs() {
-    let g = TestGuard::new();
+    let g    = TestGuard::new();
     let args = vec!["s".into(), "a".into(), "b".into(), "c".into()];
     exec_dash_c("echo \"$*\"", args.clone()).unwrap();
     assert_output!(g, "a b c\n");
@@ -245,10 +245,10 @@ mod shell_intro_2_1 {
 
   #[test]
   fn script_dollar_zero_is_path() {
-    let g = TestGuard::new();
+    let     g    = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "echo $0").unwrap();
-    let path = file.path().to_path_buf();
+    let path  = file.path().to_path_buf();
     let input = input::read_script(&path).unwrap();
     input::run_script(input, &path, vec![]).unwrap();
     assert_output!(g, "{}\n", path.display());
@@ -256,7 +256,7 @@ mod shell_intro_2_1 {
 
   #[test]
   fn script_arg_count() {
-    let g = TestGuard::new();
+    let     g    = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "echo $#").unwrap();
     let input = input::read_script(file.path()).unwrap();
@@ -266,7 +266,7 @@ mod shell_intro_2_1 {
 
   #[test]
   fn script_at_expansion_quoted_preserves_arg_boundaries() {
-    let g = TestGuard::new();
+    let     g    = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "for x in \"$@\"; do echo $x; done").unwrap();
     let input = input::read_script(file.path()).unwrap();
@@ -276,7 +276,7 @@ mod shell_intro_2_1 {
 
   #[test]
   fn script_empty_arg_preserved() {
-    let g = TestGuard::new();
+    let     g    = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "echo $#:$1:$2:$3").unwrap();
     let input = input::read_script(file.path()).unwrap();
@@ -291,7 +291,7 @@ mod shell_intro_2_1 {
 
   #[test]
   fn script_args_not_re_expanded() {
-    let g = TestGuard::new();
+    let     g    = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "echo $1").unwrap();
     let input = input::read_script(file.path()).unwrap();
@@ -301,7 +301,7 @@ mod shell_intro_2_1 {
 
   #[test]
   fn script_shift_advances_positional() {
-    let g = TestGuard::new();
+    let     g    = TestGuard::new();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     writeln!(file, "shift; echo $1 $#").unwrap();
     let input = input::read_script(file.path()).unwrap();
@@ -315,7 +315,7 @@ mod shell_intro_2_1 {
   fn dash_c_parse_error_returns_ok() {
     // Unbalanced quote → ParsedSrc::parse_src returns Err; exec_dash_c
     // prints the errors but returns Ok(()) regardless.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let res = exec_dash_c("echo 'unterminated", vec!["s".into()]);
     assert!(res.is_ok());
   }
@@ -1550,8 +1550,8 @@ mod redirection_2_7 {
     #[test]
     fn noclobber_prevents_overwrite() {
       // noclobber causes > to return a Rust-level Err, so we can't use test_files! here
-      let mut g = crate::tests::testutil::TestGuard::new();
-      let dir = g.in_temp_dir();
+      let mut g   = crate::tests::testutil::TestGuard::new();
+      let     dir = g.in_temp_dir();
       crate::eval::execute::exec_nonint(
         "echo original > protected.txt; set -C; echo new > protected.txt".into(),
         Some("test_input".into()),

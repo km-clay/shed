@@ -45,7 +45,7 @@ impl super::Dispatcher {
     let mut new_env_vars = vec![];
     let mut flags = match behavior {
       AssignBehavior::Export => VarFlags::EXPORT,
-      AssignBehavior::Set => VarFlags::empty(),
+      AssignBehavior::Set    => VarFlags::empty(),
     };
     if Shed::shopts(|o| o.set.allexport) {
       flags = VarFlags::EXPORT;
@@ -56,15 +56,15 @@ impl super::Dispatcher {
     for assign_id in assigns {
       let assign = &tree[*assign_id];
       let is_arr = assign.flags.contains(NdFlags::ARR_ASSIGN);
-      let span = tree[assign.span];
+      let span   = tree[assign.span];
 
       let NdRule::Assignment { kind, var, val } = &assign.class else {
         unreachable!()
       };
       let old_status = Shed::get_status();
 
-      let var_name = &tree[*var].span.slice();
-      let var_name = &var_name.to_str_lossy();
+      let var_name   = &tree[*var].span.slice();
+      let var_name   = &var_name.to_str_lossy();
 
       let is_integer = !is_arr
         && Shed::vars(|v| v.get_var_flags(var_name)).is_some_and(|f| f.contains(VarFlags::INTEGER));
@@ -99,11 +99,11 @@ impl super::Dispatcher {
 
       if trace {
         let op = match kind {
-          AssignKind::Eq => "=",
-          AssignKind::PlusEq => "+=",
+          AssignKind::Eq      => "=",
+          AssignKind::PlusEq  => "+=",
           AssignKind::MinusEq => "-=",
-          AssignKind::MultEq => "*=",
-          AssignKind::DivEq => "/=",
+          AssignKind::MultEq  => "*=",
+          AssignKind::DivEq   => "/=",
         };
         // Arrays render as `(a b c)`, matching bash's trace; scalars/ints use
         // their plain value.
@@ -144,8 +144,8 @@ impl super::Dispatcher {
                 return Ok(false);
               };
               match &val {
-                VarKind::Int(n) => items.push_back(n.to_string().into()),
-                VarKind::Str(s) => items.push_back(s.clone()),
+                VarKind::Int(n)     => items.push_back(n.to_string().into()),
+                VarKind::Str(s)     => items.push_back(s.clone()),
                 VarKind::Arr(other) => items.extend(other.iter().cloned()),
                 VarKind::Magic(n) => {
                   if let Some(s) = n() {
@@ -195,11 +195,11 @@ impl super::Dispatcher {
           };
 
           let op_name = match op {
-            AssignKind::PlusEq => "add to",
+            AssignKind::PlusEq  => "add to",
             AssignKind::MinusEq => "subtract from",
-            AssignKind::MultEq => "multiply",
-            AssignKind::DivEq => "divide",
-            AssignKind::Eq => unreachable!(),
+            AssignKind::MultEq  => "multiply",
+            AssignKind::DivEq   => "divide",
+            AssignKind::Eq      => unreachable!(),
           };
 
           let parse_rhs = |span: Span| -> ShResult<i32> {
@@ -236,15 +236,15 @@ impl super::Dispatcher {
                 let other = val.to_string();
                 *s = format!("{}{other}", s.to_str_lossy()).into();
               } else {
-                let n = s.to_str_lossy().parse::<i32>().map_err(
-                  |_| sherr!(InvalidAssignment @ span, "cannot {op_name} string variable"),
-                )?;
+                let n = s.to_str_lossy().parse::<i32>().map_err(|_| {
+                  sherr!(InvalidAssignment @ span, "cannot {op_name} string variable")
+                })?;
                 let other = parse_rhs(span)?;
                 check_div_zero(other, span)?;
                 *s = match op {
                   AssignKind::MinusEq => (n - other).to_string().into(),
-                  AssignKind::MultEq => (n * other).to_string().into(),
-                  AssignKind::DivEq => (n / other).to_string().into(),
+                  AssignKind::MultEq  => (n * other).to_string().into(),
+                  AssignKind::DivEq   => (n / other).to_string().into(),
                   _ => unreachable!(),
                 };
               }
@@ -253,18 +253,18 @@ impl super::Dispatcher {
               let other = parse_rhs(span)?;
               check_div_zero(other, span)?;
               match op {
-                AssignKind::PlusEq => *n += other,
+                AssignKind::PlusEq  => *n += other,
                 AssignKind::MinusEq => *n -= other,
-                AssignKind::MultEq => *n *= other,
-                AssignKind::DivEq => *n /= other,
-                AssignKind::Eq => unreachable!(),
+                AssignKind::MultEq  => *n *= other,
+                AssignKind::DivEq   => *n /= other,
+                AssignKind::Eq      => unreachable!(),
               }
             }
             VarKind::Arr(items) => {
               if matches!(op, AssignKind::PlusEq) {
                 match &val {
-                  VarKind::Int(n) => items.push_back(n.to_string().into()),
-                  VarKind::Str(s) => items.push_back(s.clone()),
+                  VarKind::Int(n)     => items.push_back(n.to_string().into()),
+                  VarKind::Str(s)     => items.push_back(s.clone()),
                   VarKind::Arr(other) => items.extend(other.clone()),
                   VarKind::Magic(n) => {
                     if let Some(s) = n() {

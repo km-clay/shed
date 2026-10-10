@@ -48,7 +48,7 @@ impl Grapheme {
   }
   pub(crate) fn len_utf8(&self) -> usize {
     match self {
-      Grapheme::Single(ch) => ch.len_utf8(),
+      Grapheme::Single(ch)       => ch.len_utf8(),
       Grapheme::Cluster(cluster) => cluster.chars().map(char::len_utf8).sum(),
     }
   }
@@ -112,7 +112,7 @@ impl From<&String> for Grapheme {
 impl Display for Grapheme {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
-      Grapheme::Single(ch) => write!(f, "{ch}"),
+      Grapheme::Single(ch)       => write!(f, "{ch}"),
       Grapheme::Cluster(cluster) => write!(f, "{cluster}"),
     }
   }
@@ -213,7 +213,7 @@ impl Lines {
     self.0
   }
   pub(crate) fn to_lines(s: &str) -> Lines {
-    let s = s.to_string();
+    let     s          = s.to_string();
     let mut new: Lines = s.split('\n').map(to_graphemes).map(Line::from).collect();
     new.push_empty();
     new
@@ -236,7 +236,7 @@ impl Lines {
   }
 
   pub(crate) fn split_lines_at(&mut self, pos: Pos) -> Lines {
-    let tail = self[pos.row].split_off(pos.col);
+    let     tail        = self[pos.row].split_off(pos.col);
     let mut rest: Lines = self.drain(pos.row + 1..).collect();
     rest.insert(0, tail);
     self.push_empty();
@@ -244,7 +244,7 @@ impl Lines {
   }
 
   pub(crate) fn split_lines(mut self, pos: Pos) -> (Lines, Lines) {
-    let tail = self[pos.row].split_off(pos.col);
+    let     tail        = self[pos.row].split_off(pos.col);
     let mut rest: Lines = self.drain(pos.row + 1..).collect();
     self.push_empty();
     rest.insert(0, tail);
@@ -519,8 +519,8 @@ mod tests {
 
   #[test]
   fn line_insert_str_at_end() {
-    let mut l = line("hello");
-    let end = l.len();
+    let mut l   = line("hello");
+    let     end = l.len();
     l.insert_str(end, " world");
     assert_eq!(l.to_string(), "hello world");
   }
@@ -570,9 +570,9 @@ mod tests {
   #[test]
   fn attach_lines_into_empty_self_takes_other_contents() {
     // Truly empty Lines (vec![]), not the Default which has one empty line.
-    let mut sink = Lines(vec![]);
-    let mut other = Lines::to_lines("hello\nworld");
-    let other_len_before = other.len();
+    let mut sink             = Lines(vec![]);
+    let mut other            = Lines::to_lines("hello\nworld");
+    let     other_len_before = other.len();
     sink.attach_lines(&mut other);
 
     // push_empty only fires if self is still empty after append; here other
@@ -585,7 +585,7 @@ mod tests {
 
   #[test]
   fn attach_lines_early_returns_when_other_is_empty() {
-    let mut sink = lines_from(&["foo"]);
+    let mut sink  = lines_from(&["foo"]);
     let mut other = Lines(vec![]);
     sink.attach_lines(&mut other);
     assert_eq!(sink.join(), "foo");
@@ -661,9 +661,9 @@ mod tests {
   #[test]
   fn from_impls_produce_equivalent_results() {
     // All four Grapheme From impls should produce the same single-char Grapheme.
-    let g_char = Grapheme::from('A');
-    let g_str = Grapheme::from("A");
-    let g_string = Grapheme::from(String::from("A"));
+    let g_char       = Grapheme::from('A');
+    let g_str        = Grapheme::from("A");
+    let g_string     = Grapheme::from(String::from("A"));
     let g_string_ref = Grapheme::from(&String::from("A"));
     assert_eq!(g_char, g_str);
     assert_eq!(g_str, g_string);

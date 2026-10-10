@@ -18,7 +18,7 @@ impl Builtin for ZdAdd {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let depth = match args.opt_value("depth") {
       Some(n) => match n.to_str_lossy().parse::<usize>() {
-        Ok(n) => Some(n),
+        Ok(n)  => Some(n),
         Err(_) => return Err(sherr!(ParseErr @ args.span(), "invalid depth: {n}")),
       },
       None => None,

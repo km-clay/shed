@@ -24,9 +24,9 @@ use super::{
 
 #[expect(clippy::needless_pass_by_value)]
 fn get_mode(mode: VarStr) -> ShResult<stat::mode_t> {
-  let spec = mode.to_str_lossy();
+  let spec   = mode.to_str_lossy();
   let digits = spec.strip_prefix("0o").unwrap_or(&spec);
-  let octal = u32::from_str_radix(digits, 8).ok().filter(|&n| n <= 0o7777);
+  let octal  = u32::from_str_radix(digits, 8).ok().filter(|&n| n <= 0o7777);
 
   let mode = match octal {
     Some(octal) => octal,
@@ -47,14 +47,13 @@ fn get_mode(mode: VarStr) -> ShResult<stat::mode_t> {
 }
 
 pub(super) struct MkDir;
-#[rustfmt::skip]
 impl Builtin for MkDir {
-  fn strict_opts(&self) -> bool { true }
+  fn strict_opts(&self) -> bool {
+    true
+  }
 
   fn opts(&self) -> Vec<OptSpec> {
-    vec![
-      opt!("mode" | b'm', 1)
-    ]
+    vec![opt!("mode" | b'm', 1)]
   }
   #[allow(clippy::useless_conversion)]
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
@@ -64,11 +63,12 @@ impl Builtin for MkDir {
       );
     }
 
-    let mut status = 0;
-    let arguments = args.arguments();
+    let mut status         = 0;
+    let     arguments      = args.arguments();
 
-    let mode_specified = args.has_opt("mode");
-    let mode: stat::mode_t = args.opt_value("mode")
+    let     mode_specified = args.has_opt("mode");
+    let mode: stat::mode_t = args
+      .opt_value("mode")
       .map(get_mode)
       .transpose()
       .option_promote(args.opt_span("mode"))?
@@ -99,10 +99,12 @@ impl Builtin for MkDir {
 
         err.print_error();
         status = 1;
-        continue
+        continue;
       }
 
-      if mode_specified && let Err(e) = std::fs::set_permissions(path, Permissions::from_mode(mode.into())) {
+      if mode_specified
+        && let Err(e) = std::fs::set_permissions(path, Permissions::from_mode(mode.into()))
+      {
         let err = chmod::handle_err(e, dir)
           .with_note("the directory was created; only its mode could not be set".into())
           .promote(d_span);

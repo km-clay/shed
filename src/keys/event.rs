@@ -15,9 +15,9 @@ pub(crate) struct KeyEvent(pub KeyCode, pub ModKeys);
 
 impl KeyEvent {
   pub(crate) fn as_vim_seq(&self) -> VarStr {
-    let mut seq = util::scratch_buf();
-    let KeyEvent(event, mods) = self;
-    let mut needs_angle_bracket = false;
+    let mut seq                   = util::scratch_buf();
+    let     KeyEvent(event, mods) = self;
+    let mut needs_angle_bracket   = false;
 
     if mods.contains(ModKeys::CTRL) {
       seq.extend_from_slice(b"C-");
@@ -105,8 +105,8 @@ impl KeyEvent {
       clk @ (KeyCode::MiddleClick(x, y) | KeyCode::RightClick(x, y) | KeyCode::LeftClick(x, y)) => {
         let name = match clk {
           KeyCode::MiddleClick(_, _) => "MiddleClick",
-          KeyCode::RightClick(_, _) => "RightClick",
-          KeyCode::LeftClick(_, _) => "LeftClick",
+          KeyCode::RightClick(_, _)  => "RightClick",
+          KeyCode::LeftClick(_, _)   => "LeftClick",
           _ => unreachable!(),
         };
         let click_display = varstr!("{name}({x},{y})");
@@ -232,7 +232,7 @@ bitflags::bitflags! {
 impl From<u16> for ModKeys {
   fn from(param: u16) -> Self {
     // CSI modifiers: param = 1 + (shift) + (alt*2) + (ctrl*4) + (meta*8)
-    let bits = param.saturating_sub(1);
+    let     bits = param.saturating_sub(1);
     let mut mods = ModKeys::empty();
     if bits & 1 != 0 {
       mods |= ModKeys::SHIFT;
@@ -267,8 +267,8 @@ mod tests {
   /// require the result to be exactly one `KeyEvent` equal to the input.
   fn assert_round_trips(code: &KeyCode, mods: ModKeys) {
     let original = KeyEvent(code.clone(), mods);
-    let seq = original.as_vim_seq();
-    let parsed = expand_keymap(&seq.to_str_lossy());
+    let seq      = original.as_vim_seq();
+    let parsed   = expand_keymap(&seq.to_str_lossy());
     assert_eq!(
       parsed.len(),
       1,

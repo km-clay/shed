@@ -57,18 +57,17 @@ impl Drop for PipeFrame {
 
 impl super::Dispatcher {
   pub(super) fn exec_pipeline(&mut self, tree: &Ast, pipeline: NodeId) -> ShResult<()> {
-    let pipeline = &tree[pipeline];
-    let pipeline_span = pipeline.get_span();
-    let pipeline_flags = pipeline.flags;
-    let pipeline_context = pipeline.context;
-    let NdRule::Pipeline { cmds } = &pipeline.class else {
+    let NdRule::Pipeline { cmds } = &tree[pipeline].class else {
       unreachable!()
     };
+    let pipeline         = &tree[pipeline];
+    let pipeline_span    = pipeline.get_span();
+    let pipeline_flags   = pipeline.flags;
+    let pipeline_context = pipeline.context;
 
-    let cmds: &[NodeId] = &tree[*cmds];
-
-    let is_bg = pipeline_flags.contains(NdFlags::BACKGROUND);
-    let num_cmds = cmds.len();
+    let cmds: &[NodeId]  = &tree[*cmds];
+    let is_bg            = pipeline_flags.contains(NdFlags::BACKGROUND);
+    let num_cmds         = cmds.len();
 
     // closure that tells us if a pipeline segment should fork
     let should_fork_segment =
@@ -79,10 +78,10 @@ impl super::Dispatcher {
       return self.exec_one(tree, cmds[0], should_fork_segment, pipeline_flags);
     }
 
-    let interactive = Shed::term(Terminal::interactive);
-    let mut tty_attached = false;
+    let     interactive       = Shed::term(Terminal::interactive);
+    let mut tty_attached      = false;
 
-    let _underscore_guard = (num_cmds > 1).then(super::suppress_underscore_guard);
+    let     _underscore_guard = (num_cmds > 1).then(super::suppress_underscore_guard);
 
     let _cooked_guard = (!is_bg && interactive).then(|| Shed::term_mut(Terminal::prepare_for_exec));
 
@@ -96,16 +95,16 @@ impl super::Dispatcher {
     self.job_stack.new_job();
     self.fg_job = !is_bg && Shed::term(Terminal::interactive);
 
-    let redirs = RedirSet::from(&tree[pipeline.redirs]);
+    let     redirs              = RedirSet::from(&tree[pipeline.redirs]);
 
-    let (in_rdrs, out_rdrs) = redirs.split_by_channel();
-    let mut result = Ok(());
+    let     (in_rdrs, out_rdrs) = redirs.split_by_channel();
+    let mut result              = Ok(());
 
-    let mut spans = vec![];
+    let mut spans               = vec![];
 
-    let lastpipe = shopt!(core.lastpipe);
-    let pipe_style = shopt!(core.pipeline_style);
-    let fork_only = matches!(pipe_style, PipeStyle::Fork);
+    let     lastpipe            = shopt!(core.lastpipe);
+    let     pipe_style          = shopt!(core.pipeline_style);
+    let     fork_only           = matches!(pipe_style, PipeStyle::Fork);
 
     // If any stage runs internally, the pgid of the job is set to the shell's
     let has_in_process =
@@ -123,16 +122,16 @@ impl super::Dispatcher {
     let mut tail_status: Option<(i32, Span)> = None;
     let mut cmd_iter = cmds.iter().enumerate().peekable();
 
-    let _frame = PipeFrame::enter();
+    let     _frame   = PipeFrame::enter();
 
     let mut prev_read: Option<Arc<dyn Sink>> = None;
-    let mut sinks: Vec<Weak<dyn Sink>> = vec![];
-    let mut workers: Vec<jobs::WorkerId> = vec![];
+    let mut sinks    : Vec<Weak<dyn Sink>>   = vec![];
+    let mut workers  : Vec<jobs::WorkerId>   = vec![];
 
     while let Some((i, cmd)) = cmd_iter.next() {
-      let mut guard = Sinks::redir_scope();
+      let mut guard     = Sinks::redir_scope();
 
-      let cmd_forks = node::node_forks(tree, *cmd);
+      let     cmd_forks = node::node_forks(tree, *cmd);
       let cmd_name = tree
         .command_for(*cmd)
         .map(|s| s.slice())
@@ -154,8 +153,8 @@ impl super::Dispatcher {
       };
 
       let run_in_shell = lastpipe && i == num_cmds - 1 && !cmd_forks;
-      let will_fork = (num_cmds > 1 || is_bg) && !thread_this_stage && !run_in_shell;
-      let _fork = Shed::meta_mut(|m| m.enter_fork(will_fork));
+      let will_fork    = (num_cmds > 1 || is_bg) && !thread_this_stage && !run_in_shell;
+      let _fork        = Shed::meta_mut(|m| m.enter_fork(will_fork));
 
       if run_in_shell {
         if let Some(read) = prev_read.take() {
@@ -197,9 +196,9 @@ impl super::Dispatcher {
       }
 
       match (i, prev_read.take()) {
-        (0, _) => guard.apply_set(&in_rdrs)?,
+        (0, _)          => guard.apply_set(&in_rdrs)?,
         (_, Some(read)) => guard.apply_sink(0, read)?,
-        _ => {}
+        _               => {}
       }
 
       if i + 1 < num_cmds {
@@ -228,13 +227,13 @@ impl super::Dispatcher {
       }
 
       let cmd_node = &tree[*cmd];
-      let span = tree.span_for(*cmd);
+      let span     = tree.span_for(*cmd);
 
       spans.push(span);
 
       result = if thread_this_stage {
         let stage_sinks = Shed::sinks(|s| s.clone());
-        let handle = self.spawn_stage(tree, *cmd, stage_sinks)?;
+        let handle      = self.spawn_stage(tree, *cmd, stage_sinks)?;
         if let Some(tid) = handle.pthread_id() {
           workers.push(tid);
         }
@@ -362,8 +361,8 @@ impl super::Dispatcher {
     should_fork: impl Fn(&Node) -> bool,
     flags: NdFlags,
   ) -> ShResult<()> {
-    let cmd = &tree[cmd_id];
-    let span = tree.span_for(cmd_id);
+    let cmd     = &tree[cmd_id];
+    let span    = tree.span_for(cmd_id);
     let context = cmd.context;
     // it's a single command
     // just thread it through dispatch_node directly.

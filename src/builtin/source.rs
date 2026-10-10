@@ -13,8 +13,8 @@ impl super::Builtin for Source {
   }
 
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let (arg_vec, _) = args.take_argv();
-    let mut arg_iter = arg_vec.into_iter();
+    let     (arg_vec, _) = args.take_argv();
+    let mut arg_iter     = arg_vec.into_iter();
 
     let Some((file, span)) = arg_iter.next() else {
       return Err(sherr!(
@@ -39,8 +39,8 @@ impl super::Builtin for Source {
     let extra: Vec<VarStr> = arg_iter.map(|(arg, _)| arg).collect();
     let saved_argv = (!extra.is_empty()).then(|| {
       Shed::vars_mut(|v| {
-        let scope = v.cur_scope_mut();
-        let saved = scope.sh_argv().clone();
+        let scope   = v.cur_scope_mut();
+        let saved   = scope.sh_argv().clone();
         let dollar0 = saved.front().cloned().unwrap_or_default();
         scope.sh_argv_mut().clear();
         scope.bpush_arg(dollar0);
@@ -54,7 +54,7 @@ impl super::Builtin for Source {
     // source adds an xtrace layer
     let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
 
-    let result = rc::source_file(path);
+    let result  = rc::source_file(path);
 
     if let Some(saved) = saved_argv {
       Shed::vars_mut(|v| {
@@ -88,9 +88,9 @@ pub(super) mod tests {
 
   #[test]
   fn source_simple() {
-    let _g = TestGuard::new();
+    let     _g   = TestGuard::new();
     let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     path = file.path().display().to_string();
     file.write_all(b"some_var=some_val").unwrap();
 
     test_input(format!("source {path}")).unwrap();
@@ -102,9 +102,9 @@ pub(super) mod tests {
   fn source_tolerates_non_utf8_bytes() {
     // Regression: `read_to_string` rejected the whole file on a single
     // non-UTF-8 byte. A stray byte in a comment must not abort sourcing.
-    let _g = TestGuard::new();
+    let     _g   = TestGuard::new();
     let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     path = file.path().display().to_string();
     file
       .write_all(b"# comment with \xff byte\nsrc_ok_var=yes")
       .unwrap();
@@ -115,9 +115,9 @@ pub(super) mod tests {
 
   #[test]
   fn source_multiple_commands() {
-    let _g = TestGuard::new();
+    let     _g   = TestGuard::new();
     let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     path = file.path().display().to_string();
     file.write_all(b"x=1\ny=2\nz=3").unwrap();
 
     test_input(format!("source {path}")).unwrap();
@@ -128,9 +128,9 @@ pub(super) mod tests {
 
   #[test]
   fn source_defines_function() {
-    let _g = TestGuard::new();
+    let     _g   = TestGuard::new();
     let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     path = file.path().display().to_string();
     file.write_all(b"greet() { echo hi; }").unwrap();
 
     test_input(format!("source {path}")).unwrap();
@@ -140,9 +140,9 @@ pub(super) mod tests {
 
   #[test]
   fn source_defines_alias() {
-    let _g = TestGuard::new();
+    let     _g   = TestGuard::new();
     let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     path = file.path().display().to_string();
     file.write_all(b"alias ll='ls -la'").unwrap();
 
     test_input(format!("source {path}")).unwrap();
@@ -152,9 +152,9 @@ pub(super) mod tests {
 
   #[test]
   fn source_output_captured() {
-    let guard = TestGuard::new();
-    let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     guard = TestGuard::new();
+    let mut file  = NamedTempFile::new().unwrap();
+    let     path  = file.path().display().to_string();
     file.write_all(b"echo sourced").unwrap();
 
     test_input(format!("source {path}")).unwrap();
@@ -165,9 +165,9 @@ pub(super) mod tests {
   #[test]
   fn source_passes_positional_params() {
     // POSIX: `. file a b c` sources only `file`; a/b/c become $1/$2/$3.
-    let guard = TestGuard::new();
-    let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     guard = TestGuard::new();
+    let mut file  = NamedTempFile::new().unwrap();
+    let     path  = file.path().display().to_string();
     file
       .write_all(b"echo \"count=$# all=$* one=$1 two=$2\"")
       .unwrap();
@@ -182,9 +182,9 @@ pub(super) mod tests {
   #[test]
   fn source_restores_positional_params() {
     // The caller's positional parameters are restored after the source.
-    let guard = TestGuard::new();
-    let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     guard = TestGuard::new();
+    let mut file  = NamedTempFile::new().unwrap();
+    let     path  = file.path().display().to_string();
     file.write_all(b":").unwrap(); // no-op body
 
     test_input(format!(
@@ -197,9 +197,9 @@ pub(super) mod tests {
 
   #[test]
   fn source_no_args_leaves_positionals_unchanged() {
-    let guard = TestGuard::new();
-    let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     guard = TestGuard::new();
+    let mut file  = NamedTempFile::new().unwrap();
+    let     path  = file.path().display().to_string();
     file.write_all(b"echo \"inner=$# $1\"").unwrap();
 
     test_input(format!(
@@ -218,9 +218,9 @@ pub(super) mod tests {
 
   #[test]
   fn source_dot_syntax() {
-    let _g = TestGuard::new();
+    let     _g   = TestGuard::new();
     let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     path = file.path().display().to_string();
     file.write_all(b"dot_var=dot_val").unwrap();
 
     test_input(format!(". {path}")).unwrap();
@@ -238,7 +238,7 @@ pub(super) mod tests {
 
   #[test]
   fn source_directory_fails() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     test_input(format!("source {}", dir.path().display())).ok();
     assert_ne!(state::Shed::get_status(), 0);
@@ -248,9 +248,9 @@ pub(super) mod tests {
 
   #[test]
   fn source_status_zero() {
-    let _g = TestGuard::new();
+    let     _g   = TestGuard::new();
     let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     path = file.path().display().to_string();
     file.write_all(b"true").unwrap();
 
     test_input(format!("source {path}")).unwrap();
@@ -259,9 +259,9 @@ pub(super) mod tests {
 
   #[test]
   fn source_top_level_return_exits_script_cleanly() {
-    let _g = TestGuard::new();
+    let     _g   = TestGuard::new();
     let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     path = file.path().display().to_string();
     file
       .write_all(b"before=set\nreturn 0\nafter=should_not_run\n")
       .unwrap();
@@ -274,9 +274,9 @@ pub(super) mod tests {
 
   #[test]
   fn source_top_level_return_propagates_status() {
-    let _g = TestGuard::new();
+    let     _g   = TestGuard::new();
     let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     path = file.path().display().to_string();
     file.write_all(b"return 42").unwrap();
 
     test_input(format!("source {path}")).unwrap();
@@ -285,9 +285,9 @@ pub(super) mod tests {
 
   #[test]
   fn source_return_inside_conditional() {
-    let _g = TestGuard::new();
+    let     _g   = TestGuard::new();
     let mut file = NamedTempFile::new().unwrap();
-    let path = file.path().display().to_string();
+    let     path = file.path().display().to_string();
     file
       .write_all(
         b"GUARD=yes\n\

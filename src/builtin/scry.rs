@@ -41,7 +41,7 @@ impl super::Builtin for Scry {
     true
   }
   fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
-    let opts = self.opts();
+    let     opts = self.opts();
     let mut argv = argv.to_vec();
 
     // scry can be given default arguments via this SCRY_DEFAULT_OPTS variable,
@@ -175,9 +175,9 @@ impl Scry {
     CandidateStream::spawn(move |sink| {
       use std::io::{BufRead, BufReader};
 
-      let delim = if null_in { b'\0' } else { b'\n' };
+      let     delim  = if null_in { b'\0' } else { b'\n' };
       let mut reader = BufReader::new(SinkIo(stdin));
-      let mut buf = Vec::new();
+      let mut buf    = Vec::new();
       loop {
         buf.clear();
         match reader.read_until(delim, &mut buf) {
@@ -297,7 +297,7 @@ impl Scry {
   }
 
   fn print_candidates(builder: FuzzyBuilder, no_newline: bool, quote_out: bool) -> ShResult<()> {
-    let selector = builder.build();
+    let selector   = builder.build();
     let candidates = selector.filtered();
 
     if quote_out {

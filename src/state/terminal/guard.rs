@@ -22,19 +22,19 @@ use super::{CursorStyle, ScrollRegionState, Shed};
 /// even if the code panics or returns early.
 #[derive(Debug)]
 pub(crate) struct TermGuard {
-  raw_mode: Option<bool>,
+  raw_mode       : Option<bool>,
   bracketed_paste: Option<bool>,
-  kitty_proto: Option<bool>,
-  alt_buffer: Option<bool>,
-  report_focus: Option<bool>,
-  cursor_style: Option<CursorStyle>,
-  cursor_visible: Option<bool>,
-  mouse_support: Option<bool>,
-  interactive: Option<bool>,
-  termios_depth: Option<usize>,
+  kitty_proto    : Option<bool>,
+  alt_buffer     : Option<bool>,
+  report_focus   : Option<bool>,
+  cursor_style   : Option<CursorStyle>,
+  cursor_visible : Option<bool>,
+  mouse_support  : Option<bool>,
+  interactive    : Option<bool>,
+  termios_depth  : Option<usize>,
   /// Outer Option: did this guard capture the scroll region?
   /// Inner Option: was a scroll region active at capture time?
-  scroll_region: Option<ScrollRegionState>,
+  scroll_region  : Option<ScrollRegionState>,
 
   /// This determines whether the drop impl will actually restore the state or not.
   /// Also prevents any of the builder methods from modifying the guard after it has been activated.

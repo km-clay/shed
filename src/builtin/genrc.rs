@@ -31,17 +31,17 @@ impl super::Builtin for GenRc {
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let mut config = rc::GenRcConfig::default();
-    let mut use_defaults = false;
-    let mut no_comments = false;
+    let mut config           = rc::GenRcConfig::default();
+    let mut use_defaults     = false;
+    let mut no_comments      = false;
 
-    let mut want_shopts = false;
-    let mut want_aliases = false;
-    let mut want_keymaps = false;
-    let mut want_autocmds = false;
-    let mut want_functions = false;
+    let mut want_shopts      = false;
+    let mut want_aliases     = false;
+    let mut want_keymaps     = false;
+    let mut want_autocmds    = false;
+    let mut want_functions   = false;
     let mut want_completions = false;
-    let mut want_vars = false;
+    let mut want_vars        = false;
     let mut any_section_flag = false;
 
     for opt in args.options() {
@@ -74,9 +74,9 @@ impl super::Builtin for GenRc {
           want_vars = true;
           any_section_flag = true;
         }
-        "default" => use_defaults = true,
+        "default"     => use_defaults = true,
         "no-comments" => no_comments = true,
-        _ => {}
+        _             => {}
       }
     }
 

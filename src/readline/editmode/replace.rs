@@ -13,8 +13,8 @@ use super::{
 
 #[derive(Default, Debug)]
 pub(crate) struct ViReplace {
-  cmds: Vec<EditCmd>,
-  pending_cmd: EditCmd,
+  cmds        : Vec<EditCmd>,
+  pending_cmd : EditCmd,
   repeat_count: u16,
 }
 
@@ -48,10 +48,10 @@ impl EditMode for ViReplace {
       }
       E(K::ExMode, _) => Some(EditCmd {
         register: RegisterName::default(),
-        verb: Some(verb!(Verb::ExMode)),
-        motion: None,
-        raw_seq: String::new(),
-        flags: CmdFlags::default(),
+        verb    : Some(verb!(Verb::ExMode)),
+        motion  : None,
+        raw_seq : String::new(),
+        flags   : CmdFlags::default(),
       }),
       key!(Ctrl + 'w') => {
         self.pending_cmd.set_verb(verb!(Verb::Delete));

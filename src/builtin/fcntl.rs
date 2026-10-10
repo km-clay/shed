@@ -31,9 +31,9 @@ bitflags! {
 impl FdFlags {
   fn as_char(self) -> char {
     match self {
-      _ if self == FdFlags::CLOEXEC => 'c',
+      _ if self == FdFlags::CLOEXEC  => 'c',
       _ if self == FdFlags::NONBLOCK => 'n',
-      _ if self == FdFlags::APPEND => 'a',
+      _ if self == FdFlags::APPEND   => 'a',
       _ => unreachable!(),
     }
   }
@@ -42,23 +42,23 @@ impl FdFlags {
       'c' => Role::Set(FdFlags::CLOEXEC),
       'n' => Role::Set(FdFlags::NONBLOCK),
       'a' => Role::Set(FdFlags::APPEND),
-      _ => Role::Unknown,
+      _   => Role::Unknown,
     }
   }
   fn get_set_bit(self) -> Option<(libc::c_int, libc::c_int, libc::c_int)> {
     match self {
-      _ if self == FdFlags::CLOEXEC => Some((libc::F_GETFD, libc::F_SETFD, libc::FD_CLOEXEC)),
+      _ if self == FdFlags::CLOEXEC  => Some((libc::F_GETFD, libc::F_SETFD, libc::FD_CLOEXEC)),
       _ if self == FdFlags::NONBLOCK => Some((libc::F_GETFL, libc::F_SETFL, libc::O_NONBLOCK)),
-      _ if self == FdFlags::APPEND => Some((libc::F_GETFL, libc::F_SETFL, libc::O_APPEND)),
+      _ if self == FdFlags::APPEND   => Some((libc::F_GETFL, libc::F_SETFL, libc::O_APPEND)),
       _ => None,
     }
   }
   fn parse_name(name: &[u8]) -> Option<Self> {
     match name {
-      b"cloexec" => Some(FdFlags::CLOEXEC),
+      b"cloexec"  => Some(FdFlags::CLOEXEC),
       b"nonblock" => Some(FdFlags::NONBLOCK),
-      b"append" => Some(FdFlags::APPEND),
-      _ => None,
+      b"append"   => Some(FdFlags::APPEND),
+      _           => None,
     }
   }
 }
@@ -75,8 +75,8 @@ impl super::Builtin for Fcntl {
     )
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let (arg_vec, _) = args.take_argv();
-    let mut it = arg_vec.into_iter().peekable();
+    let     (arg_vec, _) = args.take_argv();
+    let mut it           = arg_vec.into_iter().peekable();
 
     let Some((fd_word, fd_span)) = it.next() else {
       return Err(
@@ -157,10 +157,10 @@ impl Fcntl {
     let Ok(sink_fd) = sink.as_os_fd() else {
       return Err(sherr!(ExecFail @ span, "fd {fd} is not a valid file descriptor").with_code(1));
     };
-    let raw = sink_fd.as_raw_fd();
+    let raw      = sink_fd.as_raw_fd();
 
     let fd_flags = unsafe { libc::fcntl(raw, libc::F_GETFD) };
-    let status = unsafe { libc::fcntl(raw, libc::F_GETFL) };
+    let status   = unsafe { libc::fcntl(raw, libc::F_GETFL) };
     if fd_flags < 0 || status < 0 {
       return Err(Self::fd_err(fd, span));
     }
@@ -175,8 +175,8 @@ impl Fcntl {
     let (flags, status) = Self::read_flags(fd, fd_span)?;
     let mode = match status & libc::O_ACCMODE {
       libc::O_WRONLY => "write-only",
-      libc::O_RDWR => "read-write",
-      _ => "read-only",
+      libc::O_RDWR   => "read-write",
+      _              => "read-only",
     };
     outln!("mode\t\t{mode}");
     outln!(
@@ -194,8 +194,8 @@ impl Fcntl {
     util::with_status(0)
   }
   fn print_flags_terse(fd: RawFd, fd_span: Span) -> ShResult<()> {
-    let (flags, _) = Self::read_flags(fd, fd_span)?;
-    let on: String = flags.iter().map(FdFlags::as_char).collect();
+    let (flags, _)  = Self::read_flags(fd, fd_span)?;
+    let on : String = flags.iter().map(FdFlags::as_char).collect();
     let off: String = (!flags).iter().map(FdFlags::as_char).collect();
 
     out!("fcntl {fd}");

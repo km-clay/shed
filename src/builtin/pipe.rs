@@ -15,7 +15,6 @@ use super::opt::OptSpec;
 
 pub(super) struct Pipe;
 impl super::Builtin for Pipe {
-  #[rustfmt::skip]
   #[cfg(not(linux_like))]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
@@ -24,7 +23,6 @@ impl super::Builtin for Pipe {
       opt!("no-cloexec" | b'C'   ),
     ]
   }
-  #[rustfmt::skip]
   #[cfg(linux_like)]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
@@ -39,9 +37,9 @@ impl super::Builtin for Pipe {
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let array_name = args.opt_value("array").unwrap_or("PIPE".into());
-    let nonblock = args.has_opt("non-block");
-    let cloexec = !args.has_opt("no-cloexec");
-    let packet = args.has_opt("packet");
+    let nonblock   = args.has_opt("non-block");
+    let cloexec    = !args.has_opt("no-cloexec");
+    let packet     = args.has_opt("packet");
     let size = match args.opt_value("size") {
       Some(s) => {
         Some(strops::parse_size(&s.to_str_lossy()).promote_err(args.opt_span("size").unwrap())?)
@@ -50,7 +48,7 @@ impl super::Builtin for Pipe {
     };
 
     let (rd, wr) = match procio::OsPipe::pipes_with(cloexec, nonblock, size, packet) {
-      Ok(p) => p,
+      Ok(p)  => p,
       Err(e) => Err(sherr!(ExecFail @ args.cmd_span(), "failed to create pipe: {e}"))?,
     };
 
@@ -85,7 +83,7 @@ mod tests {
   fn creates_fd_pair() {
     let g = TestGuard::new();
     test_input(r#"pipe -a p; echo "${p[0]},${p[1]}""#).unwrap();
-    let out = g.read_output();
+    let out    = g.read_output();
     let (r, w) = out.trim().split_once(',').expect("two fds");
     assert!(r.parse::<i32>().unwrap() >= 10, "read fd not high: {out:?}");
     assert!(
@@ -143,8 +141,8 @@ mod tests {
     use nix::fcntl::{FcntlArg, fcntl};
 
     let (rd, _wr) = OsPipe::pipes_with(true, false, Some(256 * 1024), false).unwrap();
-    let bfd = rd.as_os_fd().unwrap();
-    let sz = fcntl(bfd, FcntlArg::F_GETPIPE_SZ).unwrap();
+    let bfd       = rd.as_os_fd().unwrap();
+    let sz        = fcntl(bfd, FcntlArg::F_GETPIPE_SZ).unwrap();
     assert!(
       sz as u64 >= 256 * 1024,
       "pipe buffer {sz} below requested 256K"

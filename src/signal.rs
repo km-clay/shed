@@ -231,7 +231,7 @@ fn default_terminates(sig: Signal) -> bool {
 /// We basically abuse Rust's error propagation to abort execution and travel upward
 /// to a place that catches and handles it.
 pub(crate) fn check_signals() -> ShResult<()> {
-  let pending = SIGNALS.swap(0, Ordering::SeqCst);
+  let pending    = SIGNALS.swap(0, Ordering::SeqCst);
 
   let got_signal = |sig: Signal| -> bool { pending & (1 << sig as u64) != 0 };
   // Returns whether a trap was actually registered (and thus ran), so callers
@@ -323,7 +323,7 @@ pub(crate) fn disarm_wake_fd() {
 pub(crate) fn install_signal_handlers() {
   ensure_wake_pipe();
 
-  let flags = SaFlags::empty();
+  let flags  = SaFlags::empty();
   let action = SigAction::new(SigHandler::Handler(handle_signal), flags, SigSet::empty());
 
   unsafe {
@@ -341,7 +341,7 @@ pub(crate) fn install_signal_handlers() {
 pub(crate) fn sig_setup() {
   install_signal_handlers();
 
-  let flags = SaFlags::empty();
+  let flags  = SaFlags::empty();
   let ignore = SigAction::new(SigHandler::SigIgn, flags, SigSet::empty());
 
   unsafe {
@@ -495,7 +495,7 @@ pub(crate) fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
     // update the job table with the new status for the child process
     j.query_mut(JobID::Pid(pid)).map(|job| {
       let child_pgid = job.pgid();
-      let is_fg = fg_pgid.is_some_and(|fg| fg == child_pgid);
+      let is_fg      = fg_pgid.is_some_and(|fg| fg == child_pgid);
       job.update_by_id(JobID::Pid(pid), status);
       let is_finished = !job.running();
 
@@ -562,14 +562,14 @@ pub(crate) fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   }
 
   let status_strs = stats.iter().map(|s| match s {
-    Outcome::Exited(code) => varstr!("{code}"),
+    Outcome::Exited(code)  => varstr!("{code}"),
     Outcome::Signaled(sig) => varstr!("{}", 128 + *sig as i32),
     _ => "1".into(),
   });
 
   let children: Vec<(VarStr, VarStr)> = cmds.into_iter().zip(status_strs).collect();
   let last_status = children.last().map(|c| c.1.clone()).unwrap_or_default();
-  let cmd_count = children.len();
+  let cmd_count   = children.len();
 
   // now run our post job autocmds
   // with these variables set
@@ -663,7 +663,7 @@ mod tests {
     // untrapped fatal signal instead of silently swallowing it.
     set_signal(Signal::SIGUSR2);
     let result = check_signals();
-    let quit = SHOULD_QUIT.load(Ordering::SeqCst);
+    let quit   = SHOULD_QUIT.load(Ordering::SeqCst);
     // Clear the exit request we just raised before asserting, so it can't
     // leak into other tests sharing this process (these globals are static).
     reset_signal_state();

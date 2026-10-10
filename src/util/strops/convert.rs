@@ -26,8 +26,8 @@ impl CalFormat {
   fn format(self, fields: [u32; 3]) -> Option<NaiveDate> {
     let (y, m, d) = match self {
       Self::Iso => (fields[0], fields[1], fields[2]),
-      Self::Eu => (fields[2], fields[1], fields[0]),
-      Self::Us => (fields[2], fields[0], fields[1]),
+      Self::Eu  => (fields[2], fields[1], fields[0]),
+      Self::Us  => (fields[2], fields[0], fields[1]),
     };
 
     NaiveDate::from_ymd_opt(widen_year(y), m, d)
@@ -39,9 +39,9 @@ impl CalFormat {
 /// `00-68` are 2000s and `69-99` are 1900s.
 fn widen_year(n: u32) -> i32 {
   match n {
-    0..=68 => 2000 + n as i32,
+    0..=68  => 2000 + n as i32,
     69..=99 => 1900 + n as i32,
-    _ => n as i32,
+    _       => n as i32,
   }
 }
 
@@ -63,9 +63,9 @@ fn escape_unknown_specs(format: &str) -> String {
 
   const MODIFIERS: &[u8] = b"-_0^#:.";
 
-  let bytes = format.as_bytes();
-  let mut out = String::with_capacity(format.len());
-  let mut i = 0;
+  let     bytes = format.as_bytes();
+  let mut out   = String::with_capacity(format.len());
+  let mut i     = 0;
 
   while i < bytes.len() {
     if bytes[i] != b'%' {
@@ -109,8 +109,8 @@ pub(crate) fn parse_paren_strftime(cur: &mut SliceCursor) -> ShResult<VarStr> {
         fmt.push(escaped);
       }
       Some(b')') => break,
-      Some(b) => fmt.push(b),
-      None => return Err(sherr!(ParseErr, "unterminated strftime format")),
+      Some(b)    => fmt.push(b),
+      None       => return Err(sherr!(ParseErr, "unterminated strftime format")),
     }
   }
 
@@ -153,18 +153,18 @@ pub(crate) fn format_time(delta: TimeDelta, show_subsecond: bool) -> Option<Stri
   let show_subsecond = show_subsecond && delta.num_seconds().abs() < 60;
   let signed =
     i128::from(delta.num_seconds()) * 1_000_000 + i128::from(delta.subsec_nanos()) / 1_000;
-  let negative = signed < 0;
-  let mut micros = signed.unsigned_abs();
-  let mut millis = 0;
-  let mut seconds = 0;
-  let mut minutes = 0;
-  let mut hours = 0;
-  let mut days = 0;
-  let mut decades = 0;
-  let mut centuries = 0;
-  let mut millennia = 0;
-  let mut epochs = 0;
-  let mut aeons = 0;
+  let     negative   = signed < 0;
+  let mut micros     = signed.unsigned_abs();
+  let mut millis     = 0;
+  let mut seconds    = 0;
+  let mut minutes    = 0;
+  let mut hours      = 0;
+  let mut days       = 0;
+  let mut decades    = 0;
+  let mut centuries  = 0;
+  let mut millennia  = 0;
+  let mut epochs     = 0;
+  let mut aeons      = 0;
   let mut eternities = 0; // just in case, you know?
 
   if micros >= 1000 {
@@ -222,8 +222,8 @@ pub(crate) fn format_time(delta: TimeDelta, show_subsecond: bool) -> Option<Stri
   }
 
   // Format the result
-  let mut result = Vec::new();
-  let should_show_subsecond = |res: &[String]| show_subsecond || res.is_empty();
+  let mut result                = Vec::new();
+  let     should_show_subsecond = |res: &[String]| show_subsecond || res.is_empty();
 
   if eternities > 0 {
     let mut string = format!("{eternities} eternit");
@@ -383,9 +383,9 @@ pub(crate) fn parse_size(s: &str) -> ShResult<u64> {
 
   // If no unit suffix found, interpret as raw byte count
   match s.parse::<i64>() {
-    Err(_) => Err(sherr!(ParseErr, "invalid size number: {s}",)),
+    Err(_)         => Err(sherr!(ParseErr, "invalid size number: {s}",)),
     Ok(n) if n < 0 => Err(sherr!(ParseErr, "size number cannot be negative: {s}",)),
-    Ok(n) => Ok(n as u64),
+    Ok(n)          => Ok(n as u64),
   }
 }
 
@@ -418,9 +418,9 @@ pub(crate) enum ModeOp {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ModeClause {
-  who: Vec<u32>,
-  op: ModeOp,
-  rwx: u32,
+  who    : Vec<u32>,
+  op     : ModeOp,
+  rwx    : u32,
   special: u32,
 }
 
@@ -429,8 +429,8 @@ impl ModeClause {
     for &shift in &self.who {
       let triple = (mode >> shift) & 0o7;
       let next = match self.op {
-        ModeOp::Set => self.rwx,
-        ModeOp::Add => triple | self.rwx,
+        ModeOp::Set    => self.rwx,
+        ModeOp::Add    => triple | self.rwx,
         ModeOp::Remove => triple & !self.rwx & 0o7,
       };
       mode = (mode & !(0o7 << shift)) | (next << shift);
@@ -442,7 +442,7 @@ impl ModeClause {
         mode &= !self.clearable_special();
         mode |= special;
       }
-      ModeOp::Add => mode |= special,
+      ModeOp::Add    => mode |= special,
       ModeOp::Remove => mode &= !special,
     }
     mode
@@ -496,11 +496,11 @@ pub(crate) fn parse_mode_clauses(spec: &str) -> ShResult<Vec<ModeClause>> {
       b'=' => ModeOp::Set,
       b'+' => ModeOp::Add,
       b'-' => ModeOp::Remove,
-      _ => unreachable!("find() matched one of the three"),
+      _    => unreachable!("find() matched one of the three"),
     };
-    let perm_str = &rest[1..];
+    let     perm_str = &rest[1..];
 
-    let mut who = Vec::new();
+    let mut who      = Vec::new();
     for ch in who_str.chars() {
       match ch {
         'u' => who.push(WHO_USER),
@@ -522,7 +522,7 @@ pub(crate) fn parse_mode_clauses(spec: &str) -> ShResult<Vec<ModeClause>> {
     who.sort_unstable();
     who.dedup();
 
-    let mut rwx = 0;
+    let mut rwx     = 0;
     let mut special = 0;
     for ch in perm_str.chars() {
       match ch {
@@ -601,28 +601,28 @@ enum TimeTk {
 }
 
 pub(crate) struct TimeReader<'a> {
-  orig: &'a str,
-  tks: Vec<TimeTk>,
-  pos: usize,
-  anchor: Option<DateTime<Utc>>,
-  clock: Option<NaiveTime>,
-  dir: Option<Direction>,
-  offset: Option<i64>,
-  pending: i64, // pending offset read
+  orig    : &'a str,
+  tks     : Vec<TimeTk>,
+  pos     : usize,
+  anchor  : Option<DateTime<Utc>>,
+  clock   : Option<NaiveTime>,
+  dir     : Option<Direction>,
+  offset  : Option<i64>,
+  pending : i64, // pending offset read
   upcoming: bool,
 }
 
 impl<'a> TimeReader<'a> {
   fn new(s: &'a str) -> Self {
     Self {
-      orig: s,
-      tks: vec![],
-      pos: 0,
-      anchor: None,
-      clock: None,
-      dir: None,
-      offset: None,
-      pending: 0,
+      orig    : s,
+      tks     : vec![],
+      pos     : 0,
+      anchor  : None,
+      clock   : None,
+      dir     : None,
+      offset  : None,
+      pending : 0,
       upcoming: false,
     }
   }
@@ -658,10 +658,10 @@ impl<'a> TimeReader<'a> {
   }
 
   fn parse_epoch(s: &str) -> ShResult<DateTime<Utc>> {
-    let bad = || sherr!(ParseErr, "invalid epoch timestamp '@{s}'");
+    let bad           = || sherr!(ParseErr, "invalid epoch timestamp '@{s}'");
     let (whole, frac) = s.split_once('.').map_or((s, None), |(a, b)| (a, Some(b)));
 
-    let secs: i64 = whole.parse().map_err(|_| bad())?;
+    let secs: i64     = whole.parse().map_err(|_| bad())?;
     let nanos: u32 = match frac {
       None => 0,
       Some(f) if f.is_empty() || !f.bytes().all(|b| b.is_ascii_digit()) => return Err(bad()),
@@ -713,11 +713,11 @@ impl<'a> TimeReader<'a> {
             self.read_offset(n)?;
           }
         }
-        TimeTk::Word(w) => self.read_word(&w)?,
-        TimeTk::Epoch(dt) => self.anchor = Some(dt),
+        TimeTk::Word(w)     => self.read_word(&w)?,
+        TimeTk::Epoch(dt)   => self.anchor = Some(dt),
         TimeTk::Clock(time) => self.clock = Some(time),
         // a calendar date names a day, which is what an anchor is
-        TimeTk::Date(d) => self.anchor = Some(local_to_utc(d.and_hms_opt(0, 0, 0).unwrap())?),
+        TimeTk::Date(d)     => self.anchor = Some(local_to_utc(d.and_hms_opt(0, 0, 0).unwrap())?),
       }
     }
 
@@ -739,7 +739,7 @@ impl<'a> TimeReader<'a> {
         local_to_utc(when)?
       }
       (Some(a), None) => a,
-      (None, None) => Utc::now(),
+      (None, None)    => Utc::now(),
     };
     let Some(micros) = self.offset else {
       return Ok(base);
@@ -772,7 +772,7 @@ impl<'a> TimeReader<'a> {
   /// Fold the unsigned offset read so far into the running total.
   fn commit(&mut self, dir: Direction) {
     let signed = match dir {
-      Direction::Forward => self.pending,
+      Direction::Forward  => self.pending,
       Direction::Backward => self.pending.saturating_neg(),
     };
     self.offset = Some(self.offset.unwrap_or(0).saturating_add(signed));
@@ -812,26 +812,24 @@ impl<'a> TimeReader<'a> {
     Ok(())
   }
 
-  #[rustfmt::skip]
   fn keyword_anchor(&mut self, word: &VarStr, upcoming: bool) -> ShResult<Option<DateTime<Utc>>> {
     let today = Local::now().date_naive();
-    let midnight = |d: NaiveDate| -> ShResult<DateTime<Utc>> {
-      local_to_utc(d.and_hms_opt(0, 0, 0).unwrap())
-    };
+    let midnight =
+      |d: NaiveDate| -> ShResult<DateTime<Utc>> { local_to_utc(d.and_hms_opt(0, 0, 0).unwrap()) };
 
     if let Ok(wd) = word.parse::<Weekday>() {
-      let delta = i64::from(wd.num_days_from_monday())
-        - i64::from(today.weekday().num_days_from_monday());
+      let delta =
+        i64::from(wd.num_days_from_monday()) - i64::from(today.weekday().num_days_from_monday());
       let mut when = midnight(today + TimeDelta::days(delta))?;
 
       if upcoming && when <= Utc::now() {
         when = midnight(today + TimeDelta::days(delta + 7))?;
       }
 
-      return Ok(Some(when))
+      return Ok(Some(when));
     }
 
-    let mut when =match word.as_bytes() {
+    let mut when = match word.as_bytes() {
       b"now"       => Utc::now(),
       b"today"     => midnight(today)?,
       b"yesterday" => midnight(today - Days::new(1))?,
@@ -841,23 +839,26 @@ impl<'a> TimeReader<'a> {
 
     let year_offset = self.peek_tk().and_then(|tk| {
       let TimeTk::Num(n) = tk else { return None };
-      if *n < 1000.0 { return None; }
-      if matches!(self.peek_nth(1), Some(TimeTk::Word(_))) { return None; }
+      if *n < 1000.0 {
+        return None;
+      }
+      if matches!(self.peek_nth(1), Some(TimeTk::Word(_))) {
+        return None;
+      }
 
       NaiveDate::from_ymd_opt(*n as i32, 1, 1)
     });
 
     if let Some(off) = year_offset {
       self.pos += 1;
-      when = when.with_year(off.year()).ok_or_else(|| {
-        sherr!(ParseErr, "invalid year offset '{off}' for date '{when}'")
-      })?;
+      when = when
+        .with_year(off.year())
+        .ok_or_else(|| sherr!(ParseErr, "invalid year offset '{off}' for date '{when}'"))?;
     }
 
     Ok(Some(when))
   }
 
-  #[rustfmt::skip]
   fn month_num(word: &VarStr) -> Option<u32> {
     Some(match word.as_bytes() {
       b"jan" | b"january"  => 1,
@@ -871,43 +872,40 @@ impl<'a> TimeReader<'a> {
       b"oct" | b"october"  => 10,
       b"nov" | b"november" => 11,
       b"dec" | b"december" => 12,
-      b"sep"
-      | b"sept"
-      | b"september"       => 9,
-      _                    => return None,
+      b"sep" | b"sept" | b"september" => 9,
+      _ => return None,
     })
   }
 
   fn direction(word: &VarStr) -> Option<Direction> {
     match word.as_bytes() {
-      b"after" | b"since" | b"from" => Some(Direction::Forward),
+      b"after" | b"since" | b"from"          => Some(Direction::Forward),
       b"ago" | b"before" | b"til" | b"until" => Some(Direction::Backward),
       _ => None,
     }
   }
-  #[rustfmt::skip]
   fn unit_micros(unit: &VarStr) -> Option<i64> {
     const MICROS: i64 = 1;
     const MILLIS: i64 = 1000 * MICROS;
     const SECOND: i64 = 1000 * MILLIS;
-    const MINUTE: i64 = 60   * SECOND;
-    const HOUR  : i64 = 60   * MINUTE;
-    const DAY   : i64 = 24   * HOUR;
-    const WEEK  : i64 = 7    * DAY;
-    const MONTH : i64 = 30   * DAY; // approximate
-    const YEAR  : i64 = 365  * DAY; // approximate
+    const MINUTE: i64 = 60 * SECOND;
+    const HOUR: i64 = 60 * MINUTE;
+    const DAY: i64 = 24 * HOUR;
+    const WEEK: i64 = 7 * DAY;
+    const MONTH: i64 = 30 * DAY; // approximate
+    const YEAR: i64 = 365 * DAY; // approximate
 
     match unit.as_bytes() {
       b"us" | b"micro" | b"micros" | b"microsecond" | b"microseconds" => Some(MICROS),
       b"ms" | b"milli" | b"millis" | b"millisecond" | b"milliseconds" => Some(MILLIS),
-      b"s"  | b"sec"   | b"secs"   | b"second"      | b"seconds"      => Some(SECOND),
-      b"m"  | b"min"   | b"mins"   | b"minute"      | b"minutes"      => Some(MINUTE),
-      b"h"  | b"hr"    | b"hrs"    | b"hour"        | b"hours"        => Some(HOUR),
-      b"d"  | b"day"   | b"days"                                      => Some(DAY),
-      b"w"  | b"wk"    | b"wks"    | b"week"        | b"weeks"        => Some(WEEK),
-      b"mo" | b"month" | b"months"                                    => Some(MONTH),
-      b"y"  | b"yr"    | b"yrs"    | b"year"        | b"years"        => Some(YEAR),
-      _                                                               => None,
+      b"s" | b"sec" | b"secs" | b"second" | b"seconds" => Some(SECOND),
+      b"m" | b"min" | b"mins" | b"minute" | b"minutes" => Some(MINUTE),
+      b"h" | b"hr" | b"hrs" | b"hour" | b"hours"       => Some(HOUR),
+      b"d" | b"day" | b"days" => Some(DAY),
+      b"w" | b"wk" | b"wks" | b"week" | b"weeks" => Some(WEEK),
+      b"mo" | b"month" | b"months"               => Some(MONTH),
+      b"y" | b"yr" | b"yrs" | b"year" | b"years" => Some(YEAR),
+      _ => None,
     }
   }
 
@@ -947,13 +945,13 @@ impl<'a> TimeReader<'a> {
     } else if third_len == 4 {
       match sep {
         b'.' => &[CalFormat::Eu],
-        _ => &[CalFormat::Us],
+        _    => &[CalFormat::Us],
       }
     } else {
       match sep {
         b'.' => &[CalFormat::Eu, CalFormat::Us],
         b'/' => &[CalFormat::Us, CalFormat::Eu],
-        _ => &[CalFormat::Iso, CalFormat::Us, CalFormat::Eu],
+        _    => &[CalFormat::Iso, CalFormat::Us, CalFormat::Eu],
       }
     };
 
@@ -1043,17 +1041,17 @@ impl<'a> TimeReader<'a> {
         Some(b'@') => {
           cur.bump();
           let (start, end) = cur.bump_while_span(|c| c.is_ascii_digit() || c == b'-' || c == b'.');
-          let epoch_secs = Self::parse_epoch(&s[start..end])?;
-          let tk = TimeTk::Epoch(epoch_secs);
+          let epoch_secs   = Self::parse_epoch(&s[start..end])?;
+          let tk           = TimeTk::Epoch(epoch_secs);
           tks.push(tk);
         }
         Some(c) if c.is_ascii_alphabetic() => {
           let (start, end) = cur.bump_while_span(|c| c.is_ascii_alphabetic());
-          let word = s[start..end].to_ascii_lowercase();
+          let word         = s[start..end].to_ascii_lowercase();
           tks.push(TimeTk::Word(word.as_str().into()));
         }
         Some(_) => cur.bump(),
-        None => break,
+        None    => break,
       }
     }
 
@@ -1070,7 +1068,7 @@ impl<'a> TimeReader<'a> {
   /// `october`, `today` and `tomorrow` all contain `to`.
   fn split_span(s: &str) -> Option<(String, String)> {
     let words: Vec<&str> = s.split_whitespace().collect();
-    let i = words.iter().position(|w| *w == "to")?;
+    let i                = words.iter().position(|w| *w == "to")?;
     if i == 0 || i + 1 == words.len() {
       return None;
     }
@@ -1096,9 +1094,9 @@ impl<'a> TimeReader<'a> {
         .ok_or_else(|| sherr!(ParseErr, "span in '{s}' is too large"));
     }
 
-    let mut tks = Self::tokenize(s)?.into_iter().peekable();
+    let mut tks        = Self::tokenize(s)?.into_iter().peekable();
     let mut total: i64 = 0;
-    let mut saw_any = false;
+    let mut saw_any    = false;
 
     while let Some(tk) = tks.next() {
       match tk {
@@ -1118,10 +1116,10 @@ impl<'a> TimeReader<'a> {
             .ok_or_else(|| sherr!(ParseErr, "duration too large"))?;
           saw_any = true;
         }
-        TimeTk::Word(w) => return Err(sherr!(ParseErr, "unexpected '{w}' in duration")),
+        TimeTk::Word(w)  => return Err(sherr!(ParseErr, "unexpected '{w}' in duration")),
         TimeTk::Clock(_) => return Err(sherr!(ParseErr, "a clock time is not a duration")),
         TimeTk::Epoch(_) => return Err(sherr!(ParseErr, "a timestamp is not a duration")),
-        TimeTk::Date(_) => return Err(sherr!(ParseErr, "a date is not a duration")),
+        TimeTk::Date(_)  => return Err(sherr!(ParseErr, "a date is not a duration")),
       }
     }
 
@@ -1174,14 +1172,14 @@ mod format_time_tests {
     // `chrono fmt -d 1y` humanises back as something other than "1 year".
     for unit in ["1 week", "1mo", "1y", "3mo", "2y"] {
       let micros = super::TimeReader::parse_dur(unit).unwrap();
-      let back = super::format_time(TimeDelta::microseconds(micros), true).unwrap_or_default();
+      let back   = super::format_time(TimeDelta::microseconds(micros), true).unwrap_or_default();
       let expect = match unit {
         "1 week" => "1 week",
-        "1mo" => "1 month",
-        "1y" => "1 year",
-        "3mo" => "3 months",
-        "2y" => "2 years",
-        _ => unreachable!(),
+        "1mo"    => "1 month",
+        "1y"     => "1 year",
+        "3mo"    => "3 months",
+        "2y"     => "2 years",
+        _        => unreachable!(),
       };
       assert_eq!(back, expect, "{unit} did not round-trip");
     }

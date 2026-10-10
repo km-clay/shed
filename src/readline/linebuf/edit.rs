@@ -18,9 +18,9 @@ use super::{
 /// The `LineBuf`'s undo/redo stack, and some edit-related state fields
 #[derive(Clone, Debug, Default)]
 pub(super) struct EditStack {
-  undo: Vec<Edit>,
-  redo: Vec<Edit>,
-  open: Option<OpenGroup>,
+  undo : Vec<Edit>,
+  redo : Vec<Edit>,
+  open : Option<OpenGroup>,
   depth: usize,
 
   /// The depth of current [`LineBuf::edit()`](super::LineBuf::edit) recursion
@@ -33,7 +33,7 @@ pub(super) struct EditStack {
 /// live buffer, so the step is diffed exactly once, when the group closes.
 #[derive(Clone, Debug)]
 struct OpenGroup {
-  old: Lines,
+  old       : Lines,
   old_cursor: Pos,
 }
 
@@ -115,9 +115,9 @@ impl EditStack {
 pub(crate) struct Edit {
   old_cursor: Pos,
   new_cursor: Pos,
-  at: Pos,
-  removed: VarStr,
-  inserted: VarStr,
+  at        : Pos,
+  removed   : VarStr,
+  inserted  : VarStr,
 }
 
 impl Edit {
@@ -160,8 +160,8 @@ impl Edit {
 }
 
 pub(super) struct Diff {
-  start: Pos,
-  removed: VarStr,
+  start   : Pos,
+  removed : VarStr,
   inserted: VarStr,
 }
 
@@ -169,7 +169,7 @@ impl Diff {
   fn new(before: &Lines, after: &Lines) -> Self {
     if before.len() == after.len() {
       let mut changed: Option<usize> = None;
-      let mut multiple = false;
+      let mut multiple               = false;
       for r in 0..before.len() {
         if before[r] != after[r] {
           if changed.is_some() {
@@ -183,8 +183,8 @@ impl Diff {
         Some(r) if !multiple => return Self::diff_single_row(r, &before[r], &after[r]),
         None => {
           return Self {
-            start: Pos::default(),
-            removed: VarStr::default(),
+            start   : Pos::default(),
+            removed : VarStr::default(),
             inserted: VarStr::default(),
           };
         } // identical
@@ -196,24 +196,24 @@ impl Diff {
   /// Flat grapheme diff over the whole newline-joined buffer. Correct for any
   /// change including row insert/delete, at the cost of stringifying both buffers.
   fn diff_flat(before: &Lines, after: &Lines) -> Self {
-    let a = before.to_string();
-    let b = after.to_string();
-    let ag: Vec<&str> = a.graphemes(true).collect();
-    let bg: Vec<&str> = b.graphemes(true).collect();
-    let pmax = ag.len().min(bg.len());
-    let mut p = 0;
+    let     a             = before.to_string();
+    let     b             = after.to_string();
+    let     ag: Vec<&str> = a.graphemes(true).collect();
+    let     bg: Vec<&str> = b.graphemes(true).collect();
+    let     pmax          = ag.len().min(bg.len());
+    let mut p             = 0;
     while p < pmax && ag[p] == bg[p] {
       p += 1;
     }
-    let smax = (ag.len() - p).min(bg.len() - p);
-    let mut s = 0;
+    let     smax = (ag.len() - p).min(bg.len() - p);
+    let mut s    = 0;
     while s < smax && ag[ag.len() - 1 - s] == bg[bg.len() - 1 - s] {
       s += 1;
     }
-    let removed = VarStr::from_slices(ag[p..ag.len() - s].iter());
-    let inserted = VarStr::from_slices(bg[p..bg.len() - s].iter());
-    let mut row = 0;
-    let mut col = 0;
+    let     removed  = VarStr::from_slices(ag[p..ag.len() - s].iter());
+    let     inserted = VarStr::from_slices(bg[p..bg.len() - s].iter());
+    let mut row      = 0;
+    let mut col      = 0;
     for g in &ag[..p] {
       if *g == "\n" {
         row += 1;
@@ -232,19 +232,19 @@ impl Diff {
   /// Diff two single lines into ((row, col), removed, inserted). No newlines are
   /// involved, so the spans stay within the row.
   fn diff_single_row(row: usize, before: &Line, after: &Line) -> Self {
-    let bg = before.graphemes();
-    let ag = after.graphemes();
-    let pmax = bg.len().min(ag.len());
-    let mut p = 0;
+    let     bg   = before.graphemes();
+    let     ag   = after.graphemes();
+    let     pmax = bg.len().min(ag.len());
+    let mut p    = 0;
     while p < pmax && bg[p] == ag[p] {
       p += 1;
     }
-    let smax = (bg.len() - p).min(ag.len() - p);
-    let mut s = 0;
+    let     smax = (bg.len() - p).min(ag.len() - p);
+    let mut s    = 0;
     while s < smax && bg[bg.len() - 1 - s] == ag[ag.len() - 1 - s] {
       s += 1;
     }
-    let removed: VarStr = Line(bg[p..bg.len() - s].to_vec()).to_var_str();
+    let removed : VarStr = Line(bg[p..bg.len() - s].to_vec()).to_var_str();
     let inserted: VarStr = Line(ag[p..ag.len() - s].to_vec()).to_var_str();
     Self {
       start: Pos { row, col: p },
@@ -288,8 +288,8 @@ fn insert_lines_at(lines: &mut Lines, at: Pos, text: &str) {
     lines[row].insert_str(col, text);
     return;
   }
-  let segs: Vec<&str> = text.split('\n').collect();
-  let mut tail: Line = lines[row].split_off(col);
+  let     segs: Vec<&str> = text.split('\n').collect();
+  let mut tail: Line      = lines[row].split_off(col);
   lines[row].push_str(segs[0]);
   let mut new: Vec<Line> = segs[1..]
     .iter()
@@ -324,11 +324,11 @@ enum Opener {
 /// absent: depth changes at the opener, so they're neutral for the count.
 fn keyword_opener(kw: &str) -> Option<Opener> {
   Some(match kw {
-    "if" => Opener::If,
-    "case" => Opener::Case,
-    "for" => Opener::For,
+    "if"              => Opener::If,
+    "case"            => Opener::Case,
+    "for"             => Opener::For,
     "while" | "until" => Opener::Loop,
-    "select" => Opener::Select,
+    "select"          => Opener::Select,
     _ => return None,
   })
 }
@@ -336,9 +336,9 @@ fn keyword_opener(kw: &str) -> Option<Opener> {
 /// The openers a closer keyword is allowed to close.
 fn keyword_closes(kw: &str) -> Option<&'static [Opener]> {
   Some(match kw {
-    "fi" => &[Opener::If],
+    "fi"   => &[Opener::If],
     "done" => &[Opener::For, Opener::Loop, Opener::Select],
-    _ => return None, // esac is handled specially (it may also close a dangling arm)
+    _      => return None, // esac is handled specially (it may also close a dangling arm)
   })
 }
 
@@ -418,7 +418,7 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
       | CtxTkRule::ProcSubIn
       | CtxTkRule::ProcSubOut
       | CtxTkRule::Arithmetic => {
-        let end = tk.range().end;
+        let     end   = tk.range().end;
         let mut inner = Vec::new();
         collect_depth_events(tk.sub_tokens(), &mut inner, events);
         for _ in 0..inner.len() {
@@ -429,7 +429,7 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
       // count: open at the `(`, close at the `)` once it's there.
       CtxTkRule::ArrayLiteral => {
         events.push((start, 1));
-        let end = tk.range().end;
+        let     end   = tk.range().end;
         let mut inner = Vec::new();
         collect_depth_events(tk.sub_tokens(), &mut inner, events);
         for _ in 0..inner.len() {
@@ -450,7 +450,7 @@ fn collect_depth_events(tokens: &[CtxTk], stack: &mut Vec<Opener>, events: &mut 
 /// offsets into it).
 pub(super) fn depth_levels_from_tokens(tokens: &[CtxTk], input: &str) -> Vec<(usize, usize)> {
   let mut events = Vec::new();
-  let mut stack = Vec::new();
+  let mut stack  = Vec::new();
   collect_depth_events(tokens, &mut stack, &mut events);
   events.sort_by_key(|(pos, _)| *pos);
 
@@ -464,8 +464,8 @@ pub(super) fn depth_levels_from_tokens(tokens: &[CtxTk], input: &str) -> Vec<(us
   boundaries.push(input.len());
 
   let mut depth: i32 = 0;
-  let mut ei = 0;
-  let mut depths = Vec::with_capacity(boundaries.len());
+  let mut ei         = 0;
+  let mut depths     = Vec::with_capacity(boundaries.len());
   for &b in &boundaries {
     while ei < events.len() && events[ei].0 < b {
       depth += events[ei].1;
@@ -495,25 +495,25 @@ pub(super) fn parse_failed_strict(input: &str) -> bool {
 
 pub(super) fn extract_range_contiguous(buf: &mut Lines, start: Pos, end: Pos) -> Lines {
   let start_col = start.col.min(buf[start.row].len());
-  let end_col = end.col.min(buf[end.row].len());
+  let end_col   = end.col.min(buf[end.row].len());
 
   if start.row == end.row {
     // single line case
-    let line = &mut buf[start.row];
+    let line                   = &mut buf[start.row];
     let removed: Vec<Grapheme> = line.0.drain(start_col..end_col).collect();
     return Lines(vec![Line(removed)]);
   }
 
   // multi line case
   // tail of first line
-  let first_tail: Line = buf[start.row].split_off(start_col);
+  let first_tail: Line  = buf[start.row].split_off(start_col);
 
   // all inbetween lines. extracts nothing if only two rows
-  let middle: Lines = buf.drain(start.row + 1..end.row).collect();
+  let middle    : Lines = buf.drain(start.row + 1..end.row).collect();
 
   // head of last line
-  let last_col = end_col.min(buf[start.row + 1].len());
-  let last_head: Line = Line::from(buf[start.row + 1].0.drain(..last_col).collect::<Vec<_>>());
+  let last_col          = end_col.min(buf[start.row + 1].len());
+  let last_head : Line  = Line::from(buf[start.row + 1].0.drain(..last_col).collect::<Vec<_>>());
 
   // tail of last line
   let mut last_remainder = buf.remove(start.row + 1);
@@ -569,7 +569,7 @@ impl super::LineBuf {
       return res;
     }
 
-    let before = self.lines.clone();
+    let before     = self.lines.clone();
     let old_cursor = self.cursor.pos;
 
     self.descend();
@@ -581,7 +581,7 @@ impl super::LineBuf {
     }
 
     let new_cursor = self.cursor.pos;
-    let changed = self.lines != before;
+    let changed    = self.lines != before;
 
     match policy {
       RecordPolicy::Skip => {}
@@ -631,37 +631,161 @@ mod depth_levels_tests {
   // Expected per-row (start, end) depths across the shell's block constructs.
   // These were validated against the parser's `block_depth` before that field
   // was retired; this pins the token-based derivation against regressions.
-  #[rustfmt::skip]
   #[expect(clippy::type_complexity)]
   const BATTERY: &[(&str, &str, &[(usize, usize)])] = &[
-    ("if 1-line", "if true; then\n  echo hi\nfi", &[(0,1),(1,1),(1,0)]),
-    ("if multiline", "if true\nthen\n  echo hi\nfi", &[(0,1),(1,1),(1,1),(1,0)]),
-    ("if/elif/else", "if a; then\n  b\nelif c; then\n  d\nelse\n  e\nfi", &[(0,1),(1,1),(1,1),(1,1),(1,1),(1,1),(1,0)]),
-    ("nested if", "if a; then\n  if b; then\n    c\n  fi\nfi", &[(0,1),(1,2),(2,2),(2,1),(1,0)]),
-    ("for/do/done", "for x in a b; do\n  echo $x\ndone", &[(0,1),(1,1),(1,0)]),
-    ("while", "while true; do\n  echo hi\ndone", &[(0,1),(1,1),(1,0)]),
-    ("func braces", "foo() {\n  bar() {\n    echo hi\n  }\n}", &[(0,1),(1,2),(2,2),(2,1),(1,0)]),
-    ("brace group", "{\n  echo a\n  echo b\n}", &[(0,1),(1,1),(1,1),(1,0)]),
-    ("subshell", "(\n  echo a\n  echo b\n)", &[(0,1),(1,1),(1,1),(1,0)]),
-    ("cmdsub multiline", "x=$(\n  echo a\n)\necho $x", &[(0,0),(0,0),(0,0),(0,0)]),
-    ("for inside if", "if a; then\n  for x in y; do\n    z\n  done\nfi", &[(0,1),(1,2),(2,2),(2,1),(1,0)]),
-    ("unclosed if", "if true; then\n  echo hi", &[(0,1),(1,1)]),
-    ("case", "case $x in\n  a)\n    echo a\n    ;;\nesac", &[(0,1),(1,2),(2,2),(2,1),(1,0)]),
-    ("case multi-arm", "case $x in\n  a)\n    echo a\n    ;;\n  b)\n    echo b\n    ;;\nesac", &[(0,1),(1,2),(2,2),(2,1),(1,2),(2,2),(2,1),(1,0)]),
-    ("case no trailing ;;", "case $x in\n  a)\n    echo a\nesac", &[(0,1),(1,2),(2,2),(2,0)]),
-    ("case in if", "if t; then\n  case $x in\n    a)\n      b\n      ;;\n  esac\nfi", &[(0,1),(1,2),(2,3),(3,3),(3,2),(2,1),(1,0)]),
-    ("case leading paren", "case $x in\n  (a|b)\n    echo ab\n    ;;\nesac", &[(0,1),(1,2),(2,2),(2,1),(1,0)]),
-    ("subshell in arm", "case $x in\n  a)\n    (\n      echo a\n    )\n    ;;\nesac", &[(0,1),(1,2),(2,3),(3,3),(3,2),(2,1),(1,0)]),
-    ("plain lines", "echo a\necho b\necho c", &[(0,0),(0,0),(0,0)]),
-    ("array literal", "arr=(\n  a\n  b\n)", &[(0,1),(1,1),(1,1),(1,0)]),
-    ("array one-line", "arr=(a b c)\necho hi", &[(0,0),(0,0)]),
-    ("array in func", "f() {\n  x=(\n    a\n  )\n}", &[(0,1),(1,2),(2,2),(2,1),(1,0)]),
-    ("function kw", "function foo {\n  echo hi\n}", &[(0,1),(1,1),(1,0)]),
-    ("dbl bracket test", "if [[ -f x ]]; then\n  echo y\nfi", &[(0,1),(1,1),(1,0)]),
-    ("arith command", "if (( 1 + 1 )); then\n  echo y\nfi", &[(0,1),(1,1),(1,0)]),
-    ("nested everything", "for x in a; do\n  if [[ $x ]]; then\n    case $x in\n      a)\n        (\n          echo deep\n        )\n        ;;\n    esac\n  fi\ndone", &[(0,1),(1,2),(2,3),(3,4),(4,5),(5,5),(5,4),(4,3),(3,2),(2,1),(1,0)]),
-    ("pipe across lines", "echo a |\n  grep b |\n  wc -l", &[(0,0),(0,0),(0,0)]),
-    ("heredoc", "cat <<EOF\nbody\nEOF\necho done", &[(0,0),(0,0),(0,0),(0,0)]),
+    (
+      "if 1-line",
+      "if true; then\n  echo hi\nfi",
+      &[(0, 1), (1, 1), (1, 0)],
+    ),
+    (
+      "if multiline",
+      "if true\nthen\n  echo hi\nfi",
+      &[(0, 1), (1, 1), (1, 1), (1, 0)],
+    ),
+    (
+      "if/elif/else",
+      "if a; then\n  b\nelif c; then\n  d\nelse\n  e\nfi",
+      &[(0, 1), (1, 1), (1, 1), (1, 1), (1, 1), (1, 1), (1, 0)],
+    ),
+    (
+      "nested if",
+      "if a; then\n  if b; then\n    c\n  fi\nfi",
+      &[(0, 1), (1, 2), (2, 2), (2, 1), (1, 0)],
+    ),
+    (
+      "for/do/done",
+      "for x in a b; do\n  echo $x\ndone",
+      &[(0, 1), (1, 1), (1, 0)],
+    ),
+    (
+      "while",
+      "while true; do\n  echo hi\ndone",
+      &[(0, 1), (1, 1), (1, 0)],
+    ),
+    (
+      "func braces",
+      "foo() {\n  bar() {\n    echo hi\n  }\n}",
+      &[(0, 1), (1, 2), (2, 2), (2, 1), (1, 0)],
+    ),
+    (
+      "brace group",
+      "{\n  echo a\n  echo b\n}",
+      &[(0, 1), (1, 1), (1, 1), (1, 0)],
+    ),
+    (
+      "subshell",
+      "(\n  echo a\n  echo b\n)",
+      &[(0, 1), (1, 1), (1, 1), (1, 0)],
+    ),
+    (
+      "cmdsub multiline",
+      "x=$(\n  echo a\n)\necho $x",
+      &[(0, 0), (0, 0), (0, 0), (0, 0)],
+    ),
+    (
+      "for inside if",
+      "if a; then\n  for x in y; do\n    z\n  done\nfi",
+      &[(0, 1), (1, 2), (2, 2), (2, 1), (1, 0)],
+    ),
+    ("unclosed if", "if true; then\n  echo hi", &[(0, 1), (1, 1)]),
+    (
+      "case",
+      "case $x in\n  a)\n    echo a\n    ;;\nesac",
+      &[(0, 1), (1, 2), (2, 2), (2, 1), (1, 0)],
+    ),
+    (
+      "case multi-arm",
+      "case $x in\n  a)\n    echo a\n    ;;\n  b)\n    echo b\n    ;;\nesac",
+      &[
+        (0, 1),
+        (1, 2),
+        (2, 2),
+        (2, 1),
+        (1, 2),
+        (2, 2),
+        (2, 1),
+        (1, 0),
+      ],
+    ),
+    (
+      "case no trailing ;;",
+      "case $x in\n  a)\n    echo a\nesac",
+      &[(0, 1), (1, 2), (2, 2), (2, 0)],
+    ),
+    (
+      "case in if",
+      "if t; then\n  case $x in\n    a)\n      b\n      ;;\n  esac\nfi",
+      &[(0, 1), (1, 2), (2, 3), (3, 3), (3, 2), (2, 1), (1, 0)],
+    ),
+    (
+      "case leading paren",
+      "case $x in\n  (a|b)\n    echo ab\n    ;;\nesac",
+      &[(0, 1), (1, 2), (2, 2), (2, 1), (1, 0)],
+    ),
+    (
+      "subshell in arm",
+      "case $x in\n  a)\n    (\n      echo a\n    )\n    ;;\nesac",
+      &[(0, 1), (1, 2), (2, 3), (3, 3), (3, 2), (2, 1), (1, 0)],
+    ),
+    (
+      "plain lines",
+      "echo a\necho b\necho c",
+      &[(0, 0), (0, 0), (0, 0)],
+    ),
+    (
+      "array literal",
+      "arr=(\n  a\n  b\n)",
+      &[(0, 1), (1, 1), (1, 1), (1, 0)],
+    ),
+    ("array one-line", "arr=(a b c)\necho hi", &[(0, 0), (0, 0)]),
+    (
+      "array in func",
+      "f() {\n  x=(\n    a\n  )\n}",
+      &[(0, 1), (1, 2), (2, 2), (2, 1), (1, 0)],
+    ),
+    (
+      "function kw",
+      "function foo {\n  echo hi\n}",
+      &[(0, 1), (1, 1), (1, 0)],
+    ),
+    (
+      "dbl bracket test",
+      "if [[ -f x ]]; then\n  echo y\nfi",
+      &[(0, 1), (1, 1), (1, 0)],
+    ),
+    (
+      "arith command",
+      "if (( 1 + 1 )); then\n  echo y\nfi",
+      &[(0, 1), (1, 1), (1, 0)],
+    ),
+    (
+      "nested everything",
+      "for x in a; do\n  if [[ $x ]]; then\n    case $x in\n      a)\n        (\n          echo deep\n        )\n        ;;\n    esac\n  fi\ndone",
+      &[
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 4),
+        (4, 5),
+        (5, 5),
+        (5, 4),
+        (4, 3),
+        (3, 2),
+        (2, 1),
+        (1, 0),
+      ],
+    ),
+    (
+      "pipe across lines",
+      "echo a |\n  grep b |\n  wc -l",
+      &[(0, 0), (0, 0), (0, 0)],
+    ),
+    (
+      "heredoc",
+      "cat <<EOF\nbody\nEOF\necho done",
+      &[(0, 0), (0, 0), (0, 0), (0, 0)],
+    ),
   ];
 
   #[test]

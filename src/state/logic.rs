@@ -28,7 +28,7 @@ use super::{
 
 #[derive(Clone, Debug)]
 pub(crate) struct ShAlias {
-  body: VarStr,
+  body  : VarStr,
   source: Span,
 }
 
@@ -70,9 +70,9 @@ pub(crate) enum IsInternal {
 #[derive(Clone, Debug)]
 pub(crate) enum ShFunc {
   Defined {
-    logic: Arc<Ast>, // immutable
-    source: Span,
-    ctx: Option<LabelBuilder>,
+    logic      : Arc<Ast>, // immutable
+    source     : Span,
+    ctx        : Option<LabelBuilder>,
     is_internal: Option<IsInternal>,
   },
   Autoload(AutoloadSrc),
@@ -99,7 +99,7 @@ impl ShFunc {
   #[allow(dead_code)]
   pub(crate) fn autoload_src(&self) -> Option<&AutoloadSrc> {
     match self {
-      Self::Autoload(src) => Some(src),
+      Self::Autoload(src)  => Some(src),
       Self::Defined { .. } => None,
     }
   }
@@ -107,14 +107,14 @@ impl ShFunc {
   pub(crate) fn source(&self) -> Option<&Span> {
     match self {
       Self::Defined { source, .. } => Some(source),
-      Self::Autoload(_) => None,
+      Self::Autoload(_)            => None,
     }
   }
   #[allow(dead_code)]
   pub(crate) fn logic(&self) -> Option<&Ast> {
     match self {
       Self::Defined { logic, .. } => Some(&**logic),
-      Self::Autoload(_) => None,
+      Self::Autoload(_)           => None,
     }
   }
   #[allow(dead_code)]
@@ -218,7 +218,7 @@ crate::two_way_display!(AutoCmdKind,
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct AutoCmd {
-  kind: AutoCmdKind,
+  kind   : AutoCmdKind,
   command: VarStr,
 }
 
@@ -233,7 +233,7 @@ impl AutoCmd {
 
 impl Display for AutoCmd {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let kind = self.kind.to_string();
+    let kind    = self.kind.to_string();
     let command = escape::shell_quote(&self.command.to_str_lossy());
     write!(f, "autocmd {kind} {command}")
   }
@@ -251,9 +251,9 @@ impl TrapTarget {
   pub(crate) fn parse(s: &VarStr) -> ShResult<Self> {
     match s.as_bytes() {
       b"0" | b"EXIT" => Ok(TrapTarget::Exit),
-      b"RETURN" => Ok(TrapTarget::Return),
-      b"ERR" => Ok(TrapTarget::Error),
-      _ => Ok(TrapTarget::Signal(parse_signal(&s.to_str_lossy())?)),
+      b"RETURN"      => Ok(TrapTarget::Return),
+      b"ERR"         => Ok(TrapTarget::Error),
+      _              => Ok(TrapTarget::Signal(parse_signal(&s.to_str_lossy())?)),
     }
   }
 }
@@ -261,9 +261,9 @@ impl TrapTarget {
 impl Display for TrapTarget {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      TrapTarget::Exit => write!(f, "EXIT"),
+      TrapTarget::Exit   => write!(f, "EXIT"),
       TrapTarget::Return => write!(f, "RETURN"),
-      TrapTarget::Error => write!(f, "ERR"),
+      TrapTarget::Error  => write!(f, "ERR"),
       TrapTarget::Signal(s) => {
         let name = s.to_string();
         write!(f, "{}", name.strip_prefix("SIG").unwrap_or(&name))
@@ -277,13 +277,13 @@ impl Display for TrapTarget {
 /// Contains aliases and functions
 #[derive(Default, Clone, Debug)]
 pub(crate) struct LogTab {
-  functions: HashMap<String, ShFunc>,
+  functions     : HashMap<String, ShFunc>,
   comp_autoloads: HashMap<String, AutoloadSrc>,
-  aliases: HashMap<String, ShAlias>,
-  ex_aliases: HashMap<String, ShAlias>,
+  aliases       : HashMap<String, ShAlias>,
+  ex_aliases    : HashMap<String, ShAlias>,
 
-  traps: HashMap<TrapTarget, VarStr>,
-  keymaps: Vec<KeyMap>,
+  traps   : HashMap<TrapTarget, VarStr>,
+  keymaps : Vec<KeyMap>,
   autocmds: HashMap<AutoCmdKind, Vec<AutoCmd>>,
 }
 
@@ -344,7 +344,7 @@ impl LogTab {
       .comp_autoloads
       .iter()
       .filter_map(|(name, src)| match src {
-        AutoloadSrc::Path(_) => Some(name.clone()),
+        AutoloadSrc::Path(_)         => Some(name.clone()),
         AutoloadSrc::Embedded { .. } => None,
       })
       .collect();
@@ -500,8 +500,8 @@ mod tests {
 
   #[test]
   fn register_autoload_comps_preserves_user_entries() {
-    let mut table = LogTab::new();
-    let (name, src) = user_comp();
+    let mut table       = LogTab::new();
+    let     (name, src) = user_comp();
     table.insert_comp_autoload(&name, src);
     table.register_autoload_comps();
     // the user-registered entry must survive re-registering the bundled set
@@ -510,8 +510,8 @@ mod tests {
 
   #[test]
   fn forget_comps_resets_to_bundled_only() {
-    let mut table = LogTab::new();
-    let (name, src) = user_comp();
+    let mut table       = LogTab::new();
+    let     (name, src) = user_comp();
     table.insert_comp_autoload(&name, src);
     table.forget(ForgetFlags::COMPS);
     assert!(table.get_autoload_comp_names().is_empty());

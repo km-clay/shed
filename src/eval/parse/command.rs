@@ -61,7 +61,7 @@ impl ParseStream {
 
     let target = if class == RedirType::HereString {
       RedirTarget::HereDoc {
-        body: next_tk.word(),
+        body : next_tk.word(),
         flags: next_tk.flags | TkFlags::HERESTRING,
       }
     } else if redir_bldr.dup_from_word {
@@ -89,7 +89,7 @@ impl ParseStream {
     if redir_tk.flags.contains(TkFlags::REDIR_ALL) {
       redirs.push(RedirSpec::Dup {
         from: 1.into(),
-        to: 2.into(),
+        to  : 2.into(),
         mode: RedirType::Output,
       });
     }
@@ -113,9 +113,9 @@ impl ParseStream {
     Ok(())
   }
   pub(super) fn parse_pipeln(&mut self) -> ShResult<Option<NodeId>> {
-    let mut cmds = vec![];
+    let mut cmds               = vec![];
     let mut span: Option<Span> = None;
-    let mut flags = NdFlags::empty();
+    let mut flags              = NdFlags::empty();
 
     let mut dangling_pipe: Option<Span> = None;
     while let Some(cmd) = self.parse_block(false)? {
@@ -173,19 +173,19 @@ impl ParseStream {
     let next_tk = |this: &mut Self, off: usize| this.tokens.get(this.cursor + off).cloned();
 
     let result = 'out: {
-      let mut tk_counter = 0;
-      let mut redirs = vec![];
-      let mut argv = vec![];
-      let mut flags = NdFlags::empty();
+      let mut tk_counter  = 0;
+      let mut redirs      = vec![];
+      let mut argv        = vec![];
+      let mut flags       = NdFlags::empty();
       let mut assignments = vec![];
 
       loop {
         let Some(prefix_tk) = next_tk(self, tk_counter) else {
           break;
         };
-        let is_cmd = prefix_tk.flags.contains(TkFlags::IS_CMD);
+        let is_cmd        = prefix_tk.flags.contains(TkFlags::IS_CMD);
         let is_assignment = prefix_tk.flags.contains(TkFlags::ASSIGN);
-        let is_keyword = prefix_tk.flags.contains(TkFlags::KEYWORD);
+        let is_keyword    = prefix_tk.flags.contains(TkFlags::KEYWORD);
 
         if is_cmd {
           extend_span!(span, prefix_tk.span);
@@ -253,12 +253,12 @@ impl ParseStream {
 
         let had_assignments = !assignments.is_empty();
 
-        let node_range = self.tree.alloc_nodes(assignments);
-        let assignments = self.tree.alloc_children(node_range.ids());
+        let node_range      = self.tree.alloc_nodes(assignments);
+        let assignments     = self.tree.alloc_children(node_range.ids());
 
-        let span = self.tree.alloc(span.unwrap_or_default());
-        let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
-        let argv = self.tree.alloc_tokens(argv);
+        let span            = self.tree.alloc(span.unwrap_or_default());
+        let redirs          = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+        let argv            = self.tree.alloc_tokens(argv);
         let mut nd = node!(
           self,
           span,
@@ -349,11 +349,11 @@ impl ParseStream {
       self.commit(tk_counter);
 
       // arena allocation
-      let node_range = self.tree.alloc_nodes(assignments);
+      let node_range  = self.tree.alloc_nodes(assignments);
       let assignments = self.tree.alloc_children(node_range.ids());
-      let span = self.tree.alloc(span.unwrap_or_default());
-      let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
-      let argv = self.tree.alloc_tokens(argv);
+      let span        = self.tree.alloc(span.unwrap_or_default());
+      let redirs      = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+      let argv        = self.tree.alloc_tokens(argv);
 
       let node = node!(
         self,
@@ -375,19 +375,19 @@ impl ParseStream {
     }
   }
   fn parse_assignment(&mut self, token: &Tk) -> Option<Node> {
-    let base = token.span.start();
-    let slice = token.slice();
-    let mut cur = SliceCursor::new(slice.as_bytes());
+    let     base          = token.span.start();
+    let     slice         = token.slice();
+    let mut cur           = SliceCursor::new(slice.as_bytes());
 
-    let mut var_name = util::scratch_buf();
-    let name_start = base;
-    let mut name_end = base;
+    let mut var_name      = util::scratch_buf();
+    let     name_start    = base;
+    let mut name_end      = base;
 
-    let mut var_val = util::scratch_buf();
-    let mut val_start = token.end();
-    let val_end = token.end();
+    let mut var_val       = util::scratch_buf();
+    let mut val_start     = token.end();
+    let     val_end       = token.end();
 
-    let mut assign_kind = None;
+    let mut assign_kind   = None;
     let mut bracket_depth = 0usize;
 
     // Delimiters are all ASCII, so byte scanning is UTF-8-safe; `cur.pos()`
@@ -464,8 +464,8 @@ impl ParseStream {
     }
     let assign_kind = assign_kind.unwrap();
 
-    let var = Tk::new(TkRule::Str, Span::new(name_start, name_end, token.source()));
-    let val = Tk::new(TkRule::Str, Span::new(val_start, val_end, token.source()));
+    let var         = Tk::new(TkRule::Str, Span::new(name_start, name_end, token.source()));
+    let val         = Tk::new(TkRule::Str, Span::new(val_start, val_end, token.source()));
     let flags = if var_val.first() == Some(&b'(') && var_val.last() == Some(&b')') {
       NdFlags::ARR_ASSIGN
     } else {
@@ -473,8 +473,8 @@ impl ParseStream {
     };
 
     let span = self.tree.alloc(token.span);
-    let var = self.tree.alloc(var);
-    let val = self.tree.alloc(val);
+    let var  = self.tree.alloc(var);
+    let val  = self.tree.alloc(val);
 
     Some(node!(
       self,
@@ -546,8 +546,8 @@ mod command_parse_tests {
     // The first token in the prefix loop is a Redir, not a Cmd /
     // Assignment / Keyword — hits the `prefix_tk.class == TkRule::Redir`
     // branch and the inline build_redir call.
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g   = TestGuard::new();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("out.txt");
     test_input(format!("> {} echo prefixed_redir_marker", path.display())).unwrap();
     let content = std::fs::read_to_string(&path).unwrap();
@@ -627,10 +627,10 @@ mod command_parse_tests {
 
   #[test]
   fn redir_all_prefix_captures_stderr_to_file() {
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join("out.txt");
-    let cmd = format!("&> {} ls /nonexistent_marker_aaa", path.display());
+    let _g      = TestGuard::new();
+    let dir     = tempfile::TempDir::new().unwrap();
+    let path    = dir.path().join("out.txt");
+    let cmd     = format!("&> {} ls /nonexistent_marker_aaa", path.display());
     let content = run_with_ls_stderr(cmd, &path);
     assert!(
       content.contains("nonexistent_marker_aaa"),
@@ -640,10 +640,10 @@ mod command_parse_tests {
 
   #[test]
   fn redir_all_arg_loop_captures_stderr_to_file() {
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join("out.txt");
-    let cmd = format!("ls /nonexistent_marker_bbb &> {}", path.display());
+    let _g      = TestGuard::new();
+    let dir     = tempfile::TempDir::new().unwrap();
+    let path    = dir.path().join("out.txt");
+    let cmd     = format!("ls /nonexistent_marker_bbb &> {}", path.display());
     let content = run_with_ls_stderr(cmd, &path);
     assert!(
       content.contains("nonexistent_marker_bbb"),
@@ -656,8 +656,8 @@ mod command_parse_tests {
     // `&>` (single `>`) should truncate, not append. Write a sentinel,
     // then run a `&>` that produces no stdout and a known stderr; the
     // sentinel must be gone.
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g   = TestGuard::new();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("out.txt");
     std::fs::write(&path, "PRIOR_CONTENT_SENTINEL\n").unwrap();
     let cmd = format!("&> {} ls /nonexistent_truncate", path.display());
@@ -675,8 +675,8 @@ mod command_parse_tests {
 
   #[test]
   fn redir_all_append_prefix_preserves_prior_content() {
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g   = TestGuard::new();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("out.txt");
     std::fs::write(&path, "PRIOR_CONTENT_KEPT\n").unwrap();
     let cmd = format!("&>> {} ls /nonexistent_append", path.display());
@@ -694,8 +694,8 @@ mod command_parse_tests {
 
   #[test]
   fn redir_all_append_arg_loop_preserves_prior_content() {
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g   = TestGuard::new();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("out.txt");
     std::fs::write(&path, "PRIOR_CONTENT_ARGLOOP\n").unwrap();
     let cmd = format!("ls /nonexistent_argloop_append &>> {}", path.display());
@@ -715,10 +715,10 @@ mod command_parse_tests {
   fn redir_all_routes_stdout_too() {
     // Mirror of the stderr check — confirm that fd 1 (stdout) is also
     // routed to the file. Use `echo` (a builtin) for stdout content.
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g   = TestGuard::new();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("out.txt");
-    let cmd = format!("&> {} echo STDOUT_VIA_REDIR_ALL", path.display());
+    let cmd  = format!("&> {} echo STDOUT_VIA_REDIR_ALL", path.display());
     test_input(cmd).unwrap();
     let content = std::fs::read_to_string(&path).unwrap();
     assert!(
@@ -754,10 +754,10 @@ mod command_parse_tests {
     // `>>file 2>&1 cmd` — file redirect then dup, with both as
     // prefixes. Apply order ([File, Dup]) means fd 1 points to file
     // before the Dup borrows it, so fd 2 also lands in the file.
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g   = TestGuard::new();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("out.txt");
-    let cmd = format!(">> {} 2>&1 ls /nonexistent_prefix_dup_file", path.display());
+    let cmd  = format!(">> {} 2>&1 ls /nonexistent_prefix_dup_file", path.display());
     test_input(cmd).unwrap();
     let content = std::fs::read_to_string(&path).unwrap();
     assert!(
@@ -776,8 +776,8 @@ mod command_parse_tests {
     // prefix-redir command and then a subsequent plain echo whose
     // output should still reach the test harness (which it wouldn't
     // if shed's stdout had been silently redirected).
-    let g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let g    = TestGuard::new();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("out.txt");
     let cmd = format!(
       "&> {} ls /nonexistent_no_leak ; echo POST_MARKER",

@@ -84,7 +84,7 @@ impl ValueBytes for VarKind {
       VarKind::Str(s) => s.as_bytes().to_vec(),
       VarKind::Int(i) => i.to_string().into_bytes(),
       VarKind::Arr(items) => {
-        let mut out = Vec::new();
+        let mut out       = Vec::new();
         let mut item_iter = items.iter().peekable();
         while let Some(item) = item_iter.next() {
           out.extend_from_slice(item.as_bytes());
@@ -95,7 +95,7 @@ impl ValueBytes for VarKind {
         out
       }
       VarKind::AssocArr(items) => {
-        let mut out = Vec::new();
+        let mut out       = Vec::new();
         let mut item_iter = items.iter().peekable();
         while let Some((k, v)) = item_iter.next() {
           out.extend_from_slice(&escape::shell_quote_bytes(k.as_bytes()));
@@ -108,7 +108,7 @@ impl ValueBytes for VarKind {
         out
       }
       VarKind::Magic(func) => func().unwrap_or_default().as_bytes().to_vec(),
-      VarKind::Unset => Vec::new(),
+      VarKind::Unset       => Vec::new(),
     }
   }
 }
@@ -116,7 +116,7 @@ impl ValueBytes for VarKind {
 /// Join lines with `\n` (no trailing newline), byte-native.
 fn join_lines(mut lines: Vec<Vec<u8>>) -> Vec<u8> {
   lines.sort();
-  let mut out = Vec::new();
+  let mut out  = Vec::new();
   let mut iter = lines.into_iter().peekable();
   while let Some(line) = iter.next() {
     out.extend_from_slice(&line);
@@ -136,7 +136,7 @@ pub(crate) fn serialize_var(name: &str, var: &Var) -> Option<VarStr> {
 
   let mut letters: Vec<u8> = Vec::new();
   match kind {
-    VarKind::Arr(_) => letters.push(b'a'),
+    VarKind::Arr(_)      => letters.push(b'a'),
     VarKind::AssocArr(_) => letters.push(b'A'),
     _ => {}
   }
@@ -217,9 +217,9 @@ pub(crate) fn display_as_vars(
 }
 
 pub(crate) fn display_as_var(name: impl AsRef<[u8]>, value: impl ValueBytes) -> Vec<u8> {
-  let name = name.as_ref();
-  let value = escape::shell_quote_bytes(&value.value_bytes());
-  let mut out = Vec::with_capacity(name.len() + value.len() + 1);
+  let     name  = name.as_ref();
+  let     value = escape::shell_quote_bytes(&value.value_bytes());
+  let mut out   = Vec::with_capacity(name.len() + value.len() + 1);
   out.extend_from_slice(name);
   out.push(b'=');
   out.extend_from_slice(&value);
@@ -301,7 +301,7 @@ impl ShellParam {
       '@' => Some(Self::AllArgs),
       '*' => Some(Self::AllArgsStr),
       '#' => Some(Self::ArgCount),
-      _ => None,
+      _   => None,
     }
   }
 }
@@ -309,13 +309,13 @@ impl ShellParam {
 impl Display for ShellParam {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
-      Self::ShPid => write!(f, "$"),
-      Self::LastJob => write!(f, "!"),
-      Self::ShellName => write!(f, "0"),
-      Self::Pos(n) => write!(f, "{n}"),
-      Self::AllArgs => write!(f, "@"),
+      Self::ShPid      => write!(f, "$"),
+      Self::LastJob    => write!(f, "!"),
+      Self::ShellName  => write!(f, "0"),
+      Self::Pos(n)     => write!(f, "{n}"),
+      Self::AllArgs    => write!(f, "@"),
       Self::AllArgsStr => write!(f, "*"),
-      Self::ArgCount => write!(f, "#"),
+      Self::ArgCount   => write!(f, "#"),
     }
   }
 }
@@ -371,9 +371,9 @@ impl ArrIndex {
   /// the `allow_side_effects` parameter controls whether or not mutating parameter
   /// expansions and command substitutions will be evaluated.
   pub(crate) fn parse(s: &str, allow_side_effects: bool) -> ShResult<Self> {
-    let input = SegStream::from_bytes(s.as_bytes());
+    let input    = SegStream::from_bytes(s.as_bytes());
     let expanded = var::expand_raw_inner(None, &mut input.cursor(), allow_side_effects, false)?;
-    let s = VarStr::from(expanded.into_bytes());
+    let s        = VarStr::from(expanded.into_bytes());
 
     match s.as_bytes() {
       b"@" => Ok(Self::AllSplit),
@@ -447,26 +447,26 @@ fn top_level_colon(s: &str) -> Option<usize> {
 /// causing re-entrant borrows.
 #[derive(Clone, Debug)]
 pub(crate) struct VarName {
-  name: String,
-  index: Option<ArrIndex>,
+  name       : String,
+  index      : Option<ArrIndex>,
   slice_start: Option<usize>,
-  slice_len: Option<usize>,
+  slice_len  : Option<usize>,
 }
 
 impl VarName {
   pub(crate) fn parse(raw: &str, allow_side_effects: bool) -> ShResult<Self> {
     let Some(bracket_start) = raw.find('[') else {
       return Ok(Self {
-        name: raw.to_string(),
-        index: None,
+        name       : raw.to_string(),
+        index      : None,
         slice_start: None,
-        slice_len: None,
+        slice_len  : None,
       });
     };
 
     // Find the matching ']' by tracking depth, since the index
     // content may contain nested brackets (e.g. ${arr[${i[0]}]})
-    let mut depth = 0;
+    let mut depth       = 0;
     let mut bracket_end = None;
     for (i, ch) in raw[bracket_start..].char_indices() {
       match ch {
@@ -484,14 +484,14 @@ impl VarName {
 
     let Some(bracket_end) = bracket_end else {
       return Ok(Self {
-        name: raw.to_string(),
-        index: None,
+        name       : raw.to_string(),
+        index      : None,
         slice_start: None,
-        slice_len: None,
+        slice_len  : None,
       });
     };
 
-    let name = raw[..bracket_start].to_string();
+    let name    = raw[..bracket_start].to_string();
     let idx_str = &raw[bracket_start + 1..bracket_end];
     // quoted subscripts need special handling
     let index = if idx_str.contains('"') || idx_str.contains('\'') {
@@ -506,8 +506,8 @@ impl VarName {
       if let Some(rest) = after_bracket.strip_prefix(':') {
         // Split on ':' at the top level only (not inside ${} or $())
         if let Some(split_pos) = top_level_colon(rest) {
-          let s = &rest[..split_pos];
-          let l = &rest[split_pos + 1..];
+          let s       = &rest[..split_pos];
+          let l       = &rest[split_pos + 1..];
           let s_input = SegStream::from_bytes(s.as_bytes());
           let l_input = SegStream::from_bytes(l.as_bytes());
           let s_exp = var::expand_raw(None, &mut s_input.cursor()).map_or_else(
@@ -590,7 +590,7 @@ pub(crate) trait VarStrSliceExt {
 
 impl VarStrSliceExt for [VarStr] {
   fn join_with(&self, sep: &str) -> VarStr {
-    let mut out = vec![];
+    let mut out  = vec![];
     let mut iter = self.iter();
     if let Some(first) = iter.next() {
       out.extend_from_slice(first.as_bytes());
@@ -605,7 +605,7 @@ impl VarStrSliceExt for [VarStr] {
 
 impl VarStrSliceExt for [&VarStr] {
   fn join_with(&self, sep: &str) -> VarStr {
-    let mut out = vec![];
+    let mut out  = vec![];
     let mut iter = self.iter();
     if let Some(first) = iter.next() {
       out.extend_from_slice(first.as_bytes());
@@ -730,7 +730,7 @@ impl ToSql for VarStr {
     // keep working; fall back to BLOB only when the bytes aren't UTF-8.
     match self.to_str() {
       Some(s) => Ok(rusqlite::types::ToSqlOutput::from(s)),
-      None => Ok(rusqlite::types::ToSqlOutput::from(self.as_bytes())),
+      None    => Ok(rusqlite::types::ToSqlOutput::from(self.as_bytes())),
     }
   }
 }
@@ -801,7 +801,7 @@ impl From<&Var> for VarStr {
       let Var { kind, .. } = value;
       match kind {
         VarKind::Str(var_str) => var_str.clone(),
-        VarKind::Int(n) => (*n).into(),
+        VarKind::Int(n)       => (*n).into(),
         _ => unreachable!(),
       }
     } else {
@@ -948,12 +948,12 @@ pub(crate) enum VarKindTag {
 impl VarKind {
   pub(crate) fn tag(&self) -> VarKindTag {
     match self {
-      Self::Str(_) => VarKindTag::Str,
-      Self::Int(_) => VarKindTag::Int,
-      Self::Arr(_) => VarKindTag::Arr,
+      Self::Str(_)      => VarKindTag::Str,
+      Self::Int(_)      => VarKindTag::Int,
+      Self::Arr(_)      => VarKindTag::Arr,
       Self::AssocArr(_) => VarKindTag::AssocArr,
-      Self::Magic(_) => VarKindTag::Magic,
-      Self::Unset => VarKindTag::Unset,
+      Self::Magic(_)    => VarKindTag::Magic,
+      Self::Unset       => VarKindTag::Unset,
     }
   }
 }
@@ -972,7 +972,7 @@ impl VarKind {
         raw.to_str_lossy(),
       ));
     }
-    let raw = &raw[1..raw.len() - 1];
+    let raw    = &raw[1..raw.len() - 1];
 
     let handle = state::register_source(raw);
     let tokens = LexStream::new(&handle, LexFlags::empty())
@@ -985,7 +985,7 @@ impl VarKind {
       .try_fold(Vec::new(), |mut acc, wrds| {
         match wrds {
           Ok(wrds) => acc.extend(wrds.iter().cloned()),
-          Err(e) => return Err(e),
+          Err(e)   => return Err(e),
         }
         Ok(acc)
       })?;
@@ -1019,7 +1019,7 @@ impl VarKind {
         raw.to_str_lossy(),
       ));
     }
-    let body = &raw[1..raw.len() - 1];
+    let     body  = &raw[1..raw.len() - 1];
     let mut pairs = Vec::new();
     let mut bytes = SliceCursor::new(body);
 
@@ -1040,7 +1040,7 @@ impl VarKind {
       }
 
       // Read until the matching ']'.
-      let mut key = util::scratch_buf();
+      let mut key   = util::scratch_buf();
       let mut depth = 1usize;
       loop {
         let Some(b) = bytes.next_byte() else {
@@ -1075,7 +1075,7 @@ impl VarKind {
       // Read the value up to top-level whitespace. Quote chars are kept (and
       // tracked only to tell when whitespace is inside them) so the expander
       // still handles the original quoting, e.g. $'...' ANSI-C strings.
-      let mut val = util::scratch_buf();
+      let mut val      = util::scratch_buf();
       let mut qt_state = QuoteState::default();
       match_loop!(bytes.peek_byte() => c, {
         b'\\' if !qt_state.in_single() => {
@@ -1131,8 +1131,8 @@ impl Display for VarKind {
         let mut item_iter = items.iter().peekable();
         while let Some(item) = item_iter.next() {
           let (k, v) = item;
-          let key = escape::shell_quote(&k.to_str_lossy());
-          let val = escape::shell_quote(&v.to_str_lossy());
+          let key    = escape::shell_quote(&k.to_str_lossy());
+          let val    = escape::shell_quote(&v.to_str_lossy());
           write!(f, "{key}={val}")?;
           if item_iter.peek().is_some() {
             write!(f, " ")?;
@@ -1141,7 +1141,7 @@ impl Display for VarKind {
         Ok(())
       }
       VarKind::Magic(func) => write!(f, "{}", func().unwrap_or_default()),
-      VarKind::Unset => Ok(()),
+      VarKind::Unset       => Ok(()),
     }
   }
 }
@@ -1149,14 +1149,14 @@ impl Display for VarKind {
 #[derive(Clone, Debug)]
 pub(crate) struct Var {
   flags: VarFlags,
-  kind: VarKind,
+  kind : VarKind,
 }
 
 impl Default for Var {
   fn default() -> Self {
     Self {
       flags: VarFlags::default(),
-      kind: VarKind::Str(VarStr::default()),
+      kind : VarKind::Str(VarStr::default()),
     }
   }
 }
@@ -1165,7 +1165,7 @@ impl Var {
   pub(crate) fn env_var(val: &str) -> Self {
     Self {
       flags: VarFlags::EXPORT,
-      kind: VarKind::Str(val.into()),
+      kind : VarKind::Str(val.into()),
     }
   }
   pub(crate) fn new(kind: VarKind, flags: VarFlags) -> Self {
@@ -1278,8 +1278,8 @@ impl Deref for DeferredAst {
 
 #[derive(Default, Clone, Debug)]
 pub(crate) struct VarTab {
-  vars: HashMap<String, Var>,
-  params: HashMap<ShellParam, VarStr>,
+  vars   : HashMap<String, Var>,
+  params : HashMap<ShellParam, VarStr>,
   sh_argv: VecDeque<VarStr>, /* Using a VecDeque makes the implementation of `shift` straightforward */
 
   kind: ScopeKind,
@@ -1297,7 +1297,7 @@ impl VarTab {
     }
   }
   pub(crate) fn new() -> Self {
-    let vars = Self::init_sh_vars();
+    let vars   = Self::init_sh_vars();
     let params = Self::init_params();
     let mut var_tab = Self {
       vars,
@@ -1419,7 +1419,7 @@ impl VarTab {
           Some(format!("{install_dir}:{}", hpath.to_str_lossy()))
         }
         None => Some(install_dir.to_string()),
-        _ => None,
+        _    => None,
       };
       if let Some(hpath) = new_hpath {
         env.insert("SHED_HPATH".into(), hpath.into());
@@ -1442,8 +1442,8 @@ impl VarTab {
       .map(|(k, v)| (k, Var::new(VarKind::Str(v), VarFlags::EXPORT)))
       .collect();
 
-    let orig = stat::umask(stat::Mode::empty());
-    let umask = stat::umask(orig);
+    let     orig      = stat::umask(stat::Mode::empty());
+    let     umask     = stat::umask(orig);
     let mut umask_var = Var::env_var(&format!("{umask:04o}"));
     let underline = Var::new(
       VarKind::Str(VarStr::from(
@@ -1785,7 +1785,7 @@ fn get_status_str() -> Option<VarStr> {
 }
 fn get_seconds() -> Option<VarStr> {
   let shell_time = Shed::meta(MetaTab::shell_time);
-  let secs = Instant::now().duration_since(shell_time).as_secs();
+  let secs       = Instant::now().duration_since(shell_time).as_secs();
   Some(varstr!("{secs}"))
 }
 fn get_epoch_realtime() -> Option<VarStr> {
@@ -1983,7 +1983,7 @@ mod shell_param_fmt_tests {
       ShellParam::ArgCount,
     ];
     for v in cases {
-      let s = v.to_string();
+      let s      = v.to_string();
       let parsed = ShellParam::from_str(&s).unwrap();
       assert_eq!(parsed, v, "round-trip mismatch for {v:?} via {s:?}");
     }
@@ -2023,7 +2023,7 @@ mod set_index_tests {
 
   #[test]
   fn literal_index_replaces_existing_slot() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = make_tab_with_arr("arr", vec!["a", "b", "c"]);
     tab
       .set_index("arr", ArrIndex::Literal(1), "B!".into())
@@ -2033,7 +2033,7 @@ mod set_index_tests {
 
   #[test]
   fn literal_index_past_end_resizes_with_empty_strings() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = make_tab_with_arr("arr", vec!["a"]);
     tab
       .set_index("arr", ArrIndex::Literal(3), "z".into())
@@ -2043,7 +2043,7 @@ mod set_index_tests {
 
   #[test]
   fn from_back_index_targets_correct_slot() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = make_tab_with_arr("arr", vec!["a", "b", "c"]);
     // FromBack(1) → items.len() - 1 = index 2.
     tab
@@ -2054,15 +2054,15 @@ mod set_index_tests {
 
   #[test]
   fn from_back_index_out_of_bounds_errors() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = make_tab_with_arr("arr", vec!["a", "b"]);
-    let res = tab.set_index("arr", ArrIndex::FromBack(5), "x".into());
+    let     res = tab.set_index("arr", ArrIndex::FromBack(5), "x".into());
     assert!(res.is_err());
   }
 
   #[test]
   fn assoc_array_new_key_appended() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
       .set_var("h", VarKind::AssocArr(vec![]), VarFlags::empty())
@@ -2092,7 +2092,7 @@ mod set_index_tests {
 
   #[test]
   fn assoc_array_existing_key_overwritten_in_place() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
       .set_var(
@@ -2112,7 +2112,7 @@ mod set_index_tests {
 
   #[test]
   fn set_index_on_scalar_errors() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
       .set_var("scalar", VarKind::Str("plain".into()), VarFlags::empty())
@@ -2125,7 +2125,7 @@ mod set_index_tests {
 
   #[test]
   fn missing_var_literal_index_creates_array() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
       .set_index("never_existed", ArrIndex::Literal(0), "x".into())
@@ -2135,7 +2135,7 @@ mod set_index_tests {
 
   #[test]
   fn missing_var_sparse_index_pads_with_empties() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
       .set_index("sparse", ArrIndex::Literal(3), "v".into())
@@ -2145,7 +2145,7 @@ mod set_index_tests {
 
   #[test]
   fn missing_var_key_index_creates_assoc() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
       .set_index("fresh", ArrIndex::Key("k".into()), "v".into())
@@ -2158,9 +2158,9 @@ mod set_index_tests {
 
   #[test]
   fn missing_var_from_back_index_errors() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
-    let res = tab.set_index("fresh", ArrIndex::FromBack(1), "v".into());
+    let     res = tab.set_index("fresh", ArrIndex::FromBack(1), "v".into());
     assert!(
       res.is_err(),
       "counting back from an absent array has no length"
@@ -2170,15 +2170,15 @@ mod set_index_tests {
 
   #[test]
   fn wildcard_index_into_indexed_array_errors() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = make_tab_with_arr("arr", vec!["a", "b"]);
-    let res = tab.set_index("arr", ArrIndex::AllSplit, "x".into());
+    let     res = tab.set_index("arr", ArrIndex::AllSplit, "x".into());
     assert!(res.is_err());
   }
 
   #[test]
   fn wildcard_index_into_assoc_array_errors() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
       .set_var(
@@ -2202,12 +2202,12 @@ mod set_index_tests {
     // any write borrow on var_scopes (because arithmetic-eval on Raw
     // indices re-enters the var table). This test mirrors that flow:
     // peek at the kind, resolve, then set.
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
       .set_var("h", VarKind::AssocArr(vec![]), VarFlags::empty())
       .unwrap();
-    let tag = tab.try_get_var_kind_tag("h").unwrap();
+    let tag      = tab.try_get_var_kind_tag("h").unwrap();
     let resolved = ArrIndex::Literal(7).resolve_for(tag).unwrap();
     tab.set_index("h", resolved, "v".into()).unwrap();
     assert_eq!(assoc_items(&tab, "h"), vec![("7".into(), "v".into())]);

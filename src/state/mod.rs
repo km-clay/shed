@@ -75,16 +75,16 @@ thread_local! {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ForkSpan {
   source: SourceId,
-  start: usize,
-  end: usize,
+  start : usize,
+  end   : usize,
 }
 
 impl From<Span> for ForkSpan {
   fn from(value: Span) -> Self {
     Self {
       source: value.source(),
-      start: value.start(),
-      end: value.end(),
+      start : value.start(),
+      end   : value.end(),
     }
   }
 }
@@ -104,26 +104,26 @@ pub(crate) enum ForkKind {
 impl ForkKind {
   fn name(self) -> &'static str {
     match self {
-      Self::Command => "command",
-      Self::Builtin => "builtin",
-      Self::Function => "function",
-      Self::Compound => "compound",
-      Self::Subshell => "subshell",
+      Self::Command    => "command",
+      Self::Builtin    => "builtin",
+      Self::Function   => "function",
+      Self::Compound   => "compound",
+      Self::Subshell   => "subshell",
       Self::CommandSub => "command substitution",
-      Self::ProcSub => "process substitution",
+      Self::ProcSub    => "process substitution",
       Self::Background => "background job",
     }
   }
   fn color(self) -> ariadne::Color {
     use ariadne::Color;
     match self {
-      Self::Command => Color::Red,
-      Self::Builtin => Color::Yellow,
-      Self::Function => Color::Cyan,
-      Self::Compound => Color::Blue,
-      Self::Subshell => Color::Magenta,
+      Self::Command    => Color::Red,
+      Self::Builtin    => Color::Yellow,
+      Self::Function   => Color::Cyan,
+      Self::Compound   => Color::Blue,
+      Self::Subshell   => Color::Magenta,
       Self::CommandSub => Color::Green,
-      Self::ProcSub => Color::Fixed(208),
+      Self::ProcSub    => Color::Fixed(208),
       Self::Background => Color::Fixed(39),
     }
   }
@@ -131,9 +131,9 @@ impl ForkKind {
 
 #[derive(Debug, Clone)]
 struct ForkStat {
-  count: usize,
-  span: StrongSpan,
-  kind: ForkKind,
+  count : usize,
+  span  : StrongSpan,
+  kind  : ForkKind,
   blames: Vec<ForkBlame>,
 }
 
@@ -158,7 +158,7 @@ impl ForkStat {
 
   fn into_render_data(self) -> Vec<LabelBuilder> {
     let mut data = vec![];
-    let msg = varstr!("{} \u{d7}{}", self.kind.name(), self.count());
+    let     msg  = varstr!("{} \u{d7}{}", self.kind.name(), self.count());
     let label = LabelBuilder::new(self.span.trimmed())
       .with_color(self.kind.color())
       .with_message(msg);
@@ -184,9 +184,9 @@ impl ForkStat {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ForkBlame {
-  span: StrongSpan,
+  span    : StrongSpan,
   behavior: ForkBehavior,
-  kind: ForkKind,
+  kind    : ForkKind,
 }
 
 impl ForkBlame {
@@ -224,20 +224,20 @@ impl ForkBlame {
 }
 
 pub(crate) struct ForgetSpec {
-  flags: ForgetFlags,
+  flags       : ForgetFlags,
   exclude_vars: Vec<String>,
 }
 
 impl ForgetSpec {
   pub(crate) fn new() -> Self {
     Self {
-      flags: ForgetFlags::empty(),
+      flags       : ForgetFlags::empty(),
       exclude_vars: vec![],
     }
   }
   pub(crate) fn all() -> Self {
     Self {
-      flags: ForgetFlags::all(),
+      flags       : ForgetFlags::all(),
       exclude_vars: vec![],
     }
   }
@@ -304,8 +304,8 @@ impl Message {
   }
   pub(crate) fn with_timestamp(&self) -> String {
     let time: DateTime<Local> = (self.when).into();
-    let formatted = time.format("[%x %T]").to_string();
-    let msg = self.what.trim().replace('\n', "\n\t\t\t"); // aligns multiline messages
+    let formatted             = time.format("[%x %T]").to_string();
+    let msg                   = self.what.trim().replace('\n', "\n\t\t\t"); // aligns multiline messages
 
     format!("{formatted}\t{msg}")
   }
@@ -357,35 +357,35 @@ macro_rules! access_mut {
 pub(super) struct Shed {
   // constructed in state/util.rs
   /// The job table
-  jobs: RefCell<jobs::JobTab>,
+  jobs       : RefCell<jobs::JobTab>,
   /// Shell variable scopes
-  var_scopes: RefCell<scopes::ScopeStack>,
+  var_scopes : RefCell<scopes::ScopeStack>,
   /// Metadata and miscellaneous bookkeeping
-  meta: RefCell<meta::MetaTab>,
+  meta       : RefCell<meta::MetaTab>,
   /// Table for functions, aliases, etc
-  logic: RefCell<logic::LogTab>,
+  logic      : RefCell<logic::LogTab>,
   /// `chrono timer` stopwatches
-  timers: RefCell<timers::Timers>,
+  timers     : RefCell<timers::Timers>,
   pipe_frames: RefCell<procio::PipeFrames>,
   /// The terminal state
-  terminal: RefCell<terminal::Terminal>,
+  terminal   : RefCell<terminal::Terminal>,
   /// The shell configuration options
-  shopts: RefCell<shopt::ShOpts>,
+  shopts     : RefCell<shopt::ShOpts>,
   /// The last exit status code, used by `$?`
   status_code: AtomicI32,
 
   /// Pending status messages to be displayed under the prompt
   status_msg_queue: RefCell<VecDeque<Message>>,
   /// History of status messages that have been displayed
-  status_msg_hist: RefCell<VecDeque<Message>>,
+  status_msg_hist : RefCell<VecDeque<Message>>,
 
   /// Pending system messages to be displayed with the prompt
   system_msg_queue: RefCell<VecDeque<Message>>,
   /// History of system messages that have been displayed
-  system_msg_hist: RefCell<VecDeque<Message>>,
+  system_msg_hist : RefCell<VecDeque<Message>>,
 
   /// The IPC socket
-  socket: RefCell<Option<Arc<socket::ShedSocket>>>,
+  socket     : RefCell<Option<Arc<socket::ShedSocket>>>,
   /// The list of subscribers to the IPC socket
   subscribers: RefCell<Vec<Arc<UnixStream>>>,
 
@@ -406,23 +406,23 @@ pub(super) struct Shed {
 impl Shed {
   pub(crate) fn new() -> Self {
     Self {
-      jobs: RefCell::new(jobs::JobTab::new()),
-      var_scopes: RefCell::new(scopes::ScopeStack::new()),
-      meta: RefCell::new(meta::MetaTab::new()),
-      logic: RefCell::new(logic::LogTab::new()),
-      timers: RefCell::new(timers::Timers::new()),
+      jobs       : RefCell::new(jobs::JobTab::new()),
+      var_scopes : RefCell::new(scopes::ScopeStack::new()),
+      meta       : RefCell::new(meta::MetaTab::new()),
+      logic      : RefCell::new(logic::LogTab::new()),
+      timers     : RefCell::new(timers::Timers::new()),
       pipe_frames: RefCell::new(crate::procio::PipeFrames::default()),
-      terminal: RefCell::new(terminal::Terminal::new()),
-      shopts: RefCell::new(shopt::ShOpts::default()),
+      terminal   : RefCell::new(terminal::Terminal::new()),
+      shopts     : RefCell::new(shopt::ShOpts::default()),
       status_code: AtomicI32::new(0),
 
       status_msg_queue: RefCell::new(VecDeque::new()),
-      status_msg_hist: RefCell::new(VecDeque::new()),
+      status_msg_hist : RefCell::new(VecDeque::new()),
 
       system_msg_queue: RefCell::new(VecDeque::new()),
-      system_msg_hist: RefCell::new(VecDeque::new()),
+      system_msg_hist : RefCell::new(VecDeque::new()),
 
-      socket: RefCell::new(None),
+      socket     : RefCell::new(None),
       subscribers: RefCell::new(vec![]),
 
       call_context: RefCell::new(vec![]),
@@ -431,7 +431,7 @@ impl Shed {
       sinks: RefCell::new(procio::Sinks::new()),
 
       #[cfg(test)]
-      saved: RefCell::new(None),
+      saved             : RefCell::new(None),
     }
   }
 
@@ -649,8 +649,8 @@ impl Shed {
         return;
       }
 
-      let fork_span = ForkSpan::from(span);
-      let mut profile = shed.fork_profile.borrow_mut();
+      let     fork_span = ForkSpan::from(span);
+      let mut profile   = shed.fork_profile.borrow_mut();
       let stat = profile
         .entry(fork_span)
         .or_insert_with(|| ForkStat::new(span.upgrade(), kind));
@@ -660,7 +660,7 @@ impl Shed {
   }
 
   pub(crate) fn blame_forks(tree: &Ast, node_id: NodeId) {
-    let span = tree.span_for(node_id);
+    let span      = tree.span_for(node_id);
     let fork_span = ForkSpan::from(span);
 
     // return early if fork_trace is disabled, or this
@@ -696,7 +696,7 @@ impl Shed {
   pub(crate) fn report_forks() -> Option<String> {
     SHED.with(|shed| {
       let mut profile = shed.fork_profile.borrow_mut();
-      let profile = std::mem::take(&mut *profile);
+      let     profile = std::mem::take(&mut *profile);
       if profile.is_empty() {
         return None;
       }
@@ -704,8 +704,8 @@ impl Shed {
       // One fork report per source. storing (num_forks, labels)
       let mut by_source: HashMap<SourceId, (usize, Vec<LabelBuilder>)> = HashMap::default();
       for stat in profile.into_values() {
-        let src = stat.span.source();
-        let count = stat.count();
+        let src             = stat.span.source();
+        let count           = stat.count();
         let (total, labels) = by_source.entry(src).or_insert_with(|| (0, vec![]));
         *total += count;
         labels.extend(stat.into_render_data());
@@ -739,7 +739,7 @@ impl Shed {
   pub(crate) fn pop_status_msg() -> Option<String> {
     SHED.with(|shed| {
       let mut queue = shed.status_msg_queue.borrow_mut();
-      let mut hist = shed.status_msg_hist.borrow_mut();
+      let mut hist  = shed.status_msg_hist.borrow_mut();
       Self::pop_msg(&mut queue, &mut hist)
     })
   }
@@ -756,7 +756,7 @@ impl Shed {
   pub(crate) fn pop_system_msg() -> Option<String> {
     SHED.with(|shed| {
       let mut queue = shed.system_msg_queue.borrow_mut();
-      let mut hist = shed.system_msg_hist.borrow_mut();
+      let mut hist  = shed.system_msg_hist.borrow_mut();
       Self::pop_msg(&mut queue, &mut hist)
     })
   }
@@ -805,7 +805,7 @@ impl Shed {
 
     // Nonblocking read; the request ends at EOF on the client's write half
     conn.set_nonblocking(true).ok();
-    let mut bytes = vec![];
+    let mut bytes      = vec![];
     let mut idle_iters = 0;
     loop {
       let mut buffer = procio::take_scratch();
@@ -860,8 +860,8 @@ impl Shed {
   /// the frame exits (restoring the stack to its prior length).
   pub(crate) fn push_call_frame(labels: Vec<LabelBuilder>) -> CallFrameGuard {
     let restore = SHED.with(|shed| {
-      let mut cc = shed.call_context.borrow_mut();
-      let restore = cc.len();
+      let mut cc      = shed.call_context.borrow_mut();
+      let     restore = cc.len();
       cc.extend(labels);
       restore
     });
@@ -891,19 +891,19 @@ impl Shed {
     use itertools::izip;
     use std::fmt::Write as _;
 
-    let id = job.tabid().map(|i| (i + 1).to_string()).unwrap_or_default();
-    let pids = job.get_pids();
+    let id    = job.tabid().map(|i| (i + 1).to_string()).unwrap_or_default();
+    let pids  = job.get_pids();
     let stats = job.get_stats();
-    let cmds = job.get_cmds();
+    let cmds  = job.get_cmds();
 
     Self::broadcast(|sub| {
       let mut buf = format!("job>>begin>>{id} {}\n", pids.len());
       for (pid, stat, cmd) in izip!(&pids, &stats, &cmds) {
         let stat_str = match stat {
-          Outcome::Exited(0) => "done".to_string(),
-          Outcome::Exited(n) => format!("failed:{n}"),
-          Outcome::Signaled(sig) => format!("signaled:{sig:?}"),
-          Outcome::Stopped(sig) => format!("stopped:{sig:?}"),
+          Outcome::Exited(0)       => "done".to_string(),
+          Outcome::Exited(n)       => format!("failed:{n}"),
+          Outcome::Signaled(sig)   => format!("signaled:{sig:?}"),
+          Outcome::Stopped(sig)    => format!("stopped:{sig:?}"),
           other @ Outcome::Running => format!("{other:?}"),
         };
         let _ = writeln!(buf, "job>>child>>{pid} {stat_str} {cmd}");
@@ -927,8 +927,8 @@ impl Shed {
 
     Self::broadcast(|sub| {
       let mut buf = String::new();
-      let _ = writeln!(buf, "line>>buffer>>{buffer}");
-      let _ = writeln!(buf, "line>>cursor>>{cursor}");
+      let     _   = writeln!(buf, "line>>buffer>>{buffer}");
+      let     _   = writeln!(buf, "line>>cursor>>{cursor}");
       if let Some(anchor) = anchor {
         let _ = writeln!(buf, "line>>anchor>>{anchor}");
       }

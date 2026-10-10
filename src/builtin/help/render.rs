@@ -21,8 +21,8 @@ pub(super) enum Overlay {
   // used for link hints
   // inserts arbitrary styled text at a given position
   Insert {
-    pos: usize,
-    text: String,
+    pos  : usize,
+    text : String,
     style: Style,
   },
 }
@@ -47,12 +47,12 @@ pub(super) fn render(content: &str, overlays: Vec<Overlay>) -> String {
   events.sort_by(|a, b| a.0.cmp(&b.0).then(event_rank(&a.1).cmp(&event_rank(&b.1))));
 
   let mut out = String::with_capacity(content.len() + events.len() * 16);
-  let mut struct_stack: Vec<&str> = Vec::new();
+  let mut struct_stack : Vec<&str>  = Vec::new();
   let mut overlay_stack: Vec<Style> = Vec::new();
-  let mut events_iter = events.into_iter().peekable();
+  let mut events_iter               = events.into_iter().peekable();
   let mut cursor = 0;
 
-  let bytes = content.as_bytes();
+  let     bytes  = content.as_bytes();
   while cursor < bytes.len() {
     // Fire any events at the current cursor.
     drain_events_at(
@@ -87,8 +87,8 @@ pub(super) fn render(content: &str, overlays: Vec<Overlay>) -> String {
       None => {
         // plain text, just copy until the next SGR sequence
         let next_event = events_iter.peek().map_or(bytes.len(), |(p, _)| *p);
-        let next_sgr = find_sgr(bytes, cursor + 1).unwrap_or(bytes.len());
-        let run_end = next_event.min(next_sgr).min(bytes.len()).max(cursor + 1);
+        let next_sgr   = find_sgr(bytes, cursor + 1).unwrap_or(bytes.len());
+        let run_end    = next_event.min(next_sgr).min(bytes.len()).max(cursor + 1);
 
         out.push_str(&content[cursor..run_end]);
         cursor = run_end;
@@ -117,8 +117,8 @@ enum EventKind {
 
 fn event_rank(ev: &EventKind) -> u8 {
   match ev {
-    EventKind::CloseOverlay => 0,
-    EventKind::Insert { .. } => 1,
+    EventKind::CloseOverlay   => 0,
+    EventKind::Insert { .. }  => 1,
     EventKind::OpenOverlay(_) => 2,
   }
 }
@@ -200,8 +200,8 @@ mod tests {
     // Cross-ref `autocmd`, search hit covers all of "autocmd". After the
     // search close, the outer REF_SEQ should be re-emitted so that the
     // following structural RESET still has something to close.
-    let content = format!("{REF_SEQ}autocmd{RESET_SEQ}");
-    let search = Style::new().bold().invert().cyan();
+    let content    = format!("{REF_SEQ}autocmd{RESET_SEQ}");
+    let search     = Style::new().bold().invert().cyan();
     let prefix_len = REF_SEQ.len();
     let overlays = vec![Overlay::Span {
       range: prefix_len..prefix_len + "autocmd".len(),
@@ -213,8 +213,8 @@ mod tests {
     // come from yansi.
     assert!(out.starts_with(REF_SEQ));
     assert!(out.contains("autocmd"));
-    let last_reset = out.rfind(RESET_SEQ).unwrap();
-    let preceding = &out[..last_reset];
+    let last_reset  = out.rfind(RESET_SEQ).unwrap();
+    let preceding   = &out[..last_reset];
     // After the inner reset, REF_SEQ must appear again before the final
     // close — that's the re-emission.
     let inner_reset = preceding.rfind(RESET_SEQ).unwrap();
@@ -227,13 +227,13 @@ mod tests {
   #[test]
   fn insert_emits_text_and_resumes_outer() {
     let content = format!("{REF_SEQ}autocmd{RESET_SEQ}");
-    let tag = Style::new().bold().yellow();
+    let tag     = Style::new().bold().yellow();
     let overlays = vec![Overlay::Insert {
-      pos: REF_SEQ.len(),
-      text: "[a]".into(),
+      pos  : REF_SEQ.len(),
+      text : "[a]".into(),
       style: tag,
     }];
-    let out = render(&content, overlays);
+    let out     = render(&content, overlays);
     // The visible characters should be `[a]autocmd` (the hint key followed
     // by the cross-ref content). Strip ANSI for the visual assertion.
     let visible = strip_ansi(&out);
@@ -258,13 +258,13 @@ mod tests {
         style: Style::new().bold().invert(),
       },
       Overlay::Insert {
-        pos: 9,
-        text: "[a]".into(),
+        pos  : 9,
+        text : "[a]".into(),
         style: Style::new().bold().yellow(),
       },
     ];
-    let out = render(&content, overlays);
-    let in_newlines = content.bytes().filter(|b| *b == b'\n').count();
+    let out          = render(&content, overlays);
+    let in_newlines  = content.bytes().filter(|b| *b == b'\n').count();
     let out_newlines = out.bytes().filter(|b| *b == b'\n').count();
     assert_eq!(
       in_newlines, out_newlines,
@@ -274,17 +274,17 @@ mod tests {
 
   #[test]
   fn overlays_outside_structural_just_paint() {
-    let content = "plain text".to_string();
-    let style = Style::new().bold();
+    let content  = "plain text".to_string();
+    let style    = Style::new().bold();
     let overlays = vec![Overlay::Span { range: 0..5, style }];
-    let out = render(&content, overlays);
+    let out      = render(&content, overlays);
     assert_eq!(strip_ansi(&out), "plain text");
   }
 
   fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut i = 0;
+    let mut out   = String::with_capacity(s.len());
+    let     bytes = s.as_bytes();
+    let mut i     = 0;
     while i < bytes.len() {
       if bytes[i] == 0x1b
         && let Some(end) = scan_sgr(bytes, i)

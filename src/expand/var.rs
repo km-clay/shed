@@ -23,7 +23,7 @@ pub(crate) fn expand_raw_inner(
   allow_side_effects: bool,
   mark_split: bool,
 ) -> ShResult<SegStream> {
-  let mut result = SegStream::new();
+  let mut result   = SegStream::new();
   let mut qt_state = QuoteState::default();
 
   match_loop!(chars.next() => unit, {
@@ -128,11 +128,11 @@ pub(crate) fn expand_var(
   stream: &mut SegCursor,
   allow_side_effects: bool,
 ) -> ShResult<SegStream> {
-  let mut var_name = SegStream::new();
-  let mut brace_depth: i32 = 0;
+  let mut var_name               = SegStream::new();
+  let mut brace_depth      : i32 = 0;
   let mut inner_brace_depth: i32 = 0;
-  let mut prev_was_dollar = false;
-  let mut in_subsh = false;
+  let mut prev_was_dollar        = false;
+  let mut in_subsh               = false;
 
   match_loop!(stream.peek() => unit, {
     Unit::Mark(Marker::Subshell) if var_name.is_empty() => {
@@ -255,8 +255,8 @@ pub(crate) fn positional_fields_seg(fields: &[VarStr]) -> SegStream {
 /// Look up a bare `$name` and return its value, honoring `set -u` (nounset).
 fn lookup_var(var_name: &SegStream) -> ShResult<SegStream> {
   let name_bytes = var_name.to_bytes();
-  let name = String::from_utf8_lossy(&name_bytes);
-  let val = try_var!(name.as_ref());
+  let name       = String::from_utf8_lossy(&name_bytes);
+  let val        = try_var!(name.as_ref());
   if val.is_none() && shopt!(set.nounset) {
     return Err(sherr!(NotFound, "Variable '{name}' is not set"));
   }
@@ -299,7 +299,7 @@ mod tests {
       for s in &seg.stream() {
         match s {
           StreamSeg::Bytes(b) => out.push_str(&String::from_utf8_lossy(b)),
-          StreamSeg::Mark(m) => out.push(marker_char(*m)),
+          StreamSeg::Mark(m)  => out.push(marker_char(*m)),
         }
       }
       out
@@ -310,16 +310,16 @@ mod tests {
     match m {
       Marker::Quote(Quote::Double) => '\u{fdd0}',
       Marker::Quote(Quote::Single) => '\u{fdd1}',
-      Marker::TildeSub => '\u{fdd2}',
-      Marker::ProcSub(ProcSubKind::In) => '\u{fdd3}',
+      Marker::TildeSub             => '\u{fdd2}',
+      Marker::ProcSub(ProcSubKind::In)  => '\u{fdd3}',
       Marker::ProcSub(ProcSubKind::Out) => '\u{fdd4}',
-      Marker::NullExpand => '\u{fdd5}',
-      Marker::ArgSep => '\u{fdd6}',
-      Marker::Subshell => '\u{fdd7}',
-      Marker::VarSub => '\u{fdd8}',
-      Marker::Escape => '\u{fdd9}',
+      Marker::NullExpand  => '\u{fdd5}',
+      Marker::ArgSep      => '\u{fdd6}',
+      Marker::Subshell    => '\u{fdd7}',
+      Marker::VarSub      => '\u{fdd8}',
+      Marker::Escape      => '\u{fdd9}',
       Marker::ExpandStart => '\u{fde1}',
-      Marker::ExpandEnd => '\u{fde2}',
+      Marker::ExpandEnd   => '\u{fde2}',
     }
   }
   #[allow(dead_code)]
@@ -337,7 +337,7 @@ mod tests {
     let _guard = TestGuard::new();
     set_var!("MYVAR", VarKind::Str("hello".into())).unwrap();
 
-    let raw = unescape_str(b"$MYVAR");
+    let raw    = unescape_str(b"$MYVAR");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "hello");
   }
@@ -347,7 +347,7 @@ mod tests {
     let _guard = TestGuard::new();
     set_var!("FOO", VarKind::Str("bar".into())).unwrap();
 
-    let raw = unescape_str(b"${FOO}");
+    let raw    = unescape_str(b"${FOO}");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "bar");
   }
@@ -356,7 +356,7 @@ mod tests {
   fn var_expansion_unset_empty() {
     let _guard = TestGuard::new();
 
-    let raw = unescape_str(b"$NONEXISTENT");
+    let raw    = unescape_str(b"$NONEXISTENT");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "");
   }
@@ -367,7 +367,7 @@ mod tests {
     set_var!("A", VarKind::Str("hello".into())).unwrap();
     set_var!("B", VarKind::Str("world".into())).unwrap();
 
-    let raw = unescape_str(b"${A}_${B}");
+    let raw    = unescape_str(b"${A}_${B}");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(result, "hello_world");
   }
@@ -377,9 +377,9 @@ mod tests {
   #[test]
   fn tilde_expansion_home() {
     let _guard = TestGuard::new();
-    let home = var!("HOME");
+    let home   = var!("HOME");
 
-    let raw = unescape_str(b"~/foo");
+    let raw    = unescape_str(b"~/foo");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(
       result,
@@ -390,9 +390,9 @@ mod tests {
   #[test]
   fn tilde_expansion_bare() {
     let _guard = TestGuard::new();
-    let home = var!("HOME");
+    let home   = var!("HOME");
 
-    let raw = unescape_str(b"~");
+    let raw    = unescape_str(b"~");
     let result = expand_raw(&mut raw.cursor()).unwrap();
     assert_eq!(
       result,
@@ -421,7 +421,7 @@ mod tests {
   fn expand_glob_matches_escaped_space() {
     use crate::expand::markers::strip_markers;
     // The original bug: `my\ *` should match a file named `my file.txt`.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let tmp = std::env::temp_dir().join("shed_test_glob_escape");
     std::fs::create_dir_all(&tmp).ok();
     let target = tmp.join("my file.txt");
@@ -433,7 +433,7 @@ mod tests {
     // After unescape_str, `my\ *` becomes `my{ESCAPE} *`; convert to a glob
     // pattern the way `expand()` does before matching.
     let unescaped = unescape_str(b"my\\ *");
-    let pattern = crate::expand::escape::markers_to_glob_escapes(&unescaped);
+    let pattern   = crate::expand::escape::markers_to_glob_escapes(&unescaped);
     let result = expand_glob(&pattern)
       .into_iter()
       .map(|word| word.to_str_lossy().to_string())
@@ -456,7 +456,7 @@ mod tests {
   #[test]
   fn expand_glob_leading_dot_matches_bash_rule() {
     use crate::expand::markers::strip_markers;
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let tmp = std::env::temp_dir().join("shed_test_glob_dotfiles");
     std::fs::remove_dir_all(&tmp).ok();
     std::fs::create_dir_all(&tmp).unwrap();
@@ -475,8 +475,8 @@ mod tests {
         .collect()
     };
     // Capture everything before restoring cwd so an assert failure can't leak it.
-    let dot_f = glob(".f*");
-    let star = glob("*");
+    let dot_f    = glob(".f*");
+    let star     = glob("*");
     let dot_star = glob(".*");
 
     if let Some(prev) = saved {
@@ -527,7 +527,7 @@ mod tests {
   /// Build a tempdir populated with the given filenames.
   fn make_fixture(name: &str, files: &[&str]) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(name);
-    let _ = std::fs::remove_dir_all(&dir);
+    let _   = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     for f in files {
       std::fs::File::create(dir.join(f)).unwrap();
@@ -539,11 +539,11 @@ mod tests {
   fn glob_quoted_prefix_unquoted_meta_matches() {
     // `"path/"*` should glob — only `*` is unquoted, the prefix is literal.
     // This is the cd-completion case.
-    let _g = TestGuard::new();
-    let dir = make_fixture("shed_glob_qprefix", &["alpha", "beta", "gamma"]);
+    let _g      = TestGuard::new();
+    let dir     = make_fixture("shed_glob_qprefix", &["alpha", "beta", "gamma"]);
     let pattern = format!(r#""{}/"*"#, dir.display());
-    let words = expand_words_in(&dir, &pattern);
-    let _ = std::fs::remove_dir_all(&dir);
+    let words   = expand_words_in(&dir, &pattern);
+    let _       = std::fs::remove_dir_all(&dir);
 
     let mut got: Vec<String> = words
       .iter()
@@ -560,10 +560,10 @@ mod tests {
   #[test]
   fn glob_fully_quoted_is_literal() {
     // `"*"` should be a literal `*` — no expansion.
-    let _g = TestGuard::new();
-    let dir = make_fixture("shed_glob_full_quote", &["a", "b"]);
+    let _g    = TestGuard::new();
+    let dir   = make_fixture("shed_glob_full_quote", &["a", "b"]);
     let words = expand_words_in(&dir, r#""*""#);
-    let _ = std::fs::remove_dir_all(&dir);
+    let _     = std::fs::remove_dir_all(&dir);
 
     assert_eq!(words, vec!["*"]);
   }
@@ -571,10 +571,10 @@ mod tests {
   #[test]
   fn glob_squote_is_literal() {
     // `'*'` should be a literal `*` — no expansion.
-    let _g = TestGuard::new();
-    let dir = make_fixture("shed_glob_squote", &["a", "b"]);
+    let _g    = TestGuard::new();
+    let dir   = make_fixture("shed_glob_squote", &["a", "b"]);
     let words = expand_words_in(&dir, "'*'");
-    let _ = std::fs::remove_dir_all(&dir);
+    let _     = std::fs::remove_dir_all(&dir);
 
     assert_eq!(words, vec!["*"]);
   }
@@ -582,10 +582,10 @@ mod tests {
   #[test]
   fn glob_backslash_escaped_is_literal() {
     // `\*` should be a literal `*`.
-    let _g = TestGuard::new();
-    let dir = make_fixture("shed_glob_bs_escape", &["a", "b"]);
+    let _g    = TestGuard::new();
+    let dir   = make_fixture("shed_glob_bs_escape", &["a", "b"]);
     let words = expand_words_in(&dir, r"\*");
-    let _ = std::fs::remove_dir_all(&dir);
+    let _     = std::fs::remove_dir_all(&dir);
 
     assert_eq!(words, vec!["*"]);
   }
@@ -593,12 +593,12 @@ mod tests {
   #[test]
   fn glob_unquoted_expands() {
     // Baseline: unquoted `*` globs as expected.
-    let _g = TestGuard::new();
-    let dir = make_fixture("shed_glob_unquoted", &["a.txt", "b.txt", "c.log"]);
-    let words = expand_words_in(&dir, "*.txt");
-    let _ = std::fs::remove_dir_all(&dir);
+    let     _g    = TestGuard::new();
+    let     dir   = make_fixture("shed_glob_unquoted", &["a.txt", "b.txt", "c.log"]);
+    let     words = expand_words_in(&dir, "*.txt");
+    let     _     = std::fs::remove_dir_all(&dir);
 
-    let mut got = words;
+    let mut got   = words;
     got.sort();
     assert_eq!(got, vec!["a.txt", "b.txt"]);
   }
@@ -606,16 +606,16 @@ mod tests {
   #[test]
   fn glob_quoted_prefix_with_subdir_unquoted_meta() {
     // `"a/"*.txt` — prefix quoted, suffix has unquoted glob meta.
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let outer = make_fixture("shed_glob_subdir", &[]);
-    let sub = outer.join("sub");
+    let sub   = outer.join("sub");
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::File::create(sub.join("a.txt")).unwrap();
     std::fs::File::create(sub.join("b.txt")).unwrap();
 
     let pattern = format!(r#""{}/sub/"*.txt"#, outer.display());
-    let words = expand_words_in(&outer, &pattern);
-    let _ = std::fs::remove_dir_all(&outer);
+    let words   = expand_words_in(&outer, &pattern);
+    let _       = std::fs::remove_dir_all(&outer);
 
     let mut got: Vec<String> = words
       .iter()

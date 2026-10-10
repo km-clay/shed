@@ -43,8 +43,8 @@ impl super::Builtin for Complete {
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let blame = args.span();
-    let src = build_source(&args);
+    let blame     = args.span();
+    let src       = build_source(&args);
     let comp_opts = get_comp_opts(args.options())?;
 
     if comp_opts.flags.contains(CompFlags::PRINT) {
@@ -128,17 +128,17 @@ impl super::Builtin for CompGen {
       unreachable!()
     };
 
-    let parsed = parse_opts(&tree[*argv], &self.opts())?;
+    let     parsed = parse_opts(&tree[*argv], &self.opts())?;
     // the whole expanded command line, for the spec's stored source
-    let src = parsed.trace.join_with(" ");
+    let     src    = parsed.trace.join_with(" ");
 
-    let mut opts = vec![];
-    let mut args = vec![];
+    let mut opts   = vec![];
+    let mut args   = vec![];
     for word in parsed.words {
       match word {
-        Word::Opt(opt) => opts.push(opt),
+        Word::Opt(opt)         => opts.push(opt),
         Word::Arg(value, span) => args.push((value, span)),
-        Word::Sep(_) => {}
+        Word::Sep(_)           => {}
       }
     }
 
@@ -155,9 +155,9 @@ impl super::Builtin for CompGen {
     let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
 
     let dummy_ctx = CompContext {
-      words: vec![prefix.clone()],
-      cword: 0,
-      line: prefix.clone(),
+      words     : vec![prefix.clone()],
+      cword     : 0,
+      line      : prefix.clone(),
       cursor_pos: prefix.as_str().len(),
     };
 
@@ -172,23 +172,23 @@ impl super::Builtin for CompGen {
 }
 
 struct CompaddOpts {
-  prefix: Option<VarStr>,
-  suffix: Option<VarStr>,
-  desc_arr: Option<VarStr>,
-  cand_arr: Option<VarStr>,
+  prefix   : Option<VarStr>,
+  suffix   : Option<VarStr>,
+  desc_arr : Option<VarStr>,
+  cand_arr : Option<VarStr>,
   assoc_arr: Option<VarStr>,
-  desc: Option<VarStr>,
+  desc     : Option<VarStr>,
 }
 
 impl CompaddOpts {
   fn from_args(args: &BuiltinArgs) -> Self {
     Self {
-      prefix: args.opt_value("prefix"),
-      suffix: args.opt_value("suffix"),
-      desc_arr: args.opt_value("desc_arr"),
-      cand_arr: args.opt_value("cand_arr"),
+      prefix   : args.opt_value("prefix"),
+      suffix   : args.opt_value("suffix"),
+      desc_arr : args.opt_value("desc_arr"),
+      cand_arr : args.opt_value("cand_arr"),
       assoc_arr: args.opt_value("assoc_arr"),
-      desc: args.opt_value("desc"),
+      desc     : args.opt_value("desc"),
     }
   }
 }
@@ -211,9 +211,9 @@ impl super::Builtin for Compadd {
     let make_candidate = |a: &str| -> Candidate {
       match (&opts.prefix, &opts.suffix) {
         (Some(p), Some(s)) => format!("{p}{a}{s}").into(),
-        (Some(p), None) => format!("{p}{a}").into(),
-        (None, Some(s)) => format!("{a}{s}").into(),
-        (None, None) => Candidate::from(a),
+        (Some(p), None)    => format!("{p}{a}").into(),
+        (None, Some(s))    => format!("{a}{s}").into(),
+        (None, None)       => Candidate::from(a),
       }
     };
 
@@ -248,8 +248,8 @@ impl super::Builtin for Compadd {
       .zip_longest(descriptions)
       .filter_map(|pair| match pair {
         EitherOrBoth::Both(cand, desc) => Some(cand.with_desc(&desc)),
-        EitherOrBoth::Left(cand) => Some(cand),
-        EitherOrBoth::Right(_) => None,
+        EitherOrBoth::Left(cand)       => Some(cand),
+        EitherOrBoth::Right(_)         => None,
       })
       .collect();
 
@@ -307,11 +307,11 @@ pub(super) fn get_comp_opts<'a>(opts: impl Iterator<Item = &'a Opt>) -> ShResult
       }
       "action" => comp_opts.action = Some(opt.value()?),
       "option" => match &*opt.value()? {
-        b"default" => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
-        b"dirnames" => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
-        b"space" => comp_opts.opt_flags |= CompOptFlags::SPACE,
+        b"default"   => comp_opts.opt_flags |= CompOptFlags::DEFAULT,
+        b"dirnames"  => comp_opts.opt_flags |= CompOptFlags::DIRNAMES,
+        b"space"     => comp_opts.opt_flags |= CompOptFlags::SPACE,
         b"filenames" => comp_opts.opt_flags |= CompOptFlags::FILENAMES,
-        b"nospace" => comp_opts.opt_flags &= !CompOptFlags::SPACE,
+        b"nospace"   => comp_opts.opt_flags &= !CompOptFlags::SPACE,
         opt_flag => {
           return Err(sherr!(
             InvalidOpt @ opt.span(),
@@ -320,18 +320,18 @@ pub(super) fn get_comp_opts<'a>(opts: impl Iterator<Item = &'a Opt>) -> ShResult
         }
       },
 
-      "aliases" => comp_opts.flags |= CompFlags::ALIAS,
-      "signals" => comp_opts.flags |= CompFlags::SIGNALS,
+      "aliases"     => comp_opts.flags |= CompFlags::ALIAS,
+      "signals"     => comp_opts.flags |= CompFlags::SIGNALS,
       "remove_spec" => comp_opts.flags |= CompFlags::REMOVE,
-      "jobs" => comp_opts.flags |= CompFlags::JOBS,
+      "jobs"        => comp_opts.flags |= CompFlags::JOBS,
       "print_specs" => comp_opts.flags |= CompFlags::PRINT,
-      "filenames" => comp_opts.flags |= CompFlags::FILES,
+      "filenames"   => comp_opts.flags |= CompFlags::FILES,
       "directories" => comp_opts.flags |= CompFlags::DIRS,
-      "commands" => comp_opts.flags |= CompFlags::CMDS,
-      "builtins" => comp_opts.flags |= CompFlags::BUILTINS,
-      "users" => comp_opts.flags |= CompFlags::USERS,
-      "variables" => comp_opts.flags |= CompFlags::VARS,
-      _ => unreachable!(),
+      "commands"    => comp_opts.flags |= CompFlags::CMDS,
+      "builtins"    => comp_opts.flags |= CompFlags::BUILTINS,
+      "users"       => comp_opts.flags |= CompFlags::USERS,
+      "variables"   => comp_opts.flags |= CompFlags::VARS,
+      _             => unreachable!(),
     }
   }
 
@@ -533,7 +533,7 @@ mod tests {
     // (a stray `.reverse()` after the ascending sort).
     let guard = TestGuard::new();
     test_input("compgen -W 'delta alpha charlie bravo' ").unwrap();
-    let out = guard.read_output();
+    let out              = guard.read_output();
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines, ["alpha", "bravo", "charlie", "delta"]);
   }
@@ -550,7 +550,7 @@ mod tests {
   fn compgen_wordlist_exact_match() {
     let guard = TestGuard::new();
     test_input("compgen -W 'hello help helm' hel").unwrap();
-    let out = guard.read_output();
+    let out              = guard.read_output();
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines.len(), 3);
   }
@@ -559,7 +559,7 @@ mod tests {
   fn compgen_wordlist_single_match() {
     let guard = TestGuard::new();
     test_input("compgen -W 'alpha beta gamma' g").unwrap();
-    let out = guard.read_output();
+    let out              = guard.read_output();
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0], "gamma");
@@ -569,7 +569,7 @@ mod tests {
   fn compgen_wordlist_double_dash() {
     let guard = TestGuard::new();
     test_input("compgen -W 'alpha beta gamma' -- \"g\"").unwrap();
-    let out = guard.read_output();
+    let out              = guard.read_output();
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0], "gamma");
@@ -605,8 +605,8 @@ mod tests {
   #[test]
   fn compgen_dirs() {
     let guard = TestGuard::new();
-    let tmp = TempDir::new().unwrap();
-    let sub = tmp.path().join("subdir");
+    let tmp   = TempDir::new().unwrap();
+    let sub   = tmp.path().join("subdir");
     fs::create_dir(&sub).unwrap();
 
     let prefix = format!("{}/", tmp.path().display());
@@ -620,7 +620,7 @@ mod tests {
   #[test]
   fn compgen_files() {
     let guard = TestGuard::new();
-    let tmp = TempDir::new().unwrap();
+    let tmp   = TempDir::new().unwrap();
     fs::write(tmp.path().join("testfile.txt"), "").unwrap();
     fs::create_dir(tmp.path().join("testdir")).unwrap();
 
@@ -691,7 +691,7 @@ mod tests {
   fn compadd_basic_words() {
     let _g = TestGuard::new();
     test_input("compadd a b c").unwrap();
-    let cands = take_comp_candidates();
+    let cands               = take_comp_candidates();
     let contents: Vec<&str> = collect_contents(&cands);
     assert_eq!(contents, vec!["a", "b", "c"]);
     for c in &cands {
@@ -704,7 +704,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("compadd a b").unwrap();
     test_input("compadd c d").unwrap();
-    let cands = take_comp_candidates();
+    let cands               = take_comp_candidates();
     let contents: Vec<&str> = collect_contents(&cands);
     assert_eq!(contents, vec!["a", "b", "c", "d"]);
   }
@@ -714,7 +714,7 @@ mod tests {
     // After draining, a fresh take should return empty.
     let _g = TestGuard::new();
     test_input("compadd x y").unwrap();
-    let _ = take_comp_candidates();
+    let _     = take_comp_candidates();
     let cands = take_comp_candidates();
     assert!(cands.is_empty(), "candidates should reset after take");
   }
@@ -723,7 +723,7 @@ mod tests {
   fn compadd_prefix() {
     let _g = TestGuard::new();
     test_input("compadd -P 'pre_' a b").unwrap();
-    let cands = take_comp_candidates();
+    let cands               = take_comp_candidates();
     let contents: Vec<&str> = collect_contents(&cands);
     assert_eq!(contents, vec!["pre_a", "pre_b"]);
   }
@@ -732,7 +732,7 @@ mod tests {
   fn compadd_suffix() {
     let _g = TestGuard::new();
     test_input("compadd -S '_suf' a b").unwrap();
-    let cands = take_comp_candidates();
+    let cands               = take_comp_candidates();
     let contents: Vec<&str> = collect_contents(&cands);
     assert_eq!(contents, vec!["a_suf", "b_suf"]);
   }
@@ -741,7 +741,7 @@ mod tests {
   fn compadd_prefix_and_suffix() {
     let _g = TestGuard::new();
     test_input("compadd -P 'p.' -S '=' x y").unwrap();
-    let cands = take_comp_candidates();
+    let cands               = take_comp_candidates();
     let contents: Vec<&str> = collect_contents(&cands);
     assert_eq!(contents, vec!["p.x=", "p.y="]);
   }
@@ -751,7 +751,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("words=(alpha beta gamma)").unwrap();
     test_input("compadd -a words").unwrap();
-    let cands = take_comp_candidates();
+    let cands               = take_comp_candidates();
     let contents: Vec<&str> = collect_contents(&cands);
     assert_eq!(contents, vec!["alpha", "beta", "gamma"]);
   }
@@ -830,7 +830,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("words=(x y)").unwrap();
     test_input("compadd -P 'opt.' -S '=' -a words").unwrap();
-    let cands = take_comp_candidates();
+    let cands               = take_comp_candidates();
     let contents: Vec<&str> = collect_contents(&cands);
     assert_eq!(contents, vec!["opt.x=", "opt.y="]);
   }
@@ -864,7 +864,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("declare -A m=([gamma]=g [alpha]=a [beta]=b)").unwrap();
     test_input("compadd -A m").unwrap();
-    let cands = take_comp_candidates();
+    let cands            = take_comp_candidates();
     let order: Vec<&str> = collect_contents(&cands);
     assert_eq!(order, vec!["gamma", "alpha", "beta"]);
   }
@@ -928,7 +928,7 @@ mod tests {
     // doesn't exist at all) should just contribute nothing.
     let _g = TestGuard::new();
     test_input("compadd -A nonexistent_var fallback").unwrap();
-    let cands = take_comp_candidates();
+    let cands               = take_comp_candidates();
     let contents: Vec<&str> = collect_contents(&cands);
     assert_eq!(contents, vec!["fallback"]);
   }
@@ -940,7 +940,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("not_assoc=hello").unwrap();
     test_input("compadd -A not_assoc fallback").unwrap();
-    let cands = take_comp_candidates();
+    let cands               = take_comp_candidates();
     let contents: Vec<&str> = collect_contents(&cands);
     assert_eq!(contents, vec!["fallback"]);
   }

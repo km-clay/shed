@@ -26,16 +26,16 @@ impl QuoteState {
   pub(crate) fn toggle_double(&mut self) {
     match self {
       QuoteState::Outside => *self = QuoteState::Double,
-      QuoteState::Double => *self = QuoteState::Outside,
-      QuoteState::Single => {}
+      QuoteState::Double  => *self = QuoteState::Outside,
+      QuoteState::Single  => {}
     }
   }
   /// Toggles whether we are in a single quote. If self == `QuoteState::Double` or `QuoteState::Backtick,` this does nothing, since single quotes inside those quotes are just literal characters
   pub(crate) fn toggle_single(&mut self) {
     match self {
       QuoteState::Outside => *self = QuoteState::Single,
-      QuoteState::Single => *self = QuoteState::Outside,
-      QuoteState::Double => {}
+      QuoteState::Single  => *self = QuoteState::Outside,
+      QuoteState::Double  => {}
     }
   }
 }

@@ -21,8 +21,8 @@ use super::entry_obj;
 
 struct WhereBuilder {
   conditions: Vec<String>,
-  params: Vec<Box<dyn ToSql>>,
-  idx: usize,
+  params    : Vec<Box<dyn ToSql>>,
+  idx       : usize,
 }
 
 impl WhereBuilder {
@@ -44,30 +44,30 @@ impl WhereBuilder {
 #[derive(Debug, Default, Clone)]
 pub(super) struct HistQuery {
   // 456 bytes by the way lol 8D
-  pub(super) after: (Option<VarStr>, bool),
-  pub(super) before: (Option<VarStr>, bool),
-  pub(super) contains: (Option<VarStr>, bool),
-  pub(super) lines_gt: (Option<u64>, bool),
-  pub(super) lines_lt: (Option<u64>, bool),
-  pub(super) starts_with: (Option<VarStr>, bool),
-  pub(super) ends_with: (Option<VarStr>, bool),
-  pub(super) matches: (Option<VarStr>, bool),
-  pub(super) duration_gt: (Option<VarStr>, bool),
-  pub(super) duration_lt: (Option<VarStr>, bool),
-  pub(super) with_status: (Option<i32>, bool),
-  pub(super) with_token: (Option<VarStr>, bool),
-  pub(super) in_dir: (Option<VarStr>, bool),
-  pub(super) limit: Option<u64>,
+  pub(super) after       : (Option<VarStr>, bool),
+  pub(super) before      : (Option<VarStr>, bool),
+  pub(super) contains    : (Option<VarStr>, bool),
+  pub(super) lines_gt    : (Option<u64>, bool),
+  pub(super) lines_lt    : (Option<u64>, bool),
+  pub(super) starts_with : (Option<VarStr>, bool),
+  pub(super) ends_with   : (Option<VarStr>, bool),
+  pub(super) matches     : (Option<VarStr>, bool),
+  pub(super) duration_gt : (Option<VarStr>, bool),
+  pub(super) duration_lt : (Option<VarStr>, bool),
+  pub(super) with_status : (Option<i32>, bool),
+  pub(super) with_token  : (Option<VarStr>, bool),
+  pub(super) in_dir      : (Option<VarStr>, bool),
+  pub(super) limit       : Option<u64>,
   pub(super) specific_ids: Vec<i64>,
-  pub(super) no_numbers: bool,
-  pub(super) no_dupes: bool,
-  pub(super) reverse: bool,
-  pub(super) json: bool,
-  pub(super) quoted: bool,
-  pub(super) count: bool,
-  pub(super) delete: bool,
-  pub(super) restore: bool,
-  pub(super) ex_hist: bool,
+  pub(super) no_numbers  : bool,
+  pub(super) no_dupes    : bool,
+  pub(super) reverse     : bool,
+  pub(super) json        : bool,
+  pub(super) quoted      : bool,
+  pub(super) count       : bool,
+  pub(super) delete      : bool,
+  pub(super) restore     : bool,
+  pub(super) ex_hist     : bool,
 }
 
 impl HistQuery {
@@ -80,10 +80,10 @@ impl HistQuery {
 
     let (conditions, params) = b.build();
 
-    let limit = self.limit.map(|n| format!("LIMIT {n}")).unwrap_or_default();
+    let limit                = self.limit.map(|n| format!("LIMIT {n}")).unwrap_or_default();
 
     // hardcoding DESC ordering so that limit always starts from the most recent entry
-    let tail = format!("ORDER BY id DESC {limit}");
+    let tail                 = format!("ORDER BY id DESC {limit}");
 
     let param_refs: Vec<&dyn ToSql> = params.iter().map(AsRef::as_ref).collect();
 
@@ -117,8 +117,8 @@ impl HistQuery {
   fn build_conditions(&self, hist: &History) -> ShResult<WhereBuilder> {
     let mut b = WhereBuilder {
       conditions: vec![],
-      params: vec![],
-      idx: 1,
+      params    : vec![],
+      idx       : 1,
     };
 
     if let (Some(after), not) = &self.after {
@@ -190,7 +190,7 @@ impl HistQuery {
 
     if !self.specific_ids.is_empty() {
       let mut id_strings = vec![];
-      let last_id = hist.last_id();
+      let     last_id    = hist.last_id();
 
       for id in &self.specific_ids {
         let id = match id.cmp(&0) {
@@ -213,21 +213,21 @@ impl HistQuery {
   }
 
   pub(super) fn from_opts(opts: &[Opt]) -> ShResult<Self> {
-    let mut new = Self::new();
+    let mut new     = Self::new();
     let mut negated = false; // '--not' flag flips this for one argument
-    let value = |opt: &Opt| -> Option<VarStr> { opt.value().ok() };
+    let     value   = |opt: &Opt| -> Option<VarStr> { opt.value().ok() };
 
     for opt in opts {
       match opt.key() {
-        "after" => new.after = (value(opt), negated),
-        "before" => new.before = (value(opt), negated),
-        "contains" => new.contains = (value(opt), negated),
+        "after"       => new.after = (value(opt), negated),
+        "before"      => new.before = (value(opt), negated),
+        "contains"    => new.contains = (value(opt), negated),
         "starts-with" => new.starts_with = (value(opt), negated),
-        "ends-with" => new.ends_with = (value(opt), negated),
-        "matches" => new.matches = (value(opt), negated),
+        "ends-with"   => new.ends_with = (value(opt), negated),
+        "matches"     => new.matches = (value(opt), negated),
         "duration-gt" => new.duration_gt = (value(opt), negated),
         "duration-lt" => new.duration_lt = (value(opt), negated),
-        "with-token" => new.with_token = (value(opt), negated),
+        "with-token"  => new.with_token = (value(opt), negated),
         "with-status" => {
           let arg = opt.value()?;
           match arg.parse::<i32>() {
@@ -253,7 +253,7 @@ impl HistQuery {
         }
         opt_key @ ("lines-gt" | "lines-lt") => {
           let is_gt = opt_key == "lines-gt";
-          let arg = opt.value()?;
+          let arg   = opt.value()?;
           let count = arg
             .parse::<u64>()
             .map_err(|v| sherr!(ParseErr, "Invalid number for {opt}: {v}"))?;
@@ -268,15 +268,15 @@ impl HistQuery {
           negated = !negated;
           continue;
         }
-        "ex" => new.ex_hist = true,
-        "count" => new.count = true,
-        "delete" => new.delete = true,
-        "restore" => new.restore = true,
-        "json" => new.json = true,
-        "quoted" => new.quoted = true,
-        "no-dupes" => new.no_dupes = true,
+        "ex"         => new.ex_hist = true,
+        "count"      => new.count = true,
+        "delete"     => new.delete = true,
+        "restore"    => new.restore = true,
+        "json"       => new.json = true,
+        "quoted"     => new.quoted = true,
+        "no-dupes"   => new.no_dupes = true,
         "no-numbers" => new.no_numbers = true,
-        "reverse" => new.reverse = true,
+        "reverse"    => new.reverse = true,
         _ => {
           return Err(sherr!(ParseErr, "Unknown option for history: {opt}").with_code(2));
         }

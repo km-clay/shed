@@ -122,7 +122,7 @@ mod tests {
   #[test]
   fn eval_propagates_failure_status() {
     let _g = TestGuard::new();
-    let _ = test_input("eval false");
+    let _  = test_input("eval false");
     assert_ne!(state::Shed::get_status(), 0);
   }
 }

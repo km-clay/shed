@@ -2,4 +2,19 @@ max_width = 100
 tab_spaces = 2
 edition = "2024"
 
+struct_field_align_threshold = 8
+enum_discrim_align_threshold = 8
+match_arm_align_threshold = 14
+let_align_threshold = 18
+align_stretch_threshold = 20
+align_before_colon = true
+
+skip_macro_invocations = [
+  "opt",
+  "sherr",
+  "mode",
+  "sub_command",
+  "varstr",
+]
+
 newline_style = "Unix"

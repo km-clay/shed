@@ -148,7 +148,7 @@ fn is_exec_wrapper(tk: &CtxTk) -> bool {
 }
 
 fn promote_exec_wrappers(tokens: &mut [CtxTk]) {
-  let mut tokens = tokens.iter_mut().peekable();
+  let mut tokens       = tokens.iter_mut().peekable();
   let mut skip_to_next = false;
   'outer: while let Some(tk) = tokens.next() {
     promote_exec_wrappers(&mut tk.sub_tokens);
@@ -185,7 +185,7 @@ fn promote_exec_wrappers(tokens: &mut [CtxTk]) {
           let target = tokens.next().unwrap();
           target.class = match is_valid_cmd(&target.as_tk()) {
             Some(kind) => CtxTkRule::ValidCommand(kind),
-            None => CtxTkRule::InvalidCommand,
+            None       => CtxTkRule::InvalidCommand,
           };
           break;
         }
@@ -247,7 +247,7 @@ fn is_valid(command: &Tk) -> Option<CmdKind> {
 
 fn is_valid_cmd(command: &Tk) -> Option<CmdKind> {
   let expanded = command.expand_no_side_effects().ok()?;
-  let name = expanded.get_first_word()?;
+  let name     = expanded.get_first_word()?;
   let cmd_path = Path::new(&name);
 
   if cmd_path.is_absolute()
@@ -262,9 +262,9 @@ fn is_valid_cmd(command: &Tk) -> Option<CmdKind> {
   } else {
     let util = cmd::which_util(&name.to_str_lossy())?;
     match util.kind() {
-      UtilKind::Alias => Some(CmdKind::Alias),
+      UtilKind::Alias    => Some(CmdKind::Alias),
       UtilKind::Function => Some(CmdKind::Function),
-      UtilKind::Builtin => Some(CmdKind::Builtin),
+      UtilKind::Builtin  => Some(CmdKind::Builtin),
       UtilKind::Command(_) | UtilKind::File(_) => Some(CmdKind::External),
     }
   }
@@ -327,10 +327,10 @@ impl TerminatorCtx {
     match self {
       Self::Eof => false,
       Self::Arith | Self::ArithSub => ch == ')' && next_is(chars, ')'),
-      Self::VarIndex => ch == ']',
-      Self::ParamExpansion => ch == '}',
-      Self::DoubleQuote => ch == '"',
-      Self::SingleQuote => ch == '\'',
+      Self::VarIndex               => ch == ']',
+      Self::ParamExpansion         => ch == '}',
+      Self::DoubleQuote            => ch == '"',
+      Self::SingleQuote            => ch == '\'',
     }
   }
 }
@@ -412,9 +412,9 @@ impl CtxTkRule {
 /// This nesting of 'subtokens' allows for entire trees to be created in cases of heavily nested expressions.
 #[derive(Debug, Clone)]
 pub(super) struct CtxTk {
-  span: Span,
-  bytes: VarStr,
-  class: CtxTkRule,
+  span      : Span,
+  bytes     : VarStr,
+  class     : CtxTkRule,
   sub_tokens: Vec<CtxTk>,
 }
 
@@ -479,8 +479,8 @@ impl CtxTk {
       | TkRule::SubshEnd
       | TkRule::BraceGrpStart
       | TkRule::BraceGrpEnd => Some(CtxTkRule::Operator),
-      TkRule::Sep => Some(CtxTkRule::Separator),
-      TkRule::Redir => Some(CtxTkRule::Redirect),
+      TkRule::Sep     => Some(CtxTkRule::Separator),
+      TkRule::Redir   => Some(CtxTkRule::Redirect),
       TkRule::Comment => Some(CtxTkRule::Comment),
 
       TkRule::Expanded { exp: _ } | TkRule::HereDoc { .. } | TkRule::Null | TkRule::Str => None,
@@ -490,7 +490,7 @@ impl CtxTk {
   /// Lossy conversion back to Tk. Useful for feeding subtokens back into functions that expect Tks, like `is_valid`.
   fn as_tk(&self) -> Tk {
     Tk {
-      span: self.span,
+      span : self.span,
       class: TkRule::Str,
       flags: TkFlags::empty(),
     }
@@ -517,8 +517,8 @@ impl CtxTk {
     };
 
     let token_start = start_pos + span.start();
-    let body_start = token_start + opener_size; // skip the opening backtick
-    let token_end = body_start + inner_consumed;
+    let body_start  = token_start + opener_size; // skip the opening backtick
+    let token_end   = body_start + inner_consumed;
     let body_end = if closed {
       token_end.saturating_sub(1) // exclude closing backtick in span if it exists
     } else {
@@ -575,7 +575,7 @@ impl CtxTk {
       ..
     } = self;
 
-    let mut left = vec![];
+    let mut left  = vec![];
     let mut right = vec![];
     for child in sub_tokens {
       let cr = child.range();
@@ -642,7 +642,7 @@ impl CtxTk {
   }
 
   pub(super) fn find_nodes<F: Fn(&CtxTk) -> bool>(&self, pred: F) -> Vec<&CtxTk> {
-    let mut found = vec![];
+    let mut found                  = vec![];
     let mut work: VecDeque<&CtxTk> = self.sub_tokens().iter().collect();
 
     while let Some(child) = work.pop_front() {
@@ -664,7 +664,7 @@ impl CtxTk {
   pub(super) fn from_ex_tk(tk: ExTk) -> Vec<Self> {
     let (class, span) = tk.unpack();
     match class {
-      ExTkRule::Bang => vec![Self::leaf(span, CtxTkRule::ExBang)],
+      ExTkRule::Bang   => vec![Self::leaf(span, CtxTkRule::ExBang)],
       ExTkRule::Append => vec![Self::leaf(span, CtxTkRule::Operator)],
       ExTkRule::NormalSeq | ExTkRule::Argument => vec![Self::leaf(span, CtxTkRule::Argument)],
       ExTkRule::Address(addr) => match addr {
@@ -707,7 +707,7 @@ impl CtxTk {
       return vec![Self::new(span, class, vec![])];
     }
 
-    let raw = span.slice().to_str_lossy().into_owned();
+    let     raw   = span.slice().to_str_lossy().into_owned();
     let mut chars = raw.char_indices().peekable();
 
     let new_class = if flags.contains(TkFlags::IS_ARITH) {
@@ -811,7 +811,7 @@ fn check_path_exists(path: &str) -> bool {
   let bytes = stripped.as_bytes();
   let (dir, prefix): (&Path, &[u8]) = match bytes.iter().rposition(|&b| b == b'/') {
     Some(idx) => (paths::path_from_bytes(&bytes[..=idx]), &bytes[idx + 1..]),
-    None => (Path::new("."), bytes),
+    None      => (Path::new("."), bytes),
   };
   paths::path_entries(dir).any(|e| e.file_name().as_bytes().starts_with(prefix))
 }
@@ -821,8 +821,8 @@ fn check_path_exists(path: &str) -> bool {
 /// This allows for styling filenames in tokens like `--foo=/path/to/bar`
 /// And also allows the completer to get more fine-grained context
 fn subdivide_argument(mut tk: CtxTk) -> Vec<CtxTk> {
-  let wordbreaks = params::get_comp_wordbreaks();
-  let mut tokens = vec![];
+  let     wordbreaks = params::get_comp_wordbreaks();
+  let mut tokens     = vec![];
 
   let push_token = |tks: &mut Vec<CtxTk>, mut tk: CtxTk| {
     if check_path_exists(&tk.span.slice().to_str_lossy()) {
@@ -832,15 +832,15 @@ fn subdivide_argument(mut tk: CtxTk) -> Vec<CtxTk> {
   };
 
   loop {
-    let raw = tk.span.slice().to_str_lossy().into_owned();
+    let raw        = tk.span.slice().to_str_lossy().into_owned();
     let span_start = tk.span.range().start;
-    let span_end = tk.span.range().end;
+    let span_end   = tk.span.range().end;
 
     let split_at = raw.char_indices().find_map(|(byte, ch)| {
       if !wordbreaks.to_str_lossy().contains(ch) {
         return None;
       }
-      let after = span_start + byte + ch.len_utf8();
+      let after     = span_start + byte + ch.len_utf8();
       let can_split = after < span_end && tk.can_split_at(after);
 
       can_split.then_some(after)
@@ -867,21 +867,21 @@ fn subdivide_argument(mut tk: CtxTk) -> Vec<CtxTk> {
 /// `subdivide_argument` and gets shredded on `=` / `[` / `(` from
 /// `COMP_WORDBREAKS` with no awareness of the underlying structure.
 fn parse_assignment(span: Span, flags: TkFlags) -> Vec<CtxTk> {
-  let raw = span.slice().to_str_lossy().into_owned();
+  let raw        = span.slice().to_str_lossy().into_owned();
   let span_start = span.range().start;
 
   // Find the `=` operator. ASSIGN was set, so this should always succeed.
   let Some((eq_off, eq_len)) = strops::split_at_unescaped(raw.as_bytes(), b"=") else {
     return vec![CtxTk::new(span, CtxTkRule::Argument, vec![])];
   };
-  let lhs_text = &raw[..eq_off];
-  let lhs_end = span_start + eq_off;
-  let op_end = lhs_end + eq_len;
+  let     lhs_text    = &raw[..eq_off];
+  let     lhs_end     = span_start + eq_off;
+  let     op_end      = lhs_end + eq_len;
 
   // LHS: ParamName + optional ParamIndex.
-  let mut lhs_sub = vec![];
-  let bracket_off = lhs_text.find('[');
-  let name_end = bracket_off.map_or(lhs_end, |b| span_start + b);
+  let mut lhs_sub     = vec![];
+  let     bracket_off = lhs_text.find('[');
+  let     name_end    = bracket_off.map_or(lhs_end, |b| span_start + b);
 
   lhs_sub.push(CtxTk::new(
     Span::from_range(span_start..name_end, span.source()),
@@ -891,7 +891,7 @@ fn parse_assignment(span: Span, flags: TkFlags) -> Vec<CtxTk> {
 
   if let Some(b) = bracket_off {
     // Find matching `]` tracking depth (so `arr[a[0]]` parses correctly).
-    let mut depth = 0;
+    let mut depth     = 0;
     let mut close_off = lhs_text.len();
     for (i, ch) in lhs_text[b..].char_indices() {
       match ch {
@@ -906,13 +906,13 @@ fn parse_assignment(span: Span, flags: TkFlags) -> Vec<CtxTk> {
         _ => {}
       }
     }
-    let index_start = span_start + b;
-    let index_end = span_start + close_off;
+    let     index_start = span_start + b;
+    let     index_end   = span_start + close_off;
 
     // Recursively scan the index contents (excluding the brackets).
     // ARITH context matches what `${arr[idx]}` already uses.
-    let inner_text = &lhs_text[b + 1..close_off - 1];
-    let inner_span = Span::from_range((index_start + 1)..(index_end - 1), span.source());
+    let     inner_text  = &lhs_text[b + 1..close_off - 1];
+    let     inner_span  = Span::from_range((index_start + 1)..(index_end - 1), span.source());
     let mut inner_chars = inner_text.char_indices().peekable();
     let (_, inner) = scan_subspans(
       &mut inner_chars,
@@ -942,16 +942,16 @@ fn parse_assignment(span: Span, flags: TkFlags) -> Vec<CtxTk> {
   );
 
   // RHS: scan as full top-level expansion context.
-  let rhs_text = &raw[eq_off + eq_len..];
+  let rhs_text  = &raw[eq_off + eq_len..];
   let rhs_start = op_end;
-  let rhs_end = span_start + raw.len();
-  let rhs_span = Span::from_range(rhs_start..rhs_end, span.source());
+  let rhs_end   = span_start + raw.len();
+  let rhs_span  = Span::from_range(rhs_start..rhs_end, span.source());
 
   let rhs_tk = if rhs_text.starts_with('(') {
-    let close_off = rhs_text.rfind(')').filter(|&c| c > 0);
-    let inner_end = close_off.unwrap_or(rhs_text.len());
-    let inner_text = &rhs_text[1..inner_end];
-    let inner_span = Span::from_range((rhs_start + 1)..(rhs_start + inner_end), span.source());
+    let     close_off   = rhs_text.rfind(')').filter(|&c| c > 0);
+    let     inner_end   = close_off.unwrap_or(rhs_text.len());
+    let     inner_text  = &rhs_text[1..inner_end];
+    let     inner_span  = Span::from_range((rhs_start + 1)..(rhs_start + inner_end), span.source());
     let mut inner_chars = inner_text.char_indices().peekable();
     let (_, inner) = scan_subspans(
       &mut inner_chars,
@@ -1043,7 +1043,7 @@ fn get_subtoken(
   *consumed += inner_consumed;
 
   let token_end = token_start + opener_len + inner_consumed; // include the opening
-  let span = Span::from_range(token_start..token_end, span.source());
+  let span      = Span::from_range(token_start..token_end, span.source());
   CtxTk::new(span, rule, inner)
 }
 
@@ -1055,7 +1055,7 @@ fn scan_subspans(
   term_ctx: TerminatorCtx,
 ) -> (usize, Vec<CtxTk>) {
   use ScanCtx as S;
-  let consumed = &mut 0;
+  let     consumed   = &mut 0;
   let mut sub_tokens = vec![];
   let consume = |chars: &mut Peekable<CharIndices>, cons: &mut usize| {
     chars.next().map(|(i, c)| {
@@ -1153,7 +1153,7 @@ fn scan_subspans(
             sub_tokens.push(CtxTk::new(span, CtxTkRule::Glob, vec![]));
           }
           '[' => {
-            let span_start = i + span.range().start;
+            let span_start    = i + span.range().start;
             let orig_consumed = *consumed;
             while let Some(&(_, ch)) = chars.peek() {
               consume(chars, consumed);
@@ -1197,7 +1197,7 @@ fn scan_subspans(
             sub_tokens.push(CtxTk::new(span, CtxTkRule::HistExp, vec![]));
           }
           c if c.is_ascii_alphanumeric() || c == '-' || c == '_' => {
-            let span_start = i + span.range().start;
+            let span_start    = i + span.range().start;
             let orig_consumed = *consumed;
             while let Some(&(_, hexp_ch)) = chars.peek() {
               match hexp_ch {
@@ -1209,7 +1209,7 @@ fn scan_subspans(
               continue; // no valid history expansion token chars, skip
             }
             let delta = *consumed - orig_consumed;
-            let span = Span::from_range(span_start..(span_start + 1 + delta), span.source());
+            let span  = Span::from_range(span_start..(span_start + 1 + delta), span.source());
             log::debug!(
               "Found history expansion token: '{}'",
               span.slice().to_str_lossy()
@@ -1237,7 +1237,7 @@ fn scan_subspans(
         let class = match dir {
           '<' => CtxTkRule::ProcSubIn,
           '>' => CtxTkRule::ProcSubOut,
-          _ => unreachable!(),
+          _   => unreachable!(),
         };
 
         let sub_tk = CtxTk::from_cmd_sub(chars, class, consumed, i, lex_subshell, span);
@@ -1282,18 +1282,18 @@ fn scan_subspans(
           *consumed += inner_consumed;
 
           let token_start = i + span.range().start;
-          let token_end = token_start + 2 + inner_consumed; // include the $'
-          let span = Span::from_range(token_start..token_end, span.source());
+          let token_end   = token_start + 2 + inner_consumed; // include the $'
+          let span        = Span::from_range(token_start..token_end, span.source());
           sub_tokens.push(CtxTk::new(span, CtxTkRule::DollarString, inner));
         } else if next_is(chars, '{') && scan_ctx.contains(S::VAR_SUB) {
           // parameter expansion
           // welcome to the posix house of horrors
           consume(chars, consumed); // consume the '{'
-          let var_start = i + span.range().start;
+          let     var_start      = i + span.range().start;
           let mut var_sub_tokens = vec![];
           // Track position-after-last-consumed within the param expansion.
           // Starts right after `${` and grows as we consume each piece.
-          let mut pos = var_start + 2;
+          let mut pos            = var_start + 2;
 
           // Prefix (#, !)
           if let Some(&(_, ch)) = chars.peek()
@@ -1397,9 +1397,9 @@ fn scan_subspans(
                   ));
 
                   // Offset arg, scan until ':' or '}' at brace depth 0
-                  let offset_start = pos;
-                  let mut depth: i32 = 0;
-                  let mut hit_colon = false;
+                  let     offset_start = pos;
+                  let mut depth: i32   = 0;
+                  let mut hit_colon    = false;
                   while let Some(&(_, c)) = chars.peek() {
                     if depth == 0 && (c == ':' || c == '}') {
                       if c == ':' {
@@ -1433,8 +1433,8 @@ fn scan_subspans(
                     ));
 
                     // Length arg, scan until '}' at brace depth 0
-                    let length_start = pos;
-                    let mut depth: i32 = 0;
+                    let     length_start = pos;
+                    let mut depth: i32   = 0;
                     while let Some(&(_, c)) = chars.peek() {
                       if depth == 0 && c == '}' {
                         break;
@@ -1542,9 +1542,9 @@ fn scan_subspans(
               ));
 
               // Pattern arg, scan until '/' or '}' at brace depth 0
-              let pat_start = pos;
+              let     pat_start  = pos;
               let mut depth: i32 = 0;
-              let mut hit_slash = false;
+              let mut hit_slash  = false;
               while let Some(&(_, c)) = chars.peek() {
                 if depth == 0 && (c == '/' || c == '}') {
                   if c == '/' {
@@ -1578,7 +1578,7 @@ fn scan_subspans(
                 ));
 
                 // Replacement arg, scan until '}' at brace depth 0
-                let rep_start = pos;
+                let     rep_start  = pos;
                 let mut depth: i32 = 0;
                 while let Some(&(_, c)) = chars.peek() {
                   if depth == 0 && c == '}' {
@@ -1616,13 +1616,13 @@ fn scan_subspans(
             var_sub_tokens,
           ));
         } else if scan_ctx.contains(S::VAR_SUB) {
-          let sub_start = i + span.range().start;
+          let sub_start     = i + span.range().start;
           let orig_consumed = *consumed;
-          let first = chars.peek().map(|(_, c)| *c);
+          let first         = chars.peek().map(|(_, c)| *c);
 
-          let is_param = first.is_some_and(|c| ShellParam::from_char(c).is_some());
-          let is_digit = first.is_some_and(|c| c.is_ascii_digit());
-          let is_var_char = first.is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+          let is_param      = first.is_some_and(|c| ShellParam::from_char(c).is_some());
+          let is_digit      = first.is_some_and(|c| c.is_ascii_digit());
+          let is_var_char   = first.is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
 
           if is_param || is_digit {
             consume(chars, consumed);
@@ -1635,17 +1635,17 @@ fn scan_subspans(
             }
           }
 
-          let var_size = *consumed - orig_consumed;
-          let sub_end = sub_start + 1 + var_size; // include the '$' in the span
+          let var_size   = *consumed - orig_consumed;
+          let sub_end    = sub_start + 1 + var_size; // include the '$' in the span
 
           let outer_span = Span::from_range(sub_start..sub_end, span.source());
           let inner_span = Span::from_range(sub_start + 1..sub_end, span.source());
-          let sub_token = CtxTk::new(inner_span, CtxTkRule::ParamName, vec![]);
+          let sub_token  = CtxTk::new(inner_span, CtxTkRule::ParamName, vec![]);
           sub_tokens.push(CtxTk::new(outer_span, CtxTkRule::VarSub, vec![sub_token]));
         }
       }
       'a'..='z' | 'A'..='Z' | '_' if in_arith => {
-        let var_start = i + span.range().start;
+        let     var_start    = i + span.range().start;
         let mut var_consumed = ch.len_utf8();
         while let Some(&(_, ch)) = chars.peek() {
           if !(ch.is_ascii_alphanumeric() || ch == '_') {
@@ -1658,7 +1658,7 @@ fn scan_subspans(
         sub_tokens.push(CtxTk::new(var_span, CtxTkRule::ArithVar, vec![]));
       }
       '0'..='9' if in_arith => {
-        let num_start = i + span.range().start;
+        let     num_start    = i + span.range().start;
         let mut num_consumed = ch.len_utf8();
         while let Some(&(_, ch)) = chars.peek() {
           if !ch.is_ascii_digit() {
@@ -1675,8 +1675,8 @@ fn scan_subspans(
         if in_arith =>
       {
         let op_start = i + span.range().start;
-        let op_end = op_start + 1;
-        let op_span = Span::from_range(op_start..op_end, span.source());
+        let op_end   = op_start + 1;
+        let op_span  = Span::from_range(op_start..op_end, span.source());
         sub_tokens.push(CtxTk::new(op_span, CtxTkRule::ArithOp, vec![]));
       }
       _ => {}
@@ -1689,7 +1689,7 @@ fn scan_subspans(
 fn lex_backtick(chars: &mut Peekable<CharIndices>) -> (bool, usize) {
   let mut qt_state = QuoteState::default();
   let mut consumed = 0;
-  let mut closed = false;
+  let mut closed   = false;
   let advance = |chars: &mut Peekable<CharIndices>, cons: &mut usize| {
     // advance iterator, increment consumed bytes
     chars.next().map(|(_, c)| {
@@ -1725,11 +1725,11 @@ fn lex_delim(chars: &mut Peekable<CharIndices>, opener: char) -> (bool, usize) {
     '{' => '}',
     '[' => ']',
     '<' => '>',
-    _ => unreachable!(),
+    _   => unreachable!(),
   };
-  let mut qt_state = QuoteState::default();
-  let mut consumed = 0;
-  let mut depth = 1;
+  let mut qt_state  = QuoteState::default();
+  let mut consumed  = 0;
+  let mut depth     = 1;
   let mut is_closed = false;
   let advance = |chars: &mut Peekable<CharIndices>, cons: &mut usize| {
     // advance iterator, increment consumed bytes
@@ -1805,7 +1805,7 @@ mod tests {
       .find(|t| !matches!(t.class, TkRule::Sep))
       .expect("token");
     let expanded = tk.expand_no_side_effects().expect("expand");
-    let word = expanded.get_first_word().expect("word");
+    let word     = expanded.get_first_word().expect("word");
     assert!(
       word.to_str_lossy().starts_with('/'),
       "tilde-expanded path should be absolute, got {word:?}"
@@ -1840,8 +1840,8 @@ mod tests {
   #[test]
   fn var_sub_simple() {
     let src = "$foo";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
     assert_eq!(span_str(v, src), "$foo");
   }
 
@@ -1857,7 +1857,7 @@ mod tests {
     //   2. `$` followed by a non-var-char (e.g. '.', ' ')
     let toks = get_context_tokens("echo $");
     let last = toks.last().expect("trailing token");
-    let v = find(last, CtxTkRule::VarSub).expect("VarSub for bare $");
+    let v    = find(last, CtxTkRule::VarSub).expect("VarSub for bare $");
     assert_eq!(v.as_bytes(), b"$");
     let n = find(v, CtxTkRule::ParamName).expect("zero-width ParamName under VarSub");
     assert_eq!(n.as_bytes(), b"");
@@ -1881,8 +1881,8 @@ mod tests {
   #[test]
   fn param_expansion_default() {
     let src = "${foo:-bar}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
     assert_eq!(span_str(v, src), "${foo:-bar}");
 
     let name = find(v, CtxTkRule::ParamName).expect("ParamName");
@@ -1897,16 +1897,16 @@ mod tests {
     // Regression for the lex_delim/from_cmd_sub mismatch: the closing `)` must
     // be inside the CmdSub span.
     let src = "$(echo hi)";
-    let tk = parse_first(src);
-    let c = find(&tk, CtxTkRule::CmdSub).expect("CmdSub");
+    let tk  = parse_first(src);
+    let c   = find(&tk, CtxTkRule::CmdSub).expect("CmdSub");
     assert_eq!(span_str(c, src), "$(echo hi)");
   }
 
   #[test]
   fn arithmetic_atoms() {
     let src = "$((1+2))";
-    let tk = parse_first(src);
-    let a = find(&tk, CtxTkRule::Arithmetic).expect("Arithmetic");
+    let tk  = parse_first(src);
+    let a   = find(&tk, CtxTkRule::Arithmetic).expect("Arithmetic");
     assert_eq!(span_str(a, src), "$((1+2))");
     assert!(find(a, CtxTkRule::ArithOp).is_some(), "expected ArithOp");
   }
@@ -1916,7 +1916,7 @@ mod tests {
     // Regression for the bug where `ARITHMETIC` in `TOP_LEVEL` caused
     // identifier chars in plain words to be classified as ArithVar.
     let src = "foo";
-    let tk = parse_first(src);
+    let tk  = parse_first(src);
     assert!(
       find(&tk, CtxTkRule::ArithVar).is_none(),
       "plain word should not produce ArithVar sub-tokens"
@@ -1927,16 +1927,16 @@ mod tests {
   fn double_string_with_escape_keeps_alignment() {
     // Regression for the `\\` arm not updating *consumed.
     let src = r#""a\"b""#;
-    let tk = parse_first(src);
-    let s = find(&tk, CtxTkRule::DoubleString).expect("DoubleString");
+    let tk  = parse_first(src);
+    let s   = find(&tk, CtxTkRule::DoubleString).expect("DoubleString");
     assert_eq!(span_str(s, src), r#""a\"b""#);
   }
 
   #[test]
   fn double_string_with_var_sub() {
     let src = r#""hi $foo""#;
-    let tk = parse_first(src);
-    let s = find(&tk, CtxTkRule::DoubleString).expect("DoubleString");
+    let tk  = parse_first(src);
+    let s   = find(&tk, CtxTkRule::DoubleString).expect("DoubleString");
     assert_eq!(span_str(s, src), r#""hi $foo""#);
     let v = find(s, CtxTkRule::VarSub).expect("VarSub inside DoubleString");
     assert_eq!(span_str(v, src), "$foo");
@@ -1945,24 +1945,24 @@ mod tests {
   #[test]
   fn utf8_multibyte_in_double_string() {
     let src = "\"αβγ\"";
-    let tk = parse_first(src);
-    let s = find(&tk, CtxTkRule::DoubleString).expect("DoubleString");
+    let tk  = parse_first(src);
+    let s   = find(&tk, CtxTkRule::DoubleString).expect("DoubleString");
     assert_eq!(span_str(s, src), "\"αβγ\"");
   }
 
   #[test]
   fn unclosed_quote_does_not_panic() {
     let src = r#""abc"#;
-    let tk = parse_first(src);
-    let s = find(&tk, CtxTkRule::DoubleString).expect("DoubleString");
+    let tk  = parse_first(src);
+    let s   = find(&tk, CtxTkRule::DoubleString).expect("DoubleString");
     // Unclosed: span runs to end of input.
     assert_eq!(span_str(s, src), r#""abc"#);
   }
 
   #[test]
   fn nested_cmd_subs() {
-    let src = "$(echo $(echo hi))";
-    let tk = parse_first(src);
+    let src   = "$(echo $(echo hi))";
+    let tk    = parse_first(src);
     let outer = find(&tk, CtxTkRule::CmdSub).expect("outer CmdSub");
     assert_eq!(span_str(outer, src), "$(echo $(echo hi))");
     let inner = outer
@@ -1975,8 +1975,8 @@ mod tests {
 
   #[test]
   fn nested_param_default() {
-    let src = "${foo:-${bar}}";
-    let tk = parse_first(src);
+    let src   = "${foo:-${bar}}";
+    let tk    = parse_first(src);
     let outer = find(&tk, CtxTkRule::VarSub).expect("outer VarSub");
     assert_eq!(span_str(outer, src), "${foo:-${bar}}");
   }
@@ -1988,8 +1988,8 @@ mod tests {
     // After the subshell refactor, `(` and `)` are separate SubshStart /
     // SubshEnd tokens at the lex level, both classified as Operator at the
     // CtxTk level. `(echo foo)` is no longer a single fat Subshell token.
-    let src = "(echo foo)";
-    let tks = get_context_tokens(src);
+    let src    = "(echo foo)";
+    let tks    = get_context_tokens(src);
     let opener = tks.first().expect("at least one token");
     assert_eq!(opener.class, CtxTkRule::Operator);
     assert_eq!(span_str(opener, src), "(");
@@ -2024,8 +2024,8 @@ mod tests {
   fn arithmetic_dollar_form_atoms() {
     // $((x + 5)) should produce an Arithmetic node with ArithVar/ArithOp/ArithNumber.
     let src = "$((x + 5))";
-    let tk = parse_first(src);
-    let a = find(&tk, CtxTkRule::Arithmetic).expect("Arithmetic");
+    let tk  = parse_first(src);
+    let a   = find(&tk, CtxTkRule::Arithmetic).expect("Arithmetic");
     assert_eq!(span_str(a, src), "$((x + 5))");
     assert!(find(a, CtxTkRule::ArithVar).is_some(), "expected ArithVar");
     assert!(find(a, CtxTkRule::ArithOp).is_some(), "expected ArithOp");
@@ -2039,16 +2039,16 @@ mod tests {
   fn arithmetic_var_span_is_complete() {
     // Off-by-one regression test: ArithVar span must cover all chars of the var name.
     let src = "$((foo))";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::ArithVar).expect("ArithVar");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::ArithVar).expect("ArithVar");
     assert_eq!(span_str(v, src), "foo");
   }
 
   #[test]
   fn arithmetic_number_span_is_complete() {
     let src = "$((42))";
-    let tk = parse_first(src);
-    let n = find(&tk, CtxTkRule::ArithNumber).expect("ArithNumber");
+    let tk  = parse_first(src);
+    let n   = find(&tk, CtxTkRule::ArithNumber).expect("ArithNumber");
     assert_eq!(span_str(n, src), "42");
   }
 
@@ -2062,8 +2062,8 @@ mod tests {
   #[test]
   fn single_string_simple() {
     let src = "'hello world'";
-    let tk = parse_first(src);
-    let s = find(&tk, CtxTkRule::SingleString).expect("SingleString");
+    let tk  = parse_first(src);
+    let s   = find(&tk, CtxTkRule::SingleString).expect("SingleString");
     assert_eq!(span_str(s, src), "'hello world'");
   }
 
@@ -2071,8 +2071,8 @@ mod tests {
   fn single_string_suppresses_dollar_and_bang() {
     // Inside single quotes, $foo and !foo should NOT produce sub-tokens.
     let src = "'$foo and !bang'";
-    let tk = parse_first(src);
-    let s = find(&tk, CtxTkRule::SingleString).expect("SingleString");
+    let tk  = parse_first(src);
+    let s   = find(&tk, CtxTkRule::SingleString).expect("SingleString");
     assert!(
       find(s, CtxTkRule::VarSub).is_none(),
       "VarSub should not appear inside single-quoted string"
@@ -2088,32 +2088,32 @@ mod tests {
   #[test]
   fn glob_star() {
     let src = "*.rs";
-    let tk = parse_first(src);
-    let g = find(&tk, CtxTkRule::Glob).expect("Glob");
+    let tk  = parse_first(src);
+    let g   = find(&tk, CtxTkRule::Glob).expect("Glob");
     assert_eq!(span_str(g, src), "*");
   }
 
   #[test]
   fn glob_question() {
     let src = "a?.rs";
-    let tk = parse_first(src);
-    let g = find(&tk, CtxTkRule::Glob).expect("Glob");
+    let tk  = parse_first(src);
+    let g   = find(&tk, CtxTkRule::Glob).expect("Glob");
     assert_eq!(span_str(g, src), "?");
   }
 
   #[test]
   fn glob_bracket_class() {
     let src = "[abc].txt";
-    let tk = parse_first(src);
-    let g = find(&tk, CtxTkRule::Glob).expect("Glob");
+    let tk  = parse_first(src);
+    let g   = find(&tk, CtxTkRule::Glob).expect("Glob");
     assert_eq!(span_str(g, src), "[abc]");
   }
 
   #[test]
   fn glob_bracket_handles_escaped_close() {
     let src = r"[a\]b]";
-    let tk = parse_first(src);
-    let g = find(&tk, CtxTkRule::Glob).expect("Glob");
+    let tk  = parse_first(src);
+    let g   = find(&tk, CtxTkRule::Glob).expect("Glob");
     // The scanner should consume up through the *unescaped* ']'.
     assert_eq!(span_str(g, src), r"[a\]b]");
   }
@@ -2123,8 +2123,8 @@ mod tests {
   #[test]
   fn tilde_classified_as_tilde() {
     let src = "~/bin";
-    let tk = parse_first(src);
-    let t = find(&tk, CtxTkRule::Tilde).expect("Tilde");
+    let tk  = parse_first(src);
+    let t   = find(&tk, CtxTkRule::Tilde).expect("Tilde");
     assert_eq!(span_str(t, src), "~");
   }
 
@@ -2168,8 +2168,8 @@ mod tests {
   #[test]
   fn backtick_cmd_sub() {
     let src = "`echo hi`";
-    let tk = parse_first(src);
-    let b = find(&tk, CtxTkRule::BacktickSub).expect("BacktickSub");
+    let tk  = parse_first(src);
+    let b   = find(&tk, CtxTkRule::BacktickSub).expect("BacktickSub");
     assert_eq!(span_str(b, src), "`echo hi`");
   }
 
@@ -2202,8 +2202,8 @@ mod tests {
   #[test]
   fn dollar_quoted_string() {
     let src = r"$'hello\n'";
-    let tk = parse_first(src);
-    let d = find(&tk, CtxTkRule::DollarString).expect("DollarString");
+    let tk  = parse_first(src);
+    let d   = find(&tk, CtxTkRule::DollarString).expect("DollarString");
     assert_eq!(span_str(d, src), r"$'hello\n'");
     // The escape inside should be recognized.
     assert!(
@@ -2217,8 +2217,8 @@ mod tests {
   #[test]
   fn param_expansion_bare() {
     let src = "${foo}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
     assert_eq!(span_str(v, src), "${foo}");
     let name = find(v, CtxTkRule::ParamName).expect("ParamName");
     assert_eq!(span_str(name, src), "foo");
@@ -2227,8 +2227,8 @@ mod tests {
   #[test]
   fn param_expansion_length_prefix() {
     let src = "${#foo}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
     assert_eq!(span_str(v, src), "${#foo}");
     let prefix = find(v, CtxTkRule::ParamPrefix).expect("ParamPrefix");
     assert_eq!(span_str(prefix, src), "#");
@@ -2236,9 +2236,9 @@ mod tests {
 
   #[test]
   fn param_expansion_indirect_prefix() {
-    let src = "${!foo}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let src    = "${!foo}";
+    let tk     = parse_first(src);
+    let v      = find(&tk, CtxTkRule::VarSub).expect("VarSub");
     let prefix = find(v, CtxTkRule::ParamPrefix).expect("ParamPrefix");
     assert_eq!(span_str(prefix, src), "!");
   }
@@ -2260,18 +2260,18 @@ mod tests {
   #[test]
   fn param_expansion_error_if_unset() {
     let src = "${foo:?nope}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
-    let op = find(v, CtxTkRule::ParamOp).expect("ParamOp");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let op  = find(v, CtxTkRule::ParamOp).expect("ParamOp");
     assert_eq!(span_str(op, src), ":?");
   }
 
   #[test]
   fn param_expansion_alternate_if_set() {
     let src = "${foo:+bar}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
-    let op = find(v, CtxTkRule::ParamOp).expect("ParamOp");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let op  = find(v, CtxTkRule::ParamOp).expect("ParamOp");
     assert_eq!(span_str(op, src), ":+");
   }
 
@@ -2299,60 +2299,60 @@ mod tests {
   #[test]
   fn param_expansion_hash_prefix_strip() {
     let src = "${foo#prefix}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
-    let op = find(v, CtxTkRule::ParamOp).expect("ParamOp");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let op  = find(v, CtxTkRule::ParamOp).expect("ParamOp");
     assert_eq!(span_str(op, src), "#");
   }
 
   #[test]
   fn param_expansion_double_hash_greedy_prefix() {
     let src = "${foo##prefix}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
-    let op = find(v, CtxTkRule::ParamOp).expect("ParamOp");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let op  = find(v, CtxTkRule::ParamOp).expect("ParamOp");
     assert_eq!(span_str(op, src), "##");
   }
 
   #[test]
   fn param_expansion_percent_suffix_strip() {
     let src = "${foo%suffix}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
-    let op = find(v, CtxTkRule::ParamOp).expect("ParamOp");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let op  = find(v, CtxTkRule::ParamOp).expect("ParamOp");
     assert_eq!(span_str(op, src), "%");
   }
 
   #[test]
   fn param_expansion_double_percent_greedy_suffix() {
     let src = "${foo%%suffix}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
-    let op = find(v, CtxTkRule::ParamOp).expect("ParamOp");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let op  = find(v, CtxTkRule::ParamOp).expect("ParamOp");
     assert_eq!(span_str(op, src), "%%");
   }
 
   #[test]
   fn param_expansion_substring_offset_only() {
     let src = "${foo:1}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
     assert_eq!(span_str(v, src), "${foo:1}");
   }
 
   #[test]
   fn param_expansion_substring_offset_and_length() {
     let src = "${foo:1:3}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
     assert_eq!(span_str(v, src), "${foo:1:3}");
   }
 
   #[test]
   fn param_expansion_array_index() {
     let src = "${arr[0]}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
     assert_eq!(span_str(v, src), "${arr[0]}");
     let idx = find(v, CtxTkRule::ParamIndex).expect("ParamIndex");
     assert_eq!(span_str(idx, src), "[0]");
@@ -2361,8 +2361,8 @@ mod tests {
   #[test]
   fn param_expansion_empty_body() {
     let src = "${}";
-    let tk = parse_first(src);
-    let v = find(&tk, CtxTkRule::VarSub).expect("VarSub");
+    let tk  = parse_first(src);
+    let v   = find(&tk, CtxTkRule::VarSub).expect("VarSub");
     // Empty body still produces a wrapper span covering both braces.
     assert_eq!(span_str(v, src), "${}");
   }
@@ -2373,8 +2373,8 @@ mod tests {
   fn escape_outside_string() {
     // Bare escape — should produce Escape sub-token.
     let src = r"a\b";
-    let tk = parse_first(src);
-    let _ = find(&tk, CtxTkRule::Escape).expect("Escape");
+    let tk  = parse_first(src);
+    let _   = find(&tk, CtxTkRule::Escape).expect("Escape");
   }
 
   // Quotes inside double strings should NOT toggle quote state out
@@ -2382,8 +2382,8 @@ mod tests {
   #[test]
   fn single_quote_inside_double_is_literal() {
     let src = r#""it's""#;
-    let tk = parse_first(src);
-    let s = find(&tk, CtxTkRule::DoubleString).expect("DoubleString");
+    let tk  = parse_first(src);
+    let s   = find(&tk, CtxTkRule::DoubleString).expect("DoubleString");
     assert_eq!(span_str(s, src), r#""it's""#);
   }
 
@@ -2393,8 +2393,8 @@ mod tests {
   #[test]
   fn cmd_sub_with_inner_single_quotes() {
     let src = r#""foo $(echo 'bar!') biz""#;
-    let tk = parse_first(src);
-    let cs = find(&tk, CtxTkRule::CmdSub).expect("CmdSub");
+    let tk  = parse_first(src);
+    let cs  = find(&tk, CtxTkRule::CmdSub).expect("CmdSub");
     assert_eq!(span_str(cs, src), "$(echo 'bar!')");
     // The HistExp inside should NOT trigger because it's inside single quotes.
     let inner_ss = find(cs, CtxTkRule::SingleString).expect("SingleString");
@@ -2421,9 +2421,9 @@ mod tests {
     if !has_cmd("sudo") {
       return;
     }
-    let _g = TestGuard::new();
-    let src = "sudo something";
-    let tokens = get_context_tokens(src);
+    let _g      = TestGuard::new();
+    let src     = "sudo something";
+    let tokens  = get_context_tokens(src);
     let sudo_tk = find_by_text(&tokens, "sudo", src).expect("sudo token");
     assert_eq!(*sudo_tk.class(), CtxTkRule::Keyword);
   }
@@ -2433,8 +2433,8 @@ mod tests {
     if !has_cmd("sudo") || !has_cmd("cat") {
       return;
     }
-    let _g = TestGuard::new();
-    let src = "sudo cat";
+    let _g     = TestGuard::new();
+    let src    = "sudo cat";
     let tokens = get_context_tokens(src);
     let cat_tk = find_by_text(&tokens, "cat", src).expect("cat token");
     assert!(matches!(*cat_tk.class(), CtxTkRule::ValidCommand(_)));
@@ -2445,8 +2445,8 @@ mod tests {
     if !has_cmd("sudo") {
       return;
     }
-    let _g = TestGuard::new();
-    let src = "sudo definitely_not_a_real_cmd_xyzzy";
+    let _g     = TestGuard::new();
+    let src    = "sudo definitely_not_a_real_cmd_xyzzy";
     let tokens = get_context_tokens(src);
     let cmd_tk = find_by_text(&tokens, "definitely_not_a_real_cmd_xyzzy", src).expect("token");
     assert_eq!(*cmd_tk.class(), CtxTkRule::InvalidCommand);
@@ -2457,8 +2457,8 @@ mod tests {
     if !has_cmd("sudo") || !has_cmd("cat") {
       return;
     }
-    let _g = TestGuard::new();
-    let src = "sudo -E cat";
+    let _g     = TestGuard::new();
+    let src    = "sudo -E cat";
     let tokens = get_context_tokens(src);
     let cat_tk = find_by_text(&tokens, "cat", src).expect("cat token");
     assert!(matches!(*cat_tk.class(), CtxTkRule::ValidCommand(_)));
@@ -2469,8 +2469,8 @@ mod tests {
     if !has_cmd("sudo") || !has_cmd("cat") {
       return;
     }
-    let _g = TestGuard::new();
-    let src = "sudo FOO=bar cat";
+    let _g     = TestGuard::new();
+    let src    = "sudo FOO=bar cat";
     let tokens = get_context_tokens(src);
     let cat_tk = find_by_text(&tokens, "cat", src).expect("cat token");
     assert!(matches!(*cat_tk.class(), CtxTkRule::ValidCommand(_)));
@@ -2484,12 +2484,12 @@ mod tests {
     if !has_cmd("sudo") || !has_cmd("strace") || !has_cmd("cat") {
       return;
     }
-    let _g = TestGuard::new();
-    let src = "sudo strace cat";
-    let tokens = get_context_tokens(src);
-    let sudo_tk = find_by_text(&tokens, "sudo", src).expect("sudo");
+    let _g        = TestGuard::new();
+    let src       = "sudo strace cat";
+    let tokens    = get_context_tokens(src);
+    let sudo_tk   = find_by_text(&tokens, "sudo", src).expect("sudo");
     let strace_tk = find_by_text(&tokens, "strace", src).expect("strace");
-    let cat_tk = find_by_text(&tokens, "cat", src).expect("cat");
+    let cat_tk    = find_by_text(&tokens, "cat", src).expect("cat");
     assert_eq!(*sudo_tk.class(), CtxTkRule::Keyword);
     assert_eq!(*strace_tk.class(), CtxTkRule::Keyword);
     assert!(matches!(*cat_tk.class(), CtxTkRule::ValidCommand(_)));
@@ -2500,11 +2500,11 @@ mod tests {
     if !has_cmd("cat") {
       return;
     }
-    let _g = TestGuard::new();
-    let src = "run0 cat";
-    let tokens = get_context_tokens(src);
+    let _g      = TestGuard::new();
+    let src     = "run0 cat";
+    let tokens  = get_context_tokens(src);
     let run0_tk = find_by_text(&tokens, "run0", src);
-    let cat_tk = find_by_text(&tokens, "cat", src).expect("cat");
+    let cat_tk  = find_by_text(&tokens, "cat", src).expect("cat");
     // run0 is in EXEC_WRAPPERS, but `is_exec_wrapper` also checks
     // is_valid_cmd — so this fires only if run0 is itself in PATH.
     // We don't assume it is; just assert "if recognized as wrapper,
@@ -2519,9 +2519,9 @@ mod tests {
   #[test]
   fn non_wrapper_command_not_promoted() {
     // `echo foo` — echo isn't an exec wrapper.
-    let _g = TestGuard::new();
-    let src = "echo foo";
-    let tokens = get_context_tokens(src);
+    let _g      = TestGuard::new();
+    let src     = "echo foo";
+    let tokens  = get_context_tokens(src);
     let echo_tk = find_by_text(&tokens, "echo", src).expect("echo");
     // echo should NOT be Keyword (it's not a wrapper).
     assert_ne!(*echo_tk.class(), CtxTkRule::Keyword);
@@ -2534,9 +2534,9 @@ mod tests {
   /// Unix-like CI.
   #[test]
   fn existing_path_arg_classified_as_argument_file() {
-    let _g = TestGuard::new();
-    let src = "echo /tmp";
-    let tokens = get_context_tokens(src);
+    let _g      = TestGuard::new();
+    let src     = "echo /tmp";
+    let tokens  = get_context_tokens(src);
     let path_tk = find_by_text(&tokens, "/tmp", src).expect("path token");
     assert_eq!(*path_tk.class(), CtxTkRule::ArgumentFile);
   }
@@ -2545,8 +2545,8 @@ mod tests {
   /// `Argument` classification.
   #[test]
   fn nonexistent_path_arg_classified_as_plain_argument() {
-    let _g = TestGuard::new();
-    let src = "echo /this/does/not/exist/zzzqqq";
+    let _g     = TestGuard::new();
+    let src    = "echo /this/does/not/exist/zzzqqq";
     let tokens = get_context_tokens(src);
     let arg_tk = find_by_text(&tokens, "/this/does/not/exist/zzzqqq", src).expect("arg token");
     assert_eq!(*arg_tk.class(), CtxTkRule::Argument);
@@ -2556,10 +2556,10 @@ mod tests {
   /// be subdivided into sub-tokens.
   #[test]
   fn keyword_token_has_no_subtokens() {
-    let _g = TestGuard::new();
-    let src = "if true; then :; fi";
+    let _g     = TestGuard::new();
+    let src    = "if true; then :; fi";
     let tokens = get_context_tokens(src);
-    let if_tk = find_by_text(&tokens, "if", src).expect("if token");
+    let if_tk  = find_by_text(&tokens, "if", src).expect("if token");
     assert_eq!(*if_tk.class(), CtxTkRule::Keyword);
     assert!(if_tk.sub_tokens.is_empty());
   }

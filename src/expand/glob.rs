@@ -46,8 +46,8 @@ enum Atom {
 impl Atom {
   fn tokenize(pattern: &[u8]) -> Rc<[Self]> {
     let mut out = vec![];
-    let mut i = 0;
-    let n = pattern.len();
+    let mut i   = 0;
+    let     n   = pattern.len();
 
     while i < n {
       match pattern[i] {
@@ -188,7 +188,7 @@ fn sweep_inner(atoms: &[Atom], text: &[u8], mode: SweepMode, ci: bool) -> Option
    * | b |     |     |  T   |  T  |     |     |  T   |  T  |  T   | -> matches (longest)
    */
 
-  let m = atoms.len();
+  let m       = atoms.len();
   let reverse = mode.is_reverse();
   let longest = mode.is_longest();
 
@@ -209,7 +209,7 @@ fn sweep_inner(atoms: &[Atom], text: &[u8], mode: SweepMode, ci: bool) -> Option
     }
   };
 
-  let mut cur = StateSet::new(m + 1);
+  let mut cur  = StateSet::new(m + 1);
   let mut next = StateSet::new(m + 1);
 
   cur.set(0, true);
@@ -293,15 +293,15 @@ impl GlobOpts {
 /// A compiled glob pattern, which can be used to match against strings.
 #[derive(Debug, Clone)]
 pub(crate) struct Pattern {
-  atoms: Rc<[Atom]>,
-  orig: Rc<[u8]>, // used for caching
+  atoms  : Rc<[Atom]>,
+  orig   : Rc<[u8]>, // used for caching
   literal: Option<Rc<[u8]>>,
-  opts: GlobOpts,
+  opts   : GlobOpts,
 }
 
 impl Pattern {
   pub(crate) fn compile(pattern: &[u8], opts: GlobOpts) -> Self {
-    let atoms = Atom::tokenize(pattern);
+    let atoms   = Atom::tokenize(pattern);
     let literal = Self::compile_literal(&atoms, opts);
     Self {
       atoms,
@@ -392,9 +392,9 @@ enum ClassItem {
 impl ClassItem {
   fn matches_raw(items: &[Self], b: u8) -> bool {
     items.iter().any(|it| match *it {
-      ClassItem::Byte(x) => b == x,
+      ClassItem::Byte(x)       => b == x,
       ClassItem::Range(lo, hi) => (lo..=hi).contains(&b),
-      ClassItem::Posix(pc) => pc.test(b),
+      ClassItem::Posix(pc)     => pc.test(b),
     })
   }
   fn is_match(polarity: bool, items: &[Self], b: u8, ci: bool) -> bool {
@@ -425,45 +425,45 @@ enum PosixClass {
 impl PosixClass {
   fn from_name(name: &[u8]) -> Option<Self> {
     match name {
-      b"alnum" => Some(Self::Alnum),
-      b"alpha" => Some(Self::Alpha),
-      b"blank" => Some(Self::Blank),
-      b"cntrl" => Some(Self::Cntrl),
-      b"digit" => Some(Self::Digit),
-      b"graph" => Some(Self::Graph),
-      b"lower" => Some(Self::Lower),
-      b"print" => Some(Self::Print),
-      b"punct" => Some(Self::Punct),
-      b"space" => Some(Self::Space),
-      b"upper" => Some(Self::Upper),
+      b"alnum"  => Some(Self::Alnum),
+      b"alpha"  => Some(Self::Alpha),
+      b"blank"  => Some(Self::Blank),
+      b"cntrl"  => Some(Self::Cntrl),
+      b"digit"  => Some(Self::Digit),
+      b"graph"  => Some(Self::Graph),
+      b"lower"  => Some(Self::Lower),
+      b"print"  => Some(Self::Print),
+      b"punct"  => Some(Self::Punct),
+      b"space"  => Some(Self::Space),
+      b"upper"  => Some(Self::Upper),
       b"xdigit" => Some(Self::XDigit),
-      _ => None,
+      _         => None,
     }
   }
 
   fn test(self, b: u8) -> bool {
     match self {
-      Self::Alpha => b.is_ascii_alphabetic(),
-      Self::Alnum => b.is_ascii_alphanumeric(),
-      Self::Cntrl => b.is_ascii_control(),
-      Self::Digit => b.is_ascii_digit(),
-      Self::Graph => b.is_ascii_graphic(),
-      Self::Lower => b.is_ascii_lowercase(),
-      Self::Print => b.is_ascii_graphic() || b == b' ',
-      Self::Punct => b.is_ascii_punctuation(),
-      Self::Upper => b.is_ascii_uppercase(),
+      Self::Alpha  => b.is_ascii_alphabetic(),
+      Self::Alnum  => b.is_ascii_alphanumeric(),
+      Self::Cntrl  => b.is_ascii_control(),
+      Self::Digit  => b.is_ascii_digit(),
+      Self::Graph  => b.is_ascii_graphic(),
+      Self::Lower  => b.is_ascii_lowercase(),
+      Self::Print  => b.is_ascii_graphic() || b == b' ',
+      Self::Punct  => b.is_ascii_punctuation(),
+      Self::Upper  => b.is_ascii_uppercase(),
       Self::XDigit => b.is_ascii_hexdigit(),
-      Self::Blank => matches!(b, b' ' | b'\t'),
-      Self::Space => matches!(b, b'\t' | b'\n' | b'\r' | 0x0B | 0x0C | b' '),
+      Self::Blank  => matches!(b, b' ' | b'\t'),
+      Self::Space  => matches!(b, b'\t' | b'\n' | b'\r' | 0x0B | 0x0C | b' '),
     }
   }
 }
 
 fn parse_class(p: &[u8]) -> Option<(bool, Vec<ClassItem>, usize)> {
-  let n = p.len();
-  let mut items = vec![];
+  let     n        = p.len();
+  let mut items    = vec![];
   let mut polarity = true;
-  let mut j = 0;
+  let mut j        = 0;
 
   if j < n && (p[j] == b'!' || p[j] == b'^') {
     polarity = false;
@@ -487,8 +487,8 @@ fn parse_class(p: &[u8]) -> Option<(bool, Vec<ClassItem>, usize)> {
       b']' => return Some((polarity, items, j + 1)),
       b'[' if j + 1 < n && p[j + 1] == b':' => {
         // posix class
-        let start = j + 2;
-        let mut k = start;
+        let     start = j + 2;
+        let mut k     = start;
 
         // find ':]'
         while k + 1 < n && !(p[k] == b':' && p[k + 1] == b']') {
@@ -522,7 +522,7 @@ fn parse_class(p: &[u8]) -> Option<(bool, Vec<ClassItem>, usize)> {
 /// Quick structural check: only return true if the string could plausibly be a glob.
 pub(super) fn might_be_glob(s: &[u8]) -> bool {
   let mut open_bracket = false;
-  let mut bytes = s.iter();
+  let mut bytes        = s.iter();
 
   match_loop!(bytes.next() => b, {
     b'\\' => {
@@ -582,10 +582,10 @@ pub(crate) fn expand_glob_with(pattern: &[u8], opts: GlobOpts) -> Vec<Vec<u8>> {
     return vec![pattern.to_vec()];
   }
 
-  let segments = PathSeg::compile_segments(pattern, opts);
-  let absolute = pattern.starts_with(b"/");
+  let segments  = PathSeg::compile_segments(pattern, opts);
+  let absolute  = pattern.starts_with(b"/");
   let dirs_only = pattern.len() > 1 && pattern.ends_with(b"/");
-  let dotglob = shopt!(core.dotglob);
+  let dotglob   = shopt!(core.dotglob);
 
   let seed = if absolute {
     PathBuf::from("/")
@@ -596,7 +596,7 @@ pub(crate) fn expand_glob_with(pattern: &[u8], opts: GlobOpts) -> Vec<Vec<u8>> {
   // using a deque lets us switch between BFS/DFS if one proves
   // to be more efficient than the other. `pop_front` = BFS, `pop_back` = DFS
   let mut frontier = VecDeque::from([(seed, 0usize)]); // (path, segments consumed)
-  let mut out = vec![];
+  let mut out      = vec![];
 
   while let Some((path, i)) = frontier.pop_front() {
     if i == segments.len() {
@@ -621,9 +621,9 @@ pub(crate) fn expand_glob_with(pattern: &[u8], opts: GlobOpts) -> Vec<Vec<u8>> {
         }
 
         for entry in paths::path_entries(&normalize_dir(&path)) {
-          let is_dir = entry.file_type().is_ok_and(|ft| ft.is_dir());
+          let     is_dir = entry.file_type().is_ok_and(|ft| ft.is_dir());
 
-          let mut child = path.clone();
+          let mut child  = path.clone();
           child.push(entry.file_name());
           if is_dir {
             frontier.push_back((child, i));
@@ -641,7 +641,7 @@ pub(crate) fn expand_glob_with(pattern: &[u8], opts: GlobOpts) -> Vec<Vec<u8>> {
       }
       PathSeg::Glob { pat, lit_dot } => {
         for entry in paths::path_entries(&normalize_dir(&path)) {
-          let name = entry.file_name();
+          let name  = entry.file_name();
           let bytes = name.as_bytes();
           if bytes.first() == Some(&b'.') && !*lit_dot && !dotglob {
             continue;
@@ -666,8 +666,8 @@ pub(crate) fn expand_glob_with(pattern: &[u8], opts: GlobOpts) -> Vec<Vec<u8>> {
 }
 
 pub(crate) fn replace_posix_classes(s: &str) -> String {
-  let mut out = String::with_capacity(s.len());
-  let mut chars = s.chars().peekable();
+  let mut out        = String::with_capacity(s.len());
+  let mut chars      = s.chars().peekable();
   let mut in_bracket = false;
 
   match_loop!(chars.next() => ch, {
@@ -725,18 +725,18 @@ pub(crate) fn replace_posix_classes(s: &str) -> String {
 
 fn posix_class_chars(name: &str) -> Option<&'static str> {
   match name {
-    "alnum" => Some("a-zA-Z0-9"),
-    "alpha" => Some("a-zA-Z"),
-    "blank" => Some(" \t"),
-    "cntrl" => Some("\x00-\x1F\x7F"),
-    "digit" => Some("0-9"),
-    "graph" => Some("!-~"),
-    "lower" => Some("a-z"),
-    "print" => Some(" -~"),
-    "punct" => Some("!-/:-@\\[-`{-~"),
-    "space" => Some(" \t\r\n\x0b\x0c"),
-    "upper" => Some("A-Z"),
+    "alnum"  => Some("a-zA-Z0-9"),
+    "alpha"  => Some("a-zA-Z"),
+    "blank"  => Some(" \t"),
+    "cntrl"  => Some("\x00-\x1F\x7F"),
+    "digit"  => Some("0-9"),
+    "graph"  => Some("!-~"),
+    "lower"  => Some("a-z"),
+    "print"  => Some(" -~"),
+    "punct"  => Some("!-/:-@\\[-`{-~"),
+    "space"  => Some(" \t\r\n\x0b\x0c"),
+    "upper"  => Some("A-Z"),
     "xdigit" => Some("A-Fa-f0-9"),
-    _ => None,
+    _        => None,
   }
 }

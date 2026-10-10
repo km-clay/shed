@@ -15,9 +15,9 @@ pub(crate) fn deserialize_history(content: &str) -> Vec<HistEntry> {
 }
 
 fn try_import_bash(content: &str) -> Vec<HistEntry> {
-  let mut lines = content.lines().peekable();
-  let mut entries = vec![];
-  let timestamp_pat = Regex::new(r"^#(\d+)$").unwrap();
+  let mut lines         = content.lines().peekable();
+  let mut entries       = vec![];
+  let     timestamp_pat = Regex::new(r"^#(\d+)$").unwrap();
 
   while let Some(line) = lines.next() {
     if let Some(caps) = timestamp_pat.captures(line) {
@@ -43,7 +43,7 @@ fn try_import_bash(content: &str) -> Vec<HistEntry> {
 
 fn collect_continuation<'a>(first: &'a str, lines: &mut impl Iterator<Item = &'a str>) -> String {
   let mut parts = vec![];
-  let mut line = first;
+  let mut line  = first;
   loop {
     let cont = strops::ends_with_unescaped(line.as_bytes(), b"\\");
     parts.push(if cont {
@@ -83,7 +83,7 @@ fn try_import_zsh(content: &str) -> ShResult<Vec<HistEntry>> {
     return Err(sherr!(ParseErr, "no zsh extended-history markers found"));
   }
 
-  let mut lines = content.lines().peekable();
+  let mut lines   = content.lines().peekable();
   let mut entries = vec![];
 
   while let Some(line) = lines.next() {
@@ -114,7 +114,7 @@ fn try_import_zsh(content: &str) -> ShResult<Vec<HistEntry>> {
 }
 
 fn expand_fish_cmd(cmd: &str) -> String {
-  let mut out = String::new();
+  let mut out   = String::new();
   let mut chars = cmd.chars();
 
   match_loop!(chars.next() => ch, {
@@ -144,7 +144,7 @@ fn try_import_fish(content: &str) -> ShResult<Vec<HistEntry>> {
   }
 
   let mut entries = vec![];
-  let mut lines = content.lines();
+  let mut lines   = content.lines();
 
   while let Some(line) = lines.next() {
     if let Some(cmd) = line.strip_prefix("- cmd: ") {
@@ -331,9 +331,9 @@ mod tests {
 
   #[test]
   fn collect_continuation_joins_escaped_lines() {
-    let rest = vec!["second", "third"];
-    let mut iter = rest.into_iter();
-    let result = collect_continuation("first\\", &mut iter);
+    let     rest   = vec!["second", "third"];
+    let mut iter   = rest.into_iter();
+    let     result = collect_continuation("first\\", &mut iter);
     // First line had a trailing `\` so the next iter line joins on a
     // newline; the second line doesn't end with `\` so we stop.
     assert_eq!(result, "first\nsecond");
@@ -343,8 +343,8 @@ mod tests {
   fn collect_continuation_stops_at_iter_exhaustion() {
     // Trailing `\` but no more lines — the loop breaks via the
     // `if let Some(next) = ... else { break }` arm.
-    let mut iter = std::iter::empty::<&str>();
-    let result = collect_continuation("only\\", &mut iter);
+    let mut iter   = std::iter::empty::<&str>();
+    let     result = collect_continuation("only\\", &mut iter);
     assert_eq!(result, "only");
   }
 
@@ -354,9 +354,9 @@ mod tests {
     // line continuation. The final `\` must be kept, and no further lines are
     // consumed. (Regression: the old unconditional `strip_suffix('\\')` dropped
     // the last backslash, corrupting the imported command.)
-    let rest = vec!["should_not_be_joined"];
-    let mut iter = rest.into_iter();
-    let result = collect_continuation("printf '%s' foo\\\\", &mut iter);
+    let     rest   = vec!["should_not_be_joined"];
+    let mut iter   = rest.into_iter();
+    let     result = collect_continuation("printf '%s' foo\\\\", &mut iter);
     assert_eq!(result, "printf '%s' foo\\\\");
     // The follow-up line was left untouched in the iterator.
     assert_eq!(iter.next(), Some("should_not_be_joined"));

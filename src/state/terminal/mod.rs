@@ -96,30 +96,30 @@ bitflags! {
 #[derive(Debug)]
 #[expect(clippy::struct_excessive_bools)]
 pub(crate) struct Terminal {
-  tty: Option<RawFd>,
-  reader: parse::PollReader,
+  tty      : Option<RawFd>,
+  reader   : parse::PollReader,
   input_buf: String,
 
   bracketed_paste: bool,
   kitty_kbd_proto: bool,
-  report_focus: bool,
-  raw_mode: bool,
-  alt_buffer: bool,
-  cursor_style: CursorStyle,
-  cursor_visible: bool,
-  mouse_enabled: bool,
-  interactive: bool,
+  report_focus   : bool,
+  raw_mode       : bool,
+  alt_buffer     : bool,
+  cursor_style   : CursorStyle,
+  cursor_visible : bool,
+  mouse_enabled  : bool,
+  interactive    : bool,
 
   termios_stack: Vec<Termios>,
-  term_caps: TermCap,
-  xt_version: Option<parse::XtVersion>,
+  term_caps    : TermCap,
+  xt_version   : Option<parse::XtVersion>,
 
   t_cols: usize,
   t_rows: usize,
 
   scroll_region: ScrollRegionState,
 
-  last_bell: Option<Instant>,
+  last_bell : Option<Instant>,
   last_input: Option<Instant>,
 
   /// When set, terminal-capability and cursor-position probes short-circuit
@@ -128,7 +128,7 @@ pub(crate) struct Terminal {
   test_mode: bool,
 
   // these are used for handling prompt redraws when executing `:!...` ex mode commands
-  prompt_extent: Option<(u16, u16)>,
+  prompt_extent : Option<(u16, u16)>,
   prompt_cleared: bool,
 }
 
@@ -196,8 +196,8 @@ impl Terminal {
             }
             changed
           }
-          Attr::FocusReport(toggle) => Self::toggle_attr(&mut self.report_focus, *toggle),
-          Attr::BracketPaste(toggle) => Self::toggle_attr(&mut self.bracketed_paste, *toggle),
+          Attr::FocusReport(toggle)   => Self::toggle_attr(&mut self.report_focus, *toggle),
+          Attr::BracketPaste(toggle)  => Self::toggle_attr(&mut self.bracketed_paste, *toggle),
           Attr::KittyKbdProto(toggle) => Self::toggle_attr(&mut self.kitty_kbd_proto, *toggle),
           Attr::MouseTracking(toggle) => Self::toggle_attr(&mut self.mouse_enabled, *toggle),
           _ => true, // non-toggle attrs (ModifyOtherKeys, ApplicationKeypad) always emit
@@ -241,9 +241,9 @@ impl Terminal {
     if let Some(val) = try_var!("SHED_COLOR_MODE") {
       match val.to_str_lossy().as_ref() {
         "truecolor" | "24bit" => return Some(ColorMode::Truecolor),
-        "256" | "256color" => return Some(ColorMode::Palette256),
-        "16" | "8" => return Some(ColorMode::Palette16),
-        "none" | "off" => return None,
+        "256" | "256color"    => return Some(ColorMode::Palette256),
+        "16" | "8"            => return Some(ColorMode::Palette16),
+        "none" | "off"        => return None,
         _ => {}
       }
     }
@@ -331,7 +331,7 @@ impl Terminal {
 
   /// Access the underlying tty file descriptor.
   pub(crate) fn tty(&self) -> Option<BorrowedFd<'static>> {
-    let raw = self.tty?;
+    let raw      = self.tty?;
     let borrowed = unsafe { BorrowedFd::borrow_raw(raw) };
     Some(borrowed)
   }
@@ -358,7 +358,7 @@ impl Terminal {
         self.termios_stack.clear();
         Err(sherr!(InternalErr, "Terminal hangup detected"))
       }
-      Err(_) => Ok(None),
+      Err(_)  => Ok(None),
       Ok(tty) => Ok(Some(tty)),
     }
   }
@@ -609,7 +609,7 @@ impl Terminal {
     // new terminal size. Assumes the owner intends to reserve 2 rows at
     // the bottom (status line + gap above it).
     if let ScrollRegionState::Set(top, _) = self.scroll_region {
-      let reserved = Self::reserved_rows();
+      let reserved   = Self::reserved_rows();
       let new_bottom = (rows.saturating_sub(reserved)).max(top);
       self
         .execute_control(&TermCtl::Scroll(Scroll::SetRegion(top, new_bottom)))
@@ -626,7 +626,7 @@ impl Terminal {
 
     loop {
       let mut fds = [PollFd::new(tty, PollFlags::POLLIN)];
-      let res = poll::poll(&mut fds, timeout);
+      let     res = poll::poll(&mut fds, timeout);
       if matches!(res, Err(Errno::EINTR)) {
         continue;
       }
@@ -727,7 +727,7 @@ impl Terminal {
     }
     let (cursor_row, cursor_col) = match self.get_cursor_pos().ok().flatten() {
       Some((row, col)) => (Some(row.0), Some(col.0 as u16)),
-      None => (None, None),
+      None             => (None, None),
     };
 
     if cursor_row.is_none_or(|r| r >= bottom as usize) {
@@ -767,7 +767,7 @@ impl Terminal {
   }
 
   pub(crate) fn emit_osc_copy(&mut self, primary: bool, buf: &str) -> ShResult<()> {
-    let sel = if primary { "p" } else { "c" };
+    let sel     = if primary { "p" } else { "c" };
     let encoded = util::base64_encode(buf.as_bytes());
 
     if encoded.len() > (1024 * 75) {
@@ -853,13 +853,13 @@ impl Terminal {
     if shopt!(core.bell_enabled) {
       // we use a cooldown because I don't like having my ears assaulted by 1 million bells
       // whenever i finish clearing the line using backspace.
-      let now = Instant::now();
+      let now      = Instant::now();
 
       // surprisingly, a fixed cooldown like '100' is actually more annoying than 1 million bells.
       // I've found this range of 50-150 to be the best balance
       let cooldown = random::random_range::<u8>(50..150);
       let should_send = match self.last_bell {
-        None => true,
+        None       => true,
         Some(time) => now.duration_since(time).as_millis() > u128::from(cooldown),
       };
       if should_send {
@@ -882,7 +882,7 @@ impl Terminal {
     // If we aren't attached to a terminal, the pgid already controls it, or the
     // process group does not exist Then return ok
     let term_controller = self.controller().unwrap_or(Pid::this());
-    let isatty = self.isatty();
+    let isatty          = self.isatty();
     if !isatty || pgid == term_controller || signal::killpg(pgid, None).is_err() {
       return Ok(());
     }
@@ -891,7 +891,7 @@ impl Terminal {
       signal::kill(term_controller, Signal::SIGTTOU).ok();
     }
 
-    let mut new_mask = SigSet::empty();
+    let mut new_mask  = SigSet::empty();
     let mut mask_bkup = SigSet::empty();
 
     new_mask.add(Signal::SIGTSTP);
@@ -1045,10 +1045,10 @@ impl Terminal {
   pub(crate) fn enforce_raw_mode(&mut self) -> ShResult<()> {
     // we propagate the error for this one so that the interactive loop
     // breaks correctly on EIO
-    let tty_raw = self.tty_raw_checked()?;
-    let tty = unsafe { BorrowedFd::borrow_raw(tty_raw) };
+    let     tty_raw = self.tty_raw_checked()?;
+    let     tty     = unsafe { BorrowedFd::borrow_raw(tty_raw) };
 
-    let mut t = term::tcgetattr(tty)?;
+    let mut t       = term::tcgetattr(tty)?;
     enable_raw_mode(&mut t);
     term::tcsetattr(tty, SetArg::TCSANOW, &t)?;
     Ok(())
@@ -1079,9 +1079,9 @@ impl Terminal {
     let mut buf = buf.as_bytes();
     while !buf.is_empty() {
       match unistd::write(tty, buf) {
-        Ok(n) => buf = &buf[n..],
+        Ok(n)             => buf = &buf[n..],
         Err(Errno::EINTR) => (),
-        Err(_) => return Err(std::io::Error::last_os_error().into()),
+        Err(_)            => return Err(std::io::Error::last_os_error().into()),
       }
     }
     Ok(())
@@ -1104,7 +1104,7 @@ impl Terminal {
       return Ok(());
     }
     let reserved: u16 = Self::reserved_rows();
-    let bottom = (self.t_rows() as u16).saturating_sub(reserved).max(1);
+    let bottom        = (self.t_rows() as u16).saturating_sub(reserved).max(1);
     self.execute_control(&TermCtl::Scroll(Scroll::SetRegion(1, bottom)))?;
     self.fix_cursor_row(bottom)
   }
@@ -1201,7 +1201,7 @@ impl Default for Terminal {
 impl std::io::Write for Terminal {
   fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
     match std::str::from_utf8(buf) {
-      Ok(s) => self.input_buf.push_str(s),
+      Ok(s)  => self.input_buf.push_str(s),
       Err(_) => self.input_buf.push_str(&String::from_utf8_lossy(buf)),
     }
     Ok(buf.len())
@@ -1214,7 +1214,7 @@ impl std::io::Write for Terminal {
     let mut buf = self.input_buf.as_bytes();
     while !buf.is_empty() {
       match unistd::write(tty, buf) {
-        Ok(n) => buf = &buf[n..],
+        Ok(n)             => buf = &buf[n..],
         Err(Errno::EINTR) => (),
         Err(_) => {
           self.input_buf.clear();
@@ -1626,11 +1626,11 @@ mod terminal_method_tests {
   fn cooked_no_echo_guard_disables_echo_and_restores_on_drop() {
     use nix::sys::termios::{LocalFlags, tcgetattr};
     use std::os::fd::BorrowedFd;
-    let _g = TestGuard::new();
-    let tty_fd = Shed::term(|t| t.tty().map(|f| f.as_raw_fd())).unwrap();
+    let _g       = TestGuard::new();
+    let tty_fd   = Shed::term(|t| t.tty().map(|f| f.as_raw_fd())).unwrap();
     let borrowed = unsafe { BorrowedFd::borrow_raw(tty_fd) };
 
-    let before = tcgetattr(borrowed).unwrap().local_flags;
+    let before   = tcgetattr(borrowed).unwrap().local_flags;
     {
       let _guard = Shed::term_mut(|t| t.cooked_no_echo_guard().unwrap());
       let inside = tcgetattr(borrowed).unwrap().local_flags;
@@ -1651,7 +1651,7 @@ mod terminal_method_tests {
 
   #[test]
   fn poll_returns_zero_on_timeout_with_no_input() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     // Short timeout, no bytes available.
     let ret = Shed::term_mut(|t| t.poll(PollTimeout::from(10u8)).unwrap());
     assert_eq!(ret, 0, "expected no fds ready, got {ret}");
@@ -1669,7 +1669,7 @@ mod terminal_method_tests {
 
   #[test]
   fn get_cursor_pos_returns_none_in_test_mode() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let pos = Shed::term_mut(|t| t.get_cursor_pos().unwrap());
     assert_eq!(pos, None);
   }
@@ -1681,7 +1681,7 @@ mod terminal_method_tests {
 
   #[test]
   fn query_term_caps_is_skipped_in_test_mode() {
-    let _g = TestGuard::new();
+    let _g          = TestGuard::new();
     let caps_before = Shed::term(super::Terminal::term_caps);
     Shed::term_mut(|t| t.query_term_caps().unwrap());
     let caps_after = Shed::term(super::Terminal::term_caps);
@@ -1698,7 +1698,7 @@ mod terminal_method_tests {
 
   #[test]
   fn setup_terminal_returns_guard_that_restores_on_drop() {
-    let _g = TestGuard::new();
+    let _g         = TestGuard::new();
     let raw_before = Shed::term(|t| t.raw_mode);
     {
       let _setup_guard = Shed::term_mut(|t| t.setup_terminal().unwrap());
@@ -1709,6 +1709,6 @@ mod terminal_method_tests {
     // Guard dropped — state should be reasonable. raw_mode may or may
     // not change; we just make sure nothing panicked.
     let _raw_after = Shed::term(|t| t.raw_mode);
-    let _ = raw_before;
+    let _          = raw_before;
   }
 }

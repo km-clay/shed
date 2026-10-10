@@ -72,37 +72,37 @@ impl FromStr for ArithOp {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s {
-      "+" => Ok(Self::Add),
-      "-" => Ok(Self::Sub),
-      "*" => Ok(Self::Mul),
-      "**" => Ok(Self::Pow),
-      "/" => Ok(Self::Div),
-      "%" => Ok(Self::Mod),
-      "<" => Ok(Self::Lt),
-      ">" => Ok(Self::Gt),
-      "<=" => Ok(Self::Le),
-      ">=" => Ok(Self::Ge),
-      "==" => Ok(Self::Eq),
-      "!=" => Ok(Self::Ne),
-      "&&" => Ok(Self::And),
-      "||" => Ok(Self::Or),
-      "&" => Ok(Self::BitAnd),
-      "|" => Ok(Self::BitOr),
-      "^" => Ok(Self::BitXor),
-      "<<" => Ok(Self::ShiftL),
-      ">>" => Ok(Self::ShiftR),
-      "=" => Ok(Self::Assign),
-      "+=" => Ok(Self::PlusAssign),
-      "-=" => Ok(Self::MinusAssign),
-      "*=" => Ok(Self::MulAssign),
-      "/=" => Ok(Self::DivAssign),
-      "%=" => Ok(Self::ModAssign),
-      "&=" => Ok(Self::BitAndAssign),
-      "|=" => Ok(Self::BitOrAssign),
-      "^=" => Ok(Self::BitXorAssign),
+      "+"   => Ok(Self::Add),
+      "-"   => Ok(Self::Sub),
+      "*"   => Ok(Self::Mul),
+      "**"  => Ok(Self::Pow),
+      "/"   => Ok(Self::Div),
+      "%"   => Ok(Self::Mod),
+      "<"   => Ok(Self::Lt),
+      ">"   => Ok(Self::Gt),
+      "<="  => Ok(Self::Le),
+      ">="  => Ok(Self::Ge),
+      "=="  => Ok(Self::Eq),
+      "!="  => Ok(Self::Ne),
+      "&&"  => Ok(Self::And),
+      "||"  => Ok(Self::Or),
+      "&"   => Ok(Self::BitAnd),
+      "|"   => Ok(Self::BitOr),
+      "^"   => Ok(Self::BitXor),
+      "<<"  => Ok(Self::ShiftL),
+      ">>"  => Ok(Self::ShiftR),
+      "="   => Ok(Self::Assign),
+      "+="  => Ok(Self::PlusAssign),
+      "-="  => Ok(Self::MinusAssign),
+      "*="  => Ok(Self::MulAssign),
+      "/="  => Ok(Self::DivAssign),
+      "%="  => Ok(Self::ModAssign),
+      "&="  => Ok(Self::BitAndAssign),
+      "|="  => Ok(Self::BitOrAssign),
+      "^="  => Ok(Self::BitXorAssign),
       "<<=" => Ok(Self::ShiftLAssign),
       ">>=" => Ok(Self::ShiftRAssign),
-      _ => Err(sherr!(ParseErr, "Unknown operator: '{s}'")),
+      _     => Err(sherr!(ParseErr, "Unknown operator: '{s}'")),
     }
   }
 }
@@ -148,7 +148,7 @@ enum StackVal {
 impl StackVal {
   fn to_num(&self) -> ShResult<Num> {
     match self {
-      StackVal::Num(n) => Ok(*n),
+      StackVal::Num(n)    => Ok(*n),
       StackVal::Var(name) => resolve_var_num(name),
     }
   }
@@ -159,13 +159,13 @@ impl StackVal {
 /// 10-35, `A-Z` → 36-61, `@` → 62, `_` → 63. Returns `None` if out of range.
 fn radix_digit_value(c: u8, base: u32) -> Option<u32> {
   let v = match c {
-    b'0'..=b'9' => u32::from(c - b'0'),
-    b'a'..=b'z' => u32::from(c - b'a') + 10,
+    b'0'..=b'9'               => u32::from(c - b'0'),
+    b'a'..=b'z'               => u32::from(c - b'a') + 10,
     b'A'..=b'Z' if base <= 36 => u32::from(c - b'A') + 10,
-    b'A'..=b'Z' => u32::from(c - b'A') + 36,
+    b'A'..=b'Z'               => u32::from(c - b'A') + 36,
     b'@' => 62,
     b'_' => 63,
-    _ => return None,
+    _    => return None,
   };
   (v < base).then_some(v)
 }
@@ -244,7 +244,7 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
         .ok_or_else(|| sherr!(ParseErr, "Missing operand in arithmetic expression"))?
       {
         StackVal::Var(name) => name,
-        StackVal::Num(_) => return Err(sherr!(ParseErr, "Assignment target must be a variable")),
+        StackVal::Num(_)    => return Err(sherr!(ParseErr, "Assignment target must be a variable")),
       }
     };
   }
@@ -259,22 +259,22 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
       stack.push(StackVal::Num(rhs));
     }
     ArithOp::PlusAssign => {
-      let rhs = pop_num!();
-      let lhs = pop_var!();
+      let rhs     = pop_num!();
+      let lhs     = pop_var!();
       let new_val = resolve_var_num(&lhs)? + rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::MinusAssign => {
-      let rhs = pop_num!();
-      let lhs = pop_var!();
+      let rhs     = pop_num!();
+      let lhs     = pop_var!();
       let new_val = resolve_var_num(&lhs)? - rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::MulAssign => {
-      let rhs = pop_num!();
-      let lhs = pop_var!();
+      let rhs     = pop_num!();
+      let lhs     = pop_var!();
       let new_val = resolve_var_num(&lhs)? * rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
@@ -284,7 +284,7 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
       if rhs == 0 {
         return Err(sherr!(InternalErr, "Division by zero"));
       }
-      let lhs = pop_var!();
+      let lhs     = pop_var!();
       let new_val = resolve_var_num(&lhs)? / rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
@@ -294,7 +294,7 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
       if rhs == 0 {
         return Err(sherr!(InternalErr, "Modulo by zero"));
       }
-      let lhs = pop_var!();
+      let lhs     = pop_var!();
       let new_val = resolve_var_num(&lhs)? % rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
@@ -325,7 +325,7 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
       stack.push(StackVal::Num(lhs / rhs));
     }
     ArithOp::Pow => {
-      let exp = pop_num!();
+      let exp  = pop_num!();
       let base = pop_num!();
       if exp < 0 {
         return Err(sherr!(InternalErr, "exponent less than 0"));
@@ -417,22 +417,22 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
 
     // Bitwise/shift compound assignment
     ArithOp::BitAndAssign => {
-      let rhs = pop_num!();
-      let lhs = pop_var!();
+      let rhs     = pop_num!();
+      let lhs     = pop_var!();
       let new_val = resolve_var_num(&lhs)? & rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::BitOrAssign => {
-      let rhs = pop_num!();
-      let lhs = pop_var!();
+      let rhs     = pop_num!();
+      let lhs     = pop_var!();
       let new_val = resolve_var_num(&lhs)? | rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
     }
     ArithOp::BitXorAssign => {
-      let rhs = pop_num!();
-      let lhs = pop_var!();
+      let rhs     = pop_num!();
+      let lhs     = pop_var!();
       let new_val = resolve_var_num(&lhs)? ^ rhs;
       assign_var(&lhs, new_val)?;
       stack.push(StackVal::Num(new_val));
@@ -485,8 +485,8 @@ fn assign_var(name: &str, val: Num) -> ShResult<()> {
 
 impl ArithTk {
   pub(crate) fn tokenize(raw: &[u8]) -> ShResult<Vec<Self>> {
-    let mut tokens = Vec::new();
-    let mut cur = SliceCursor::new(raw);
+    let mut tokens           = Vec::new();
+    let mut cur              = SliceCursor::new(raw);
     // Track whether the last emitted token was an operand, to distinguish
     // unary minus from binary subtraction.
     let mut last_was_operand = false;
@@ -795,8 +795,8 @@ impl ArithTk {
     match tk {
       // Pending markers participate in flushing at their op's precedence.
       ArithTk::PendingTernaryElse(_) => 1,
-      ArithTk::PendingOr(_) => 2,
-      ArithTk::PendingAnd(_) => 3,
+      ArithTk::PendingOr(_)          => 2,
+      ArithTk::PendingAnd(_)         => 3,
       ArithTk::Op(op) => match op {
         ArithOp::Assign
         | ArithOp::PlusAssign
@@ -809,15 +809,15 @@ impl ArithTk {
         | ArithOp::BitXorAssign
         | ArithOp::ShiftLAssign
         | ArithOp::ShiftRAssign => 1,
-        ArithOp::Or => 2,
-        ArithOp::And => 3,
-        ArithOp::BitOr => 4,
-        ArithOp::BitXor => 5,
-        ArithOp::BitAnd => 6,
+        ArithOp::Or               => 2,
+        ArithOp::And              => 3,
+        ArithOp::BitOr            => 4,
+        ArithOp::BitXor           => 5,
+        ArithOp::BitAnd           => 6,
         ArithOp::Eq | ArithOp::Ne => 7,
         ArithOp::Lt | ArithOp::Gt | ArithOp::Le | ArithOp::Ge => 8,
         ArithOp::ShiftL | ArithOp::ShiftR => 9,
-        ArithOp::Add | ArithOp::Sub => 10,
+        ArithOp::Add | ArithOp::Sub       => 10,
         ArithOp::Mul | ArithOp::Div | ArithOp::Mod => 11,
         // `**` binds tighter than `* / %` but looser than the unary operators
         // (bash: `-2**2` == `(-2)**2` == 4).
@@ -909,8 +909,8 @@ impl ArithTk {
 
   fn to_rpn(tokens: Vec<ArithTk>) -> ShResult<Vec<ArithTk>> {
     let mut output: Vec<ArithTk> = Vec::new();
-    let mut ops: Vec<ArithTk> = Vec::new();
-    let mut tokens = tokens.into_iter().peekable();
+    let mut ops   : Vec<ArithTk> = Vec::new();
+    let mut tokens               = tokens.into_iter().peekable();
 
     match_loop!(tokens.next() => token, {
       ArithTk::Num(_) => output.push(token),
@@ -1192,17 +1192,17 @@ impl ArithTk {
 /// The caller is responsible for stripping any `((...))` or `(...)` wrappers.
 pub(crate) fn expand_arithmetic(span: Option<Span>, expr: &[u8]) -> ShResult<VarStr> {
   let unescaped = escape::unescape_math(expr)?;
-  let expanded = var::expand_raw(span, &mut unescaped.cursor())?.into_bytes();
-  let tokens = ArithTk::tokenize(&expanded)?;
-  let rpn = ArithTk::to_rpn(tokens)?;
-  let result = ArithTk::eval_rpn(&rpn)?;
+  let expanded  = var::expand_raw(span, &mut unescaped.cursor())?.into_bytes();
+  let tokens    = ArithTk::tokenize(&expanded)?;
+  let rpn       = ArithTk::to_rpn(tokens)?;
+  let result    = ArithTk::eval_rpn(&rpn)?;
   Ok(varstr!("{result}"))
 }
 
 /// Eval a pre-expanded expression
 pub(crate) fn eval_expanded(expr: &[u8]) -> ShResult<Num> {
   let tokens = ArithTk::tokenize(expr)?;
-  let rpn = ArithTk::to_rpn(tokens)?;
+  let rpn    = ArithTk::to_rpn(tokens)?;
   ArithTk::eval_rpn(&rpn)
 }
 
@@ -1217,8 +1217,8 @@ pub(crate) fn expand_arithmetic_wrapped(span: Option<Span>, raw: &[u8]) -> ShRes
 }
 
 fn strip_enclosing_parens(s: &[u8]) -> Option<&[u8]> {
-  let inner = s.strip_prefix(b"(")?;
-  let mut cur = SliceCursor::new(inner);
+  let     inner = s.strip_prefix(b"(")?;
+  let mut cur   = SliceCursor::new(inner);
   // The opening `(` is already consumed (depth 1); scan to its matching `)`.
   // The cursor lands just past that `)`; if that is the end of `inner`, the
   // opening paren enclosed the whole string.
@@ -1527,7 +1527,7 @@ mod tests {
 
   #[test]
   fn arith_comma_returns_last() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     // (j=2, j+1) should set j=2 and return 3
     let result = arith("(j=2, j+1)");
     assert_eq!(result, 3.0);
@@ -1867,7 +1867,7 @@ mod tests {
   #[test]
   fn bad_arith_in_assignment_errors_not_leaks() {
     use crate::tests::testutil::test_input;
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = test_input("foo=$((1 k 2))");
     assert!(
       result.is_err() || Shed::get_status() != 0,

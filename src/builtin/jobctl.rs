@@ -102,7 +102,7 @@ impl super::Builtin for Bg {
 }
 
 pub(super) fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResult<()> {
-  let span = args.span();
+  let     span    = args.span();
   let mut arg_vec = args.arguments();
 
   let Some(curr_job_id) = Shed::jobs(JobTab::curr_job) else {
@@ -111,7 +111,7 @@ pub(super) fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResu
 
   let tabid = match arg_vec.next() {
     Some((arg, blame)) => parse_job_id(&arg.to_str_lossy(), blame)?,
-    None => curr_job_id,
+    None               => curr_job_id,
   };
 
   let Some(mut job) = Shed::jobs_mut(|j| j.remove_job(JobID::TableID(tabid))) else {
@@ -158,11 +158,11 @@ impl super::Builtin for Jobs {
     let mut flags = JobCmdFlags::empty();
     for opt in args.options() {
       match opt.key() {
-        "long" => flags |= JobCmdFlags::LONG,
-        "pids" => flags |= JobCmdFlags::PIDS,
+        "long"     => flags |= JobCmdFlags::LONG,
+        "pids"     => flags |= JobCmdFlags::PIDS,
         "new-only" => flags |= JobCmdFlags::NEW_ONLY,
-        "running" => flags |= JobCmdFlags::RUNNING,
-        "stopped" => flags |= JobCmdFlags::STOPPED,
+        "running"  => flags |= JobCmdFlags::RUNNING,
+        "stopped"  => flags |= JobCmdFlags::STOPPED,
         _ => {
           return Err(sherr!(
             SyntaxErr @ args.span(),
@@ -227,8 +227,8 @@ impl super::Builtin for Disown {
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let span = args.span();
-    let nohup = args.has_opt("nohup");
+    let span       = args.span();
+    let nohup      = args.has_opt("nohup");
     let disown_all = args.has_opt("all");
 
     // -a operates on every job; explicit ids and the current-job
@@ -283,7 +283,7 @@ impl KillSig {
   fn as_i32(self) -> i32 {
     match self {
       KillSig::Real(s) => s as i32,
-      KillSig::Zero => 0,
+      KillSig::Zero    => 0,
     }
   }
 }
@@ -292,7 +292,7 @@ impl std::fmt::Display for KillSig {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       KillSig::Real(s) => write!(f, "{s}"),
-      KillSig::Zero => write!(f, "signal 0"),
+      KillSig::Zero    => write!(f, "signal 0"),
     }
   }
 }
@@ -337,10 +337,10 @@ fn parse_kill_target(arg: &str, blame: Span) -> ShResult<KillTarget> {
   };
 
   Ok(match n {
-    -1 => KillTarget::Broadcast,
-    0 => KillTarget::OurPgrp,
+    -1          => KillTarget::Broadcast,
+    0           => KillTarget::OurPgrp,
     _ if n < -1 => KillTarget::Pgid(Pid::from_raw(-n)),
-    _ => KillTarget::Pid(Pid::from_raw(n)),
+    _           => KillTarget::Pid(Pid::from_raw(n)),
   })
 }
 
@@ -382,7 +382,7 @@ fn send_signal(target: &KillTarget, sig: KillSig, verbose: bool, blame: Span) ->
             // status is updated to match.
             KillSig::Real(s) => job.killpg(s),
             // Signal 0 is a probe — don't touch the job's state.
-            KillSig::Zero => Ok(raw_killpg(job.pgid(), 0)?),
+            KillSig::Zero    => Ok(raw_killpg(job.pgid(), 0)?),
           }
         } else {
           Err(sherr!(ExecFail @ blame, "Job not found"))
@@ -409,13 +409,13 @@ impl super::Builtin for Kill {
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut signal: Option<KillSig> = None;
-    let mut list_sig = false;
-    let mut verbose = false;
+    let mut list_sig                = false;
+    let mut verbose                 = false;
 
     for opt in args.options() {
       match opt.key() {
         "verbose" => verbose = true,
-        "list" => list_sig = true,
+        "list"    => list_sig = true,
         "signal" => {
           let sig_name = opt.value()?;
           signal = Some(parse_kill_sig(&sig_name.to_str_lossy()).promote_err(args.cmd_span())?);
@@ -591,7 +591,7 @@ mod kill_tests {
 
   #[test]
   fn kill_signal_name_sends_to_pid() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let pid = fork_pausing_child();
     test_input(format!("kill -TERM {}", pid.as_raw())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -603,7 +603,7 @@ mod kill_tests {
 
   #[test]
   fn kill_default_signal_is_term() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let pid = fork_pausing_child();
     test_input(format!("kill {}", pid.as_raw())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -615,7 +615,7 @@ mod kill_tests {
 
   #[test]
   fn kill_dash_s_sets_signal() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let pid = fork_pausing_child();
     test_input(format!("kill -s KILL {}", pid.as_raw())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -629,7 +629,7 @@ mod kill_tests {
   fn kill_numeric_signal_arg_works() {
     // `kill -9 <pid>` — `-9` arrives as a positional arg starting with
     // `-`, the builtin strips the `-` and parses "9" as a signal.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let pid = fork_pausing_child();
     test_input(format!("kill -9 {}", pid.as_raw())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -642,7 +642,7 @@ mod kill_tests {
   #[test]
   fn kill_dash_signame_overrides_signal_per_arg() {
     // First positional `-INT` should set the signal for subsequent pids.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let pid = fork_pausing_child();
     test_input(format!("kill -INT {}", pid.as_raw())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -654,7 +654,7 @@ mod kill_tests {
 
   #[test]
   fn kill_verbose_prints_description() {
-    let g = TestGuard::new();
+    let g   = TestGuard::new();
     let pid = fork_pausing_child();
     test_input(format!("kill -v -TERM {}", pid.as_raw())).unwrap();
     waitpid(pid, None).unwrap();
@@ -669,7 +669,7 @@ mod kill_tests {
     use nix::sys::wait::WaitPidFlag;
     // `kill -0 <pid>` against a running process succeeds without
     // actually delivering anything; child stays alive.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let pid = fork_pausing_child();
     // The probe didn't deliver — child is still paused. Confirm via
     // WNOHANG: nothing has changed.
@@ -691,7 +691,7 @@ mod kill_tests {
   fn kill_dash_zero_against_dead_pid_errors() {
     // A reaped/never-existed pid: kill(2) returns ESRCH and the builtin
     // propagates it as an error (status != 0).
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     // Spawn and immediately reap so the pid is gone.
     let pid = fork_pausing_child();
     let raw = pid.as_raw();
@@ -707,7 +707,7 @@ mod kill_tests {
   fn kill_dash_s_zero_probes_live_pid() {
     use nix::sys::wait::WaitPidFlag;
     // Same probe semantics, but via -s 0 instead of -0.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let pid = fork_pausing_child();
     test_input(format!("kill -s 0 {}", pid.as_raw())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -737,7 +737,7 @@ mod disown_tests {
   /// jobs as we set up multi-job tests.
   pub(super) fn insert_fake_job(pid: i32, cmd: &[u8]) -> usize {
     use nix::sys::wait::WaitStatus;
-    let pid = Pid::from_raw(pid);
+    let     pid   = Pid::from_raw(pid);
     let mut child = ChildProc::new(pid, Some(cmd), Some(pid), None);
     child.set_stat(WaitStatus::StillAlive);
     let mut bldr = JobBldr::new();
@@ -768,7 +768,7 @@ mod disown_tests {
 
   #[test]
   fn disown_removes_current_job_from_table() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let tabid = insert_fake_job(99001, b"fake_cmd");
     assert!(job_exists(tabid));
     test_input("disown").unwrap();
@@ -779,7 +779,7 @@ mod disown_tests {
 
   #[test]
   fn disown_dash_h_marks_nohup_and_keeps_job() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let tabid = insert_fake_job(99002, b"fake_cmd");
     assert_eq!(job_send_hup(tabid), Some(true));
     test_input("disown -h").unwrap();
@@ -795,7 +795,7 @@ mod disown_tests {
 
   #[test]
   fn disown_dash_a_removes_all_jobs() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let id1 = insert_fake_job(99010, b"cmd_a");
     let id2 = insert_fake_job(99011, b"cmd_b");
     let id3 = insert_fake_job(99012, b"cmd_c");
@@ -807,7 +807,7 @@ mod disown_tests {
 
   #[test]
   fn disown_dash_a_dash_h_keeps_all_jobs_marks_nohup() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let id1 = insert_fake_job(99020, b"cmd_a");
     let id2 = insert_fake_job(99021, b"cmd_b");
     test_input("disown -a -h").unwrap();
@@ -825,7 +825,7 @@ mod disown_tests {
     // with the current job and appended argv on top, so `disown %N`
     // would also remove the current job. Now the current-job fallback
     // only applies when argv is empty.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let id1 = insert_fake_job(99030, b"cmd_a");
     let id2 = insert_fake_job(99031, b"cmd_b");
     test_input(format!("disown %{}", id1 + 1)).unwrap();
@@ -835,7 +835,7 @@ mod disown_tests {
 
   #[test]
   fn disown_with_multiple_explicit_ids_removes_only_named() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let id1 = insert_fake_job(99050, b"cmd_a");
     let id2 = insert_fake_job(99051, b"cmd_b");
     let id3 = insert_fake_job(99052, b"cmd_c");
@@ -849,7 +849,7 @@ mod disown_tests {
 
   #[test]
   fn disown_invalid_jobid_errors() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let _id = insert_fake_job(99040, b"fake_cmd");
     test_input("disown %not_a_number").ok();
     assert_ne!(state::Shed::get_status(), 0);

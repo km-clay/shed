@@ -37,7 +37,7 @@ impl Builtin for SleepDuration {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let (dur, span) = argv::join_raw_arg_iter(args.arguments());
 
-    let dur = dur.trim().to_str_lossy();
+    let dur         = dur.trim().to_str_lossy();
 
     let dur = if dur == "inf" {
       Duration::MAX
@@ -51,7 +51,7 @@ impl Builtin for SleepDuration {
       Duration::from_micros(micros.cast_unsigned())
     };
 
-    let ts = super::now(libc::CLOCK_MONOTONIC);
+    let ts       = super::now(libc::CLOCK_MONOTONIC);
     let deadline = super::deadline_after(ts, dur);
 
     super::sleep_until(libc::CLOCK_MONOTONIC, &deadline)

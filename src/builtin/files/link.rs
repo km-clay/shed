@@ -34,7 +34,6 @@ impl Builtin for Link {
       let Err(e) = std::fs::hard_link(target, link) else {
         continue;
       };
-      #[rustfmt::skip]
       let err = match e.kind() {
         EK::AlreadyExists      => sherr!(ExecFail @ l_span, "cannot create link `{link}`: file exists"                      ),
         EK::CrossesDevices     => sherr!(ExecFail @ l_span, "cannot create link `{link}`: cross-device link"                ),

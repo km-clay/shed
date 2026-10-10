@@ -20,7 +20,6 @@ impl super::BuiltinRouter for Fs {
   fn name(&self) -> &'static str {
     "fs"
   }
-  #[rustfmt::skip]
   fn sub_commands(&self) -> &'static [SubCommand] {
     const SUB_COMMANDS: &[SubCommand] = &[
       sub_command!(

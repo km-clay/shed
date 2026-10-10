@@ -53,14 +53,14 @@ impl super::Builtin for Read {
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let mut flags = ReadFlags::empty();
-    let mut prompt = None;
-    let mut timeout = None;
-    let mut max_bytes = None;
-    let mut array_name = None;
-    let mut delim = b'\n';
+    let mut flags           = ReadFlags::empty();
+    let mut prompt          = None;
+    let mut timeout         = None;
+    let mut max_bytes       = None;
+    let mut array_name      = None;
+    let mut delim           = b'\n';
 
-    let (arg_vec, opts) = args.take_argv();
+    let     (arg_vec, opts) = args.take_argv();
 
     for opt in opts {
       match opt.key() {
@@ -108,9 +108,9 @@ impl super::Builtin for Read {
           };
           timeout = Some(millis);
         }
-        "quoted" => flags |= ReadFlags::QUOTED | ReadFlags::NO_ESCAPE,
+        "quoted"    => flags |= ReadFlags::QUOTED | ReadFlags::NO_ESCAPE,
         "no-escape" => flags |= ReadFlags::NO_ESCAPE,
-        "no-echo" => flags |= ReadFlags::NO_ECHO,
+        "no-echo"   => flags |= ReadFlags::NO_ECHO,
         _ => return Err(sherr!(ExecFail @ opt.span(), "unexpected flag '{opt}'").with_code(2)),
       }
     }
@@ -179,9 +179,9 @@ fn walking_read(
   timeout: Option<i32>,
   max_bytes: Option<usize>,
 ) -> ShResult<Vec<u8>> {
-  let mut buf = vec![];
+  let mut buf     = vec![];
   let mut escaped = false;
-  let timeout = timeout.map(PollTimeout::try_from).and_then(Result::ok);
+  let     timeout = timeout.map(PollTimeout::try_from).and_then(Result::ok);
 
   loop {
     let ready = match sink.poll(timeout) {
@@ -276,8 +276,8 @@ fn seeking_read(
   escape_aware: bool,
   max_bytes: Option<usize>,
 ) -> ShResult<Vec<u8>> {
-  let mut buf = [0u8; CHUNK_SIZE];
-  let mut line = Vec::new();
+  let mut buf              = [0u8; CHUNK_SIZE];
+  let mut line             = Vec::new();
   let mut last_was_escaped = false;
 
   loop {
@@ -308,7 +308,7 @@ fn seeking_read(
       Err(e) => return Err(e.into()),
     };
 
-    let chunk = &buf[..n];
+    let chunk      = &buf[..n];
     let scan_slice = &chunk[scan_start..];
 
     if let Some(pos_in_scan) = delim_scan(delim, scan_slice, escape_aware) {
@@ -328,7 +328,7 @@ fn seeking_read(
 
     if escape_aware && n > 0 {
       let mut escaped = false;
-      let mut i = n;
+      let mut i       = n;
 
       while i > scan_start {
         i -= 1;
@@ -365,7 +365,7 @@ fn finalize(mut line: Vec<u8>, escape_aware: bool) -> ShResult<Vec<u8>> {
 }
 
 fn unescape(line: &[u8]) -> Vec<u8> {
-  let mut out = Vec::with_capacity(line.len());
+  let mut out       = Vec::with_capacity(line.len());
   let mut byte_enum = line.iter();
 
   match_loop!(byte_enum.next() => &byte => byte, {
@@ -389,8 +389,8 @@ fn unescape(line: &[u8]) -> Vec<u8> {
 /// the divergence makes splitting colored, column-aligned command output
 /// (`eza`, `ls`, `ps`) survive positional indexing.
 fn glue_zero_width(fields: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
-  let mut out: Vec<Vec<u8>> = Vec::with_capacity(fields.len());
-  let mut pending: Vec<u8> = Vec::new();
+  let mut out    : Vec<Vec<u8>> = Vec::with_capacity(fields.len());
+  let mut pending: Vec<u8>      = Vec::new();
 
   for field in fields {
     if !field.is_empty() && ui::calc_str_width(&String::from_utf8_lossy(&field)) == 0 {
@@ -423,7 +423,7 @@ fn field_split_vars(input: &[u8], vars: &[(VarStr, Span)]) -> ShResult<()> {
     return Ok(());
   }
 
-  let sep = params::get_separators();
+  let sep    = params::get_separators();
   let fields = strops::ifs_split(input, sep.as_bytes(), Some(vars.len()));
 
   for (i, (name, _)) in vars.iter().enumerate() {
@@ -445,7 +445,7 @@ fn field_split_arr(input: &[u8], arr_name: &str) -> ShResult<()> {
     return Err(sherr!(ExecFail, "read: Array name cannot be empty"));
   }
 
-  let sep = params::get_separators();
+  let sep    = params::get_separators();
   let fields = glue_zero_width(strops::ifs_split(input, sep.as_bytes(), None));
 
   Shed::vars_mut(|v| {
@@ -536,7 +536,7 @@ impl super::Builtin for ReadKey {
     }
     let mut whitelist = None;
     let mut blacklist = None;
-    let mut var_name = None;
+    let mut var_name  = None;
 
     for opt in args.options() {
       match opt.key() {
@@ -561,7 +561,7 @@ impl super::Builtin for ReadKey {
       let _raw = Shed::term_mut(Terminal::raw_mode_guard);
       if let Err(e) = Shed::term_mut(Terminal::read) {
         match e.kind() {
-          ShErrKind::LoopBreak(_) => return util::with_status(1),
+          ShErrKind::LoopBreak(_)    => return util::with_status(1),
           ShErrKind::LoopContinue(_) => return util::with_status(0),
           _ => return Err(e).promote_err(args.span()),
         }

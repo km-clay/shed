@@ -96,10 +96,10 @@ impl EditMode for ViEx {
 
             Ok(Some(EditCmd {
               register: RegisterName::default(),
-              verb: Some(verb!(Verb::ExCmd(node))),
-              motion: None,
-              flags: CmdFlags::EXIT_CUR_MODE,
-              raw_seq: input.clone(),
+              verb    : Some(verb!(Verb::ExCmd(node))),
+              motion  : None,
+              flags   : CmdFlags::EXIT_CUR_MODE,
+              raw_seq : input.clone(),
             }))
           }
           ExParseResult::Error(e) => {
@@ -122,17 +122,17 @@ impl EditMode for ViEx {
       }
       key!(Backspace) if self.pending_cmd.is_empty() => Ok(Some(EditCmd {
         register: RegisterName::default(),
-        verb: None,
-        motion: None,
-        flags: CmdFlags::EXIT_CUR_MODE,
-        raw_seq: String::new(),
+        verb    : None,
+        motion  : None,
+        flags   : CmdFlags::EXIT_CUR_MODE,
+        raw_seq : String::new(),
       })),
       key!(Esc) => Ok(Some(EditCmd {
         register: RegisterName::default(),
-        verb: None,
-        motion: None,
-        flags: CmdFlags::EXIT_CUR_MODE,
-        raw_seq: String::new(),
+        verb    : None,
+        motion  : None,
+        flags   : CmdFlags::EXIT_CUR_MODE,
+        raw_seq : String::new(),
       })),
       _ => self.pending_cmd.editor.handle_key(key).map(|()| None),
     }
@@ -222,9 +222,9 @@ fn expand_ex_aliases(input: &str) -> String {
 }
 
 fn parse_ex_input(input: &str) -> ExP<ExNode> {
-  let input = expand_ex_aliases(input);
+  let input  = expand_ex_aliases(input);
   let handle = register_source(input.as_str());
-  let lexer = ExLexer::new(&input, handle.get_id());
+  let lexer  = ExLexer::new(&input, handle.get_id());
   let tokens = lexer.lex();
   let parser = ExParser::new(tokens);
   parser.parse()
@@ -343,7 +343,7 @@ pub(crate) enum ExCommand {
 #[derive(Debug, Clone)]
 pub(crate) struct ExTk {
   class: ExTkRule,
-  span: Span,
+  span : Span,
 }
 
 impl ExTk {
@@ -377,9 +377,9 @@ impl From<PatternEnd> for usize {
 }
 
 pub(crate) struct ExLexer<'a> {
-  input: VarStr,
+  input : VarStr,
   source: SourceId,
-  chars: Peekable<CharIndices<'a>>,
+  chars : Peekable<CharIndices<'a>>,
   tokens: Vec<ExTk>,
 
   flags: ExLexFlags,
@@ -473,7 +473,7 @@ impl<'a> ExLexer<'a> {
   }
   fn get_pattern_token(&self, start: usize, end: PatternEnd) -> Option<ExTk> {
     let end = match end {
-      PatternEnd::Open(i) => i,
+      PatternEnd::Open(i)   => i,
       PatternEnd::Closed(i) => i.saturating_sub(1),
     };
     let span = self.get_span(start + 1..end)?;
@@ -523,7 +523,7 @@ impl<'a> ExLexer<'a> {
     let Some((start, first)) = self.chars.peeking_next(|(_, ch)| !ch.is_alphanumeric()) else {
       return;
     };
-    let delim = first;
+    let delim      = first;
 
     let end_before = self.consume_pattern(start, delim);
     let Some(before) = self.get_pattern_token(start, end_before) else {
@@ -556,7 +556,7 @@ impl<'a> ExLexer<'a> {
     let Some((start, first)) = self.chars.peeking_next(|(_, ch)| !ch.is_alphanumeric()) else {
       return;
     };
-    let delim = first;
+    let delim      = first;
 
     let end_before = self.consume_pattern(start, delim);
     let Some(before) = self.get_pattern_token(start, end_before) else {
@@ -594,9 +594,9 @@ impl<'a> ExLexer<'a> {
 
     match cmd {
       ExCommand::Substitute => self.parse_substitute_arg(),
-      ExCommand::Global => self.parse_global_arg(),
-      ExCommand::Normal => self.parse_normal_seq(),
-      ExCommand::Shell => self.parse_shell_cmd(),
+      ExCommand::Global     => self.parse_global_arg(),
+      ExCommand::Normal     => self.parse_normal_seq(),
+      ExCommand::Shell      => self.parse_shell_cmd(),
       ExCommand::Move | ExCommand::Transfer => {
         self.skip_whitespace();
         self.parse_one_addr();
@@ -614,11 +614,11 @@ impl<'a> ExLexer<'a> {
           .tokens
           .iter()
           .any(|tk| matches!(tk.class, ExTkRule::Bang));
-        let shell_mode = has_bang && matches!(cmd, ExCommand::Read | ExCommand::Write);
+        let shell_mode  = has_bang && matches!(cmd, ExCommand::Read | ExCommand::Write);
 
-        let is_write = matches!(cmd, ExCommand::Write);
-        let rest = self.chars.by_ref().map(|(_, ch)| ch).collect::<String>();
-        let outer = Span::from_range(0..self.input.len(), self.source);
+        let is_write    = matches!(cmd, ExCommand::Write);
+        let rest        = self.chars.by_ref().map(|(_, ch)| ch).collect::<String>();
+        let outer       = Span::from_range(0..self.input.len(), self.source);
         let rest_handle = register_source(rest.as_str());
         let stream = LexStream::new(&rest_handle, LexFlags::LEX_UNFINISHED)
           .filter_map(Result::ok)
@@ -641,7 +641,7 @@ impl<'a> ExLexer<'a> {
           let outer_span = shell_tk.span;
           let mut tk = ExTk {
             class: ExTkRule::ShellTk(shell_tk),
-            span: outer_span,
+            span : outer_span,
           };
           if !pushed && is_write && tk.span.slice().to_str_lossy() == ">>" {
             tk.class = ExTkRule::Append;
@@ -720,7 +720,7 @@ impl<'a> ExLexer<'a> {
       rest.push(ch);
     }
 
-    let outer = Span::from_range(0..self.input.len(), self.source);
+    let outer       = Span::from_range(0..self.input.len(), self.source);
     let rest_handle = register_source(rest.as_str());
     let stream = LexStream::new(&rest_handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
@@ -731,7 +731,7 @@ impl<'a> ExLexer<'a> {
       let outer_span = shell_tk.span;
       self.tokens.push(ExTk {
         class: ExTkRule::ShellTk(shell_tk),
-        span: outer_span,
+        span : outer_span,
       });
     }
   }
@@ -830,19 +830,19 @@ pub(crate) enum ExNdRule {
   WriteQuit,
 
   Substitute {
-    pat: String,
-    repl: String,
+    pat  : String,
+    repl : String,
     flags: SubFlags,
   },
   Global {
-    pat: String,
+    pat   : String,
     nested: Box<ExNode>,
   },
   RepeatSubstitute,
   RepeatGlobal,
 
   Normal {
-    seq: String,
+    seq : String,
     bang: bool,
   },
   Shell(String),
@@ -875,7 +875,7 @@ impl AddressRange {
   pub(crate) fn as_motion(&self) -> Motion {
     match self {
       AddressRange::Single(line) => Motion::Line(line.clone()),
-      AddressRange::Range(s, e) => Motion::LineRange(s.clone(), e.clone()),
+      AddressRange::Range(s, e)  => Motion::LineRange(s.clone(), e.clone()),
     }
   }
 }
@@ -889,8 +889,8 @@ impl Default for AddressRange {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ExNode {
   pub address: Option<AddressRange>,
-  pub bang: bool,
-  pub kind: ExNdRule,
+  pub bang   : bool,
+  pub kind   : ExNdRule,
 }
 
 pub(super) enum ExParseResult<T> {
@@ -923,7 +923,7 @@ use ExInnerPartialParseResult as ExPR;
 #[derive(Debug, Clone)]
 pub(super) struct ExParser {
   tokens: Peekable<IntoIter<ExTk>>,
-  bang: bool,
+  bang  : bool,
 }
 
 impl ExParser {
@@ -937,13 +937,13 @@ impl ExParser {
   pub(super) fn parse(mut self) -> ExP<ExNode> {
     let address = match self.parse_address() {
       ExR::Done(ExP::Success(addr)) => Some(addr),
-      ExR::Done(ExP::Error(msg)) => return ExP::Error(msg),
+      ExR::Done(ExP::Error(msg))    => return ExP::Error(msg),
       ExR::NoMatch => None,
     };
 
     let kind = match self.parse_command() {
       ExR::Done(ExP::Success(cmd)) => cmd,
-      ExR::Done(ExP::Error(msg)) => return ExP::Error(msg),
+      ExR::Done(ExP::Error(msg))   => return ExP::Error(msg),
       ExR::NoMatch => return ExP::Error("expected command".into()),
     };
 
@@ -966,7 +966,7 @@ impl ExParser {
 
     let resolved = match Self::parse_one_address(&tk) {
       ExPR::Partial(addr) => addr,
-      ExPR::Full(motion) => return ExR::success(motion),
+      ExPR::Full(motion)  => return ExR::success(motion),
     };
 
     if self
@@ -986,7 +986,7 @@ impl ExParser {
 
     let resolved_end = match Self::parse_one_address(&end_tk) {
       ExPR::Partial(addr) => addr,
-      ExPR::Full(motion) => return ExR::success(motion),
+      ExPR::Full(motion)  => return ExR::success(motion),
     };
 
     ExR::success(AddressRange::Range(resolved, resolved_end))
@@ -999,12 +999,12 @@ impl ExParser {
         let addr = tk.span.slice().to_str_lossy().parse::<usize>().unwrap_or(1);
         ExPR::Partial(LineAddr::Number(addr))
       }
-      ExLineAddr::Dot => ExPR::Partial(LineAddr::Current),
-      ExLineAddr::Dollar => ExPR::Partial(LineAddr::Last),
+      ExLineAddr::Dot     => ExPR::Partial(LineAddr::Current),
+      ExLineAddr::Dollar  => ExPR::Partial(LineAddr::Last),
       ExLineAddr::Percent => ExPR::Full(AddressRange::all_lines()),
       ExLineAddr::Offset => {
-        let raw = tk.span.slice().to_str_lossy().into_owned();
-        let s = raw.strip_prefix('+').unwrap_or(&raw);
+        let raw    = tk.span.slice().to_str_lossy().into_owned();
+        let s      = raw.strip_prefix('+').unwrap_or(&raw);
 
         let offset = s.parse::<isize>().unwrap_or(1);
         ExPR::Partial(LineAddr::Offset(offset))
@@ -1048,24 +1048,24 @@ impl ExParser {
 
     match cmd {
       ExCommand::Read | ExCommand::Write => self.parse_read_write(&tk.class),
-      ExCommand::Substitute => self.parse_substitute(),
-      ExCommand::Global => self.parse_global(),
-      ExCommand::Normal => self.parse_normal(self.bang),
-      ExCommand::Edit => self.parse_edit(),
-      ExCommand::Stash => self.parse_stash(),
-      ExCommand::Help => self.parse_help(self.bang),
-      ExCommand::Shell => self.parse_shell(),
-      ExCommand::Move => self.parse_move(),
-      ExCommand::Transfer => self.parse_transfer(),
-      ExCommand::Trim => ExR::success(ExNdRule::Trim),
-      ExCommand::Delete => ExR::success(ExNdRule::Delete),
-      ExCommand::Yank => ExR::success(ExNdRule::Yank),
-      ExCommand::Put => ExR::success(ExNdRule::Put(Anchor::After)),
-      ExCommand::Join => ExR::success(ExNdRule::Join),
-      ExCommand::Quit => ExR::success(ExNdRule::Quit),
+      ExCommand::Substitute              => self.parse_substitute(),
+      ExCommand::Global    => self.parse_global(),
+      ExCommand::Normal    => self.parse_normal(self.bang),
+      ExCommand::Edit      => self.parse_edit(),
+      ExCommand::Stash     => self.parse_stash(),
+      ExCommand::Help      => self.parse_help(self.bang),
+      ExCommand::Shell     => self.parse_shell(),
+      ExCommand::Move      => self.parse_move(),
+      ExCommand::Transfer  => self.parse_transfer(),
+      ExCommand::Trim      => ExR::success(ExNdRule::Trim),
+      ExCommand::Delete    => ExR::success(ExNdRule::Delete),
+      ExCommand::Yank      => ExR::success(ExNdRule::Yank),
+      ExCommand::Put       => ExR::success(ExNdRule::Put(Anchor::After)),
+      ExCommand::Join      => ExR::success(ExNdRule::Join),
+      ExCommand::Quit      => ExR::success(ExNdRule::Quit),
       ExCommand::WriteQuit => ExR::success(ExNdRule::WriteQuit),
-      ExCommand::Expand => ExR::success(ExNdRule::Expand),
-      ExCommand::Submit => ExR::success(ExNdRule::Submit),
+      ExCommand::Expand    => ExR::success(ExNdRule::Expand),
+      ExCommand::Submit    => ExR::success(ExNdRule::Submit),
       ExCommand::Breakline => ExR::success(ExNdRule::Breakline),
       ExCommand::Unknown => ExR::error(format!(
         "not an editor command: {}",
@@ -1147,7 +1147,7 @@ impl ExParser {
   }
   fn parse_stash(&mut self) -> ExR<ExNdRule> {
     let arg_names = ["pop", "drop", "apply", "insert", "swap", "list"];
-    let arg = self.tokens.next().map(|tk| tk.span.slice());
+    let arg       = self.tokens.next().map(|tk| tk.span.slice());
     if arg.is_none() {
       return ExR::success(ExNdRule::Stash(StashArgs::Push(None)));
     } else if !arg_names
@@ -1158,7 +1158,7 @@ impl ExParser {
     }
 
     let name = self.tokens.next().map(|tk| tk.span.slice());
-    let arg = arg.unwrap();
+    let arg  = arg.unwrap();
     // Inner matches use the same prefix direction as the outer gate:
     // `<name>.starts_with(arg)` — so abbreviations like `:stash p` or
     // `:stash ap` resolve to `pop` / `apply` etc. The subcommand names
@@ -1188,7 +1188,7 @@ impl ExParser {
           })
           .transpose();
         let target = match target {
-          Ok(t) => t,
+          Ok(t)  => t,
           Err(e) => return e,
         };
 
@@ -1214,8 +1214,8 @@ impl ExParser {
     let flags_tk = self
       .tokens
       .peeking_next(|tk| matches!(tk.class, ExTkRule::Argument));
-    let pat = pat.span.slice().to_str_lossy().to_string();
-    let repl = repl.span.slice().to_str_lossy().to_string();
+    let     pat   = pat.span.slice().to_str_lossy().to_string();
+    let     repl  = repl.span.slice().to_str_lossy().to_string();
 
     let mut flags = SubFlags::empty();
     if let Some(flags_tk) = flags_tk {
@@ -1230,7 +1230,7 @@ impl ExParser {
           'p' => flags |= SubFlags::PRINT_RESULT,
           '#' => flags |= SubFlags::PRINT_NUMBERED,
           'l' => flags |= SubFlags::PRINT_LEFT_ALIGN,
-          _ => return ExR::error(format!("invalid substitute flag: {ch}")),
+          _   => return ExR::error(format!("invalid substitute flag: {ch}")),
         }
       }
     }
@@ -1255,11 +1255,11 @@ impl ExParser {
     let nested_parser = ExParser::new(rest);
     let sub_node = match nested_parser.parse() {
       ExP::Success(cmd) => cmd,
-      ExP::Error(msg) => return ExR::error(msg),
+      ExP::Error(msg)   => return ExR::error(msg),
     };
 
     ExR::success(ExNdRule::Global {
-      pat: pat.span.slice().to_str_lossy().to_string(),
+      pat   : pat.span.slice().to_str_lossy().to_string(),
       nested: Box::new(sub_node),
     })
   }
@@ -1273,7 +1273,7 @@ impl ExParser {
     ExR::success(ExNdRule::Edit(args))
   }
   fn parse_read_write(&mut self, rule: &ExTkRule) -> ExR<ExNdRule> {
-    let is_read = matches!(rule, ExTkRule::Command(ExCommand::Read));
+    let is_read      = matches!(rule, ExTkRule::Command(ExCommand::Read));
     let is_shell_arg = self.bang;
 
     if is_shell_arg {
@@ -1344,7 +1344,7 @@ mod parse_stash_tests {
   fn parse_stash(input: &str) -> StashArgs {
     let node = match parse_ex_input(input) {
       ExP::Success(node) => node,
-      ExP::Error(msg) => panic!("parse error for {input:?}: {msg}"),
+      ExP::Error(msg)    => panic!("parse error for {input:?}: {msg}"),
     };
     match node.kind {
       ExNdRule::Stash(args) => args,
@@ -1355,7 +1355,7 @@ mod parse_stash_tests {
   fn parse_stash_err(input: &str) -> String {
     match parse_ex_input(input) {
       ExP::Success(node) => panic!("expected error for {input:?}, got success: {node:?}"),
-      ExP::Error(msg) => msg,
+      ExP::Error(msg)    => msg,
     }
   }
 
@@ -1522,7 +1522,7 @@ mod parse_read_write_tests {
   fn parse_ok(input: &str) -> ExNdRule {
     match parse_ex_input(input) {
       ExP::Success(node) => node.kind,
-      ExP::Error(msg) => panic!("parse error for {input:?}: {msg}"),
+      ExP::Error(msg)    => panic!("parse error for {input:?}: {msg}"),
     }
   }
 
@@ -1725,7 +1725,7 @@ mod parse_one_address_tests {
   fn parse_addr(input: &str) -> AddressRange {
     let node = match parse_ex_input(input) {
       ExP::Success(node) => node,
-      ExP::Error(msg) => panic!("parse error for {input:?}: {msg}"),
+      ExP::Error(msg)    => panic!("parse error for {input:?}: {msg}"),
     };
     node
       .address
@@ -1822,14 +1822,14 @@ mod parse_command_tests {
   fn parse_ok(input: &str) -> ExNode {
     match parse_ex_input(input) {
       ExP::Success(node) => node,
-      ExP::Error(msg) => panic!("parse error for {input:?}: {msg}"),
+      ExP::Error(msg)    => panic!("parse error for {input:?}: {msg}"),
     }
   }
 
   fn parse_err(input: &str) -> String {
     match parse_ex_input(input) {
       ExP::Success(node) => panic!("expected error for {input:?}, got {node:?}"),
-      ExP::Error(msg) => msg,
+      ExP::Error(msg)    => msg,
     }
   }
 
@@ -1901,7 +1901,7 @@ mod parse_command_tests {
     let node = parse_ok("!echo foo");
     match node.kind {
       ExNdRule::Shell(s) => assert!(s.contains("echo"), "got: {s:?}"),
-      other => panic!("expected Shell, got {other:?}"),
+      other              => panic!("expected Shell, got {other:?}"),
     }
   }
 }
@@ -1921,7 +1921,7 @@ mod ex_alias_tests {
   fn parse_ok(input: &str) -> ExNode {
     match parse_ex_input(input) {
       ExP::Success(n) => n,
-      ExP::Error(e) => panic!("parse error for {input:?}: {e}"),
+      ExP::Error(e)   => panic!("parse error for {input:?}: {e}"),
     }
   }
 

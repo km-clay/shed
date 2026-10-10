@@ -42,7 +42,7 @@ mod tests {
     let guard = TestGuard::new();
     test_input("f() { echo $1; shift 1; echo $1; }").unwrap();
     test_input("f a b").unwrap();
-    let out = guard.read_output();
+    let out              = guard.read_output();
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[0], "a");
     assert_eq!(lines[1], "b");

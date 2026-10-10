@@ -66,7 +66,7 @@ impl Iterator for ColorRng {
   type Item = Color;
   fn next(&mut self) -> Option<Self::Item> {
     let colors = Self::get_colors();
-    let idx = random::random::<usize>() % colors.len();
+    let idx    = random::random::<usize>() % colors.len();
 
     Some(colors[idx])
   }
@@ -189,8 +189,8 @@ fn related_by_containment(a: &Span, b: &Span) -> bool {
   if a.source() != b.source() {
     return false;
   }
-  let ra = a.range();
-  let rb = b.range();
+  let ra           = a.range();
+  let rb           = b.range();
 
   let a_contains_b = ra.start <= rb.start && ra.end >= rb.end;
   let b_contains_a = rb.start <= ra.start && rb.end >= ra.end;
@@ -232,7 +232,7 @@ impl Display for LabelMsg {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       LabelMsg::Eager(msg) => write!(f, "{msg}"),
-      LabelMsg::Lazy(fmt) => write!(f, "{}", fmt()),
+      LabelMsg::Lazy(fmt)  => write!(f, "{}", fmt()),
     }
   }
 }
@@ -241,7 +241,7 @@ impl Debug for LabelMsg {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       LabelMsg::Eager(msg) => write!(f, "LabelMsg::Eager({msg:?})"),
-      LabelMsg::Lazy(_) => write!(f, "LabelMsg::Lazy(<closure>)"),
+      LabelMsg::Lazy(_)    => write!(f, "LabelMsg::Lazy(<closure>)"),
     }
   }
 }
@@ -251,7 +251,7 @@ impl LabelMsg {
   fn get(self) -> VarStr {
     match self {
       LabelMsg::Eager(msg) => msg,
-      LabelMsg::Lazy(f) => f(),
+      LabelMsg::Lazy(f)    => f(),
     }
   }
 
@@ -286,9 +286,9 @@ impl From<String> for LabelMsg {
 
 #[derive(Debug, Clone)]
 pub(crate) struct LabelBuilder {
-  span: StrongSpan,
+  span   : StrongSpan,
   message: Option<LabelMsg>,
-  color: Option<Color>,
+  color  : Option<Color>,
 
   /// marker for [`ShErr::collapse_context`]
   definition: bool,
@@ -297,9 +297,9 @@ pub(crate) struct LabelBuilder {
 impl LabelBuilder {
   pub(crate) fn new(span: Span) -> Self {
     Self {
-      span: span.upgrade(),
-      message: None,
-      color: None,
+      span      : span.upgrade(),
+      message   : None,
+      color     : None,
       definition: false,
     }
   }
@@ -382,11 +382,11 @@ impl ariadne::Cache<SourceId> for SpanCache {
 /// Used basically everywhere, for everything.
 #[derive(Debug)]
 pub(crate) struct ShErr {
-  kind: ShErrKind,
+  kind    : ShErrKind,
   src_span: Option<StrongSpan>,
-  labels: Vec<LabelBuilder>,
-  notes: Vec<VarStr>,
-  code: Option<i32>,
+  labels  : Vec<LabelBuilder>,
+  notes   : Vec<VarStr>,
+  code    : Option<i32>,
 
   /// Set by redirection errors in certain contexts.
   /// This is load bearing for POSIX behavior, so don't use it
@@ -484,7 +484,7 @@ impl ShErr {
   pub(crate) fn option_promote(self, span: Option<Span>) -> Self {
     match span {
       Some(span) => self.promote(span),
-      None => self,
+      None       => self,
     }
   }
   /// Promotes a shell error from a simple error to an error that blames a span
@@ -505,7 +505,7 @@ impl ShErr {
       return self;
     }
 
-    let Self { labels, .. } = self;
+    let Self { labels, .. }                 = self;
 
     let LabelBuilder { message, color, .. } = labels.first().cloned().unwrap();
     let anchor = labels
@@ -817,20 +817,20 @@ impl ShErrKind {
 impl Display for ShErrKind {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let output = match self {
-      Self::IoErr(e) => &format!("I/O Error: {e}"),
-      Self::Custom(msg, _) => msg.to_str().unwrap_or_default(),
-      Self::InvalidOpt => "Invalid option",
-      Self::ParseErr => "Parse Error",
-      Self::InternalErr => "Internal Error",
-      Self::HistoryReadErr => "History Parse Error",
-      Self::ExecFail => "Execution Failed",
+      Self::IoErr(e)           => &format!("I/O Error: {e}"),
+      Self::Custom(msg, _)     => msg.to_str().unwrap_or_default(),
+      Self::InvalidOpt         => "Invalid option",
+      Self::ParseErr           => "Parse Error",
+      Self::InternalErr        => "Internal Error",
+      Self::HistoryReadErr     => "History Parse Error",
+      Self::ExecFail           => "Execution Failed",
       Self::DeprecationWarning => "Deprecation Warning",
-      Self::BadPermission => "Bad Permissions",
-      Self::Errno(e) => &format!("Errno: {}", e.desc()),
-      Self::NotFound => "Not Found",
-      Self::TryFailed => "Try Failed",
+      Self::BadPermission      => "Bad Permissions",
+      Self::Errno(e)           => &format!("Errno: {}", e.desc()),
+      Self::NotFound           => "Not Found",
+      Self::TryFailed          => "Try Failed",
       Self::CleanExit(_) | Self::Interrupt => "",
-      Self::InvalidAssignment => "Invalid Assignment",
+      Self::InvalidAssignment              => "Invalid Assignment",
       Self::ErrInterrupt => "errexit",
       Self::SyntaxErr | Self::FuncReturn(_) | Self::LoopContinue(_) | Self::LoopBreak(_) => {
         "Syntax Error"

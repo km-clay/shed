@@ -18,7 +18,7 @@ pub(crate) enum Hint {
   /// stale even if the buffer still happens to be a literal prefix of
   /// the hint text.
   Completion {
-    lines: Lines,
+    lines      : Lines,
     token_start: usize,
   },
 }
@@ -76,8 +76,8 @@ impl Ord for Hint {
         }
       }
       Self::History(_) => match other {
-        Self::Override(_) => Ordering::Less,
-        Self::History(_) => Ordering::Equal,
+        Self::Override(_)       => Ordering::Less,
+        Self::History(_)        => Ordering::Equal,
         Self::Completion { .. } => Ordering::Greater,
       },
       Self::Completion { .. } => {
@@ -109,18 +109,18 @@ impl super::LineBuf {
     let Some(hint) = self.hint.as_mut() else {
       return f(self);
     };
-    let last_row = self.lines.len().saturating_sub(1);
+    let last_row       = self.lines.len().saturating_sub(1);
 
     // find end of the buffer, start of the hint
     let first_hint_pos = Pos::new(last_row, self.lines.get(last_row).map_or(0, Line::len));
 
     // replace our buffer with the full hint
-    let hint_lines = hint.lines().clone();
+    let hint_lines     = hint.lines().clone();
     self.edit_with(RecordPolicy::Break, |this| this.lines = hint_lines);
 
     // track old/new cursor position
     let old_cursor_pos = self.cursor.pos;
-    let result = f(self); // do our operation
+    let result         = f(self); // do our operation
     let new_cursor_pos = self.cursor.pos;
 
     // figure out if we moved into the hint
@@ -139,7 +139,7 @@ impl super::LineBuf {
         self.attempt_alias_expansion();
       }
       let new_len = self.count_graphemes();
-      let delta = new_len as isize - old_len as isize;
+      let delta   = new_len as isize - old_len as isize;
 
       if self.cursor.exclusive {
         new_cursor_pos.col_add_signed(delta + 1)

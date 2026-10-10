@@ -11,9 +11,9 @@ use crate::{
   var,
 };
 fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
-  let g = TestGuard::new();
+  let g      = TestGuard::new();
   let prompt = Prompt::default();
-  let vi = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
+  let vi     = ShedLine::new_no_hist(prompt).unwrap().with_initial(initial);
   (vi, g)
 }
 
@@ -21,38 +21,38 @@ fn test_vi(initial: &str) -> (ShedLine, TestGuard) {
 
 #[test]
 fn fuzzy_exact_match() {
-  let mut c = ScoredCandidate::new("hello".into());
-  let score = c.fuzzy_score("hello");
+  let mut c     = ScoredCandidate::new("hello".into());
+  let     score = c.fuzzy_score("hello");
   assert!(score > 0);
 }
 
 #[test]
 fn fuzzy_prefix_match() {
-  let mut c = ScoredCandidate::new("hello_world".into());
-  let score = c.fuzzy_score("hello");
+  let mut c     = ScoredCandidate::new("hello_world".into());
+  let     score = c.fuzzy_score("hello");
   assert!(score > 0);
 }
 
 #[test]
 fn fuzzy_no_match() {
-  let mut c = ScoredCandidate::new("abc".into());
-  let score = c.fuzzy_score("xyz");
+  let mut c     = ScoredCandidate::new("abc".into());
+  let     score = c.fuzzy_score("xyz");
   assert_eq!(score, i32::MIN);
 }
 
 #[test]
 fn fuzzy_empty_query() {
-  let mut c = ScoredCandidate::new("anything".into());
-  let score = c.fuzzy_score("");
+  let mut c     = ScoredCandidate::new("anything".into());
+  let     score = c.fuzzy_score("");
   assert_eq!(score, 0);
 }
 
 #[test]
 fn fuzzy_boundary_bonus() {
-  let mut a = ScoredCandidate::new("foo_bar".into());
-  let mut b = ScoredCandidate::new("fxxxbxr".into());
-  let score_a = a.fuzzy_score("fbr");
-  let score_b = b.fuzzy_score("fbr");
+  let mut a       = ScoredCandidate::new("foo_bar".into());
+  let mut b       = ScoredCandidate::new("fxxxbxr".into());
+  let     score_a = a.fuzzy_score("fbr");
+  let     score_b = b.fuzzy_score("fbr");
   // word-boundary match should score higher
   assert!(score_a > score_b);
 }
@@ -64,9 +64,9 @@ fn fuzzy_boundary_bonus() {
 #[test]
 fn fuzzy_prefers_contiguous_run() {
   // The user's real case.
-  let cand = "cp_snd luna_nights s1009_patapata spin";
+  let cand      = "cp_snd luna_nights s1009_patapata spin";
   let positions = match_positions(cand, "spin");
-  let start = cand.find("spin").unwrap();
+  let start     = cand.find("spin").unwrap();
   assert_eq!(
     positions,
     (start..start + 4).collect::<Vec<_>>(),
@@ -75,7 +75,7 @@ fn fuzzy_prefers_contiguous_run() {
 
   // A leftmost-scatter (s,p,i,n at 0,2,4,6, gappy, no boundaries) vs the
   // contiguous run at the end — the DP must choose the contiguous one.
-  let cand = "sxpxixn spin";
+  let cand  = "sxpxixn spin";
   let start = cand.find("spin").unwrap();
   assert_eq!(
     match_positions(cand, "spin"),
@@ -234,14 +234,14 @@ fn complete_signals_no_match() {
 
 #[test]
 fn wordbreak_equals_default() {
-  let _g = TestGuard::new();
-  let mut comp = SimpleCompleter::default();
+  let     _g     = TestGuard::new();
+  let mut comp   = SimpleCompleter::default();
 
-  let line = "cmd --foo=bar".to_string();
-  let cursor = line.len();
-  let _ = comp.get_candidates(&line, cursor, super::CompSource::Shell);
+  let     line   = "cmd --foo=bar".to_string();
+  let     cursor = line.len();
+  let     _      = comp.get_candidates(&line, cursor, super::CompSource::Shell);
 
-  let eq_idx = line.find('=').unwrap();
+  let     eq_idx = line.find('=').unwrap();
   assert_eq!(
     comp.token_span.0,
     eq_idx + 1,
@@ -263,12 +263,12 @@ fn wordbreak_colon_when_set() {
   })
   .unwrap();
 
-  let mut comp = SimpleCompleter::default();
-  let line = "scp host:foo".to_string();
-  let cursor = line.len();
-  let _ = comp.get_candidates(&line, cursor, super::CompSource::Shell);
+  let mut comp      = SimpleCompleter::default();
+  let     line      = "scp host:foo".to_string();
+  let     cursor    = line.len();
+  let     _         = comp.get_candidates(&line, cursor, super::CompSource::Shell);
 
-  let colon_idx = line.find(':').unwrap();
+  let     colon_idx = line.find(':').unwrap();
   assert_eq!(
     comp.token_span.0,
     colon_idx + 1,
@@ -297,12 +297,12 @@ fn wordbreak_splits_on_subtoken_edge() {
   })
   .unwrap();
 
-  let mut comp = SimpleCompleter::default();
-  let line = "scp host:~/foo".to_string();
-  let cursor = line.len();
-  let _ = comp.get_candidates(&line, cursor, super::CompSource::Shell);
+  let mut comp      = SimpleCompleter::default();
+  let     line      = "scp host:~/foo".to_string();
+  let     cursor    = line.len();
+  let     _         = comp.get_candidates(&line, cursor, super::CompSource::Shell);
 
-  let colon_idx = line.find(':').unwrap();
+  let     colon_idx = line.find(':').unwrap();
   assert_eq!(
     comp.token_span.0,
     colon_idx + 1,
@@ -325,12 +325,12 @@ fn wordbreak_rightmost_wins() {
   })
   .unwrap();
 
-  let mut comp = SimpleCompleter::default();
-  let line = "cmd --opt=host:val".to_string();
-  let cursor = line.len();
-  let _ = comp.get_candidates(&line, cursor, super::CompSource::Shell);
+  let mut comp      = SimpleCompleter::default();
+  let     line      = "cmd --opt=host:val".to_string();
+  let     cursor    = line.len();
+  let     _         = comp.get_candidates(&line, cursor, super::CompSource::Shell);
 
-  let colon_idx = line.rfind(':').unwrap();
+  let     colon_idx = line.rfind(':').unwrap();
   assert_eq!(
     comp.token_span.0,
     colon_idx + 1,
@@ -357,7 +357,7 @@ fn contents(result: &CompResult) -> Vec<&str> {
 fn get_candidates_empty_line_routes_to_command_strategy() {
   // Empty line / cursor at 0 falls through to the
   // `Self::Command { prefix: "" }` default in CompStrat::resolve.
-  let _g = TestGuard::new();
+  let     _g   = TestGuard::new();
   let mut comp = SimpleCompleter::default();
   let result = comp
     .get_candidates("", 0, super::CompSource::Shell)
@@ -382,9 +382,9 @@ fn get_candidates_var_prefix_completes_with_shell_var() {
     )
     .unwrap();
   });
-  let mut comp = SimpleCompleter::default();
-  let line = "echo $UNIQUE_COMP_TEST".to_string();
-  let cursor = line.len();
+  let mut comp   = SimpleCompleter::default();
+  let     line   = "echo $UNIQUE_COMP_TEST".to_string();
+  let     cursor = line.len();
   let result = comp
     .get_candidates(&line, cursor, super::CompSource::Shell)
     .unwrap();
@@ -410,9 +410,9 @@ fn get_candidates_var_prefix_completes_even_when_prefix_isset_var() {
     )
     .unwrap();
   });
-  let mut comp = SimpleCompleter::default();
-  let line = "echo $SETPFX_ZZZ".to_string();
-  let cursor = line.len();
+  let mut comp   = SimpleCompleter::default();
+  let     line   = "echo $SETPFX_ZZZ".to_string();
+  let     cursor = line.len();
   let result = comp
     .get_candidates(&line, cursor, super::CompSource::Shell)
     .unwrap();
@@ -430,11 +430,11 @@ fn get_candidates_var_prefix_completes_even_when_prefix_isset_var() {
 
 #[test]
 fn get_candidates_var_prefix_with_no_matches_returns_nomatch() {
-  let _g = TestGuard::new();
-  let mut comp = SimpleCompleter::default();
+  let     _g     = TestGuard::new();
+  let mut comp   = SimpleCompleter::default();
   // A prefix that absolutely won't match any shell or env var.
-  let line = "echo $ZZZZZZZ_NOT_A_REAL_VAR_PREFIX_QQQ".to_string();
-  let cursor = line.len();
+  let     line   = "echo $ZZZZZZZ_NOT_A_REAL_VAR_PREFIX_QQQ".to_string();
+  let     cursor = line.len();
   let result = comp
     .get_candidates(&line, cursor, super::CompSource::Shell)
     .unwrap();
@@ -443,15 +443,15 @@ fn get_candidates_var_prefix_with_no_matches_returns_nomatch() {
 
 #[test]
 fn get_candidates_path_arg_lists_directory_entries() {
-  let _g = TestGuard::new();
+  let _g  = TestGuard::new();
   let dir = tempfile::TempDir::new().unwrap();
   std::fs::write(dir.path().join("apple.txt"), "").unwrap();
   std::fs::write(dir.path().join("banana.txt"), "").unwrap();
   std::fs::write(dir.path().join("cherry.txt"), "").unwrap();
 
-  let mut comp = SimpleCompleter::default();
-  let line = format!("ls {}/", dir.path().display());
-  let cursor = line.len();
+  let mut comp   = SimpleCompleter::default();
+  let     line   = format!("ls {}/", dir.path().display());
+  let     cursor = line.len();
   let result = comp
     .get_candidates(&line, cursor, super::CompSource::Shell)
     .unwrap();
@@ -463,16 +463,16 @@ fn get_candidates_path_arg_lists_directory_entries() {
 
 #[test]
 fn get_candidates_path_arg_with_prefix_filters() {
-  let _g = TestGuard::new();
+  let _g  = TestGuard::new();
   let dir = tempfile::TempDir::new().unwrap();
   std::fs::write(dir.path().join("apple.txt"), "").unwrap();
   std::fs::write(dir.path().join("apricot.txt"), "").unwrap();
   std::fs::write(dir.path().join("banana.txt"), "").unwrap();
 
-  let mut comp = SimpleCompleter::default();
+  let mut comp   = SimpleCompleter::default();
   // Prefix "ap" should match apple + apricot but not banana.
-  let line = format!("ls {}/ap", dir.path().display());
-  let cursor = line.len();
+  let     line   = format!("ls {}/ap", dir.path().display());
+  let     cursor = line.len();
   let result = comp
     .get_candidates(&line, cursor, super::CompSource::Shell)
     .unwrap();
@@ -484,13 +484,13 @@ fn get_candidates_path_arg_with_prefix_filters() {
 
 #[test]
 fn get_candidates_redirect_uses_files_strategy() {
-  let _g = TestGuard::new();
+  let _g  = TestGuard::new();
   let dir = tempfile::TempDir::new().unwrap();
   std::fs::write(dir.path().join("output.log"), "").unwrap();
 
-  let mut comp = SimpleCompleter::default();
-  let line = format!("echo hi > {}/", dir.path().display());
-  let cursor = line.len();
+  let mut comp   = SimpleCompleter::default();
+  let     line   = format!("echo hi > {}/", dir.path().display());
+  let     cursor = line.len();
   let result = comp
     .get_candidates(&line, cursor, super::CompSource::Shell)
     .unwrap();
@@ -504,7 +504,7 @@ fn get_candidates_dirs_only_does_not_filter_argument_path() {
   // the Argument-NoSpec-NoMatch tail — NOT the default Argument path
   // that calls `complete_path`. This test pins that: even with
   // dirs_only=true, files surface through plain argument completion.
-  let _g = TestGuard::new();
+  let _g  = TestGuard::new();
   let dir = tempfile::TempDir::new().unwrap();
   std::fs::write(dir.path().join("file.txt"), "").unwrap();
   std::fs::create_dir(dir.path().join("subdir")).unwrap();
@@ -514,7 +514,7 @@ fn get_candidates_dirs_only_does_not_filter_argument_path() {
     ..Default::default()
   };
 
-  let line = format!("ls {}/", dir.path().display());
+  let line   = format!("ls {}/", dir.path().display());
   let cursor = line.len();
   let result = comp
     .get_candidates(&line, cursor, super::CompSource::Shell)
@@ -528,10 +528,10 @@ fn get_candidates_dirs_only_does_not_filter_argument_path() {
 fn get_candidates_token_span_set_for_var_prefix() {
   // get_candidates assigns token_span based on where the leaf starts.
   // Verify it lands on the $ position (well, just after) for a var.
-  let _g = TestGuard::new();
-  let mut comp = SimpleCompleter::default();
-  let line = "echo $PA".to_string();
-  let dollar_idx = line.find('$').unwrap();
+  let     _g         = TestGuard::new();
+  let mut comp       = SimpleCompleter::default();
+  let     line       = "echo $PA".to_string();
+  let     dollar_idx = line.find('$').unwrap();
   let _ = comp
     .get_candidates(&line, line.len(), super::CompSource::Shell)
     .unwrap();
@@ -549,15 +549,15 @@ fn get_candidates_dedups_and_sorts_many_results() {
   // The post-processing step sorts by length-then-alpha and dedups.
   // Easiest path: create files in a tempdir with predictable sort
   // order.
-  let _g = TestGuard::new();
+  let _g  = TestGuard::new();
   let dir = tempfile::TempDir::new().unwrap();
   std::fs::write(dir.path().join("a.txt"), "").unwrap();
   std::fs::write(dir.path().join("bbb.txt"), "").unwrap();
   std::fs::write(dir.path().join("c.txt"), "").unwrap();
 
-  let mut comp = SimpleCompleter::default();
-  let line = format!("ls {}/", dir.path().display());
-  let cursor = line.len();
+  let mut comp   = SimpleCompleter::default();
+  let     line   = format!("ls {}/", dir.path().display());
+  let     cursor = line.len();
   let result = comp
     .get_candidates(&line, cursor, super::CompSource::Shell)
     .unwrap();
@@ -587,14 +587,14 @@ fn get_candidates_dedups_and_sorts_many_results() {
 fn cycle_wraps_forward() {
   let _g = TestGuard::new();
   let mut comp = SimpleCompleter {
-    candidates: vec!["aaa".into(), "bbb".into(), "ccc".into()],
-    selected_idx: 2,
+    candidates    : vec!["aaa".into(), "bbb".into(), "ccc".into()],
+    selected_idx  : 2,
     original_input: String::new(),
-    token_span: (0, 0),
-    active: true,
-    dirs_only: false,
-    add_space: false,
-    cursor_pos: 0,
+    token_span    : (0, 0),
+    active        : true,
+    dirs_only     : false,
+    add_space     : false,
+    cursor_pos    : 0,
   };
   comp.cycle_completion(1);
   assert_eq!(comp.selected_idx, 0);
@@ -604,14 +604,14 @@ fn cycle_wraps_forward() {
 fn cycle_wraps_backward() {
   let _g = TestGuard::new();
   let mut comp = SimpleCompleter {
-    candidates: vec!["aaa".into(), "bbb".into(), "ccc".into()],
-    selected_idx: 0,
+    candidates    : vec!["aaa".into(), "bbb".into(), "ccc".into()],
+    selected_idx  : 0,
     original_input: String::new(),
-    token_span: (0, 0),
-    active: true,
-    dirs_only: false,
-    add_space: false,
-    cursor_pos: 0,
+    token_span    : (0, 0),
+    active        : true,
+    dirs_only     : false,
+    add_space     : false,
+    cursor_pos    : 0,
   };
   comp.cycle_completion(-1);
   assert_eq!(comp.selected_idx, 2);
@@ -644,8 +644,8 @@ fn escape_str_all_shell_metacharacters() {
     '\'', '"', '\\', '|', '&', ';', '(', ')', '<', '>', '$', '*', '!', '`', '{', '?', '[', '#',
     ' ', '\t', '\n',
   ] {
-    let input = format!("a{ch}b");
-    let escaped = escape_str(&input);
+    let input    = format!("a{ch}b");
+    let escaped  = escape_str(&input);
     let expected = format!("a\\{ch}b");
     assert_eq!(escaped, expected, "failed to escape {ch:?}");
   }
@@ -653,7 +653,7 @@ fn escape_str_all_shell_metacharacters() {
 
 #[test]
 fn escape_str_kitchen_sink() {
-  let input = "f$le (with) 'spaces' & {braces} | pipes; #hash ~tilde `backtick` !bang";
+  let input   = "f$le (with) 'spaces' & {braces} | pipes; #hash ~tilde `backtick` !bang";
   let escaped = escape_str(input);
   assert_eq!(
     escaped,
@@ -672,14 +672,14 @@ fn completed_line_only_escapes_new_text() {
   // Candidate arrives pre-escaped from upstream: user-typed "hel" stays
   // verbatim, the matched suffix "lo world" was escaped to "lo\ world".
   let comp = SimpleCompleter {
-    candidates: vec!["hello\\ world".into()],
-    selected_idx: 0,
+    candidates    : vec!["hello\\ world".into()],
+    selected_idx  : 0,
     original_input: "echo hel".into(),
-    token_span: (5, 8),
-    active: true,
-    dirs_only: false,
-    add_space: false,
-    cursor_pos: 0,
+    token_span    : (5, 8),
+    active        : true,
+    dirs_only     : false,
+    add_space     : false,
+    cursor_pos    : 0,
   };
   let result = comp.get_completed_line();
   assert_eq!(result, "echo hello\\ world");
@@ -689,14 +689,14 @@ fn completed_line_only_escapes_new_text() {
 fn completed_line_no_new_text() {
   let _g = TestGuard::new();
   let comp = SimpleCompleter {
-    candidates: vec!["hello".into()],
-    selected_idx: 0,
+    candidates    : vec!["hello".into()],
+    selected_idx  : 0,
     original_input: "echo hello".into(),
-    token_span: (5, 10),
-    active: true,
-    dirs_only: false,
-    add_space: false,
-    cursor_pos: 0,
+    token_span    : (5, 10),
+    active        : true,
+    dirs_only     : false,
+    add_space     : false,
+    cursor_pos    : 0,
   };
   let result = comp.get_completed_line();
   assert_eq!(result, "echo hello");
@@ -707,14 +707,14 @@ fn completed_line_appends_suffix_with_escape() {
   let _g = TestGuard::new();
   // Wholesale replacement of `token_span` with the (pre-escaped) candidate.
   let comp = SimpleCompleter {
-    candidates: vec!["hello\\ world".into()],
-    selected_idx: 0,
+    candidates    : vec!["hello\\ world".into()],
+    selected_idx  : 0,
     original_input: "echo hel".into(),
-    token_span: (5, 8),
-    active: true,
-    dirs_only: false,
-    add_space: false,
-    cursor_pos: 0,
+    token_span    : (5, 8),
+    active        : true,
+    dirs_only     : false,
+    add_space     : false,
+    cursor_pos    : 0,
   };
   let result = comp.get_completed_line();
   assert_eq!(result, "echo hello\\ world");
@@ -726,14 +726,14 @@ fn completed_line_suffix_only_escapes_new_part() {
   // Candidate arrives with the user's "hello" preserved verbatim and the
   // appended " world&done" already escaped to "\ world\&done".
   let comp = SimpleCompleter {
-    candidates: vec!["hello\\ world\\&done".into()],
-    selected_idx: 0,
+    candidates    : vec!["hello\\ world\\&done".into()],
+    selected_idx  : 0,
     original_input: "echo hello".into(),
-    token_span: (5, 10),
-    active: true,
-    dirs_only: false,
-    add_space: false,
-    cursor_pos: 0,
+    token_span    : (5, 10),
+    active        : true,
+    dirs_only     : false,
+    add_space     : false,
+    cursor_pos    : 0,
   };
   let result = comp.get_completed_line();
   assert_eq!(result, "echo hello\\ world\\&done");
@@ -742,7 +742,7 @@ fn completed_line_suffix_only_escapes_new_part() {
 #[test]
 fn tab_escapes_special_in_filename() {
   let tmp = std::env::temp_dir().join("shed_test_tab_esc");
-  let _ = std::fs::create_dir_all(&tmp);
+  let _   = std::fs::create_dir_all(&tmp);
   std::fs::write(tmp.join("hello world.txt"), "").unwrap();
 
   let (mut vi, _g) = test_vi("");
@@ -750,7 +750,7 @@ fn tab_escapes_special_in_filename() {
 
   Shed::term_mut(|t| t.feed_bytes(b"echo hello\t"));
   let keys = Shed::term_mut(Terminal::drain_keys);
-  let _ = vi.process_input(keys);
+  let _    = vi.process_input(keys);
 
   let line = vi.core.editor.to_string();
   assert!(
@@ -764,7 +764,7 @@ fn tab_escapes_special_in_filename() {
 #[test]
 fn tab_does_not_escape_user_text() {
   let tmp = std::env::temp_dir().join("shed_test_tab_noesc");
-  let _ = std::fs::create_dir_all(&tmp);
+  let _   = std::fs::create_dir_all(&tmp);
   std::fs::write(tmp.join("my file.txt"), "").unwrap();
 
   let (mut vi, _g) = test_vi("");
@@ -773,7 +773,7 @@ fn tab_does_not_escape_user_text() {
   // User types "echo my\ " with the space already escaped
   Shed::term_mut(|t| t.feed_bytes(b"echo my\\ \t"));
   let keys = Shed::term_mut(Terminal::drain_keys);
-  let _ = vi.process_input(keys);
+  let _    = vi.process_input(keys);
 
   let line = vi.core.editor.to_string();
   // The user's "my\ " should be preserved, not double-escaped to "my\\\ "
@@ -814,7 +814,7 @@ fn prefix_of(strat: &CompStrat) -> &str {
 
 #[test]
 fn dispatch_bare_var_sub() {
-  let input = "echo $FL";
+  let input         = "echo $FL";
   let (strat, span) = dispatch(input, input.len());
   assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
   assert_eq!(prefix_of(&strat), "FL");
@@ -823,7 +823,7 @@ fn dispatch_bare_var_sub() {
 
 #[test]
 fn dispatch_braced_var_sub_unclosed() {
-  let input = "echo ${FL";
+  let input         = "echo ${FL";
   let (strat, span) = dispatch(input, input.len());
   assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
   assert_eq!(prefix_of(&strat), "FL");
@@ -832,8 +832,8 @@ fn dispatch_braced_var_sub_unclosed() {
 
 #[test]
 fn dispatch_braced_var_sub_closed() {
-  let input = "echo ${FL}";
-  let cursor = input.find("FL").unwrap() + 2; // end of FL, just before `}`
+  let input         = "echo ${FL}";
+  let cursor        = input.find("FL").unwrap() + 2; // end of FL, just before `}`
   let (strat, span) = dispatch(input, cursor);
   assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
   assert_eq!(prefix_of(&strat), "FL");
@@ -842,8 +842,8 @@ fn dispatch_braced_var_sub_closed() {
 
 #[test]
 fn dispatch_braced_var_with_substitution_op() {
-  let input = "echo ${FL/bar";
-  let cursor = input.find("FL").unwrap() + 2; // end of FL
+  let input         = "echo ${FL/bar";
+  let cursor        = input.find("FL").unwrap() + 2; // end of FL
   let (strat, span) = dispatch(input, cursor);
   assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
   assert_eq!(&input[span.0..span.1], "FL");
@@ -851,8 +851,8 @@ fn dispatch_braced_var_with_substitution_op() {
 
 #[test]
 fn dispatch_var_sub_inside_path() {
-  let input = "echo /foo/$FL/bar";
-  let cursor = input.find("$FL").unwrap() + 3; // end of $FL
+  let input         = "echo /foo/$FL/bar";
+  let cursor        = input.find("$FL").unwrap() + 3; // end of $FL
   let (strat, span) = dispatch(input, cursor);
   assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
   assert_eq!(prefix_of(&strat), "FL");
@@ -861,7 +861,7 @@ fn dispatch_var_sub_inside_path() {
 
 #[test]
 fn dispatch_var_sub_inside_double_quoted_string() {
-  let input = "echo \"foo $FL";
+  let input         = "echo \"foo $FL";
   let (strat, span) = dispatch(input, input.len());
   assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
   assert_eq!(prefix_of(&strat), "FL");
@@ -870,8 +870,8 @@ fn dispatch_var_sub_inside_double_quoted_string() {
 
 #[test]
 fn dispatch_braced_var_inside_double_quoted_string() {
-  let input = "echo \"foo ${FL}";
-  let cursor = input.find("FL").unwrap() + 2; // end of FL
+  let input         = "echo \"foo ${FL}";
+  let cursor        = input.find("FL").unwrap() + 2; // end of FL
   let (strat, span) = dispatch(input, cursor);
   assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
   assert_eq!(&input[span.0..span.1], "FL");
@@ -886,7 +886,7 @@ fn dispatch_empty_input_is_command() {
 
 #[test]
 fn dispatch_after_separator_is_command() {
-  let input = "ls foo | ";
+  let input      = "ls foo | ";
   let (strat, _) = dispatch(input, input.len());
   assert!(matches!(strat, CompStrat::Command { .. }), "got {strat:?}");
   assert_eq!(prefix_of(&strat), "");
@@ -894,7 +894,7 @@ fn dispatch_after_separator_is_command() {
 
 #[test]
 fn dispatch_in_gap_after_command_uses_zero_width_span() {
-  let input = "echo ";
+  let input         = "echo ";
   let (strat, span) = dispatch(input, input.len());
   assert!(matches!(strat, CompStrat::Argument { .. }), "got {strat:?}");
   assert_eq!(
@@ -906,7 +906,7 @@ fn dispatch_in_gap_after_command_uses_zero_width_span() {
 
 #[test]
 fn dispatch_partial_command_name() {
-  let input = "ls";
+  let input         = "ls";
   let (strat, span) = dispatch(input, input.len());
   assert!(matches!(strat, CompStrat::Command { .. }), "got {strat:?}");
   assert_eq!(prefix_of(&strat), "ls");
@@ -915,8 +915,8 @@ fn dispatch_partial_command_name() {
 
 #[test]
 fn dispatch_preserves_braces_under_string_recursion() {
-  let input = "echo \"foo ${FL}/bar\"";
-  let cursor = input.find("FL").unwrap() + 2;
+  let input         = "echo \"foo ${FL}/bar\"";
+  let cursor        = input.find("FL").unwrap() + 2;
   let (strat, span) = dispatch(input, cursor);
   assert!(matches!(strat, CompStrat::Var { .. }), "got {strat:?}");
   assert_eq!(&input[span.0..span.1], "FL");
@@ -927,7 +927,7 @@ fn dispatch_preserves_braces_under_string_recursion() {
 #[test]
 fn tab_completes_filename() {
   let tmp = std::env::temp_dir().join("shed_test_tab_fn");
-  let _ = std::fs::create_dir_all(&tmp);
+  let _   = std::fs::create_dir_all(&tmp);
   std::fs::write(tmp.join("unique_shed_test_file.txt"), "").unwrap();
 
   let (mut vi, _g) = test_vi("");
@@ -936,7 +936,7 @@ fn tab_completes_filename() {
   // Type "echo unique_shed_test" then press Tab
   Shed::term_mut(|t| t.feed_bytes(b"echo unique_shed_test\t"));
   let keys = Shed::term_mut(Terminal::drain_keys);
-  let _ = vi.process_input(keys);
+  let _    = vi.process_input(keys);
 
   let line = vi.core.editor.to_string();
   assert!(
@@ -949,15 +949,15 @@ fn tab_completes_filename() {
 
 #[test]
 fn tab_completes_directory_with_slash() {
-  let tmp = std::env::temp_dir().join("shed_test_tab_dir");
-  let _ = std::fs::create_dir_all(tmp.join("mysubdir"));
+  let tmp          = std::env::temp_dir().join("shed_test_tab_dir");
+  let _            = std::fs::create_dir_all(tmp.join("mysubdir"));
 
   let (mut vi, _g) = test_vi("");
   std::env::set_current_dir(&tmp).unwrap();
 
   Shed::term_mut(|t| t.feed_bytes(b"cd mysub\t"));
   let keys = Shed::term_mut(Terminal::drain_keys);
-  let _ = vi.process_input(keys);
+  let _    = vi.process_input(keys);
 
   let line = vi.core.editor.to_string();
   assert!(
@@ -970,9 +970,9 @@ fn tab_completes_directory_with_slash() {
 
 #[test]
 fn tab_common_prefix_adds_no_trailing_space() {
-  let tmp = std::env::temp_dir().join("shed_test_tab_prefix");
-  let _ = std::fs::create_dir_all(tmp.join("cmpfx_one"));
-  let _ = std::fs::create_dir_all(tmp.join("cmpfx_two"));
+  let tmp          = std::env::temp_dir().join("shed_test_tab_prefix");
+  let _            = std::fs::create_dir_all(tmp.join("cmpfx_one"));
+  let _            = std::fs::create_dir_all(tmp.join("cmpfx_two"));
 
   let (mut vi, _g) = test_vi("");
   std::env::set_current_dir(&tmp).unwrap();
@@ -981,7 +981,7 @@ fn tab_common_prefix_adds_no_trailing_space() {
   // land inside the word (no trailing space) so a second Tab opens the menu.
   Shed::term_mut(|t| t.feed_bytes(b"cd cmp\t"));
   let keys = Shed::term_mut(Terminal::drain_keys);
-  let _ = vi.process_input(keys);
+  let _    = vi.process_input(keys);
 
   let line = vi.core.editor.to_string();
   assert_eq!(
@@ -995,7 +995,7 @@ fn tab_common_prefix_adds_no_trailing_space() {
 #[test]
 fn tab_after_equals() {
   let tmp = std::env::temp_dir().join("shed_test_tab_eq");
-  let _ = std::fs::create_dir_all(&tmp);
+  let _   = std::fs::create_dir_all(&tmp);
   std::fs::write(tmp.join("eqfile.txt"), "").unwrap();
 
   let (mut vi, _g) = test_vi("");
@@ -1003,7 +1003,7 @@ fn tab_after_equals() {
 
   Shed::term_mut(|t| t.feed_bytes(b"cmd --opt=eqf\t"));
   let keys = Shed::term_mut(Terminal::drain_keys);
-  let _ = vi.process_input(keys);
+  let _    = vi.process_input(keys);
 
   let line = vi.core.editor.to_string();
   assert!(
@@ -1020,7 +1020,7 @@ fn tab_after_equals() {
 fn dispatch_walks_up_from_escape_leaf() {
   // Cursor inside an Escape token (`\ `) should not produce Null —
   // the dispatcher should walk up to the parent Argument.
-  let input = "echo my\\ ";
+  let input          = "echo my\\ ";
   let (strat, _span) = dispatch(input, input.len());
   assert!(
     !matches!(strat, CompStrat::Null),
@@ -1034,8 +1034,8 @@ fn dispatch_branch_chain_deep_nesting() {
   // varsub→paramindex→cmdsub→arg→varsub→paramindex→cmdsub→argfile.
   // Just verify the branch chain resolves without panic and reaches a
   // non-Null strat.
-  let input = "(echo foo ${bar[$(echo ${foo[$(cat ~/fil)]}) + 1]})";
-  let cursor = input.find("~/fil").unwrap() + 3;
+  let input          = "(echo foo ${bar[$(echo ${foo[$(cat ~/fil)]}) + 1]})";
+  let cursor         = input.find("~/fil").unwrap() + 3;
   let (strat, _span) = dispatch(input, cursor);
   assert!(
     !matches!(strat, CompStrat::Null),
@@ -1048,10 +1048,10 @@ fn dispatch_argument_carries_full_path() {
   // CompStrat::Argument carries `path` (full token), not `prefix`. With
   // cursor in the middle, the strat must contain everything (so postfix
   // is preserved when completing).
-  let input = "cd /tmp/foo/bar/baz";
-  let cursor = input.find("foo").unwrap() + 2; // after 'fo', mid-token
+  let input          = "cd /tmp/foo/bar/baz";
+  let cursor         = input.find("foo").unwrap() + 2; // after 'fo', mid-token
   let (strat, _span) = dispatch(input, cursor);
-  let p = prefix_of(&strat);
+  let p              = prefix_of(&strat);
   assert!(
     p.contains("/bar/baz"),
     "Argument strat should contain full token incl. postfix; got {p:?}"
@@ -1087,7 +1087,7 @@ fn run_comp_func_with_args(cmd: &str, cword: &str, pword: &str) -> (String, Stri
 
 #[test]
 fn comp_args_plain_strings() {
-  let _g = TestGuard::new();
+  let _g        = TestGuard::new();
   let (a, b, c) = run_comp_func_with_args("git", "checkout", "master");
   assert_eq!(a, "git");
   assert_eq!(b, "checkout");
@@ -1096,7 +1096,7 @@ fn comp_args_plain_strings() {
 
 #[test]
 fn comp_args_with_spaces() {
-  let _g = TestGuard::new();
+  let _g        = TestGuard::new();
   let (a, b, c) = run_comp_func_with_args("my cmd", "foo bar", "baz qux");
   assert_eq!(a, "my cmd");
   assert_eq!(b, "foo bar");
@@ -1105,7 +1105,7 @@ fn comp_args_with_spaces() {
 
 #[test]
 fn comp_args_with_dollar_sign() {
-  let _g = TestGuard::new();
+  let _g        = TestGuard::new();
   let (a, b, _) = run_comp_func_with_args("$VAR", "$cmd", "");
   assert_eq!(a, "$VAR");
   assert_eq!(b, "$cmd");
@@ -1113,7 +1113,7 @@ fn comp_args_with_dollar_sign() {
 
 #[test]
 fn comp_args_with_semicolon_and_pipe() {
-  let _g = TestGuard::new();
+  let _g        = TestGuard::new();
   let (a, b, _) = run_comp_func_with_args("a;b", "x|y", "");
   assert_eq!(a, "a;b");
   assert_eq!(b, "x|y");
@@ -1121,7 +1121,7 @@ fn comp_args_with_semicolon_and_pipe() {
 
 #[test]
 fn comp_args_with_single_quote() {
-  let _g = TestGuard::new();
+  let _g          = TestGuard::new();
   let (a, _b, _c) = run_comp_func_with_args("it's", "", "");
   assert_eq!(a, "it's");
 }
@@ -1146,18 +1146,18 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn enter_with_empty_filtered_dismisses() {
-    let _g = TestGuard::new();
-    let mut sel = FuzzySelector::new();
-    let resp = sel.handle_key(key!(Enter)).unwrap();
+    let     _g   = TestGuard::new();
+    let mut sel  = FuzzySelector::new();
+    let     resp = sel.handle_key(key!(Enter)).unwrap();
     assert!(matches!(resp, SelectorResponse::Dismiss));
   }
 
   #[test]
   fn enter_accepts_candidate_at_cursor_zero() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["alpha", "beta", "gamma"]);
-    let expected = sel.filtered()[0].candidate.clone();
-    let resp = sel.handle_key(key!(Enter)).unwrap();
+    let     _g       = TestGuard::new();
+    let mut sel      = sel_with(&["alpha", "beta", "gamma"]);
+    let     expected = sel.filtered()[0].candidate.clone();
+    let     resp     = sel.handle_key(key!(Enter)).unwrap();
     match resp {
       SelectorResponse::Accept(c) => assert_eq!(c, expected),
       _ => panic!("expected Accept"),
@@ -1166,12 +1166,12 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn enter_after_navigation_accepts_correct_candidate() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut sel = sel_with(&["alpha", "beta", "gamma"]);
     sel.handle_key(key!(Down)).unwrap();
     sel.handle_key(key!(Down)).unwrap();
     let expected = sel.filtered()[2].candidate.clone();
-    let resp = sel.handle_key(key!(Enter)).unwrap();
+    let resp     = sel.handle_key(key!(Enter)).unwrap();
     match resp {
       SelectorResponse::Accept(c) => assert_eq!(c, expected),
       _ => panic!("expected Accept"),
@@ -1182,7 +1182,7 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn esc_dismisses_and_clears_filtered() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut sel = sel_with(&["a", "b", "c"]);
     assert_eq!(sel.filtered().len(), 3);
     let resp = sel.handle_key(key!(Esc)).unwrap();
@@ -1192,9 +1192,9 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn ctrl_d_dismisses_and_clears_filtered() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b", "c"]);
-    let resp = sel.handle_key(key!(Ctrl + 'd')).unwrap();
+    let     _g   = TestGuard::new();
+    let mut sel  = sel_with(&["a", "b", "c"]);
+    let     resp = sel.handle_key(key!(Ctrl + 'd')).unwrap();
     assert!(matches!(resp, SelectorResponse::Dismiss));
     assert!(sel.filtered().is_empty());
   }
@@ -1203,27 +1203,27 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn tab_advances_cursor() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b", "c"]);
-    let target = sel.filtered()[1].candidate.clone();
+    let     _g     = TestGuard::new();
+    let mut sel    = sel_with(&["a", "b", "c"]);
+    let     target = sel.filtered()[1].candidate.clone();
     sel.handle_key(key!(Tab)).unwrap();
     assert_eq!(sel.selected_candidate().unwrap(), target);
   }
 
   #[test]
   fn down_advances_cursor() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b", "c"]);
-    let target = sel.filtered()[1].candidate.clone();
+    let     _g     = TestGuard::new();
+    let mut sel    = sel_with(&["a", "b", "c"]);
+    let     target = sel.filtered()[1].candidate.clone();
     sel.handle_key(key!(Down)).unwrap();
     assert_eq!(sel.selected_candidate().unwrap(), target);
   }
 
   #[test]
   fn tab_wraps_at_end() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b", "c"]);
-    let first = sel.filtered()[0].candidate.clone();
+    let     _g    = TestGuard::new();
+    let mut sel   = sel_with(&["a", "b", "c"]);
+    let     first = sel.filtered()[0].candidate.clone();
     for _ in 0..3 {
       sel.handle_key(key!(Tab)).unwrap();
     }
@@ -1232,9 +1232,9 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn down_wraps_at_end() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b"]);
-    let first = sel.filtered()[0].candidate.clone();
+    let     _g    = TestGuard::new();
+    let mut sel   = sel_with(&["a", "b"]);
+    let     first = sel.filtered()[0].candidate.clone();
     sel.handle_key(key!(Down)).unwrap();
     sel.handle_key(key!(Down)).unwrap();
     assert_eq!(sel.selected_candidate().unwrap(), first);
@@ -1242,9 +1242,9 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn scroll_down_does_not_wrap() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b"]);
-    let last = sel.filtered()[1].candidate.clone();
+    let     _g   = TestGuard::new();
+    let mut sel  = sel_with(&["a", "b"]);
+    let     last = sel.filtered()[1].candidate.clone();
     // ScrollDown 3x: 0→1→1→1 (saturates at max-1).
     sel.handle_key(K(C::ScrollDown, M::NONE)).unwrap();
     sel.handle_key(K(C::ScrollDown, M::NONE)).unwrap();
@@ -1256,9 +1256,9 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn shift_tab_retreats_cursor() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b", "c"]);
-    let first = sel.filtered()[0].candidate.clone();
+    let     _g    = TestGuard::new();
+    let mut sel   = sel_with(&["a", "b", "c"]);
+    let     first = sel.filtered()[0].candidate.clone();
     sel.handle_key(key!(Down)).unwrap();
     sel.handle_key(key!(Shift + Tab)).unwrap();
     assert_eq!(sel.selected_candidate().unwrap(), first);
@@ -1266,9 +1266,9 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn shift_tab_clamps_at_top() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b", "c"]);
-    let first = sel.filtered()[0].candidate.clone();
+    let     _g    = TestGuard::new();
+    let mut sel   = sel_with(&["a", "b", "c"]);
+    let     first = sel.filtered()[0].candidate.clone();
     // At the top, Up/Shift+Tab clamps rather than wrapping to the far end.
     sel.handle_key(key!(Shift + Tab)).unwrap();
     assert_eq!(sel.selected_candidate().unwrap(), first);
@@ -1276,18 +1276,18 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn up_clamps_at_top() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b"]);
-    let first = sel.filtered()[0].candidate.clone();
+    let     _g    = TestGuard::new();
+    let mut sel   = sel_with(&["a", "b"]);
+    let     first = sel.filtered()[0].candidate.clone();
     sel.handle_key(key!(Up)).unwrap();
     assert_eq!(sel.selected_candidate().unwrap(), first);
   }
 
   #[test]
   fn scroll_up_does_not_wrap() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b"]);
-    let first = sel.filtered()[0].candidate.clone();
+    let     _g    = TestGuard::new();
+    let mut sel   = sel_with(&["a", "b"]);
+    let     first = sel.filtered()[0].candidate.clone();
     // ScrollUp at cursor=0 should stay at 0 (saturating).
     sel.handle_key(K(C::ScrollUp, M::NONE)).unwrap();
     sel.handle_key(K(C::ScrollUp, M::NONE)).unwrap();
@@ -1298,7 +1298,7 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn all_movement_keys_return_preview() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut sel = sel_with(&["a", "b", "c"]);
     // With a non-empty list, every move changes the selection, so the response
     // carries the newly highlighted candidate for the caller to preview.
@@ -1319,7 +1319,7 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn typing_char_filters_candidates() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut sel = sel_with(&["alpha", "beta", "gamma"]);
     assert_eq!(sel.filtered().len(), 3);
     let resp = sel.handle_key(K(C::Char('g'), M::NONE)).unwrap();
@@ -1332,7 +1332,7 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn typing_no_match_empties_filtered() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut sel = sel_with(&["alpha", "beta"]);
     sel.handle_key(K(C::Char('z'), M::NONE)).unwrap();
     assert!(sel.filtered().is_empty());
@@ -1340,7 +1340,7 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn typing_then_enter_accepts_filtered_match() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut sel = sel_with(&["alpha", "beta", "gamma"]);
     sel.handle_key(K(C::Char('g'), M::NONE)).unwrap();
     let resp = sel.handle_key(key!(Enter)).unwrap();
@@ -1352,7 +1352,7 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn typing_then_no_match_then_enter_dismisses() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut sel = sel_with(&["alpha", "beta"]);
     sel.handle_key(K(C::Char('z'), M::NONE)).unwrap();
     let resp = sel.handle_key(key!(Enter)).unwrap();
@@ -1361,7 +1361,7 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn ctrl_c_clears_query_restores_full_list() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut sel = sel_with(&["alpha", "beta", "gamma"]);
     sel.handle_key(K(C::Char('g'), M::NONE)).unwrap();
     assert_eq!(sel.filtered().len(), 1);
@@ -1375,7 +1375,7 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn navigation_on_empty_selector_does_not_panic() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut sel = FuzzySelector::new();
     for key in [
       key!(Down),
@@ -1395,19 +1395,19 @@ mod fuzzy_selector_handle_key {
 
   #[test]
   fn mouse_pos_returns_consumed() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b", "c"]);
-    let resp = sel.handle_key(K(C::MousePos(0, 0), M::NONE)).unwrap();
+    let     _g   = TestGuard::new();
+    let mut sel  = sel_with(&["a", "b", "c"]);
+    let     resp = sel.handle_key(K(C::MousePos(0, 0), M::NONE)).unwrap();
     assert!(matches!(resp, SelectorResponse::Consumed));
   }
 
   #[test]
   fn left_click_out_of_range_returns_consumed_no_change() {
-    let _g = TestGuard::new();
-    let mut sel = sel_with(&["a", "b", "c"]);
-    let before = sel.selected_candidate().unwrap();
+    let     _g     = TestGuard::new();
+    let mut sel    = sel_with(&["a", "b", "c"]);
+    let     before = sel.selected_candidate().unwrap();
     // row_map is empty without draw(); click row is out-of-range → no-op.
-    let resp = sel.handle_key(K(C::LeftClick(99, 0), M::NONE)).unwrap();
+    let     resp   = sel.handle_key(K(C::LeftClick(99, 0), M::NONE)).unwrap();
     assert!(matches!(resp, SelectorResponse::Consumed));
     assert_eq!(sel.selected_candidate().unwrap(), before);
   }
@@ -1436,7 +1436,7 @@ mod complete_jobs_tests {
   }
 
   fn insert_named_job(pid: i32, cmd: &str) {
-    let pid = Pid::from_raw(pid);
+    let     pid   = Pid::from_raw(pid);
     let mut child = ChildProc::new(pid, Some(cmd.as_bytes()), Some(pid), None);
     child.set_stat(WaitStatus::StillAlive);
     let mut bldr = JobBldr::new();
@@ -1520,7 +1520,7 @@ mod complete_builtins_tests {
 
   #[test]
   fn complete_builtins_known_prefix_matches() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let out = complete_builtins("ec"); // echo
     assert!(
       out.iter().any(|c| c.content() == "echo"),
@@ -1530,7 +1530,7 @@ mod complete_builtins_tests {
 
   #[test]
   fn complete_builtins_empty_prefix_returns_all() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let all = complete_builtins("");
     assert_eq!(all.len(), BUILTIN_NAMES.len());
   }
@@ -1555,7 +1555,7 @@ mod complete_commands_dotslash_tests {
     // populate the file cache from a unit test, so we just verify
     // the function returns successfully on a `./` prefix and that
     // any results that come back start with `./`.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let out = complete_commands("./", 2);
     for c in &out {
       assert!(c.content.starts_with("./"), "got: {c:?}");
@@ -1574,8 +1574,8 @@ mod complete_path_ignore_case_tests {
     // a lowercase prefix. Without ignore_case → no match; with it →
     // match. We just toggle the flag and confirm the on-case path
     // actually returns something.
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g        = TestGuard::new();
+    let dir       = tempfile::TempDir::new().unwrap();
     let file_path = dir.path().join("MixedCaseFile.txt");
     std::fs::write(&file_path, "x").unwrap();
 
@@ -1661,7 +1661,7 @@ mod bash_comp_spec_tests {
 
   #[test]
   fn case_insensitive_complete_preserves_candidate_case() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::create_dir(dir.path().join("src")).unwrap();
 
@@ -1671,9 +1671,9 @@ mod bash_comp_spec_tests {
 
     let spec = BashCompSpec::new().files(true).dirs(true);
     let ctx = CompContext {
-      words: vec!["cd".into(), "S".into()],
-      cword: 1,
-      line: "cd S".into(),
+      words     : vec!["cd".into(), "S".into()],
+      cword     : 1,
+      line      : "cd S".into(),
       cursor_pos: 4,
     };
     let candidates = spec.complete(&ctx).unwrap();
@@ -1712,7 +1712,7 @@ mod bash_comp_spec_tests {
   // prefix ($VAR/, ~/, etc.) through expansion.
   #[test]
   fn comp_spec_preserves_structural_prefix_under_expansion() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::create_dir(dir.path().join("src")).unwrap();
 
@@ -1730,9 +1730,9 @@ mod bash_comp_spec_tests {
 
     let spec = BashCompSpec::new().files(true).dirs(true);
     let ctx = CompContext {
-      words: vec!["cd".into(), "$TESTDIR/s".into()],
-      cword: 1,
-      line: "cd $TESTDIR/s".into(),
+      words     : vec!["cd".into(), "$TESTDIR/s".into()],
+      cword     : 1,
+      line      : "cd $TESTDIR/s".into(),
       cursor_pos: 13,
     };
     let candidates = spec.complete(&ctx).unwrap();
@@ -1769,7 +1769,7 @@ mod bash_comp_spec_tests {
     // The target of a redirect always completes as a file path, even when the
     // command (`shopt` here) has its own argument completion spec.
     for line in ["shopt > foo", "shopt >> foo", "shopt 2> foo", "echo < foo"] {
-      let tks = get_context_tokens(line);
+      let tks         = get_context_tokens(line);
       let (strat, ..) = CompStrat::resolve(&tks, line.len());
       assert!(
         matches!(strat, CompStrat::Files { .. }),
@@ -1781,8 +1781,8 @@ mod bash_comp_spec_tests {
   #[test]
   fn non_redirect_argument_unaffected() {
     use crate::readline::context::get_context_tokens;
-    let line = "shopt foo";
-    let tks = get_context_tokens(line);
+    let line        = "shopt foo";
+    let tks         = get_context_tokens(line);
     let (strat, ..) = CompStrat::resolve(&tks, line.len());
     assert!(
       matches!(strat, CompStrat::Argument { .. }),
@@ -1869,7 +1869,7 @@ fn flat_score(cand: &Candidate, q: &[char], _p: bool) -> i32 {
 
 #[test]
 fn score_cb_applies_in_extends_branch() {
-  let _g = TestGuard::new();
+  let     _g  = TestGuard::new();
   let mut sel = FuzzySelector::new();
   sel.set_score_cb(Some(flat_score));
   sel.activate(make_cands(&["abc"]));
@@ -1887,10 +1887,10 @@ fn compspec_appends_space_by_default() {
   let _g = TestGuard::new();
   test_input("complete -W 'foobar baz' spcmd").unwrap();
 
-  let mut comp = SimpleCompleter::default();
-  let line = "spcmd foob".to_string();
-  let cursor = line.len();
-  let _ = comp.get_candidates(&line, cursor, super::CompSource::Shell);
+  let mut comp   = SimpleCompleter::default();
+  let     line   = "spcmd foob".to_string();
+  let     cursor = line.len();
+  let     _      = comp.get_candidates(&line, cursor, super::CompSource::Shell);
   assert!(
     comp.add_space,
     "default spec should append a trailing space"
@@ -1903,10 +1903,10 @@ fn compspec_nospace_suppresses_space() {
   let _g = TestGuard::new();
   test_input("complete -W 'foobar baz' -o nospace nscmd").unwrap();
 
-  let mut comp = SimpleCompleter::default();
-  let line = "nscmd foob".to_string();
-  let cursor = line.len();
-  let _ = comp.get_candidates(&line, cursor, super::CompSource::Shell);
+  let mut comp   = SimpleCompleter::default();
+  let     line   = "nscmd foob".to_string();
+  let     cursor = line.len();
+  let     _      = comp.get_candidates(&line, cursor, super::CompSource::Shell);
   assert!(
     !comp.add_space,
     "-o nospace should suppress the trailing space"
@@ -1915,7 +1915,7 @@ fn compspec_nospace_suppresses_space() {
 
 #[test]
 fn merge_new_preserves_selection_and_order() {
-  let _g = TestGuard::new();
+  let     _g  = TestGuard::new();
   let mut sel = FuzzySelector::new();
   sel.activate(vec![
     Candidate::from("alpha").with_weight(1),
@@ -1943,7 +1943,7 @@ fn merge_new_preserves_selection_and_order() {
 
 #[test]
 fn merge_new_scores_arrivals_against_active_query() {
-  let _g = TestGuard::new();
+  let     _g  = TestGuard::new();
   let mut sel = FuzzySelector::new();
   sel.activate(vec![Candidate::from("foobar")]);
   sel.set_query("foo");

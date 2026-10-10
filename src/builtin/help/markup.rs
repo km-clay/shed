@@ -19,7 +19,7 @@ pub(super) fn scan_sgr(bytes: &[u8], pos: usize) -> Option<usize> {
   let mut i = pos + 2;
   while let Some(&b) = bytes.get(i) {
     match b {
-      b'm' => return Some(i + 1),
+      b'm'               => return Some(i + 1),
       b'0'..=b'9' | b';' => i += 1,
       _ => return None,
     }
@@ -37,8 +37,8 @@ pub(super) const KEYWORD_2_SEQ: &str = "\x1b[3;37m"; // italic white - [optional
 
 #[derive(Debug)]
 pub(super) struct MarkedSpan {
-  prefix_seq: Range<usize>,
-  content: Range<usize>,
+  prefix_seq : Range<usize>,
+  content    : Range<usize>,
   postfix_seq: Range<usize>,
 }
 
@@ -121,10 +121,10 @@ impl StyledHelp {
 
   pub(super) fn find_markers(&self, marker: &str) -> Vec<MarkedSpan> {
     let mut markers = vec![];
-    let mut cursor = 0;
+    let mut cursor  = 0;
 
     while let Some(pos) = self.content[cursor..].find(marker) {
-      let abs_pos = cursor + pos;
+      let abs_pos    = cursor + pos;
       let prefix_end = abs_pos + marker.len();
 
       let Some(end) = self.content[prefix_end..].find(RESET_SEQ) else {
@@ -132,7 +132,7 @@ impl StyledHelp {
       };
 
       let postfix_start = prefix_end + end;
-      let postfix_end = postfix_start + RESET_SEQ.len();
+      let postfix_end   = postfix_start + RESET_SEQ.len();
 
       markers.push(MarkedSpan::new(
         abs_pos..prefix_end,
@@ -153,10 +153,10 @@ pub(super) fn style_help_content(raw: &str) -> String {
 
 /// Strips all ansi sequences from the provided string
 fn strip_sgr(baked: &str) -> (String, Vec<usize>) {
-  let bytes = baked.as_bytes();
-  let mut visible = Vec::with_capacity(bytes.len());
+  let     bytes           = baked.as_bytes();
+  let mut visible         = Vec::with_capacity(bytes.len());
   let mut map: Vec<usize> = Vec::with_capacity(bytes.len() + 1);
-  let mut i = 0;
+  let mut i               = 0;
   while i < bytes.len() {
     if let Some(end) = scan_sgr(bytes, i) {
       i = end;
@@ -199,8 +199,8 @@ fn consume_ref_alias(chars: &mut Peekable<Chars>) -> Option<String> {
 }
 
 fn extract_ref_targets(source: &str) -> Vec<Option<String>> {
-  let mut targets = vec![];
-  let mut chars = source.chars().peekable();
+  let mut targets  = vec![];
+  let mut chars    = source.chars().peekable();
   let mut qt_state = QuoteState::default();
 
   match_loop!(chars.next() => ch, {
@@ -241,7 +241,7 @@ fn extract_ref_targets(source: &str) -> Vec<Option<String>> {
 
 fn expand_help(raw: &str) -> String {
   let mut result = String::new();
-  let mut chars = raw.chars();
+  let mut chars  = raw.chars();
 
   match_loop!(chars.next() => ch, {
     markers::RESET => result.push_str(RESET_SEQ),
@@ -275,8 +275,8 @@ fn find_closer(closer: char, res: &mut String, chars: &mut Peekable<Chars>) {
 }
 
 fn unescape_help(raw: &str) -> String {
-  let mut result = String::new();
-  let mut chars = raw.chars().peekable();
+  let mut result   = String::new();
+  let mut chars    = raw.chars().peekable();
   let mut qt_state = QuoteState::default();
 
   match_loop!(chars.next() => ch, {
@@ -398,7 +398,7 @@ mod tests {
 
   #[test]
   fn code_fence_highlights_and_preserves_content() {
-    let _g = crate::tests::testutil::TestGuard::new();
+    let _g  = crate::tests::testutil::TestGuard::new();
     let out = style_help_content("```\nls -la foo\n```");
     assert!(
       out.contains('\u{1b}'),
@@ -480,9 +480,9 @@ mod tests {
   // the opener predicate in either function.
 
   fn ref_count_invariant(src: &str) {
-    let mut styled = StyledHelp::new(src);
-    let from_render = styled.find_markers(REF_SEQ).len();
-    let from_source = styled.take_ref_targets().len();
+    let mut styled      = StyledHelp::new(src);
+    let     from_render = styled.find_markers(REF_SEQ).len();
+    let     from_source = styled.take_ref_targets().len();
     assert_eq!(
       from_render, from_source,
       "ref count desync on input {src:?}: render={from_render} source={from_source}"
@@ -540,7 +540,7 @@ mod tests {
 
   #[test]
   fn strip_sgr_removes_all_sgr_sequences() {
-    let baked = format!("{REF_SEQ}hello{RESET_SEQ} {TAG_SEQ}world{RESET_SEQ}");
+    let baked        = format!("{REF_SEQ}hello{RESET_SEQ} {TAG_SEQ}world{RESET_SEQ}");
     let (visible, _) = strip_sgr(&baked);
     assert_eq!(visible, "hello world");
   }
@@ -548,7 +548,7 @@ mod tests {
   #[test]
   fn strip_sgr_map_indexes_each_visible_byte_to_baked() {
     // "abc<REF>def<RST>ghi" — visible = "abcdefghi"
-    let baked = format!("abc{REF_SEQ}def{RESET_SEQ}ghi");
+    let baked          = format!("abc{REF_SEQ}def{RESET_SEQ}ghi");
     let (visible, map) = strip_sgr(&baked);
     assert_eq!(visible, "abcdefghi");
     // Every visible byte should map back to a baked byte that contains
@@ -571,7 +571,7 @@ mod tests {
   #[test]
   fn strip_sgr_preserves_utf8() {
     // Two-byte UTF-8 characters around an SGR sequence.
-    let baked = format!("café{REF_SEQ}naïve{RESET_SEQ}");
+    let baked          = format!("café{REF_SEQ}naïve{RESET_SEQ}");
     let (visible, map) = strip_sgr(&baked);
     assert_eq!(visible, "cafénaïve");
     // The 'é' in "café" lives at byte indices 3..5 (UTF-8 0xC3 0xA9).
@@ -591,7 +591,7 @@ mod tests {
 
   #[test]
   fn strip_sgr_handles_only_sgr_sequences() {
-    let baked = format!("{REF_SEQ}{RESET_SEQ}");
+    let baked          = format!("{REF_SEQ}{RESET_SEQ}");
     let (visible, map) = strip_sgr(&baked);
     assert_eq!(visible, "");
     assert_eq!(map, vec![baked.len()]);
@@ -604,7 +604,7 @@ mod tests {
   fn visible_view_excludes_sgr_bytes() {
     // Baked content contains "[1;33m" inside TAG_SEQ. The visible view
     // must NOT contain those bytes.
-    let raw = "see *taghere* there";
+    let raw    = "see *taghere* there";
     let styled = StyledHelp::new(raw);
     assert!(
       !styled.visible().contains("[1;33m"),

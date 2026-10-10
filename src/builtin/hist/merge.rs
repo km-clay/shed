@@ -17,7 +17,7 @@ impl Builtin for HistMerge {
     let Some((name, span)) = args.arguments().next() else {
       return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name").with_code(2));
     };
-    let hist = open_history(args.span(), false, true)?;
+    let hist  = open_history(args.span(), false, true)?;
     let other = name.to_str_lossy();
     if !hist.branch_exists(&other)? {
       return Err(sherr!(ParseErr @ span, "branch does not exist: {name}"));

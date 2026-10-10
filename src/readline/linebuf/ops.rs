@@ -42,7 +42,7 @@ pub(crate) fn toggle_case_char(c: char) -> char {
 }
 
 pub(super) struct Diff {
-  start: usize,
+  start  : usize,
   end_old: usize,
   end_new: usize,
 }
@@ -60,13 +60,13 @@ impl super::LineBuf {
     let s = span.0;
     let e = span.1;
     let motion = MotionKind::Char {
-      start: s,
-      end: e,
+      start    : s,
+      end      : e,
       inclusive: true,
     };
     let content = self.extract_range(&motion);
-    let row = s.row.min(self.lines.len().saturating_sub(1));
-    let col = s.col.min(self.lines[row].len());
+    let row     = s.row.min(self.lines.len().saturating_sub(1));
+    let col     = s.col.min(self.lines[row].len());
     self.cursor.pos = Pos { row, col };
     self.insert_str(new);
     content
@@ -99,7 +99,7 @@ impl super::LineBuf {
         (f64::from(rows) * 0.5).round() as usize
       }
     });
-    let buf_lines = self.lines.len();
+    let buf_lines  = self.lines.len();
     let hint_lines = self.hint.as_ref().map_or(0, |h| h.lines().len());
     let combined = if hint_lines == 0 {
       buf_lines
@@ -113,7 +113,7 @@ impl super::LineBuf {
     out.max(1)
   }
   pub(crate) fn update_scroll_offset(&mut self) {
-    let height = self.get_viewport_height();
+    let height    = self.get_viewport_height();
     let scrolloff = shopt!(line.scroll_offset);
     if self.cursor.pos.row < self.scroll_offset + scrolloff {
       self.scroll_offset = self.cursor.pos.row.saturating_sub(scrolloff);
@@ -219,11 +219,11 @@ impl super::LineBuf {
     }
 
     // "master span", other spans are rebased into this one
-    let outer_span = Span::new(0, new_joined.len(), SourceId::NONE);
+    let     outer_span   = Span::new(0, new_joined.len(), SourceId::NONE);
 
     // lex the chunk; rebase its tokens into the full-buffer coord
     // space (offset by `left`) AND onto the outer source.
-    let chunk = new_joined.get(left..right_new)?;
+    let     chunk        = new_joined.get(left..right_new)?;
     let mut chunk_tokens = get_context_tokens(chunk);
     for t in &mut chunk_tokens {
       t.rebase_into(outer_span, left);
@@ -270,7 +270,7 @@ impl super::LineBuf {
       return joined;
     }
 
-    let palette = highlight::Palette::new();
+    let     palette      = highlight::Palette::new();
     let mut select_spans = self.search_match_spans();
     select_spans.extend(self.select_range_byte_pos());
 
@@ -290,13 +290,13 @@ impl super::LineBuf {
     )
     .ok();
 
-    let hint = self.get_hint_text();
-    let lines = Lines::to_lines(&format!("{highlighted}{hint}"));
+    let hint     = self.get_hint_text();
+    let lines    = Lines::to_lines(&format!("{highlighted}{hint}"));
 
-    let offset = self.scroll_offset.min(lines.len());
+    let offset   = self.scroll_offset.min(lines.len());
     let (_, mid) = lines.split_at(offset);
 
-    let height = self.get_viewport_height().min(mid.len());
+    let height   = self.get_viewport_height().min(mid.len());
     let (mid, _) = mid.split_at(height);
 
     Lines(mid.to_vec()).join()
@@ -415,15 +415,15 @@ impl super::LineBuf {
     }
   }
   pub(crate) fn window_slice_to_cursor(&self) -> String {
-    let mut result = String::new();
-    let start_row = self.scroll_offset;
+    let mut result    = String::new();
+    let     start_row = self.scroll_offset;
 
     for i in start_row..self.cursor.pos.row {
       write!(result, "{}", self.lines[i]).ok();
       result.push('\n');
     }
     let line = &self.lines[self.cursor.pos.row];
-    let col = self.cursor.pos.col.min(line.len());
+    let col  = self.cursor.pos.col.min(line.len());
     for g in &line.graphemes()[..col] {
       write!(result, "{g}").ok();
     }
@@ -448,13 +448,13 @@ impl super::LineBuf {
     if lines.is_empty() {
       return;
     }
-    let row = pos.row;
-    let col = pos.col;
+    let     row   = pos.row;
+    let     col   = pos.col;
 
     // Split the current line at the insertion point
     let mut right = self.lines[row].split_off(col);
 
-    let last = lines.len() - 1;
+    let     last  = lines.len() - 1;
 
     // First line appends to current line at the split point
     self.lines[row].append(&mut lines[0]);
@@ -469,7 +469,7 @@ impl super::LineBuf {
   }
   pub(super) fn remove_at(&mut self, pos: Pos) -> Option<Grapheme> {
     let Pos { row, col } = pos;
-    let line = self.lines.get_mut(row)?;
+    let line             = self.lines.get_mut(row)?;
 
     line.0.get(col).is_some().then(|| line.0.remove(col))
   }
@@ -483,11 +483,11 @@ impl super::LineBuf {
     let col = pos.col;
     self.lines[row].insert(col, gr);
     self.indent_cache = None;
-    let pos = pos.col_add(1);
+    let pos     = pos.col_add(1);
 
     // Cheap test first: only consider dedenting if the line's trimmed content
     // is exactly a closer keyword. Skips the depth query for 99% of typing.
-    let line = self.cur_line().to_string();
+    let line    = self.cur_line().to_string();
     let trimmed = line.trim();
     let is_closer = lex::CLOSERS
       .iter()
@@ -496,7 +496,7 @@ impl super::LineBuf {
 
     if is_closer {
       let (start, end) = self.indent_levels_for_row(pos.row);
-      let is_middle = lex::MIDDLES.contains(&trimmed);
+      let is_middle    = lex::MIDDLES.contains(&trimmed);
       // Align the line with its opener: a real closer pops a block (end < start)
       // and lands at end; a middle (else/elif) is depth-neutral but renders one
       // level out. The absolute target makes a trailing space idempotent.
@@ -539,7 +539,7 @@ impl super::LineBuf {
   /// Insert `s` verbatim with no auto-indent or dedent, in O(n).
   pub(super) fn insert_str_verbatim(&mut self, s: &str) {
     for gr in s.graphemes(true) {
-      let gr = Grapheme::from(gr);
+      let gr  = Grapheme::from(gr);
       let pos = self.cursor.pos;
       if gr.is_lf() {
         let rest = self.lines[pos.row].split_off(pos.col);
@@ -615,7 +615,7 @@ impl super::LineBuf {
       self.lines = Lines::to_lines(other);
       return;
     }
-    let joined = self.to_string();
+    let joined   = self.to_string();
     let last_row = self.lines.len() - 1;
     let Some(last) = self.lines.last_mut() else {
       self.lines = Lines::to_lines(other);
@@ -645,7 +645,7 @@ impl super::LineBuf {
   }
   pub(crate) fn cursor_in_leading_ws(&self) -> bool {
     let line = self.line(self.row());
-    let col = self.col();
+    let col  = self.col();
 
     let only_ws = self
       .lines()
@@ -697,7 +697,7 @@ impl super::LineBuf {
 
   pub(crate) fn pos_to_flat(&self, pos: Pos) -> usize {
     let mut offset = 0;
-    let row = pos.row.min(self.lines.len().saturating_sub(1));
+    let     row    = pos.row.min(self.lines.len().saturating_sub(1));
     for i in 0..row {
       offset += self.lines[i].len() + 1; // +1 for '\n'
     }
@@ -849,13 +849,13 @@ impl super::LineBuf {
     }
     if self.cursor.exclusive {
       let line = self.cur_line();
-      let col = self.col();
+      let col  = self.col();
       if col > 0 && col >= line.len() {
         self.cursor.pos.col = line.len().saturating_sub(1);
       }
     } else {
       let line = self.cur_line();
-      let col = self.col();
+      let col  = self.col();
       if col > 0 && col > line.len() {
         self.cursor.pos.col = line.len();
       }
@@ -867,9 +867,9 @@ impl super::LineBuf {
   pub(crate) fn equalize_rows(&mut self, line_nums: Vec<usize>) {
     for row in line_nums {
       let (start, end) = self.indent_levels_for_row(row);
-      let num_tabs = start.min(end);
+      let num_tabs     = start.min(end);
 
-      let line = self.line_mut(row);
+      let line         = self.line_mut(row);
       while line.0.first().is_some_and(Grapheme::is_ws) {
         line.0.remove(0);
       }
@@ -885,7 +885,7 @@ impl super::LineBuf {
   /// up to the cursor — reflects whether we're inside an open block.
   pub(crate) fn cursor_indent_level(&mut self) -> (usize, bool) {
     let (to_cursor, _) = self.lines.clone().split_lines(self.cursor.pos);
-    let raw = to_cursor.join();
+    let raw            = to_cursor.join();
     let depth = edit::depth_levels_via_ctx(&raw)
       .last()
       .copied()
@@ -971,8 +971,8 @@ impl super::LineBuf {
     } else {
       e
     };
-    let mut buf = std::mem::take(&mut self.lines);
-    let extracted = extract_range_contiguous(&mut buf, s, end);
+    let mut buf       = std::mem::take(&mut self.lines);
+    let     extracted = extract_range_contiguous(&mut buf, s, end);
     self.lines = buf;
     extracted
   }
@@ -1021,7 +1021,7 @@ impl super::LineBuf {
         return Ok(vec![]);
       }
     };
-    let mut acc = 0;
+    let mut acc   = 0;
     let mut lines = vec![];
 
     loop {
@@ -1047,9 +1047,9 @@ impl super::LineBuf {
     self.calc_display_col_for(self.cursor.pos)
   }
   pub(super) fn calc_display_col_for(&self, pos: Pos) -> usize {
-    let tab_width = shopt!(line.tab_width);
-    let line = self.line(pos.row);
-    let mut col = 0;
+    let     tab_width = shopt!(line.tab_width);
+    let     line      = self.line(pos.row);
+    let mut col       = 0;
     for gr in &line.0[..pos.col] {
       let Some(ch) = gr.as_char() else {
         col += gr.width();
@@ -1091,7 +1091,7 @@ impl super::LineBuf {
   /// map every valid Pos in the buffer to a corresponding byte position in the string
   pub(super) fn byte_positions(&self) -> Vec<(usize, Pos)> {
     let mut positions = vec![];
-    let mut acc = 0;
+    let mut acc       = 0;
 
     for (row, line) in self.lines.iter().enumerate() {
       for (col, gr) in line.0.iter().enumerate() {
@@ -1111,9 +1111,9 @@ impl super::LineBuf {
     positions
   }
   pub(super) fn display_col_to_index(&self, row: usize, target: usize) -> usize {
-    let tab_width = shopt!(line.tab_width);
-    let line = self.line(row);
-    let mut col = 0;
+    let     tab_width = shopt!(line.tab_width);
+    let     line      = self.line(row);
+    let mut col       = 0;
     for (i, gr) in line.0.iter().enumerate() {
       if col >= target {
         return i;
@@ -1150,15 +1150,15 @@ impl super::LineBuf {
     let mut out = String::new();
     if s.row == end.row {
       let line = &self.lines[s.row].0;
-      let hi = end.col.min(line.len());
-      let lo = s.col.min(hi);
+      let hi   = end.col.min(line.len());
+      let lo   = s.col.min(hi);
       for g in &line[lo..hi] {
         out.push_str(&g.to_string());
       }
       return out;
     }
     let first = &self.lines[s.row].0;
-    let lo = s.col.min(first.len());
+    let lo    = s.col.min(first.len());
     for g in &first[lo..] {
       out.push_str(&g.to_string());
     }
@@ -1170,7 +1170,7 @@ impl super::LineBuf {
     }
     out.push('\n');
     let last = &self.lines[end.row].0;
-    let hi = end.col.min(last.len());
+    let hi   = end.col.min(last.len());
     for g in &last[..hi] {
       out.push_str(&g.to_string());
     }
@@ -1259,7 +1259,7 @@ impl super::LineBuf {
       'x' | 'X' => Some(|c: char| c.is_ascii_hexdigit()),
       'o' | 'O' => Some(|c: char| matches!(c, '0'..='7')),
       'b' | 'B' => Some(|c: char| c == '0' || c == '1'),
-      _ => None,
+      _         => None,
     }
   }
 
@@ -1270,11 +1270,11 @@ impl super::LineBuf {
   ///   - on any body digit (scan backward through digit chars to the
   ///     marker, verify a `0` precedes it)
   fn try_radix_literal_at(&self, pos: Pos) -> Option<(Pos, Pos)> {
-    let line = &self.lines[pos.row].0;
-    let row = pos.row;
+    let line    = &self.lines[pos.row].0;
+    let row     = pos.row;
     let char_at = |col: usize| -> Option<char> { line.get(col)?.as_char() };
 
-    let cur = char_at(pos.col)?;
+    let cur     = char_at(pos.col)?;
     let marker_col: usize = if cur == '0'
       && char_at(pos.col + 1).is_some_and(|c| {
         Self::predicate_for(c).is_some() || matches!(c, 'x' | 'X' | 'o' | 'O' | 'b' | 'B')
@@ -1318,8 +1318,8 @@ impl super::LineBuf {
       return None;
     };
 
-    let marker = char_at(marker_col)?;
-    let pred = Self::predicate_for(marker)?;
+    let     marker  = char_at(marker_col)?;
+    let     pred    = Self::predicate_for(marker)?;
 
     // Walk forward through digits matching the format's predicate.
     let mut end_col = marker_col + 1;
@@ -1428,12 +1428,12 @@ impl super::LineBuf {
   }
   pub(super) fn line_to_pos(&self, pos: Pos) -> &[Grapheme] {
     let line = &self.lines[pos.row];
-    let col = pos.col.min(line.len());
+    let col  = pos.col.min(line.len());
     &line[..col]
   }
   pub(super) fn line_from_pos(&self, pos: Pos) -> &[Grapheme] {
     let line = &self.lines[pos.row];
-    let col = pos.col.min(line.len());
+    let col  = pos.col.min(line.len());
     &line[col..]
   }
   pub(crate) fn row(&self) -> usize {
@@ -1459,7 +1459,7 @@ impl super::LineBuf {
   }
   pub(crate) fn offset_col_absolute(&self, row: usize, offset: isize) -> usize {
     let mut col = self.cursor.pos.col.saturating_add_signed(offset);
-    let max = self.lines[row].len();
+    let     max = self.lines[row].len();
     col = col.clamp(0, max);
     col
   }
@@ -1496,7 +1496,7 @@ impl super::LineBuf {
   }
   pub(super) fn cursor_on_ws(&self) -> bool {
     let line = self.cur_line();
-    let col = self.cursor.pos.col;
+    let col  = self.cursor.pos.col;
     line.graphemes().get(col).is_some_and(Grapheme::is_ws)
   }
   pub(crate) fn set_cursor(&mut self, mut pos: Pos) {
@@ -1516,7 +1516,7 @@ impl super::LineBuf {
     Pos { row, col }
   }
   pub(super) fn offset_cursor_wrapping(&self, row_offset: isize, col_offset: isize) -> Pos {
-    let row = self.offset_row(row_offset);
+    let row        = self.offset_row(row_offset);
     let (row, col) = self.offset_col_wrapping(row, col_offset);
     Pos { row, col }
   }
@@ -1531,16 +1531,16 @@ impl super::LineBuf {
   }
   pub(super) fn break_line_at_inner(&mut self, pos: Pos, invalidate_cache: bool) {
     let Pos { row, col } = pos;
-    let rest = self.lines[row].split_off(col);
+    let rest             = self.lines[row].split_off(col);
 
     self.lines.insert(row + 1, rest);
     if invalidate_cache {
       self.indent_cache = None;
     }
-    let (_, end) = self.indent_levels_for_row(row + 1);
-    let new_line = self.lines.get_mut(row + 1).unwrap();
+    let     (_, end) = self.indent_levels_for_row(row + 1);
+    let     new_line = self.lines.get_mut(row + 1).unwrap();
 
-    let mut col = 0;
+    let mut col      = 0;
     for tab in std::iter::repeat_n(Grapheme::from('\t'), end) {
       new_line.insert(0, tab);
       col += 1;
@@ -1587,9 +1587,9 @@ impl Display for super::LineBuf {
 
 /// Classic diff algorithm
 pub(super) fn find_diff_range(old: &str, new: &str) -> Diff {
-  let (oa, na) = (old.as_bytes(), new.as_bytes());
-  let mut left = 0;
-  let max_left = oa.len().min(na.len());
+  let     (oa, na) = (old.as_bytes(), new.as_bytes());
+  let mut left     = 0;
+  let     max_left = oa.len().min(na.len());
   while left < max_left && oa[left] == na[left] {
     left += 1;
   }
@@ -1600,7 +1600,7 @@ pub(super) fn find_diff_range(old: &str, new: &str) -> Diff {
     right_new -= 1;
   }
   Diff {
-    start: left,
+    start  : left,
     end_old: right_old,
     end_new: right_new,
   }
@@ -1623,7 +1623,7 @@ mod indent_tests {
   #[test]
   fn closer_dedent_is_idempotent() {
     // Typing fi aligns it with if; a trailing space must not dedent it again.
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = LineBuf::default();
     buf.set_buffer("if true; then\n\techo\n\t");
     buf.move_cursor_to_end();
@@ -1649,7 +1649,7 @@ mod indent_tests {
 
   #[test]
   fn middle_keyword_dedents_one_level() {
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = LineBuf::default();
     buf.set_buffer("if true; then\n\techo\n\t");
     buf.move_cursor_to_end();
@@ -1660,7 +1660,7 @@ mod indent_tests {
   #[test]
   fn stray_closer_does_not_dedent() {
     // A } that closes no open brace shouldn't dedent.
-    let _g = TestGuard::new();
+    let     _g  = TestGuard::new();
     let mut buf = LineBuf::default();
     buf.set_buffer("echo hi\n\t");
     buf.move_cursor_to_end();

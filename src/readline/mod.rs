@@ -126,8 +126,8 @@ macro_rules! mode {
 /// Do note that passing a table name to this struct will create a database table if it doesn't already exist.
 #[derive(Default, Debug)]
 pub(super) struct SimpleEditor {
-  pub buf: LineBuf,
-  pub mode: Emacs,
+  pub buf    : LineBuf,
+  pub mode   : Emacs,
   pub history: Option<History>,
 }
 
@@ -178,7 +178,7 @@ impl SimpleEditor {
     };
     if self.should_grab_history(&cmd) {
       let count = match cmd.motion().unwrap() {
-        Cmd(_, Motion::LineUp) => -1,
+        Cmd(_, Motion::LineUp)   => -1,
         Cmd(_, Motion::LineDown) => 1,
         _ => unreachable!(),
       };
@@ -214,15 +214,15 @@ pub(super) struct LineData {
   pub buffer: String,
   pub cursor: usize,
   pub anchor: Option<usize>,
-  pub hint: Option<String>,
-  pub mode: String,
+  pub hint  : Option<String>,
+  pub mode  : String,
 }
 
 pub(super) struct StatusLine {
-  left: String,
+  left  : String,
   middle: String,
-  right: String,
-  dirty: bool,
+  right : String,
+  dirty : bool,
 }
 
 impl StatusLine {
@@ -260,18 +260,18 @@ impl StatusLine {
   pub(crate) fn render(&mut self, term_width: usize) -> String {
     let (left, middle, right) = self.parts();
 
-    let lw = ui::calc_str_width(left);
-    let mw = ui::calc_str_width(middle);
-    let rw = ui::calc_str_width(right);
+    let lw           = ui::calc_str_width(left);
+    let mw           = ui::calc_str_width(middle);
+    let rw           = ui::calc_str_width(right);
 
-    let right_w = rw.min(term_width);
-    let after_right = term_width.saturating_sub(right_w);
+    let right_w      = rw.min(term_width);
+    let after_right  = term_width.saturating_sub(right_w);
 
-    let middle_w = mw.min(after_right);
+    let middle_w     = mw.min(after_right);
     let after_middle = after_right.saturating_sub(middle_w);
 
-    let left_w = lw.min(after_middle);
-    let leftover = after_middle.saturating_sub(left_w);
+    let left_w       = lw.min(after_middle);
+    let leftover     = after_middle.saturating_sub(left_w);
 
     let middle_str = if middle_w < mw {
       ui::truncate_with_reset(middle, middle_w, "…", Justify::Left)
@@ -307,7 +307,7 @@ impl Default for StatusLine {
 pub(super) struct Prompt {
   ps1_expanded: String,
   psr_expanded: Option<String>,
-  dirty: bool,
+  dirty       : bool,
 }
 
 #[expect(clippy::similar_names)]
@@ -361,7 +361,7 @@ impl Default for Prompt {
       ps1_expanded: prompt::expand_prompt(DEFAULT_PS1.as_bytes())
         .unwrap_or_else(|_| DEFAULT_PS1.to_string()),
       psr_expanded: None,
-      dirty: false,
+      dirty       : false,
     }
   }
 }
@@ -387,10 +387,10 @@ impl LineCmd {
   pub(crate) fn switch_to_normal() -> Self {
     Self::Execute(EditCmd {
       register: RegisterName::default(),
-      verb: Some(verb!(Verb::NormalMode)),
-      motion: None,
-      raw_seq: String::new(),
-      flags: CmdFlags::empty(),
+      verb    : Some(verb!(Verb::NormalMode)),
+      motion  : None,
+      raw_seq : String::new(),
+      flags   : CmdFlags::empty(),
     })
   }
 }
@@ -435,8 +435,8 @@ impl MacroRecord {
 }
 
 struct CompHintRequest {
-  req_gen: u64,
-  buffer: String,
+  req_gen   : u64,
+  buffer    : String,
   cursor_pos: usize,
 }
 
@@ -465,28 +465,28 @@ impl CompHintRequest {
 }
 
 struct HintReply {
-  req_gen: u64,
+  req_gen    : u64,
   token_start: usize,
-  line: String,
+  line       : String,
 }
 
 struct HintWorker {
   request_tx: mpsc::Sender<CompHintRequest>,
-  reply_rx: mpsc::Receiver<HintReply>,
-  wake_rd: OwnedFd,
-  cancel: Arc<AtomicBool>,
-  req_gen: u64,
-  last_sent: Option<(String, usize)>,
+  reply_rx  : mpsc::Receiver<HintReply>,
+  wake_rd   : OwnedFd,
+  cancel    : Arc<AtomicBool>,
+  req_gen   : u64,
+  last_sent : Option<(String, usize)>,
 }
 
 impl HintWorker {
   fn new() -> ShResult<Self> {
     let (request_tx, request_rx) = mpsc::channel::<CompHintRequest>();
-    let (reply_tx, reply_rx) = mpsc::channel::<HintReply>();
-    let (wake_rd, wake_wr) = procio::pipes_high_nonblocking()?;
+    let (reply_tx, reply_rx)     = mpsc::channel::<HintReply>();
+    let (wake_rd, wake_wr)       = procio::pipes_high_nonblocking()?;
 
-    let spec = Shed::completion_spec();
-    let cancel = Arc::new(AtomicBool::new(false));
+    let spec          = Shed::completion_spec();
+    let cancel        = Arc::new(AtomicBool::new(false));
     let worker_cancel = Arc::clone(&cancel);
 
     thread::spawn(move || {
@@ -562,8 +562,8 @@ impl Drop for HintWorker {
 }
 
 pub(super) struct ShedLine {
-  prompt: Prompt,
-  statline: Option<StatusLine>,
+  prompt   : Prompt,
+  statline : Option<StatusLine>,
   completer: Option<Box<dyn Completer>>,
 
   core: EditorCore,
@@ -585,7 +585,7 @@ pub(super) struct ShedLine {
   /// navigating the finder overwrites the buffer with previews.
   hist_preview_orig: Option<(String, usize)>,
 
-  cursor_pos_callback: Option<fn(&mut Self) -> ShResult<()>>,
+  cursor_pos_callback  : Option<fn(&mut Self) -> ShResult<()>>,
   /// Rows the cursor was pushed below the prompt home by `cursor_pos_callback`
   /// last render, so the next render can re-home before clearing the overlay.
   overlay_cursor_offset: u16,
@@ -663,12 +663,12 @@ impl ShedLine {
       buffer: self.core.editor.to_string().replace('\n', "\\n"),
       cursor: self.core.editor.cursor_to_flat(),
       anchor: self.core.editor.anchor_to_flat(),
-      hint: self
+      hint  : self
         .core
         .editor
         .try_join_hint()
         .map(|s| s.replace('\n', "\\n")),
-      mode: self.core.mode.report_mode().to_string(),
+      mode  : self.core.mode.report_mode().to_string(),
     }
   }
 
@@ -790,14 +790,14 @@ impl ShedLine {
   pub(crate) fn curr_keymap_flags(&self) -> KeyMapFlags {
     let mut flags = KeyMapFlags::empty();
     match self.core.mode.report_mode() {
-      ModeReport::Insert => flags |= KeyMapFlags::INSERT,
-      ModeReport::Normal => flags |= KeyMapFlags::NORMAL,
-      ModeReport::Ex => flags |= KeyMapFlags::EX,
-      ModeReport::Visual => flags |= KeyMapFlags::VISUAL,
-      ModeReport::Replace => flags |= KeyMapFlags::REPLACE,
+      ModeReport::Insert   => flags |= KeyMapFlags::INSERT,
+      ModeReport::Normal   => flags |= KeyMapFlags::NORMAL,
+      ModeReport::Ex       => flags |= KeyMapFlags::EX,
+      ModeReport::Visual   => flags |= KeyMapFlags::VISUAL,
+      ModeReport::Replace  => flags |= KeyMapFlags::REPLACE,
       ModeReport::Verbatim => flags |= KeyMapFlags::VERBATIM,
-      ModeReport::Emacs => flags |= KeyMapFlags::EMACS,
-      ModeReport::Remote => flags |= KeyMapFlags::REMOTE,
+      ModeReport::Emacs    => flags |= KeyMapFlags::EMACS,
+      ModeReport::Remote   => flags |= KeyMapFlags::REMOTE,
       ModeReport::Search | ModeReport::RevSearch => {}
     }
 
@@ -936,10 +936,10 @@ impl ShedLine {
     let comp = self.completer.as_mut().unwrap();
     match comp.handle_key(key.clone())? {
       CompResponse::Accept(candidate) => {
-        let comp = self.completer.as_ref().unwrap();
+        let comp       = self.completer.as_ref().unwrap();
         let span_start = comp.token_span().0;
         let new_cursor = span_start + candidate.len();
-        let line = comp.get_completed_line(&candidate);
+        let line       = comp.get_completed_line(&candidate);
         self.core.focused_editor().set_buffer(&line);
         self.core.focused_editor().set_cursor_from_flat(new_cursor);
 
@@ -974,10 +974,10 @@ impl ShedLine {
       CompResponse::Preview(candidate) => {
         // Splice the candidate into the buffer the same way Accept does,
         // but DON'T dismiss the completer. The user is still cycling.
-        let comp = self.completer.as_ref().unwrap();
+        let comp       = self.completer.as_ref().unwrap();
         let span_start = comp.token_span().0;
         let new_cursor = span_start + candidate.len();
-        let line = comp.get_completed_line(&candidate);
+        let line       = comp.get_completed_line(&candidate);
         self.core.focused_editor().set_buffer(&line);
         self.core.focused_editor().set_cursor_from_flat(new_cursor);
         self.update_editor_hint();
@@ -1020,7 +1020,7 @@ impl ShedLine {
     } else if is_exact {
       // We have a single exact match. Execute it.
       let keymap = matches.remove(0);
-      let remap = keymap.remap;
+      let remap  = keymap.remap;
       self.pending_keymap.clear();
 
       let action = keymap.action_expanded();
@@ -1056,7 +1056,7 @@ impl ShedLine {
       return Ok(None);
     }
     let keymap_flags = self.curr_keymap_flags();
-    let matches = Shed::logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
+    let matches      = Shed::logic(|l| l.keymaps_filtered(keymap_flags, &self.pending_keymap));
     let keymap = matches
       .iter()
       .find(|km| km.compare(&self.pending_keymap) == KeyMapMatch::IsExact);
@@ -1064,10 +1064,10 @@ impl ShedLine {
     let (keys, remap) = if let Some(km) = keymap {
       self.pending_keymap.clear();
       let remap = km.remap;
-      let keys = km.action_expanded();
+      let keys  = km.action_expanded();
       (keys, remap)
     } else {
-      let keys = std::mem::take(&mut self.pending_keymap);
+      let keys  = std::mem::take(&mut self.pending_keymap);
       let remap = false;
       (keys, remap)
     };
@@ -1126,7 +1126,7 @@ impl ShedLine {
       return;
     }
 
-    let buf = self.core.editor.to_string();
+    let buf        = self.core.editor.to_string();
     let cursor_pos = self.core.editor.cursor_to_flat();
     if !buf.is_empty() {
       self.worker.dispatch_worker(buf, cursor_pos);
@@ -1151,7 +1151,7 @@ impl ShedLine {
       return;
     }
     self.core.editor.set_hint(Some(Hint::Completion {
-      lines: Lines::to_lines(&reply.line),
+      lines      : Lines::to_lines(&reply.line),
       token_start: reply.token_start,
     }));
     self.needs_redraw = true;
@@ -1254,16 +1254,16 @@ impl ShedLine {
 
     let direction = match *mod_keys {
       ModKeys::SHIFT => -1,
-      _ => 1,
+      _              => 1,
     };
-    let line = self.core.focused_editor().to_string();
+    let line       = self.core.focused_editor().to_string();
     let cursor_pos = self.core.focused_editor().cursor_byte_pos();
 
     let mut comp = self
       .completer
       .take()
       .unwrap_or_else(|| match shopt!(prompt.complete_style) {
-        CompleteStyle::Grid => Box::new(GridCompleter::new()),
+        CompleteStyle::Grid  => Box::new(GridCompleter::new()),
         CompleteStyle::Fuzzy => Box::new(FuzzyCompleter::default()),
       });
     let source = if self.core.mode.report_mode() == ModeReport::Ex {
@@ -1284,7 +1284,7 @@ impl ShedLine {
         // Single candidate, don't store the completer
       }
       Ok(None) => {
-        let candidates = comp.all_candidates();
+        let candidates     = comp.all_candidates();
         let num_candidates = candidates.len();
 
         let cand_vec: Vec<(VarStr, VarStr)> =
@@ -1630,7 +1630,7 @@ impl ShedLine {
 
     let is_ctrl_d_motion = cmd.motion_is(&Motion::HalfScreenDown);
 
-    let is_ex_cmd = cmd.flags.contains(CmdFlags::IS_EX_CMD) || cmd.ex_nd_rule().is_some();
+    let is_ex_cmd        = cmd.flags.contains(CmdFlags::IS_EX_CMD) || cmd.ex_nd_rule().is_some();
     if is_ex_cmd {
       self.ex_history.push(&cmd.raw_seq).ok();
       self.ex_history.reset();
@@ -1679,7 +1679,7 @@ impl ShedLine {
       };
     }
 
-    let before = self.core.editor.to_string();
+    let before        = self.core.editor.to_string();
     let before_cursor = self.core.editor.cursor();
 
     self.core.exec_cmd(cmd, false)?;
@@ -1687,7 +1687,7 @@ impl ShedLine {
     if let Some(keys) = Shed::meta_mut(MetaTab::take_pending_widget_keys) {
       self.replay_keys(keys, false)?;
     }
-    let after = self.core.editor.to_string();
+    let after        = self.core.editor.to_string();
     let after_cursor = self.core.editor.cursor();
 
     if before != after {
@@ -1708,7 +1708,7 @@ impl ShedLine {
     // Drain the UI signals the core raised during execution. These used to be
     // refreshed inline by fire_editor_command/swap_mode before the core split.
     let shell_cmd_ran = std::mem::take(&mut self.core.shell_cmd_ran);
-    let mode_changed = std::mem::take(&mut self.core.mode_changed);
+    let mode_changed  = std::mem::take(&mut self.core.mode_changed);
     self.core.needs_redraw = false;
     self.refresh_statline();
     if shell_cmd_ran || mode_changed {
@@ -1767,8 +1767,8 @@ impl ShedLine {
 
         let prompt_cursor_offset = self.old_layout.as_ref().map_or(0, |l| l.cursor.row);
 
-        let prompt_top = cursor_row.saturating_sub(prompt_cursor_offset);
-        let scroll_amount = prompt_top.saturating_sub(1);
+        let prompt_top           = cursor_row.saturating_sub(prompt_cursor_offset);
+        let scroll_amount        = prompt_top.saturating_sub(1);
 
         if scroll_amount > 0 {
           queue_term!(TermCtl::Scroll(Scroll::Up(scroll_amount as u16))).ok();
@@ -1841,7 +1841,7 @@ impl ShedLine {
 
   fn get_layout(&mut self, line: &str) -> Layout {
     let to_cursor = self.core.editor.window_slice_to_cursor();
-    let cols = Shed::term(Terminal::t_cols);
+    let cols      = Shed::term(Terminal::t_cols);
     let prompt = layout::pad_prompt_for_gutter(
       self.prompt.get_ps1(),
       line,
@@ -2043,7 +2043,7 @@ impl ShedLine {
     let prompt_lines = prompt_end.row;
     // Always reserve at least one row at the bottom for ephemeral status
     // messages; reserve two when the full statline is on as well.
-    let reserved = Terminal::reserved_rows() as usize;
+    let reserved     = Terminal::reserved_rows() as usize;
     // Reserve room for the completer/history overlay too, so a tall buffer plus
     // the overlay below it can't push the prompt off the top and clip it.
     let predicted_overlay_rows: u16 = self
@@ -2066,7 +2066,7 @@ impl ShedLine {
     self.core.editor.set_viewport_cap(Some(viewport_cap));
     self.core.editor.update_scroll_offset();
 
-    let line = self.core.editor.display_window_joined();
+    let     line       = self.core.editor.display_window_joined();
     let mut new_layout = self.get_layout(&line);
 
     let pending_seq = self
@@ -2182,7 +2182,7 @@ impl ShedLine {
     {
       // write our pending sequence
       let to_col = (t_cols - ui::calc_str_width(&seq.to_str_lossy())) as u16;
-      let up = new_layout.cursor.row as u16; // rows to move up from cursor to top line of prompt
+      let up     = new_layout.cursor.row as u16; // rows to move up from cursor to top line of prompt
 
       // Save cursor, move up to top row, move right to column, write sequence,
       // restore cursor
@@ -2200,7 +2200,7 @@ impl ShedLine {
     {
       // write PSR
       let to_col = (t_cols - ui::calc_str_width(&psr)) as u16;
-      let down = new_layout.end.row.saturating_sub(new_layout.cursor.row) as u16;
+      let down   = new_layout.end.row.saturating_sub(new_layout.cursor.row) as u16;
 
       queue_term!(
         TermCtl::Cursor(SavePos),
@@ -2225,7 +2225,7 @@ impl ShedLine {
     // Move to end of layout for overlay draws (completer, history search)
     let has_overlays = self.completer.is_some() || self.history_fzf().is_some();
 
-    let down = new_layout.end.row.saturating_sub(new_layout.cursor.row);
+    let down         = new_layout.end.row.saturating_sub(new_layout.cursor.row);
     if has_overlays && down > 0 {
       queue_term!(TermCtl::Cursor(Down(down as u16))).ok();
       new_layout.cursor.row = new_layout.end.row;
@@ -2237,16 +2237,16 @@ impl ShedLine {
     {
       let mut pending_seq = self.core.mode.pending_seq().unwrap_or_default();
       let prefix_seq = match self.core.mode.report_mode() {
-        ModeReport::Ex => ": ",
+        ModeReport::Ex        => ": ",
         ModeReport::RevSearch => "?",
-        ModeReport::Search => "/",
+        ModeReport::Search    => "/",
         _ => unreachable!(),
       };
       let down = new_layout.end.row - new_layout.cursor.row;
       if let ModeReport::Ex = self.core.mode.report_mode()
         && shopt!(highlight.enable)
       {
-        let cursor_pos = self.core.focused_editor().cursor_to_flat();
+        let     cursor_pos  = self.core.focused_editor().cursor_to_flat();
         let mut highlighted = String::new();
         highlight::highlight_ex(
           &mut highlighted,
@@ -2311,7 +2311,7 @@ impl ShedLine {
     if let Some(statline) = self.statline.as_mut()
       && !final_draw
     {
-      let cols = Shed::term(Terminal::t_cols);
+      let cols     = Shed::term(Terminal::t_cols);
       let rendered = statline.render(cols);
       Shed::term_mut(|t| t.draw_status_line(&rendered));
     }
@@ -2330,7 +2330,7 @@ impl ShedLine {
         if elapsed < 5 {
           // Schedule a wakeup so the row clears when the message expires
           // even if the user isn't typing.
-          let diff = 5000.0 - time.elapsed().as_millis() as f64;
+          let diff    = 5000.0 - time.elapsed().as_millis() as f64;
           let timeout = PollTimeout::try_from(diff.max(0.0) as i32).unwrap_or(PollTimeout::NONE);
           Shed::meta_mut(|m| m.set_poll_timeout(Some(timeout)));
           // Reserved row is single-line; if the message has multiple lines,
@@ -2401,7 +2401,7 @@ impl ShedLine {
     let bottom_row = input_row.saturating_add(from_cursor_to_end);
 
     // status line reserves two rows
-    let gap = (term_rows.saturating_sub(2)).saturating_sub(bottom_row);
+    let gap        = (term_rows.saturating_sub(2)).saturating_sub(bottom_row);
     if gap > 0 {
       queue_term!(
         TermCtl::Cursor(SavePos),

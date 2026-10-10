@@ -23,38 +23,37 @@ use crate::{
 use super::opt::{Opt, OptSpec};
 
 struct RLimits {
-  fds: Option<u64>,
+  fds  : Option<u64>,
   procs: Option<u64>,
   stack: Option<u64>,
-  core: Option<u64>,
-  vmem: Option<u64>,
+  core : Option<u64>,
+  vmem : Option<u64>,
 }
 
-#[rustfmt::skip]
 impl RLimits {
   pub(crate) fn from_opts(opts: &[Opt]) -> ShResult<Self> {
-    let mut fds = None;
+    let mut fds   = None;
     let mut procs = None;
     let mut stack = None;
-    let mut core = None;
-    let mut vmem = None;
+    let mut core  = None;
+    let mut vmem  = None;
 
     let parse_opt = |o: &Opt| -> ShResult<u64> {
       let arg = o.value()?;
-      let val = arg.parse::<u64>().map_err(|v| {
-        sherr!(ParseErr @ o.span(), "invalid argument for {o}: {v}",).with_code(2)
-      })?;
+      let val = arg
+        .parse::<u64>()
+        .map_err(|v| sherr!(ParseErr @ o.span(), "invalid argument for {o}: {v}",).with_code(2))?;
       Ok(val)
     };
 
     for o in opts {
       match o.key() {
-        "fds"   => fds   = Some(parse_opt(o)?),
+        "fds"   => fds = Some(parse_opt(o)?),
         "procs" => procs = Some(parse_opt(o)?),
         "stack" => stack = Some(parse_opt(o)?),
-        "core"  => core  = Some(parse_opt(o)?),
-        "vmem"  => vmem  = Some(parse_opt(o)?),
-        _       => {
+        "core"  => core = Some(parse_opt(o)?),
+        "vmem"  => vmem = Some(parse_opt(o)?),
+        _ => {
           return Err(sherr!(ParseErr @ o.span(), "invalid option: {o}").with_code(2));
         }
       }
@@ -85,7 +84,7 @@ impl super::Builtin for ULimit {
     true
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let span = args.span();
+    let span      = args.span();
     let (_, opts) = args.take_argv();
     let RLimits {
       fds,
@@ -186,7 +185,7 @@ fn ulimit_nproc(span: Span, _procs: rlim_t) -> ShResult<()> {
 
 fn format_symbolic(bits: stat::mode_t) -> String {
   let format_triple = |shift: stat::mode_t, prefix: &str| -> String {
-    let b = (bits >> shift) & 0o7;
+    let     b = (bits >> shift) & 0o7;
     let mut s = String::from(prefix);
     if b & 4 == 0 {
       s.push('r');
@@ -218,9 +217,9 @@ impl super::Builtin for UMask {
   #[expect(clippy::useless_conversion)]
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
-    let symbolic = opts.iter().any(|o| o.key() == "symbolic");
+    let symbolic        = opts.iter().any(|o| o.key() == "symbolic");
 
-    let old = umask(Mode::empty());
+    let old             = umask(Mode::empty());
     umask(old);
     let old_bits = old.bits();
 
@@ -324,7 +323,7 @@ mod tests {
 
   #[test]
   fn ulimit_set_fds_to_current() {
-    let _g = TestGuard::new();
+    let _g           = TestGuard::new();
     let (current, _) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
     test_input(format!("ulimit -n {current}")).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -334,7 +333,7 @@ mod tests {
   #[test]
   #[cfg(linux_like)]
   fn ulimit_set_procs_to_current() {
-    let _g = TestGuard::new();
+    let _g           = TestGuard::new();
     let (current, _) = getrlimit(Resource::RLIMIT_NPROC).unwrap();
     test_input(format!("ulimit -u {current}")).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -343,7 +342,7 @@ mod tests {
 
   #[test]
   fn ulimit_set_stack_to_current() {
-    let _g = TestGuard::new();
+    let _g           = TestGuard::new();
     let (current, _) = getrlimit(Resource::RLIMIT_STACK).unwrap();
     test_input(format!("ulimit -s {current}")).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -352,7 +351,7 @@ mod tests {
 
   #[test]
   fn ulimit_set_vmem_to_current() {
-    let _g = TestGuard::new();
+    let _g           = TestGuard::new();
     let (current, _) = getrlimit(Resource::RLIMIT_AS).unwrap();
     test_input(format!("ulimit -v {current}")).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -363,11 +362,11 @@ mod tests {
 
   #[test]
   fn ulimit_set_core_to_nonzero_value() {
-    let _g = TestGuard::new();
+    let _g        = TestGuard::new();
     let (_, hard) = getrlimit(Resource::RLIMIT_CORE).unwrap();
     // Pick a value well within the hard cap; 4096 bytes is plenty
     // small that any reasonable system allows it.
-    let target = if hard >= 4096 { 4096 } else { hard };
+    let target    = if hard >= 4096 { 4096 } else { hard };
     test_input(format!("ulimit -c {target}")).unwrap();
     assert_eq!(getrlimit(Resource::RLIMIT_CORE).unwrap().0, target);
     // Restore to 0 to leave the test process where it was.
@@ -378,7 +377,7 @@ mod tests {
 
   #[test]
   fn ulimit_applies_multiple_options_in_one_call() {
-    let _g = TestGuard::new();
+    let _g               = TestGuard::new();
     let (fds_current, _) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
     test_input(format!("ulimit -c 0 -n {fds_current}")).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -462,7 +461,7 @@ mod tests {
 
   #[test]
   fn umask_set_octal() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let saved = umask(Mode::from_bits_truncate(0o022));
     test_input("umask 077").unwrap();
     let cur = umask(saved);
@@ -471,7 +470,7 @@ mod tests {
 
   #[test]
   fn umask_set_symbolic_equals() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let saved = umask(Mode::from_bits_truncate(0o000));
     test_input("umask u=rwx,g=rx,o=rx").unwrap();
     let cur = umask(saved);
@@ -480,7 +479,7 @@ mod tests {
 
   #[test]
   fn umask_set_symbolic_plus() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let saved = umask(Mode::from_bits_truncate(0o077));
     test_input("umask g+r").unwrap();
     let cur = umask(saved);
@@ -490,7 +489,7 @@ mod tests {
 
   #[test]
   fn umask_set_symbolic_minus() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let saved = umask(Mode::from_bits_truncate(0o022));
     test_input("umask o-r").unwrap();
     let cur = umask(saved);
@@ -500,7 +499,7 @@ mod tests {
 
   #[test]
   fn umask_set_symbolic_all() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let saved = umask(Mode::from_bits_truncate(0o000));
     test_input("umask a=rx").unwrap();
     let cur = umask(saved);
@@ -510,7 +509,7 @@ mod tests {
 
   #[test]
   fn umask_set_symbolic_plus_all() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let saved = umask(Mode::from_bits_truncate(0o777));
     test_input("umask a+rwx").unwrap();
     let cur = umask(saved);
@@ -519,7 +518,7 @@ mod tests {
 
   #[test]
   fn umask_set_symbolic_minus_all() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let saved = umask(Mode::from_bits_truncate(0o000));
     test_input("umask a-rwx").unwrap();
     let cur = umask(saved);

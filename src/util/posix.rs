@@ -16,14 +16,14 @@ pub(crate) fn execvpe(
   env: &[CString],
 ) -> nix::Result<Infallible> {
   // for nix::unistd::execve
-  let mut envp = env.to_vec();
+  let mut envp      = env.to_vec();
 
   let mut is_denied = false;
 
   if filename.to_bytes().contains(&b'/') {
     let path_bytes = filename.to_bytes();
 
-    let path = VarStr::from([b"_=", path_bytes].concat());
+    let path       = VarStr::from([b"_=", path_bytes].concat());
     envp.push(path.to_cstring_lossy());
 
     let Err(e) = execve(filename, args, &envp);
@@ -35,7 +35,7 @@ pub(crate) fn execvpe(
 
   let path = Shed::vars(|v| v.get_var("PATH"));
   for dir in std::env::split_paths(&path) {
-    let full_path = dir.join(OsStr::from_bytes(filename.to_bytes()));
+    let full_path     = dir.join(OsStr::from_bytes(filename.to_bytes()));
     let full_path_str = VarStr::from(full_path);
 
     envp.retain(|e| !e.as_bytes().starts_with(b"_="));
@@ -50,7 +50,7 @@ pub(crate) fn execvpe(
       }
       Errno::ENOENT | Errno::ENOTDIR => (), // Try next path
       Errno::EACCES => is_denied = true,    // Permission denied
-      _ => return Err(e),                   // Other error
+      _             => return Err(e),       // Other error
     }
   }
 

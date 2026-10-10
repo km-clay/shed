@@ -57,10 +57,10 @@ impl From<VecDeque<LabelBuilder>> for LabelCtx {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Node {
-  pub class: NdRule,
-  pub flags: NdFlags,
-  pub redirs: Option<RedirRange>,
-  pub span: SpanId,
+  pub class  : NdRule,
+  pub flags  : NdFlags,
+  pub redirs : Option<RedirRange>,
+  pub span   : SpanId,
   pub context: Option<LabelRange>,
 }
 
@@ -128,7 +128,7 @@ pub(crate) struct CondNode {
 #[derive(Clone, Debug)]
 pub(crate) struct CaseNode {
   pub patterns: Vec<Tk>,
-  pub body: NodeId,
+  pub body    : NodeId,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -140,7 +140,7 @@ pub(crate) enum ConjunctOp {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ConjunctNode {
-  pub cmd: NodeId,
+  pub cmd     : NodeId,
   pub operator: ConjunctOp,
 }
 
@@ -190,24 +190,24 @@ pub(crate) enum NdKind {
 impl NdRule {
   pub(crate) fn as_nd_kind(&self) -> NdKind {
     match self {
-      Self::List { .. } => NdKind::List,
-      Self::Negate { .. } => NdKind::Negate,
-      Self::IfNode { .. } => NdKind::IfNode,
-      Self::LoopNode { .. } => NdKind::LoopNode,
-      Self::ForNode { .. } => NdKind::ForNode,
-      Self::TryNode { .. } => NdKind::TryNode,
-      Self::DeferNode { .. } => NdKind::DeferNode,
-      Self::ForArith { .. } => NdKind::ForArith,
-      Self::Arithmetic { .. } => NdKind::Arithmetic,
-      Self::CaseNode { .. } => NdKind::CaseNode,
-      Self::Command { .. } => NdKind::Command,
-      Self::Pipeline { .. } => NdKind::Pipeline,
+      Self::List { .. }        => NdKind::List,
+      Self::Negate { .. }      => NdKind::Negate,
+      Self::IfNode { .. }      => NdKind::IfNode,
+      Self::LoopNode { .. }    => NdKind::LoopNode,
+      Self::ForNode { .. }     => NdKind::ForNode,
+      Self::TryNode { .. }     => NdKind::TryNode,
+      Self::DeferNode { .. }   => NdKind::DeferNode,
+      Self::ForArith { .. }    => NdKind::ForArith,
+      Self::Arithmetic { .. }  => NdKind::Arithmetic,
+      Self::CaseNode { .. }    => NdKind::CaseNode,
+      Self::Command { .. }     => NdKind::Command,
+      Self::Pipeline { .. }    => NdKind::Pipeline,
       Self::Conjunction { .. } => NdKind::Conjunction,
-      Self::Assignment { .. } => NdKind::Assignment,
-      Self::Timed { .. } => NdKind::Timed,
-      Self::BraceGrp { .. } => NdKind::BraceGrp,
-      Self::FuncDef { .. } => NdKind::FuncDef,
-      Self::Subshell { .. } => NdKind::Subsh,
+      Self::Assignment { .. }  => NdKind::Assignment,
+      Self::Timed { .. }       => NdKind::Timed,
+      Self::BraceGrp { .. }    => NdKind::BraceGrp,
+      Self::FuncDef { .. }     => NdKind::FuncDef,
+      Self::Subshell { .. }    => NdKind::Subsh,
     }
   }
 }
@@ -226,24 +226,24 @@ pub(crate) enum NdRule {
     else_block: Option<NodeId>,
   },
   LoopNode {
-    kind: LoopKind,
+    kind     : LoopKind,
     cond_node: CondNodeId,
   },
   ForNode {
-    vars: TkRange,
-    arr: TkRange,
-    body: NodeId,
+    vars      : TkRange,
+    arr       : TkRange,
+    body      : NodeId,
     positional: bool, // true if no "in" keyword is passed to the for loop
   },
   TryNode {
-    body: NodeId,
-    err: TkRange,
+    body : NodeId,
+    err  : TkRange,
     catch: Option<NodeId>,
-    ctx: LabelId,
+    ctx  : LabelId,
   },
   DeferNode {
     body: NodeId,
-    ctx: LabelId,
+    ctx : LabelId,
   },
   ForArith {
     init: Option<NodeId>,
@@ -261,12 +261,12 @@ pub(crate) enum NdRule {
     cmd: NodeId,
   },
   CaseNode {
-    pattern: TkId,
+    pattern    : TkId,
     case_blocks: CaseNodeRange,
   },
   Command {
     assignments: ChildRange,
-    argv: TkRange,
+    argv       : TkRange,
   },
   Pipeline {
     cmds: ChildRange,
@@ -276,8 +276,8 @@ pub(crate) enum NdRule {
   },
   Assignment {
     kind: AssignKind,
-    var: TkId,
-    val: TkId,
+    var : TkId,
+    val : TkId,
   },
   Subshell {
     body: NodeId,
@@ -288,7 +288,7 @@ pub(crate) enum NdRule {
   FuncDef {
     name: TkId,
     body: NodeId,
-    ctx: LabelId,
+    ctx : LabelId,
   },
 }
 
@@ -321,8 +321,8 @@ pub(crate) fn node_fork_report(tree: &Ast, node_id: NodeId) -> Vec<ForkBlame> {
 }
 
 fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
-  let src = tree.span_for(node_id).slice();
-  let mut acc = vec![];
+  let     src      = tree.span_for(node_id).slice();
+  let mut acc      = vec![];
   let mut has_fork = false;
 
   macro_rules! blame {
@@ -415,7 +415,7 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
         // if we are here, we are dealing with a function (the complicated case)
         // now we have to traverse the AST of the function and check all of its nodes,
         // even the stuff in command subs
-        let name = node.get_command().unwrap();
+        let name      = node.get_command().unwrap();
         let func_name = tree[name].slice();
 
         // Caller is about to execute this anyway (cmd sub, pipeline, etc),
@@ -448,7 +448,7 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
           match func {
             ShFunc::Defined { is_internal, .. } => match is_internal {
               Some(IsInternal::Resolved(b)) => Some(Some(*b)),
-              Some(IsInternal::Checking) => Some(Some(ForkBehavior::Never)),
+              Some(IsInternal::Checking)    => Some(Some(ForkBehavior::Never)),
               None => None,
             },
             ShFunc::Autoload(_) => Some(None),

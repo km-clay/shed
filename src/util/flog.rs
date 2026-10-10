@@ -29,7 +29,7 @@ impl log::Log for Flog {
     }
 
     let level = ui::stylize_loglevel(record.level());
-    let args = record.args();
+    let args  = record.args();
 
     let line = if let Some(file) = record.file()
       && let Some(line) = record.line()

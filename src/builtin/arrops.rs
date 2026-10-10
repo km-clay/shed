@@ -33,7 +33,7 @@ fn push_val(v: &mut ScopeStack, name: &VarStr, val: &VarStr, span: Span, end: En
   match v.get_arr_mut(&name.to_str_lossy()).ok() {
     Some(arr) => match end {
       End::Front => arr.push_front(val.clone()),
-      End::Back => arr.push_back(val.clone()),
+      End::Back  => arr.push_back(val.clone()),
     },
     None => {
       v.set_var(
@@ -54,7 +54,6 @@ fn push_val(v: &mut ScopeStack, name: &VarStr, val: &VarStr, span: Span, end: En
 /// and whether it is a push or pop.
 trait ArrOp: Builtin {
   /// Common options
-  #[rustfmt::skip]
   fn arr_opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("count"    | b'c', 1),
@@ -70,7 +69,7 @@ trait ArrOp: Builtin {
   fn exec_arr_op(&self, args: super::BuiltinArgs) -> ShResult<()> {
     match self.action() {
       Action::Push => self.push(args),
-      Action::Pop => self.pop(args),
+      Action::Pop  => self.pop(args),
     }
   }
   fn push(&self, mut args: BuiltinArgs) -> ShResult<()> {
@@ -98,7 +97,7 @@ trait ArrOp: Builtin {
             );
           }
 
-          let d = d[0];
+          let d     = d[0];
           let bytes = input.as_bytes();
           let bytes = bytes.strip_suffix(&[d]).unwrap_or(bytes);
           if bytes.is_empty() {
@@ -121,7 +120,7 @@ trait ArrOp: Builtin {
     }
 
     let mut arguments = args.arguments();
-    let name = arguments.next().unwrap().0;
+    let     name      = arguments.next().unwrap().0;
 
     // each argument is pushed to the array
     Shed::vars_mut(|v| -> ShResult<()> {
@@ -134,9 +133,9 @@ trait ArrOp: Builtin {
     util::with_status(0)
   }
   fn pop(&self, args: BuiltinArgs) -> ShResult<()> {
-    let end = self.direction();
+    let     end    = self.direction();
     let mut popped = VecDeque::new();
-    let mut count = 1;
+    let mut count  = 1;
 
     for opt in args.options() {
       match opt.key() {
@@ -162,7 +161,7 @@ trait ArrOp: Builtin {
       for _ in 0..count {
         let pop = |arr: &mut VecDeque<VarStr>| match end {
           End::Front => arr.pop_front(),
-          End::Back => arr.pop_back(),
+          End::Back  => arr.pop_back(),
         };
         let Some(popped_val) =
           Shed::vars_mut(|v| v.get_arr_mut(&arg.to_str_lossy()).ok().and_then(pop))
@@ -280,7 +279,7 @@ impl super::Builtin for Rotate {
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut reverse = false;
-    let mut count = 1;
+    let mut count   = 1;
     for opt in args.options() {
       match opt.key() {
         "reverse" => reverse = true,

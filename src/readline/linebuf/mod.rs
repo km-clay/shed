@@ -79,17 +79,17 @@ pub(crate) const DEFAULT_VIEWPORT_HEIGHT: usize = 40;
 /// features such as line-addressed ex mode commands, this design was what I landed on.
 #[derive(Debug, Clone)]
 pub(crate) struct LineBuf {
-  lines: Lines,
-  hint: Option<Hint>,
+  lines : Lines,
+  hint  : Option<Hint>,
   cursor: Cursor,
 
-  select_mode: Option<SelectMode>,
+  select_mode   : Option<SelectMode>,
   last_selection: Option<(SelectMode, Pos)>,
 
   last_substitute: Option<EditCmd>,
-  last_global: Option<EditCmd>,
-  last_search: Option<Motion>,
-  pending_search: Option<VarStr>,
+  last_global    : Option<EditCmd>,
+  last_search    : Option<Motion>,
+  pending_search : Option<VarStr>,
 
   /// Set when the last command's `f`/`t`/search-style motion found no target.
   /// Drained by macro playback and the `vice` driver to abort a run.
@@ -105,10 +105,10 @@ pub(crate) struct LineBuf {
 
   kill_ring: KillRing,
 
-  concat_points: VecDeque<Pos>,
+  concat_points  : VecDeque<Pos>,
   highlight_cache: Option<HighlightCache>,
-  indent_cache: Option<Vec<(usize, usize)>>,
-  byte_positions: Option<Vec<(usize, Pos)>>,
+  indent_cache   : Option<Vec<(usize, usize)>>,
+  byte_positions : Option<Vec<(usize, Pos)>>,
 
   open_file: Option<VarStr>,
 }
@@ -116,7 +116,7 @@ pub(crate) struct LineBuf {
 #[derive(Clone, Debug)]
 pub(super) struct HighlightCache {
   pub joined: String,
-  pub hash: u64,
+  pub hash  : u64,
   pub tokens: Vec<context::CtxTk>,
 }
 
@@ -127,7 +127,7 @@ impl Default for LineBuf {
       hint: None,
       byte_positions: None,
       cursor: Cursor {
-        pos: Pos { row: 0, col: 0 },
+        pos      : Pos { row: 0, col: 0 },
         exclusive: false,
       },
       select_mode: None,
@@ -214,7 +214,7 @@ impl LineBuf {
       self.exec_verb(cmd)
     };
 
-    let num_lines = self.lines().len();
+    let num_lines   = self.lines().len();
     let cursor_line = self.cursor().row;
 
     Shed::vars_mut(|v| {
@@ -259,14 +259,14 @@ impl LineBuf {
   }
 
   pub(crate) fn attempt_inline_expansion(&mut self, history: &History) -> bool {
-    let hist_res = self.attempt_history_expansion(history);
+    let hist_res  = self.attempt_history_expansion(history);
     let alias_res = shopt!(prompt.expand_aliases) && self.attempt_alias_expansion();
 
     hist_res || alias_res
   }
 
   pub(crate) fn attempt_alias_expansion_all(&mut self) -> bool {
-    let raw = self.to_string();
+    let raw                 = self.to_string();
     let (result, first_pos) = alias::expand_alias_with_pos(raw);
     if first_pos.is_some() {
       self.lines = Lines::to_lines(&result);
@@ -279,7 +279,7 @@ impl LineBuf {
   pub(crate) fn attempt_alias_expansion(&mut self) -> bool {
     self.edit_with(RecordPolicy::Skip, |this| {
       let (to_cursor, mut after_cursor) = this.lines.clone().split_lines(this.cursor.pos);
-      let raw = to_cursor.join();
+      let raw    = to_cursor.join();
       let handle = state::register_source(raw.as_bytes());
       let mut tokens = LexStream::new(&handle, LexFlags::empty())
         .filter_map(Result::ok)
@@ -299,8 +299,8 @@ impl LineBuf {
         return false;
       }
       let tk_start = last.span.start();
-      let word = last.slice();
-      let word = &word.to_string();
+      let word     = last.slice();
+      let word     = &word.to_string();
 
       if let Some(alias) = Shed::logic(|l| l.aliases().get(word).cloned())
         && let alias = alias.to_string()
@@ -322,8 +322,8 @@ impl LineBuf {
 
   pub(crate) fn attempt_history_expansion(&mut self, history: &History) -> bool {
     self.edit_with(RecordPolicy::Skip, |this| {
-      let buf = this.to_string();
-      let tks = context::get_context_tokens(&buf);
+      let     buf             = this.to_string();
+      let     tks             = context::get_context_tokens(&buf);
       let mut hist_expansions = vec![];
       for tk in &tks {
         hist_expansions.extend(tk.find_nodes(|n| *n.class() == CtxTkRule::HistExp));
@@ -359,8 +359,8 @@ impl LineBuf {
       for (range, change) in changes.into_iter().rev() {
         let old_len = this.count_graphemes();
         this.replace_range(range, &change);
-        let new_len = this.count_graphemes();
-        let delta = new_len as isize - old_len as isize;
+        let new_len  = this.count_graphemes();
+        let delta    = new_len as isize - old_len as isize;
         let (nr, nc) = this.offset_col_wrapping(this.row(), delta);
         this.cursor.pos.set(nr, nc);
       }
@@ -374,7 +374,7 @@ impl LineBuf {
       && !pat.is_empty()
       && let Ok(re) = Shed::meta_mut(|m| m.get_regex(&pat.to_str_lossy()))
     {
-      let buf = self.to_string();
+      let buf       = self.to_string();
       let positions = self.byte_positions();
       let lookup = |b: usize| -> Option<usize> {
         positions

@@ -31,10 +31,10 @@ impl Emacs {
     } else {
       self.pending_cmd = Some(EditCmd {
         register: RegisterName::default(),
-        verb: Some(verb),
-        motion: None,
-        raw_seq: String::new(),
-        flags: CmdFlags::default(),
+        verb    : Some(verb),
+        motion  : None,
+        raw_seq : String::new(),
+        flags   : CmdFlags::default(),
       });
     }
   }
@@ -44,10 +44,10 @@ impl Emacs {
     } else {
       self.pending_cmd = Some(EditCmd {
         register: RegisterName::default(),
-        verb: None,
-        motion: Some(motion),
-        raw_seq: String::new(),
-        flags: CmdFlags::default(),
+        verb    : None,
+        motion  : Some(motion),
+        raw_seq : String::new(),
+        flags   : CmdFlags::default(),
       });
     }
   }

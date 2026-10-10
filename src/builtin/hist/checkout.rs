@@ -21,11 +21,11 @@ impl Builtin for HistCheckout {
     let Some((name, span)) = args.arguments().next() else {
       return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name").with_code(2));
     };
-    let name_s = name.to_string();
+    let name_s        = name.to_string();
     let create_branch = args.has_opt("branch");
-    let orphan = args.has_opt("orphan");
+    let orphan        = args.has_opt("orphan");
 
-    let hist = open_history(args.span(), false, true)?;
+    let hist          = open_history(args.span(), false, true)?;
 
     if orphan {
       if hist.branch_exists(&name_s)? {

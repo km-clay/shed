@@ -24,7 +24,7 @@ impl Builtin for HistExport {
       reflog,
     } = hist.dump_all()?;
 
-    let mut map = Map::new();
+    let mut map          = Map::new();
 
     let mut json_entries = vec![];
     for entry in entries {
@@ -42,8 +42,8 @@ impl Builtin for HistExport {
 
     let mut json_branches = vec![];
     for branch in branches {
-      let (name, head) = branch;
-      let mut branch_map = Map::new();
+      let     (name, head) = branch;
+      let mut branch_map   = Map::new();
 
       branch_map.insert("name".into(), Value::String(name));
       branch_map.insert("head".into(), Value::from(head));

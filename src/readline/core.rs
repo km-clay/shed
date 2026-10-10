@@ -33,13 +33,13 @@ pub(crate) struct EditorCore {
 
   /// Set whenever an executed command mutated the buffer; the interactive
   /// wrapper reads and clears this to schedule a redraw.
-  pub needs_redraw: bool,
+  pub needs_redraw : bool,
   /// Set when an executed command shelled out, so the wrapper can refresh the
   /// prompt. Drained by the wrapper.
   pub shell_cmd_ran: bool,
   /// Set when the editing mode changed, so the wrapper can refresh a
   /// mode-aware prompt. Drained by the wrapper.
-  pub mode_changed: bool,
+  pub mode_changed : bool,
 }
 
 impl EditorCore {
@@ -245,7 +245,7 @@ impl EditorCore {
     from_replay: bool,
   ) -> ShResult<()> {
     let mut is_insert_mode = false;
-    let count = cmd.verb_count();
+    let     count          = cmd.verb_count();
 
     let mut mode = if matches!(
       self.mode.report_mode(),
@@ -303,7 +303,7 @@ impl EditorCore {
           mode!(ViVisual)
         }
 
-        Verb::SearchMode => mode!(ViSearch, count),
+        Verb::SearchMode    => mode!(ViSearch, count),
         Verb::RevSearchMode => mode!(ViSearchRev, count),
 
         _ => unreachable!(),
@@ -376,7 +376,7 @@ impl EditorCore {
       return Ok(());
     };
     let EditCmd { verb, .. } = cmd;
-    let Cmd(count, _) = verb.unwrap();
+    let Cmd(count, _)        = verb.unwrap();
     match replay {
       CmdReplay::ModeReplay { cmds, mut repeat } => {
         if count > 1 {
@@ -395,7 +395,6 @@ impl EditorCore {
               }
             }
 
-            #[rustfmt::skip]
             let old_mode_clone = match old_mode {
               ModeReport::Normal    => mode!(ViNormal),
               ModeReport::Insert    => mode!(ViInsert),
@@ -440,10 +439,10 @@ impl EditorCore {
         };
         let repeat_cmd = EditCmd {
           register: RegisterName::default(),
-          verb: cmd.verb,
-          motion: Some(motion),
-          raw_seq: format!("{count};"),
-          flags: CmdFlags::empty(),
+          verb    : cmd.verb,
+          motion  : Some(motion),
+          raw_seq : format!("{count};"),
+          flags   : CmdFlags::empty(),
         };
         self.fire(&repeat_cmd)
       }
@@ -455,10 +454,10 @@ impl EditorCore {
         new_motion.0 = *count;
         let repeat_cmd = EditCmd {
           register: RegisterName::default(),
-          verb: cmd.verb,
-          motion: Some(new_motion),
-          raw_seq: format!("{count},"),
-          flags: CmdFlags::empty(),
+          verb    : cmd.verb,
+          motion  : Some(new_motion),
+          raw_seq : format!("{count},"),
+          flags   : CmdFlags::empty(),
         };
         self.fire(&repeat_cmd)
       }
@@ -471,7 +470,7 @@ impl EditorCore {
     // machine, so it's handled here rather than in LineBuf's ex dispatch (the
     // interactive layer intercepts it earlier; this catches the headless path).
     if let Some((seq, _)) = cmd.try_get_normal_seq() {
-      let seq = seq.to_string();
+      let seq   = seq.to_string();
       let lines = self.normal_seq_lines(&cmd)?;
       return self.run_normal_seq(&lines, &seq);
     }

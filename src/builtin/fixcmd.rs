@@ -54,13 +54,13 @@ enum FixMode {
 
 #[derive(Debug, Default)]
 pub(super) struct FixCmdOpts {
-  editor: Option<VarStr>,
-  replace: Option<(VarStr, VarStr)>,
-  first: Option<RangeArg>,
-  last: Option<RangeArg>,
-  mode: FixMode,
+  editor    : Option<VarStr>,
+  replace   : Option<(VarStr, VarStr)>,
+  first     : Option<RangeArg>,
+  last      : Option<RangeArg>,
+  mode      : FixMode,
   no_numbers: bool,
-  reverse: bool,
+  reverse   : bool,
 }
 
 pub(super) fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCmdOpts)> {
@@ -70,7 +70,7 @@ pub(super) fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCm
   let mut words: Vec<(VarStr, Span)> = vec![];
   let mut opts = FixCmdOpts::default();
   for tk in args {
-    let span = tk.span;
+    let span     = tk.span;
     let expanded = tk.clone().expand()?;
     for word in expanded.get_words().iter() {
       words.push((word.clone(), span));
@@ -78,7 +78,7 @@ pub(super) fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCm
   }
 
   let mut words_iter = words.into_iter().peekable();
-  let mut non_opts = vec![];
+  let mut non_opts   = vec![];
 
   while let Some((word, span)) = words_iter.next() {
     if word == "--" {
@@ -101,8 +101,8 @@ pub(super) fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCm
     }
 
     if opts.mode != FixMode::List {
-      let mut old = String::new();
-      let mut new = String::new();
+      let mut old   = String::new();
+      let mut new   = String::new();
       let mut chars = word.chars();
       match_loop!(chars.next() => ch, {
         '\\' => {
@@ -204,7 +204,7 @@ fn fc_edit(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
     return Err(sherr!(ExecFail, "No editor specified for fc command"));
   };
   let first = opts.first.unwrap_or_default();
-  let last = opts.last.unwrap_or(first.clone());
+  let last  = opts.last.unwrap_or(first.clone());
 
   let entries = get_entry_range(
     hist,
@@ -218,10 +218,10 @@ fn fc_edit(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
   Shed::meta_mut(MetaTab::set_no_hist_save);
 
   for (_, entry) in entries {
-    let old_cmd = entry.command;
+    let     old_cmd = entry.command;
     let mut new_cmd = String::new();
 
-    let mut tmp = NamedTempFile::new()?;
+    let mut tmp     = NamedTempFile::new()?;
     tmp.write_all(old_cmd.as_bytes())?;
     tmp.flush()?;
 
@@ -247,7 +247,7 @@ fn fc_edit(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
 
 fn fc_reexec(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
   let first = opts.first.unwrap_or_default();
-  let last = opts.last.unwrap_or(first.clone());
+  let last  = opts.last.unwrap_or(first.clone());
   let entries = get_entry_range(
     hist,
     Some(first),
@@ -258,7 +258,7 @@ fn fc_reexec(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
 
   Shed::meta_mut(MetaTab::set_no_hist_save);
   for (_, entry) in entries {
-    let mut command = entry.command;
+    let mut command     = entry.command;
     let mut should_push = false;
     if let Some((old, new)) = &opts.replace {
       let new_cmd = command.replace(old.to_str_lossy().as_ref(), new.to_str_lossy().as_ref());
@@ -325,7 +325,7 @@ fn get_entry_range(
       // Negative indices count back from the most recent entry: -1 is
       // the last command, -2 the one before it, etc.
       RangeArg::Number(n) if *n < 0 => Ok(last_id + 1 + i64::from(*n)),
-      RangeArg::Number(n) => Ok(i64::from(*n)),
+      RangeArg::Number(n)           => Ok(i64::from(*n)),
       RangeArg::Prefix(p) => Ok(
         hist
           .query_by_prefix(&p.to_str_lossy())?
@@ -334,12 +334,12 @@ fn get_entry_range(
     }
   };
 
-  let first_id = resolve(&first.unwrap_or(RangeArg::Number(last_id as i32)))?;
-  let last_id = resolve(&last.unwrap_or(RangeArg::Number(first_id as i32)))?;
+  let     first_id = resolve(&first.unwrap_or(RangeArg::Number(last_id as i32)))?;
+  let     last_id  = resolve(&last.unwrap_or(RangeArg::Number(first_id as i32)))?;
 
-  let (lo, hi) = util::ordered(first_id, last_id);
+  let     (lo, hi) = util::ordered(first_id, last_id);
 
-  let mut entries = hist.query_range(lo, hi)?;
+  let mut entries  = hist.query_range(lo, hi)?;
   if reverse || first_id > last_id {
     entries.reverse();
   }
@@ -370,8 +370,8 @@ mod tests {
 
   #[test]
   fn fc_no_args_returns_defaults() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc");
+    let _g               = TestGuard::new();
+    let handle           = state::register_source("fc");
     let (non_opts, opts) = parse(&handle);
     assert!(non_opts.is_empty());
     assert_eq!(opts.mode, FixMode::Edit);
@@ -385,40 +385,40 @@ mod tests {
 
   #[test]
   fn fc_dash_l_sets_list_mode() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -l");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc -l");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::List);
   }
 
   #[test]
   fn fc_dash_n_sets_no_numbers() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -n");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc -n");
     let (_, opts) = parse(&handle);
     assert!(opts.no_numbers);
   }
 
   #[test]
   fn fc_dash_r_sets_reverse() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -r");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc -r");
     let (_, opts) = parse(&handle);
     assert!(opts.reverse);
   }
 
   #[test]
   fn fc_dash_s_sets_rerun_mode() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -s");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc -s");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::Rerun);
   }
 
   #[test]
   fn fc_multiple_flags_compose() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -l -n -r");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc -l -n -r");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::List);
     assert!(opts.no_numbers);
@@ -430,11 +430,11 @@ mod tests {
     // `-l` and `-s` set the same field; whichever comes last wins.
     // This documents the precedence rather than enforcing one — change
     // the assertion if the policy changes.
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -s -l");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc -s -l");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::List);
-    let handle = state::register_source("fc -l -s");
+    let handle    = state::register_source("fc -l -s");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::Rerun);
   }
@@ -443,17 +443,17 @@ mod tests {
 
   #[test]
   fn fc_dash_e_consumes_next_arg_as_editor() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -e vim");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc -e vim");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.editor, Some("vim".into()));
   }
 
   #[test]
   fn fc_dash_e_without_arg_errors() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let handle = state::register_source("fc -e");
-    let tks = lex_fc(&handle);
+    let tks    = lex_fc(&handle);
     let result = parse_fc_args(&tks);
     assert!(result.is_err());
   }
@@ -462,8 +462,8 @@ mod tests {
 
   #[test]
   fn fc_single_number_sets_first() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc 5");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc 5");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Number(5)));
     assert!(opts.last.is_none());
@@ -471,8 +471,8 @@ mod tests {
 
   #[test]
   fn fc_two_numbers_set_first_and_last() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc 5 10");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc 5 10");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Number(5)));
     assert_eq!(opts.last, Some(RangeArg::Number(10)));
@@ -480,8 +480,8 @@ mod tests {
 
   #[test]
   fn fc_negative_numbers_accepted() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -3 -1");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc -3 -1");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Number(-3)));
     assert_eq!(opts.last, Some(RangeArg::Number(-1)));
@@ -491,16 +491,16 @@ mod tests {
   fn fc_zero_is_not_treated_as_number() {
     // `0` parses to i32 but the `num != 0` guard rejects it, so it
     // falls through to the catch-all and becomes a Prefix.
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc 0");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc 0");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Prefix("0".into())));
   }
 
   #[test]
   fn fc_third_number_goes_to_non_opts() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc 1 2 3");
+    let _g               = TestGuard::new();
+    let handle           = state::register_source("fc 1 2 3");
     let (non_opts, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Number(1)));
     assert_eq!(opts.last, Some(RangeArg::Number(2)));
@@ -512,16 +512,16 @@ mod tests {
 
   #[test]
   fn fc_word_sets_first_as_prefix() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc git");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc git");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Prefix("git".into())));
   }
 
   #[test]
   fn fc_two_words_set_first_and_last_as_prefixes() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc git cargo");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc git cargo");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Prefix("git".into())));
     assert_eq!(opts.last, Some(RangeArg::Prefix("cargo".into())));
@@ -529,8 +529,8 @@ mod tests {
 
   #[test]
   fn fc_mixed_number_and_prefix() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc 5 git");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc 5 git");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.first, Some(RangeArg::Number(5)));
     assert_eq!(opts.last, Some(RangeArg::Prefix("git".into())));
@@ -540,8 +540,8 @@ mod tests {
 
   #[test]
   fn fc_dash_s_with_replacement() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -s foo=bar");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc -s foo=bar");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.replace, Some(("foo".into(), "bar".into())));
   }
@@ -551,8 +551,8 @@ mod tests {
     // `\=` should be part of the LHS, not the separator. Single-quote
     // the whole token so the backslash survives shell-level expansion
     // and reaches parse_fc_args literally.
-    let _g = TestGuard::new();
-    let handle = state::register_source(r"fc -s 'foo\=baz=bar'");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source(r"fc -s 'foo\=baz=bar'");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.replace, Some((r"foo\=baz".into(), "bar".into())));
   }
@@ -561,8 +561,8 @@ mod tests {
   fn fc_dash_s_without_equals_is_treated_as_range_arg() {
     // No `=` in the word: the replacement branch falls through, and
     // the word goes to the range-arg catch-all (becoming a Prefix).
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -s plainword");
+    let _g        = TestGuard::new();
+    let handle    = state::register_source("fc -s plainword");
     let (_, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::Rerun);
     assert!(opts.replace.is_none());
@@ -571,8 +571,8 @@ mod tests {
 
   #[test]
   fn fc_dash_s_second_replacement_goes_to_non_opts() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -s a=b c=d");
+    let _g               = TestGuard::new();
+    let handle           = state::register_source("fc -s a=b c=d");
     let (non_opts, opts) = parse(&handle);
     assert_eq!(opts.replace, Some(("a".into(), "b".into())));
     assert_eq!(non_opts.len(), 1);
@@ -583,8 +583,8 @@ mod tests {
 
   #[test]
   fn fc_double_dash_collects_remaining_as_non_opts() {
-    let _g = TestGuard::new();
-    let handle = state::register_source("fc -l -- -r foo 42");
+    let _g               = TestGuard::new();
+    let handle           = state::register_source("fc -l -- -r foo 42");
     let (non_opts, opts) = parse(&handle);
     assert_eq!(opts.mode, FixMode::List);
     // Everything after `--`, including the literal `--`, lands in non_opts.
@@ -648,8 +648,8 @@ mod tests {
   /// newline that `fc_edit`'s `.trim()` strips). Returns the `TempDir`
   /// (keep alive!) and the script path.
   fn overwriting_editor(new_content: &str) -> (TempDir, PathBuf) {
-    let dir = TempDir::new().unwrap();
-    let path = dir.path().join("editor.sh");
+    let dir    = TempDir::new().unwrap();
+    let path   = dir.path().join("editor.sh");
     let script = format!("#!/bin/sh\nprintf '%s\\n' \"{new_content}\" > \"$1\"\n");
     std::fs::write(&path, script).unwrap();
     let mut perms = std::fs::metadata(&path).unwrap().permissions();
@@ -720,7 +720,7 @@ mod tests {
     // of the bad content would surface visibly.
     let _g = TestGuard::new();
     unset_editor_vars();
-    let (_d_opts, opts_path) = overwriting_editor(": picked-opts");
+    let (_d_opts, opts_path)     = overwriting_editor(": picked-opts");
     let (_d_fcedit, fcedit_path) = overwriting_editor(": picked-fcedit");
     set_shell_var("FCEDIT", &fcedit_path.to_string_lossy());
     set_shell_var("EDITOR", &fcedit_path.to_string_lossy());
@@ -732,7 +732,7 @@ mod tests {
     )
     .unwrap();
     // History should now contain the opts-editor's rewrite.
-    let entries = hist_view().query_range(1, 100).unwrap();
+    let entries         = hist_view().query_range(1, 100).unwrap();
     let cmds: Vec<&str> = entries.iter().map(|(_, e)| e.command.as_str()).collect();
     assert!(cmds.contains(&": picked-opts"), "got: {cmds:?}");
     assert!(!cmds.contains(&": picked-fcedit"), "got: {cmds:?}");
@@ -769,7 +769,7 @@ mod tests {
   /// range (which can't be checked by counting history pushes, because
   /// `hist_ignore_dupes` drops consecutive identical commands).
   fn tally_editor(log_path: &Path) -> (TempDir, PathBuf) {
-    let dir = TempDir::new().unwrap();
+    let dir  = TempDir::new().unwrap();
     let path = dir.path().join("editor.sh");
     let script = format!(
       "#!/bin/sh\nprintf 'ran\\n' >> {log:?}\n",
@@ -786,10 +786,10 @@ mod tests {
   fn fc_edit_iterates_over_range() {
     let _g = TestGuard::new();
     unset_editor_vars();
-    let log_dir = TempDir::new().unwrap();
-    let log_path = log_dir.path().join("invocations.log");
+    let log_dir           = TempDir::new().unwrap();
+    let log_path          = log_dir.path().join("invocations.log");
     let (_d, editor_path) = tally_editor(&log_path);
-    let hist = fresh_history();
+    let hist              = fresh_history();
     hist.push(": one").unwrap();
     hist.push(": two").unwrap();
     hist.push(": three").unwrap();
@@ -816,7 +816,7 @@ mod tests {
   fn get_entry_range_negative_one_is_last_entry() {
     // Previously `Number(-1)` resolved to last_id - 1 because of an
     // off-by-one in get_entry_range. Now -1 correctly maps to last_id.
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let hist = fresh_history();
     hist.push(": first").unwrap();
     hist.push(": second").unwrap();
@@ -835,7 +835,7 @@ mod tests {
 
   #[test]
   fn get_entry_range_negative_n_back_from_end() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let hist = fresh_history();
     hist.push(": a").unwrap();
     hist.push(": b").unwrap();
@@ -861,7 +861,7 @@ mod tests {
 
   #[test]
   fn fc_dash_l_dispatches_to_fc_list() {
-    let g = TestGuard::new();
+    let g    = TestGuard::new();
     let hist = fresh_history();
     hist.push(": entry_one").unwrap();
     hist.push(": entry_two").unwrap();
@@ -876,7 +876,7 @@ mod tests {
 
   #[test]
   fn fc_dash_s_dispatches_to_fc_reexec() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let hist = fresh_history();
     hist.push(": prev_cmd").unwrap();
     // `fc -s` re-executes the previous command. With ":" it's harmless.
@@ -890,7 +890,7 @@ mod tests {
   fn fc_default_dispatches_to_fc_edit() {
     // With opts.editor=Some(true) the edit path leaves content
     // unchanged and re-executes the original.
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let hist = fresh_history();
     hist.push(": prev").unwrap();
     // Force FCEDIT to "true" so fc_edit picks a no-op editor.
@@ -910,7 +910,7 @@ mod tests {
 
   #[test]
   fn fc_s_reexecutes_previous_command() {
-    let g = TestGuard::new();
+    let g    = TestGuard::new();
     let hist = fresh_history();
     hist.push("echo prev_output").unwrap();
     test_input("fc -s").unwrap();
@@ -923,7 +923,7 @@ mod tests {
 
   #[test]
   fn fc_s_with_substitution_replaces_and_pushes() {
-    let g = TestGuard::new();
+    let g    = TestGuard::new();
     let hist = fresh_history();
     hist.push("echo original_marker").unwrap();
     let before = hist.last_id();
@@ -946,7 +946,7 @@ mod tests {
 
   #[test]
   fn fc_s_with_substitution_no_match_does_not_push() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let hist = fresh_history();
     hist.push(": something").unwrap();
     let before = hist.last_id();
@@ -960,7 +960,7 @@ mod tests {
 
   #[test]
   fn fc_s_with_range_reexecutes_each() {
-    let g = TestGuard::new();
+    let g    = TestGuard::new();
     let hist = fresh_history();
     hist.push("echo one").unwrap();
     hist.push("echo two").unwrap();

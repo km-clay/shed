@@ -41,7 +41,7 @@ impl KillRing {
   pub(crate) fn next_idx(&mut self) -> usize {
     let idx = match self.selected {
       Some(0) | None => self.kills.len(),
-      Some(i) => i,
+      Some(i)        => i,
     }
     .saturating_sub(1);
     self.selected = Some(idx);

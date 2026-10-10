@@ -56,30 +56,30 @@ impl FromStr for UnaryOp {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s {
-      "-e" => Ok(Self::Exists),
-      "-d" => Ok(Self::Directory),
-      "-f" => Ok(Self::File),
+      "-e"        => Ok(Self::Exists),
+      "-d"        => Ok(Self::Directory),
+      "-f"        => Ok(Self::File),
       "-h" | "-L" => Ok(Self::Symlink),
-      "-r" => Ok(Self::Readable),
-      "-w" => Ok(Self::Writable),
-      "-x" => Ok(Self::Executable),
-      "-s" => Ok(Self::NonEmpty),
-      "-p" => Ok(Self::NamedPipe),
-      "-S" => Ok(Self::Socket),
-      "-b" => Ok(Self::BlockSpecial),
-      "-c" => Ok(Self::CharSpecial),
-      "-k" => Ok(Self::Sticky),
-      "-O" => Ok(Self::UIDOwner),
-      "-G" => Ok(Self::GIDOwner),
-      "-N" => Ok(Self::ModifiedSinceStatusChange),
-      "-u" => Ok(Self::SetUID),
-      "-g" => Ok(Self::SetGID),
-      "-t" => Ok(Self::Terminal),
-      "-n" => Ok(Self::NonNull),
-      "-z" => Ok(Self::Null),
-      "-i" => Ok(Self::IsInteger),
-      "-F" => Ok(Self::IsFloat),
-      _ => Err(sherr!(SyntaxErr, "Invalid unary test operator '{s}'")),
+      "-r"        => Ok(Self::Readable),
+      "-w"        => Ok(Self::Writable),
+      "-x"        => Ok(Self::Executable),
+      "-s"        => Ok(Self::NonEmpty),
+      "-p"        => Ok(Self::NamedPipe),
+      "-S"        => Ok(Self::Socket),
+      "-b"        => Ok(Self::BlockSpecial),
+      "-c"        => Ok(Self::CharSpecial),
+      "-k"        => Ok(Self::Sticky),
+      "-O"        => Ok(Self::UIDOwner),
+      "-G"        => Ok(Self::GIDOwner),
+      "-N"        => Ok(Self::ModifiedSinceStatusChange),
+      "-u"        => Ok(Self::SetUID),
+      "-g"        => Ok(Self::SetGID),
+      "-t"        => Ok(Self::Terminal),
+      "-n"        => Ok(Self::NonNull),
+      "-z"        => Ok(Self::Null),
+      "-i"        => Ok(Self::IsInteger),
+      "-F"        => Ok(Self::IsFloat),
+      _           => Err(sherr!(SyntaxErr, "Invalid unary test operator '{s}'")),
     }
   }
 }
@@ -120,18 +120,18 @@ impl FromStr for BinaryOp {
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s {
       "==" | "=" => Ok(Self::String(StringOp::Equal)),
-      "!=" => Ok(Self::String(StringOp::NotEqual)),
-      "=~" => Ok(Self::String(StringOp::Match)),
-      "-eq" => Ok(Self::Int(IntOp::Eq)),
-      "-ne" => Ok(Self::Int(IntOp::Neq)),
-      "-gt" => Ok(Self::Int(IntOp::Gt)),
-      "-lt" => Ok(Self::Int(IntOp::Lt)),
-      "-ge" => Ok(Self::Int(IntOp::Ge)),
-      "-le" => Ok(Self::Int(IntOp::Le)),
-      "-ot" => Ok(Self::File(FileOp::OlderThan)),
-      "-nt" => Ok(Self::File(FileOp::NewerThan)),
-      "-ef" => Ok(Self::File(FileOp::FileEq)),
-      _ => Err(sherr!(SyntaxErr, "Invalid binary test operator '{s}'")),
+      "!="       => Ok(Self::String(StringOp::NotEqual)),
+      "=~"       => Ok(Self::String(StringOp::Match)),
+      "-eq"      => Ok(Self::Int(IntOp::Eq)),
+      "-ne"      => Ok(Self::Int(IntOp::Neq)),
+      "-gt"      => Ok(Self::Int(IntOp::Gt)),
+      "-lt"      => Ok(Self::Int(IntOp::Lt)),
+      "-ge"      => Ok(Self::Int(IntOp::Ge)),
+      "-le"      => Ok(Self::Int(IntOp::Le)),
+      "-ot"      => Ok(Self::File(FileOp::OlderThan)),
+      "-nt"      => Ok(Self::File(FileOp::NewerThan)),
+      "-ef"      => Ok(Self::File(FileOp::FileEq)),
+      _          => Err(sherr!(SyntaxErr, "Invalid binary test operator '{s}'")),
     }
   }
 }
@@ -139,16 +139,16 @@ impl FromStr for BinaryOp {
 /// Evaluate a single unary test (`-OP OPERAND`).
 fn eval_unary(op: &UnaryOp, operand: &str) -> bool {
   match op {
-    UnaryOp::Exists => PathBuf::from(operand).exists(),
+    UnaryOp::Exists    => PathBuf::from(operand).exists(),
     UnaryOp::Directory => PathBuf::from(operand).metadata().is_ok_and(|m| m.is_dir()),
-    UnaryOp::File => PathBuf::from(operand).metadata().is_ok_and(|m| m.is_file()),
+    UnaryOp::File      => PathBuf::from(operand).metadata().is_ok_and(|m| m.is_file()),
     UnaryOp::Symlink => {
       std::fs::symlink_metadata(operand).is_ok_and(|m| m.file_type().is_symlink())
     }
-    UnaryOp::Readable => nix::unistd::access(operand, AccessFlags::R_OK).is_ok(),
-    UnaryOp::Writable => nix::unistd::access(operand, AccessFlags::W_OK).is_ok(),
+    UnaryOp::Readable   => nix::unistd::access(operand, AccessFlags::R_OK).is_ok(),
+    UnaryOp::Writable   => nix::unistd::access(operand, AccessFlags::W_OK).is_ok(),
     UnaryOp::Executable => nix::unistd::access(operand, AccessFlags::X_OK).is_ok(),
-    UnaryOp::NonEmpty => fs::metadata(operand).is_ok_and(|m| m.len() > 0),
+    UnaryOp::NonEmpty   => fs::metadata(operand).is_ok_and(|m| m.len() > 0),
     UnaryOp::NamedPipe => stat::stat(operand)
       .is_ok_and(|s| SFlag::from_bits_truncate(s.st_mode).contains(SFlag::S_IFIFO)),
     UnaryOp::Socket => stat::stat(operand)
@@ -173,8 +173,8 @@ fn eval_unary(op: &UnaryOp, operand: &str) -> bool {
       Ok(fd) => Shed::sinks(|s| s.get(fd).is_some_and(|s| s.isatty())),
       Err(_) => false,
     },
-    UnaryOp::NonNull => !operand.is_empty(),
-    UnaryOp::Null => operand.is_empty(),
+    UnaryOp::NonNull   => !operand.is_empty(),
+    UnaryOp::Null      => operand.is_empty(),
     UnaryOp::IsInteger => operand.parse::<i64>().is_ok(),
     UnaryOp::IsFloat => operand
       .parse::<f64>()
@@ -235,12 +235,12 @@ fn eval_binary(
         .parse::<i64>()
         .map_err(|_| sherr!(SyntaxErr @ rhs.1, "test: integer expected, got '{}'", &rhs.0))?;
       Ok(match int_op {
-        IntOp::Eq => lhs_i == rhs_i,
+        IntOp::Eq  => lhs_i == rhs_i,
         IntOp::Neq => lhs_i != rhs_i,
-        IntOp::Gt => lhs_i > rhs_i,
-        IntOp::Lt => lhs_i < rhs_i,
-        IntOp::Ge => lhs_i >= rhs_i,
-        IntOp::Le => lhs_i <= rhs_i,
+        IntOp::Gt  => lhs_i > rhs_i,
+        IntOp::Lt  => lhs_i < rhs_i,
+        IntOp::Ge  => lhs_i >= rhs_i,
+        IntOp::Le  => lhs_i <= rhs_i,
       })
     }
     BinaryOp::File(file_op) => {
@@ -255,14 +255,14 @@ fn eval_binary(
         FileOp::NewerThan => mtime(&lhs.0) > mtime(&rhs.0),
         FileOp::OlderThan => mtime(&lhs.0) < mtime(&rhs.0),
         FileOp::FileEq => {
-          let left_file = PathBuf::from(lhs.0.clone());
-          let left_data = left_file.metadata();
+          let left_file  = PathBuf::from(lhs.0.clone());
+          let left_data  = left_file.metadata();
           let right_file = PathBuf::from(rhs.0.clone());
           let right_data = right_file.metadata();
 
           match (left_data, right_data) {
             (Ok(l), Ok(r)) => l.ino() == r.ino() && l.dev() == r.dev(),
-            _ => false,
+            _              => false,
           }
         }
       })
@@ -283,8 +283,8 @@ fn eval_binary(
 ///   2 args → unary op + operand   (e.g. `-f foo`)
 ///   3 args → lhs op rhs           (e.g. `a -eq b`)
 struct ArgvParser<'a> {
-  argv: &'a [(VarStr, Span)],
-  pos: usize,
+  argv    : &'a [(VarStr, Span)],
+  pos     : usize,
   extended: bool,
 }
 
@@ -381,7 +381,7 @@ fn eval_leaf(leaf: &[(VarStr, Span)], extended: bool) -> ShResult<bool> {
     return Ok(false);
   }
   let start_span = leaf.first().unwrap().1;
-  let end_span = leaf.last().unwrap().1;
+  let end_span   = leaf.last().unwrap().1;
   let major_span = start_span.merge_with(end_span).unwrap_or(end_span);
 
   match leaf.len() {
@@ -429,9 +429,9 @@ impl super::Builtin for Test {
       .unwrap_or_default()
       .to_string();
     let want_close: Option<&str> = match opener.as_str() {
-      "[" => Some("]"),
+      "["  => Some("]"),
       "[[" => Some("]]"),
-      _ => None,
+      _    => None,
     };
     if let Some(close) = want_close {
       match argv.last() {
@@ -448,10 +448,10 @@ impl super::Builtin for Test {
   }
 
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let span = args.span();
-    let cmd_span = args.cmd_span();
-    let cmd = cmd_span.slice();
-    let extended = *cmd == *b"[[";
+    let span             = args.span();
+    let cmd_span         = args.cmd_span();
+    let cmd              = cmd_span.slice();
+    let extended         = *cmd == *b"[[";
     let (mut arg_vec, _) = args.take_argv();
     if (*cmd == *b"[" || *cmd == *b"[[") && !arg_vec.is_empty() {
       arg_vec.pop();
@@ -463,7 +463,7 @@ impl super::Builtin for Test {
     // operand as the conjunction operator.
     if arg_vec.len() == 3 && arg_vec[1].0.to_str_lossy().parse::<BinaryOp>().is_ok() {
       return match eval_leaf(&arg_vec, extended).map_err(|e| e.try_blame(span)) {
-        Err(e) => Err(e.with_code(2)),
+        Err(e)  => Err(e.with_code(2)),
         Ok(res) => util::with_status(i32::from(!res)),
       };
     }
@@ -473,7 +473,7 @@ impl super::Builtin for Test {
       .map_err(|e| e.try_blame(span));
 
     match result {
-      Err(e) => Err(e.with_code(2)),
+      Err(e)  => Err(e.with_code(2)),
       Ok(res) => util::with_status(i32::from(!res)),
     }
   }
@@ -490,7 +490,7 @@ mod tests {
 
   #[test]
   fn test_exists_true() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -e {} ]]", file.path().display())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -505,7 +505,7 @@ mod tests {
 
   #[test]
   fn test_is_directory() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     test_input(format!("[[ -d {} ]]", dir.path().display())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -513,7 +513,7 @@ mod tests {
 
   #[test]
   fn test_is_directory_false() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -d {} ]]", file.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);
@@ -521,7 +521,7 @@ mod tests {
 
   #[test]
   fn test_is_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -f {} ]]", file.path().display())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -529,7 +529,7 @@ mod tests {
 
   #[test]
   fn test_is_file_false() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     test_input(format!("[[ -f {} ]]", dir.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);
@@ -537,7 +537,7 @@ mod tests {
 
   #[test]
   fn test_readable() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -r {} ]]", file.path().display())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -545,7 +545,7 @@ mod tests {
 
   #[test]
   fn test_writable() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -w {} ]]", file.path().display())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -553,7 +553,7 @@ mod tests {
 
   #[test]
   fn test_non_empty_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     fs::write(file.path(), "content").unwrap();
     test_input(format!("[[ -s {} ]]", file.path().display())).unwrap();
@@ -562,7 +562,7 @@ mod tests {
 
   #[test]
   fn test_empty_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -s {} ]]", file.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);
@@ -771,7 +771,7 @@ mod tests {
 
   #[test]
   fn test_nt_newer_is_true() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let old = NamedTempFile::new().unwrap();
     let new = NamedTempFile::new().unwrap();
     set_mtime(&old, 1_000);
@@ -787,7 +787,7 @@ mod tests {
 
   #[test]
   fn test_nt_older_is_false() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let old = NamedTempFile::new().unwrap();
     let new = NamedTempFile::new().unwrap();
     set_mtime(&old, 1_000);
@@ -803,7 +803,7 @@ mod tests {
 
   #[test]
   fn test_ot_older_is_true() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let old = NamedTempFile::new().unwrap();
     let new = NamedTempFile::new().unwrap();
     set_mtime(&old, 1_000);
@@ -820,7 +820,7 @@ mod tests {
   #[test]
   fn test_nt_existing_vs_missing_is_true() {
     let _g = TestGuard::new();
-    let f = NamedTempFile::new().unwrap();
+    let f  = NamedTempFile::new().unwrap();
     test_input(format!(
       "[[ {} -nt /tmp/__nt_no_such_file__ ]]",
       f.path().display()
@@ -832,7 +832,7 @@ mod tests {
   #[test]
   fn test_nt_missing_vs_existing_is_false() {
     let _g = TestGuard::new();
-    let f = NamedTempFile::new().unwrap();
+    let f  = NamedTempFile::new().unwrap();
     test_input(format!(
       "[[ /tmp/__nt_no_such_file__ -nt {} ]]",
       f.path().display()
@@ -844,7 +844,7 @@ mod tests {
   #[test]
   fn test_ot_missing_vs_existing_is_true() {
     let _g = TestGuard::new();
-    let f = NamedTempFile::new().unwrap();
+    let f  = NamedTempFile::new().unwrap();
     test_input(format!(
       "[[ /tmp/__ot_no_such_file__ -ot {} ]]",
       f.path().display()
@@ -863,8 +863,8 @@ mod tests {
   #[test]
   fn test_ef_same_file_is_true() {
     let _g = TestGuard::new();
-    let f = NamedTempFile::new().unwrap();
-    let p = f.path().display();
+    let f  = NamedTempFile::new().unwrap();
+    let p  = f.path().display();
     test_input(format!("[[ {p} -ef {p} ]]")).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
   }
@@ -872,8 +872,8 @@ mod tests {
   #[test]
   fn test_ef_different_files_is_false() {
     let _g = TestGuard::new();
-    let a = NamedTempFile::new().unwrap();
-    let b = NamedTempFile::new().unwrap();
+    let a  = NamedTempFile::new().unwrap();
+    let b  = NamedTempFile::new().unwrap();
     test_input(format!(
       "[[ {} -ef {} ]]",
       a.path().display(),
@@ -984,8 +984,8 @@ mod tests {
 
   #[test]
   fn test_symlink_true() {
-    let _g = TestGuard::new();
-    let dir = TempDir::new().unwrap();
+    let _g     = TestGuard::new();
+    let dir    = TempDir::new().unwrap();
     let target = dir.path().join("target");
     fs::write(&target, b"hi").unwrap();
     let link = dir.path().join("link");
@@ -996,7 +996,7 @@ mod tests {
 
   #[test]
   fn test_symlink_false_on_regular_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -h {} ]]", file.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);
@@ -1004,8 +1004,8 @@ mod tests {
 
   #[test]
   fn test_symlink_capital_l_alias() {
-    let _g = TestGuard::new();
-    let dir = TempDir::new().unwrap();
+    let _g     = TestGuard::new();
+    let dir    = TempDir::new().unwrap();
     let target = dir.path().join("target");
     fs::write(&target, b"hi").unwrap();
     let link = dir.path().join("link");
@@ -1019,8 +1019,8 @@ mod tests {
   #[test]
   fn test_executable_true() {
     use std::os::unix::fs::PermissionsExt;
-    let _g = TestGuard::new();
-    let file = NamedTempFile::new().unwrap();
+    let     _g    = TestGuard::new();
+    let     file  = NamedTempFile::new().unwrap();
     let mut perms = fs::metadata(file.path()).unwrap().permissions();
     perms.set_mode(0o755);
     fs::set_permissions(file.path(), perms).unwrap();
@@ -1031,8 +1031,8 @@ mod tests {
   #[test]
   fn test_executable_false() {
     use std::os::unix::fs::PermissionsExt;
-    let _g = TestGuard::new();
-    let file = NamedTempFile::new().unwrap();
+    let     _g    = TestGuard::new();
+    let     file  = NamedTempFile::new().unwrap();
     let mut perms = fs::metadata(file.path()).unwrap().permissions();
     perms.set_mode(0o644);
     fs::set_permissions(file.path(), perms).unwrap();
@@ -1044,8 +1044,8 @@ mod tests {
 
   #[test]
   fn test_named_pipe_true() {
-    let _g = TestGuard::new();
-    let dir = TempDir::new().unwrap();
+    let _g   = TestGuard::new();
+    let dir  = TempDir::new().unwrap();
     let fifo = dir.path().join("myfifo");
     nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRWXU).unwrap();
     test_input(format!("[[ -p {} ]]", fifo.display())).unwrap();
@@ -1054,7 +1054,7 @@ mod tests {
 
   #[test]
   fn test_named_pipe_false_on_regular_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -p {} ]]", file.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);
@@ -1064,8 +1064,8 @@ mod tests {
 
   #[test]
   fn test_socket_true() {
-    let _g = TestGuard::new();
-    let dir = TempDir::new().unwrap();
+    let _g        = TestGuard::new();
+    let dir       = TempDir::new().unwrap();
     let sock_path = dir.path().join("test.sock");
     let _listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
     test_input(format!("[[ -S {} ]]", sock_path.display())).unwrap();
@@ -1074,7 +1074,7 @@ mod tests {
 
   #[test]
   fn test_socket_false_on_regular_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -S {} ]]", file.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);
@@ -1084,7 +1084,7 @@ mod tests {
 
   #[test]
   fn test_block_special_false_on_regular_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -b {} ]]", file.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);
@@ -1099,7 +1099,7 @@ mod tests {
 
   #[test]
   fn test_char_special_false_on_regular_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -c {} ]]", file.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);
@@ -1116,7 +1116,7 @@ mod tests {
 
   #[test]
   fn test_sticky_false_on_regular_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -k {} ]]", file.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);
@@ -1126,7 +1126,7 @@ mod tests {
 
   #[test]
   fn test_uid_owner_true_on_self_created_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -O {} ]]", file.path().display())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -1134,7 +1134,7 @@ mod tests {
 
   #[test]
   fn test_gid_owner_true_on_self_created_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -G {} ]]", file.path().display())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -1151,7 +1151,7 @@ mod tests {
 
   #[test]
   fn test_setuid_false_on_regular_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -u {} ]]", file.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);
@@ -1159,7 +1159,7 @@ mod tests {
 
   #[test]
   fn test_setgid_false_on_regular_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -g {} ]]", file.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);
@@ -1169,7 +1169,7 @@ mod tests {
 
   #[test]
   fn test_modified_since_ctime_false_on_fresh_file() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let file = NamedTempFile::new().unwrap();
     test_input(format!("[[ -N {} ]]", file.path().display())).unwrap();
     assert_ne!(state::Shed::get_status(), 0);

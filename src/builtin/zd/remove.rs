@@ -14,7 +14,7 @@ impl Builtin for ZdRemove {
     vec![opt!("recursive" | b'r')]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let recursive = args.has_opt("recursive");
+    let recursive            = args.has_opt("recursive");
     let targets: Vec<String> = args.arguments().map(|(a, _)| a.to_string()).collect();
 
     if targets.is_empty() {

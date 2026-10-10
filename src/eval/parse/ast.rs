@@ -43,19 +43,19 @@ static AST_GENERATION: AtomicU32 = AtomicU32::new(0);
 /// during the parse.
 #[derive(Debug, Default)]
 pub(crate) struct Ast {
-  nodes: Vec<Node>,             // all ast nodes
-  roots: Vec<NodeId>,           // top-level statements (entry points)
-  tokens: Vec<Tk>,              // every token in the tree
-  redirs: Vec<RedirSpec>,       // every node's list of redirections
-  child_nodes: Vec<NodeId>,     // lists of NodeIds, like for pipelines and stuff
-  case_nodes: Vec<CaseNode>,    // every case node in the tree, used by `case`
-  cond_nodes: Vec<CondNode>,    // every conditional node in the tree, used by `if`/`while`
-  conjuncts: Vec<ConjunctNode>, // every conjunction node in the tree, used by `&&`/`||`
+  nodes      : Vec<Node>,         // all ast nodes
+  roots      : Vec<NodeId>,       // top-level statements (entry points)
+  tokens     : Vec<Tk>,           // every token in the tree
+  redirs     : Vec<RedirSpec>,    // every node's list of redirections
+  child_nodes: Vec<NodeId>,       // lists of NodeIds, like for pipelines and stuff
+  case_nodes : Vec<CaseNode>,     // every case node in the tree, used by `case`
+  cond_nodes : Vec<CondNode>,     // every conditional node in the tree, used by `if`/`while`
+  conjuncts  : Vec<ConjunctNode>, // every conjunction node in the tree, used by `&&`/`||`
 
-  spans: Vec<Span>,
+  spans : Vec<Span>,
   labels: Vec<LabelBuilder>,
 
-  id: u32,
+  id    : u32,
   source: Option<SourceHandle>,
 }
 
@@ -103,9 +103,9 @@ impl Ast {
   }
   pub(crate) fn span_for_range(&self, range: NodeRange) -> Span {
     let first = self[range.first().unwrap()].get_span();
-    let last = self[range.last().unwrap()].get_span();
+    let last  = self[range.last().unwrap()].get_span();
     let start = self[first].start();
-    let end = self[last].end();
+    let end   = self[last].end();
     Span::new(start, end, self[first].source())
   }
   pub(crate) fn span_for(&self, node: NodeId) -> Span {
@@ -124,13 +124,13 @@ impl Ast {
     self.roots.first().copied()
   }
   pub(crate) fn break_off(&self, id: NodeId) -> Self {
-    let mut new = Self::new();
-    let root = self.copy_into(id, &mut new);
+    let mut new  = Self::new();
+    let     root = self.copy_into(id, &mut new);
     new.mark_root(root);
 
     match self.source.as_ref() {
       Some(src) => new.with_source(src.share_handle()),
-      None => new,
+      None      => new,
     }
   }
   fn copy_into(&self, id: NodeId, dst: &mut Self) -> NodeId {
@@ -142,9 +142,9 @@ impl Ast {
       context,
     } = self[id];
 
-    let class = self.copy_class(class, dst);
-    let span = dst.alloc(self[span]);
-    let redirs = redirs.map(|r| dst.alloc_redirs(self[r].to_vec()));
+    let class   = self.copy_class(class, dst);
+    let span    = dst.alloc(self[span]);
+    let redirs  = redirs.map(|r| dst.alloc_redirs(self[r].to_vec()));
     let context = context.map(|r| dst.alloc_labels(self[r].to_vec()));
 
     dst.alloc(Node {
@@ -188,14 +188,14 @@ impl Ast {
         catch,
         ctx,
       } => NdRule::TryNode {
-        body: self.copy_into(body, dst),
-        err: self.copy_tk_range(err, dst),
+        body : self.copy_into(body, dst),
+        err  : self.copy_tk_range(err, dst),
         catch: catch.map(|n| self.copy_into(n, dst)),
-        ctx: dst.alloc(self[ctx].clone()),
+        ctx  : dst.alloc(self[ctx].clone()),
       },
       NdRule::DeferNode { body, ctx } => NdRule::DeferNode {
         body: self.copy_into(body, dst),
-        ctx: dst.alloc(self[ctx].clone()),
+        ctx : dst.alloc(self[ctx].clone()),
       },
       NdRule::ForArith {
         init,
@@ -221,12 +221,12 @@ impl Ast {
         pattern,
         case_blocks,
       } => NdRule::CaseNode {
-        pattern: dst.alloc(self[pattern].clone()),
+        pattern    : dst.alloc(self[pattern].clone()),
         case_blocks: self.copy_case_range(case_blocks, dst),
       },
       NdRule::Command { assignments, argv } => NdRule::Command {
         assignments: self.copy_node_range(assignments, dst),
-        argv: self.copy_tk_range(argv, dst),
+        argv       : self.copy_tk_range(argv, dst),
       },
       NdRule::Pipeline { cmds } => NdRule::Pipeline {
         cmds: self.copy_node_range(cmds, dst),
@@ -248,12 +248,12 @@ impl Ast {
       NdRule::FuncDef { name, body, ctx } => NdRule::FuncDef {
         name: dst.alloc(self[name].clone()),
         body: self.copy_into(body, dst),
-        ctx: dst.alloc(self[ctx].clone()),
+        ctx : dst.alloc(self[ctx].clone()),
       },
     }
   }
   fn copy_node_range(&self, r: ChildRange, dst: &mut Self) -> ChildRange {
-    let ids = self[r].to_vec();
+    let ids                 = self[r].to_vec();
     let mapped: Vec<NodeId> = ids.into_iter().map(|n| self.copy_into(n, dst)).collect();
     dst.alloc_children(mapped)
   }
@@ -285,7 +285,7 @@ impl Ast {
       .cloned()
       .map(|c| CaseNode {
         patterns: c.patterns,
-        body: self.copy_into(c.body, dst),
+        body    : self.copy_into(c.body, dst),
       })
       .collect();
     dst.alloc_cases(mapped)
@@ -294,7 +294,7 @@ impl Ast {
     let mapped: Vec<ConjunctNode> = self[r]
       .iter()
       .map(|c| ConjunctNode {
-        cmd: self.copy_into(c.cmd, dst),
+        cmd     : self.copy_into(c.cmd, dst),
         operator: c.operator,
       })
       .collect();
@@ -324,7 +324,7 @@ impl Ast {
       NdRule::CaseNode { case_blocks, .. } => {
         out.extend(self[*case_blocks].iter().map(|b| b.body));
       }
-      NdRule::Command { assignments, .. } => out.extend_from_slice(&self[*assignments]),
+      NdRule::Command { assignments, .. }            => out.extend_from_slice(&self[*assignments]),
       NdRule::Negate { cmd } | NdRule::Timed { cmd } => out.push(*cmd),
       NdRule::Subshell { body }
       | NdRule::BraceGrp { body }
@@ -574,7 +574,7 @@ impl Index<Option<RedirRange>> for Ast {
   fn index(&self, r: Option<RedirRange>) -> &[RedirSpec] {
     match r {
       Some(r) => &self[r],
-      None => &[],
+      None    => &[],
     }
   }
 }
@@ -585,7 +585,7 @@ impl Index<Option<LabelRange>> for Ast {
   fn index(&self, r: Option<LabelRange>) -> &[LabelBuilder] {
     match r {
       Some(r) => &self[r],
-      None => &[],
+      None    => &[],
     }
   }
 }

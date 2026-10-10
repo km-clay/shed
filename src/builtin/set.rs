@@ -51,22 +51,22 @@ impl SetFlags {
     let mut fields = vec![];
     for flag in self {
       let opt = match flag {
-        _ if flag == SetFlags::ERREXIT => "errexit",
-        _ if flag == SetFlags::ALLEXPORT => "allexport",
+        _ if flag == SetFlags::ERREXIT    => "errexit",
+        _ if flag == SetFlags::ALLEXPORT  => "allexport",
         _ if flag == SetFlags::IGNORE_EOF => "ignoreeof",
-        _ if flag == SetFlags::MONITOR => "monitor",
+        _ if flag == SetFlags::MONITOR    => "monitor",
         _ if flag == SetFlags::NO_CLOBBER => "noclobber",
-        _ if flag == SetFlags::NO_GLOB => "noglob",
-        _ if flag == SetFlags::NO_EXEC => "noexec",
-        _ if flag == SetFlags::NO_LOG => "nolog",
-        _ if flag == SetFlags::NOTIFY => "notify",
-        _ if flag == SetFlags::NO_UNSET => "nounset",
-        _ if flag == SetFlags::VERBOSE => "verbose",
-        _ if flag == SetFlags::VI_MODE => "vi",
+        _ if flag == SetFlags::NO_GLOB    => "noglob",
+        _ if flag == SetFlags::NO_EXEC    => "noexec",
+        _ if flag == SetFlags::NO_LOG     => "nolog",
+        _ if flag == SetFlags::NOTIFY     => "notify",
+        _ if flag == SetFlags::NO_UNSET   => "nounset",
+        _ if flag == SetFlags::VERBOSE    => "verbose",
+        _ if flag == SetFlags::VI_MODE    => "vi",
         _ if flag == SetFlags::EMACS_MODE => "emacs",
-        _ if flag == SetFlags::XTRACE => "xtrace",
-        _ if flag == SetFlags::HASHALL => "hashall",
-        _ if flag == SetFlags::PIPEFAIL => "pipefail",
+        _ if flag == SetFlags::XTRACE     => "xtrace",
+        _ if flag == SetFlags::HASHALL    => "hashall",
+        _ if flag == SetFlags::PIPEFAIL   => "pipefail",
         _ => continue,
       };
       fields.push(opt.to_string());
@@ -76,17 +76,17 @@ impl SetFlags {
 
   pub(crate) fn as_char(self) -> Option<char> {
     match self {
-      _ if self == Self::ALLEXPORT => Some('a'),
-      _ if self == Self::NOTIFY => Some('b'),
+      _ if self == Self::ALLEXPORT  => Some('a'),
+      _ if self == Self::NOTIFY     => Some('b'),
       _ if self == Self::NO_CLOBBER => Some('C'),
-      _ if self == Self::ERREXIT => Some('e'),
-      _ if self == Self::NO_GLOB => Some('f'),
-      _ if self == Self::HASHALL => Some('h'),
-      _ if self == Self::MONITOR => Some('m'),
-      _ if self == Self::NO_EXEC => Some('n'),
-      _ if self == Self::NO_UNSET => Some('u'),
-      _ if self == Self::VERBOSE => Some('v'),
-      _ if self == Self::XTRACE => Some('x'),
+      _ if self == Self::ERREXIT    => Some('e'),
+      _ if self == Self::NO_GLOB    => Some('f'),
+      _ if self == Self::HASHALL    => Some('h'),
+      _ if self == Self::MONITOR    => Some('m'),
+      _ if self == Self::NO_EXEC    => Some('n'),
+      _ if self == Self::NO_UNSET   => Some('u'),
+      _ if self == Self::VERBOSE    => Some('v'),
+      _ if self == Self::XTRACE     => Some('x'),
       _ => None,
     }
   }
@@ -109,7 +109,7 @@ impl TryFrom<char> for SetFlags {
       'u' => Ok(Self::NO_UNSET),
       'v' => Ok(Self::VERBOSE),
       'x' => Ok(Self::XTRACE),
-      _ => Err(sherr!(ParseErr, "invalid option: {}", value,).with_code(2)),
+      _   => Err(sherr!(ParseErr, "invalid option: {}", value,).with_code(2)),
     }
   }
 }
@@ -119,22 +119,22 @@ impl FromStr for SetFlags {
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s {
       "ignoreeof" => Ok(Self::IGNORE_EOF),
-      "vi" => Ok(Self::VI_MODE),
-      "emacs" => Ok(Self::EMACS_MODE),
+      "vi"        => Ok(Self::VI_MODE),
+      "emacs"     => Ok(Self::EMACS_MODE),
       "allexport" => Ok(Self::ALLEXPORT),
-      "notify" => Ok(Self::NOTIFY),
+      "notify"    => Ok(Self::NOTIFY),
       "noclobber" => Ok(Self::NO_CLOBBER),
-      "errexit" => Ok(Self::ERREXIT),
-      "noglob" => Ok(Self::NO_GLOB),
-      "hashall" => Ok(Self::HASHALL),
-      "pipefail" => Ok(Self::PIPEFAIL),
-      "monitor" => Ok(Self::MONITOR),
-      "noexec" => Ok(Self::NO_EXEC),
-      "nounset" => Ok(Self::NO_UNSET),
-      "nolog" => Ok(Self::NO_LOG),
-      "verbose" => Ok(Self::VERBOSE),
-      "xtrace" => Ok(Self::XTRACE),
-      _ => Err(sherr!(ParseErr, "invalid option: {}", s,).with_code(2)),
+      "errexit"   => Ok(Self::ERREXIT),
+      "noglob"    => Ok(Self::NO_GLOB),
+      "hashall"   => Ok(Self::HASHALL),
+      "pipefail"  => Ok(Self::PIPEFAIL),
+      "monitor"   => Ok(Self::MONITOR),
+      "noexec"    => Ok(Self::NO_EXEC),
+      "nounset"   => Ok(Self::NO_UNSET),
+      "nolog"     => Ok(Self::NO_LOG),
+      "verbose"   => Ok(Self::VERBOSE),
+      "xtrace"    => Ok(Self::XTRACE),
+      _           => Err(sherr!(ParseErr, "invalid option: {}", s,).with_code(2)),
     }
   }
 }
@@ -319,8 +319,8 @@ impl super::Builtin for Set {
       }
     }
 
-    let (arg_vec, _) = args.take_argv();
-    let mut it = arg_vec.into_iter().peekable();
+    let     (arg_vec, _) = args.take_argv();
+    let mut it           = arg_vec.into_iter().peekable();
 
     // `set -` (a bare dash) resets every set-option to its default.
     if matches!(it.peek(), Some((w, _)) if w == "-") {
@@ -686,8 +686,8 @@ mod tests {
     /// the same width when measured by display columns.
     #[test]
     fn readable_aligns_flag_names() {
-      let _g = TestGuard::new();
-      let out = build_set_call(true);
+      let _g               = TestGuard::new();
+      let out              = build_set_call(true);
       let lines: Vec<&str> = out.lines().collect();
       // Find the first column index of "on" or "off" on each line.
       let positions: Vec<usize> = lines
@@ -725,7 +725,7 @@ mod tests {
       let _g = TestGuard::new();
       test_input("set -e").unwrap();
       test_input("set +e").unwrap();
-      let call = build_set_call(false);
+      let call      = build_set_call(false);
       // After +e, errexit is off. There must be a `+` cluster
       // containing 'e' somewhere in the output.
       let plus_part = call.split_whitespace().find(|w| w.starts_with('+'));
@@ -751,7 +751,7 @@ mod tests {
     /// Result has no trailing whitespace.
     #[test]
     fn non_readable_trims_trailing_whitespace() {
-      let _g = TestGuard::new();
+      let _g   = TestGuard::new();
       let call = build_set_call(false);
       assert!(!call.ends_with(' '), "got: {call:?}");
     }

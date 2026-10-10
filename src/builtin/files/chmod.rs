@@ -24,7 +24,7 @@ impl Builtin for ChMod {
     true
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let mut status = 0;
+    let mut status    = 0;
     let mut arguments = args.arguments().peekable();
 
     let Some((mode_s, m_span)) = arguments.next() else {
@@ -39,9 +39,9 @@ impl Builtin for ChMod {
       );
     }
 
-    let spec = mode_s.to_str_lossy();
+    let spec   = mode_s.to_str_lossy();
     let digits = spec.strip_prefix("0o").unwrap_or(&spec);
-    let octal = u32::from_str_radix(digits, 8).ok().filter(|&n| n <= 0o7777);
+    let octal  = u32::from_str_radix(digits, 8).ok().filter(|&n| n <= 0o7777);
 
     if octal.is_none() && !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
       return Err(
@@ -94,17 +94,26 @@ impl Builtin for ChMod {
   }
 }
 
-#[rustfmt::skip]
 pub(super) fn handle_err(err: io::Error, file: &VarStr) -> ShErr {
   match err.kind() {
-    EK::NotFound           => sherr!(ExecFail, "cannot set mode of `{file}`: no such file or directory"        ),
-    EK::InvalidFilename    => sherr!(ExecFail, "cannot set mode of `{file}`: invalid filename"                 ),
-    EK::NotADirectory      => sherr!(ExecFail, "cannot set mode of `{file}`: path component is not a directory"),
-    EK::ReadOnlyFilesystem => sherr!(ExecFail, "cannot set mode of `{file}`: read-only filesystem"             ),
-    EK::PermissionDenied   => match err.raw_os_error() {
-      Some(libc::EPERM)    => sherr!(ExecFail, "cannot set mode of `{file}`: operation not permitted"          )
-        .with_note("only the file's owner or the superuser can change its mode".into()),
-      _                    => sherr!(ExecFail, "cannot set mode of `{file}`: permission denied"                ),
+    EK::NotFound => {
+      sherr!(ExecFail, "cannot set mode of `{file}`: no such file or directory"        )
+    }
+    EK::InvalidFilename => {
+      sherr!(ExecFail, "cannot set mode of `{file}`: invalid filename"                 )
+    }
+    EK::NotADirectory => {
+      sherr!(ExecFail, "cannot set mode of `{file}`: path component is not a directory")
+    }
+    EK::ReadOnlyFilesystem => {
+      sherr!(ExecFail, "cannot set mode of `{file}`: read-only filesystem"             )
+    }
+    EK::PermissionDenied => match err.raw_os_error() {
+      Some(libc::EPERM) => {
+        sherr!(ExecFail, "cannot set mode of `{file}`: operation not permitted"          )
+          .with_note("only the file's owner or the superuser can change its mode".into())
+      }
+      _ => sherr!(ExecFail, "cannot set mode of `{file}`: permission denied"                ),
     },
     _ => {
       if err.raw_os_error() == Some(libc::ELOOP) {

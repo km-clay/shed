@@ -24,9 +24,9 @@ two_way_display! {Unit,
 }
 
 struct ClipSpec {
-  limit: usize,
-  unit: Unit,
-  marker: Option<VarStr>,
+  limit  : usize,
+  unit   : Unit,
+  marker : Option<VarStr>,
   justify: Justify,
 }
 
@@ -74,9 +74,9 @@ impl ClipSpec {
     let justify = args
       .opt_value("justify")
       .map(|j| {
-        j.parse::<Justify>().map_err(
-          |v| sherr!(ParseErr @ args.opt_span("justify").unwrap(), "invalid justify value '{v}'"),
-        )
+        j.parse::<Justify>().map_err(|v| {
+          sherr!(ParseErr @ args.opt_span("justify").unwrap(), "invalid justify value '{v}'")
+        })
       })
       .transpose()?
       .unwrap_or(Justify::Left);
@@ -91,57 +91,60 @@ impl ClipSpec {
 }
 
 pub(super) struct Clip;
-#[rustfmt::skip]
-  impl Builtin for Clip {
-    fn opts(&self) -> Vec<OptSpec> {
-      vec![
-        opt!("justify" | b'j', 1),
-        opt!("marker"  | b'm', 1),
-        opt!("bytes"   | b'b'),
-        opt!("chars"   | b'c'),
-        opt!("width"   | b'w'),
-      ]
-    }
-
-    fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
-      let ClipSpec { limit, unit, marker, justify } = ClipSpec::parse_args(&mut args)?;
-
-      let string = self
-        .get_input_with(&mut args, |a| a.arguments().count() <= 1)
-        .map_or_else(|| argv::join_raw_arg_iter(args.arguments().skip(1)).0, VarStr::from);
-
-      let out = match unit {
-        Unit::Bytes => clip_bytes(
-          string.as_bytes(),
-          limit,
-          justify,
-          marker.as_ref().map(VarStr::as_bytes),
-        ),
-        Unit::Chars => clip_chars(
-          &string.to_str_lossy(),
-          limit,
-          justify,
-          marker,
-        ),
-        Unit::Width => ui::truncate_with_marker(
-          &string.to_str_lossy(),
-          limit,
-          &marker.unwrap_or_default().to_str_lossy(),
-          justify,
-        ).to_var_str()
-      };
-
-      procio::out_bytes(&out);
-
-      util::with_status(0)
-    }
+impl Builtin for Clip {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      opt!("justify" | b'j', 1),
+      opt!("marker"  | b'm', 1),
+      opt!("bytes"   | b'b'),
+      opt!("chars"   | b'c'),
+      opt!("width"   | b'w'),
+    ]
   }
 
-fn clip_chars(s: &str, limit: usize, justify: Justify, marker: Option<VarStr>) -> VarStr {
-  let marker = marker.unwrap_or_default();
-  let marker = marker.to_str_lossy();
+  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
+    let ClipSpec {
+      limit,
+      unit,
+      marker,
+      justify,
+    } = ClipSpec::parse_args(&mut args)?;
 
-  let s_len = s.chars().count();
+    let string = self
+      .get_input_with(&mut args, |a| a.arguments().count() <= 1)
+      .map_or_else(
+        || argv::join_raw_arg_iter(args.arguments().skip(1)).0,
+        VarStr::from,
+      );
+
+    let out = match unit {
+      Unit::Bytes => clip_bytes(
+        string.as_bytes(),
+        limit,
+        justify,
+        marker.as_ref().map(VarStr::as_bytes),
+      ),
+      Unit::Chars => clip_chars(&string.to_str_lossy(), limit, justify, marker),
+      Unit::Width => ui::truncate_with_marker(
+        &string.to_str_lossy(),
+        limit,
+        &marker.unwrap_or_default().to_str_lossy(),
+        justify,
+      )
+      .to_var_str(),
+    };
+
+    procio::out_bytes(&out);
+
+    util::with_status(0)
+  }
+}
+
+fn clip_chars(s: &str, limit: usize, justify: Justify, marker: Option<VarStr>) -> VarStr {
+  let marker     = marker.unwrap_or_default();
+  let marker     = marker.to_str_lossy();
+
+  let s_len      = s.chars().count();
   let marker_len = marker.chars().count();
 
   if limit >= s_len {
@@ -165,8 +168,8 @@ fn clip_chars(s: &str, limit: usize, justify: Justify, marker: Option<VarStr>) -
       result
     }
     Justify::Center => {
-      let head = keep / 2;
-      let tail = keep - head;
+      let     head   = keep / 2;
+      let     tail   = keep - head;
       let mut result = String::with_capacity(keep);
 
       result.extend(s.chars().take(head));
@@ -203,8 +206,8 @@ fn clip_bytes(s: &[u8], limit: usize, justify: Justify, marker: Option<&[u8]>) -
 
   let res = match justify {
     Justify::Left => {
-      let with_marker = limit - marker_len;
-      let mut result = Vec::with_capacity(with_marker);
+      let     with_marker = limit - marker_len;
+      let mut result      = Vec::with_capacity(with_marker);
 
       result.extend_from_slice(&s[..with_marker]);
       if let Some(marker) = marker {
@@ -214,9 +217,9 @@ fn clip_bytes(s: &[u8], limit: usize, justify: Justify, marker: Option<&[u8]>) -
       result
     }
     Justify::Center => {
-      let with_marker = limit - marker_len;
-      let half = with_marker / 2;
-      let mut result = Vec::with_capacity(with_marker);
+      let     with_marker = limit - marker_len;
+      let     half        = with_marker / 2;
+      let mut result      = Vec::with_capacity(with_marker);
 
       result.extend_from_slice(&s[..half]);
       if let Some(marker) = marker {
@@ -227,8 +230,8 @@ fn clip_bytes(s: &[u8], limit: usize, justify: Justify, marker: Option<&[u8]>) -
       result
     }
     Justify::Right => {
-      let with_marker = limit - marker_len;
-      let mut result = Vec::with_capacity(with_marker);
+      let     with_marker = limit - marker_len;
+      let mut result      = Vec::with_capacity(with_marker);
 
       if let Some(marker) = marker {
         result.extend_from_slice(marker);

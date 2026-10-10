@@ -91,7 +91,7 @@ impl CmdTimer {
       ));
     }
     let total_user_secs = self.total_user_secs()?;
-    let total_sys_secs = self.total_sys_secs()?;
+    let total_sys_secs  = self.total_sys_secs()?;
     let total_wall_secs = self.wall_end.unwrap().as_secs_f64();
 
     if total_wall_secs > 0.0 {
@@ -108,7 +108,7 @@ impl CmdTimer {
         "attempt to get max RSS from a CmdTimer that is still running"
       ));
     }
-    let self_r_maxrss = self.self_usage_end.unwrap().max_rss();
+    let self_r_maxrss  = self.self_usage_end.unwrap().max_rss();
     let child_r_maxrss = self.child_usage_end.unwrap().max_rss();
     Ok(self_r_maxrss.max(child_r_maxrss))
   }
@@ -152,34 +152,34 @@ impl CmdTimer {
   }
 
   pub(crate) fn total_user_secs(&self) -> ShResult<f64> {
-    let ms = self.total_user_ms()?;
+    let ms      = self.total_user_ms()?;
     let seconds = ms as f64 / 1000.0;
 
     Ok(seconds)
   }
 
   pub(crate) fn total_sys_secs(&self) -> ShResult<f64> {
-    let ms = self.total_sys_ms()?;
+    let ms      = self.total_sys_ms()?;
     let seconds = ms as f64 / 1000.0;
 
     Ok(seconds)
   }
 
   pub(crate) fn tv_to_ms(tv: TimeVal) -> i64 {
-    let sec_millis = (tv.tv_sec() * 1000) as time_t;
+    let sec_millis  = (tv.tv_sec() * 1000) as time_t;
     let usec_millis = (tv.tv_usec() / 1000) as time_t;
     sec_millis + usec_millis
   }
 
   fn format_ms(total: i64) -> String {
-    let millis = total % 1000;
-    let total_secs = total / 1000;
-    let secs = total_secs % 60;
-    let total_mins = total_secs / 60;
-    let mins = total_mins % 60;
-    let hours = total_mins / 60;
+    let     millis     = total % 1000;
+    let     total_secs = total / 1000;
+    let     secs       = total_secs % 60;
+    let     total_mins = total_secs / 60;
+    let     mins       = total_mins % 60;
+    let     hours      = total_mins / 60;
 
-    let mut result = String::new();
+    let mut result     = String::new();
     if hours > 0 {
       write!(result, "{hours}h").unwrap();
     }
@@ -228,7 +228,7 @@ impl CmdTimer {
     }
 
     let mut output = String::new();
-    let mut chars = fmt_str.chars().peekable();
+    let mut chars  = fmt_str.chars().peekable();
 
     match_loop!(chars.next() => ch, {
       '\\' => {
@@ -354,7 +354,7 @@ impl CmdTimer {
       params::with_vars(vars, || autocmd!(OnTimeReport));
     } else {
       let fmt_str = params::get_time_fmt();
-      let report = self.format_report(&fmt_str.to_str_lossy())?;
+      let report  = self.format_report(&fmt_str.to_str_lossy())?;
       system_msg!("{report}");
     }
     Ok(())
@@ -496,7 +496,7 @@ impl Drop for XtraceGuard {
 #[derive(Debug, Clone, Default)]
 struct RegexCache {
   regexes: HashMap<String, Rc<Regex>>,
-  globs: HashMap<Rc<[u8]>, Rc<Pattern>>,
+  globs  : HashMap<Rc<[u8]>, Rc<Pattern>>,
 }
 
 impl RegexCache {
@@ -525,7 +525,7 @@ impl RegexCache {
 /// Directory jump table used by `prevd`/`nextd`
 #[derive(Debug, Clone, Default)]
 struct JumpTable {
-  table: VecDeque<Rc<PathBuf>>,
+  table : VecDeque<Rc<PathBuf>>,
   cursor: usize,
 }
 
@@ -600,7 +600,7 @@ impl Drop for RedirForkGuard {
 #[expect(clippy::struct_excessive_bools)]
 pub(crate) struct MetaTab {
   // Time when the shell was started, used for calculating shell uptime
-  shell_time: Instant,
+  shell_time       : Instant,
   // whether or not we initially started as an interactive shell
   // not to be confused with interactive context guarding with Terminal and TermGuard
   interactive_shell: bool,
@@ -610,16 +610,16 @@ pub(crate) struct MetaTab {
 
   // command running duration
   runtime_start: Option<Instant>,
-  runtime_stop: Option<Instant>,
+  runtime_stop : Option<Instant>,
 
   last_job: Option<Job>,
 
   // pushd/popd stack
-  dir_stack: VecDeque<PathBuf>,
+  dir_stack     : VecDeque<PathBuf>,
   // getopts char offset for opts like -abc
   getopts_offset: usize,
 
-  old_path: Option<VarStr>,
+  old_path  : Option<VarStr>,
   // utility cache - commands, functions, aliases, etc
   path_cache: PathTable,
 
@@ -640,11 +640,11 @@ pub(crate) struct MetaTab {
   // pending keys from widget function
   pending_widget_keys: Vec<KeyEvent>,
 
-  func_depth: usize,
-  loop_depth: usize,
-  xtrace_depth: usize,
+  func_depth   : usize,
+  loop_depth   : usize,
+  xtrace_depth : usize,
   fork_builtins: bool,
-  fork_redirs: bool,
+  fork_redirs  : bool,
 
   // completion candidates given by compadd
   comp_add_candidates: Vec<Candidate>,
@@ -696,7 +696,7 @@ impl Clone for MetaTab {
       last_cmdsub_status: self.last_cmdsub_status,
       jump_table: self.jump_table.clone(),
 
-      last_job: None,
+      last_job     : None,
       procsub_stack: vec![],
     }
   }
@@ -963,11 +963,11 @@ impl MetaTab {
         longest = l.len() as i32;
       }
     }
-    let longest = longest as usize;
+    let     longest = longest as usize;
 
-    let version = env!("CARGO_PKG_VERSION");
+    let     version = env!("CARGO_PKG_VERSION");
 
-    let mut buf = String::new();
+    let mut buf     = String::new();
 
     // ╭─ shed v0.xx.x ───────────╮
     let title = format!(
@@ -1055,7 +1055,7 @@ impl MetaTab {
     std::mem::take(&mut self.last_was_func_def)
   }
   pub(crate) fn get_exec_files_in_cwd() -> Vec<Rc<Utility>> {
-    let cwd = var!("PWD");
+    let     cwd   = var!("PWD");
     let mut files = vec![];
     if let Ok(entries) = Path::new(&cwd).read_dir() {
       for entry in entries.flatten() {
@@ -1190,12 +1190,12 @@ impl MetaTab {
     &mut self.dir_stack
   }
   pub(crate) fn get_cmds_in_path() -> Vec<Rc<Utility>> {
-    let path = var!("PATH");
-    let path = path.to_str_lossy();
-    let paths = paths::path_list_entries(&path);
+    let     path  = var!("PATH");
+    let     path  = path.to_str_lossy();
+    let     paths = paths::path_list_entries(&path);
 
-    let mut seen = crate::HashSet::default();
-    let mut cmds = vec![];
+    let mut seen  = crate::HashSet::default();
+    let mut cmds  = vec![];
 
     for entry in paths {
       let is_exec = paths::is_executable_file(&entry);
@@ -1325,7 +1325,7 @@ mod cmd_timer_tests {
   #[test]
   fn format_report_literal_text_passes_through() {
     let _g = TestGuard::new();
-    let t = stopped_timer();
+    let t  = stopped_timer();
     assert_eq!(t.format_report("hello world").unwrap(), "hello world");
   }
 
@@ -1334,15 +1334,15 @@ mod cmd_timer_tests {
     // `\X` consumes the backslash and pushes X verbatim — no special
     // interpretation (so \n is the literal char 'n').
     let _g = TestGuard::new();
-    let t = stopped_timer();
+    let t  = stopped_timer();
     assert_eq!(t.format_report("\\n").unwrap(), "n");
     assert_eq!(t.format_report("a\\\\b").unwrap(), "a\\b");
   }
 
   #[test]
   fn format_report_e_emits_wall_seconds() {
-    let _g = TestGuard::new();
-    let t = stopped_timer();
+    let _g  = TestGuard::new();
+    let t   = stopped_timer();
     let out = t.format_report("%E").unwrap();
     assert!(out.chars().all(|c| c.is_ascii_digit()), "got: {out:?}");
   }
@@ -1350,23 +1350,23 @@ mod cmd_timer_tests {
   #[test]
   fn format_report_u_and_s_emit_seconds() {
     let _g = TestGuard::new();
-    let t = stopped_timer();
+    let t  = stopped_timer();
     assert!(!t.format_report("%U").unwrap().is_empty());
     assert!(!t.format_report("%S").unwrap().is_empty());
   }
 
   #[test]
   fn format_report_p_emits_percentage_with_trailing_pct() {
-    let _g = TestGuard::new();
-    let t = stopped_timer();
+    let _g  = TestGuard::new();
+    let t   = stopped_timer();
     let out = t.format_report("%P").unwrap();
     assert!(out.ends_with('%'), "got: {out:?}");
   }
 
   #[test]
   fn format_report_m_emits_maxrss() {
-    let _g = TestGuard::new();
-    let t = stopped_timer();
+    let _g  = TestGuard::new();
+    let t   = stopped_timer();
     let out = t.format_report("%M").unwrap();
     // Just digits (or possibly a sign on weird platforms).
     assert!(
@@ -1380,7 +1380,7 @@ mod cmd_timer_tests {
     // %mE / %mU / %mS — wall/user/sys in milliseconds.
     // %uE / %uU / %uS — wall/user/sys in microseconds.
     let _g = TestGuard::new();
-    let t = stopped_timer();
+    let t  = stopped_timer();
     for spec in ["%mE", "%mU", "%mS", "%uE", "%uU", "%uS"] {
       let out = t.format_report(spec).unwrap();
       assert!(
@@ -1396,7 +1396,7 @@ mod cmd_timer_tests {
     // We pinned format_ms's shape above ("Xm" + "Y.ZZZ"), so the output
     // here must contain at least an 'm' and a '.'.
     let _g = TestGuard::new();
-    let t = stopped_timer();
+    let t  = stopped_timer();
     for spec in ["%*E", "%*U", "%*S"] {
       let out = t.format_report(spec).unwrap();
       assert!(out.contains('m') && out.contains('.'), "{spec} → {out:?}");
@@ -1408,21 +1408,21 @@ mod cmd_timer_tests {
   #[test]
   fn format_report_unknown_m_subspec_passes_through_literally() {
     let _g = TestGuard::new();
-    let t = stopped_timer();
+    let t  = stopped_timer();
     assert_eq!(t.format_report("%mZ").unwrap(), "%mZ");
   }
 
   #[test]
   fn format_report_unknown_u_subspec_passes_through_literally() {
     let _g = TestGuard::new();
-    let t = stopped_timer();
+    let t  = stopped_timer();
     assert_eq!(t.format_report("%uZ").unwrap(), "%uZ");
   }
 
   #[test]
   fn format_report_unknown_star_subspec_passes_through_literally() {
     let _g = TestGuard::new();
-    let t = stopped_timer();
+    let t  = stopped_timer();
     assert_eq!(t.format_report("%*Z").unwrap(), "%*Z");
   }
 
@@ -1430,8 +1430,8 @@ mod cmd_timer_tests {
   fn format_report_unknown_top_level_spec_breaks_loop() {
     // The catchall `_` arm in the %-dispatch pushes %{param} and breaks,
     // so anything after the unknown spec is silently dropped.
-    let _g = TestGuard::new();
-    let t = stopped_timer();
+    let _g  = TestGuard::new();
+    let t   = stopped_timer();
     let out = t.format_report("%Q extra").unwrap();
     assert!(out.contains("%Q"), "got: {out:?}");
     assert!(!out.contains("extra"), "got: {out:?}");
@@ -1440,14 +1440,14 @@ mod cmd_timer_tests {
   #[test]
   fn format_report_trailing_percent_terminates_cleanly() {
     let _g = TestGuard::new();
-    let t = stopped_timer();
+    let t  = stopped_timer();
     assert_eq!(t.format_report("hello%").unwrap(), "hello");
   }
 
   #[test]
   fn format_report_trailing_backslash_terminates_cleanly() {
     let _g = TestGuard::new();
-    let t = stopped_timer();
+    let t  = stopped_timer();
     assert_eq!(t.format_report("hello\\").unwrap(), "hello");
   }
 
@@ -1455,8 +1455,8 @@ mod cmd_timer_tests {
   fn format_report_trailing_m_with_no_subspec_breaks() {
     // `%m` with nothing after — the inner `let Some(param2) = chars.next() else { break; };`
     // fires on the missing subspec.
-    let _g = TestGuard::new();
-    let t = stopped_timer();
+    let _g  = TestGuard::new();
+    let t   = stopped_timer();
     let out = t.format_report("ms=%m").unwrap();
     assert_eq!(out, "ms=");
   }
@@ -1569,7 +1569,7 @@ mod jump_table_tests {
     use std::fs;
     use tempfile::TempDir;
 
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let root = TempDir::new().unwrap();
     let (a, b, c) = (
       root.path().join("a"),
@@ -1587,7 +1587,7 @@ mod jump_table_tests {
     // pull the back target out from under the jump table
     fs::remove_dir(&b).unwrap();
 
-    let cwd_before = std::env::current_dir().unwrap();
+    let cwd_before  = std::env::current_dir().unwrap();
     let back_before = super::Shed::meta(|m| m.back_dirs().count());
 
     // prevd into the now-missing dir must fail…

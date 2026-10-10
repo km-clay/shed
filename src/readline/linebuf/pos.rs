@@ -6,24 +6,24 @@ pub(crate) enum MotionKind {
   /// `start` is not necessarily less than `end`. `start` in most cases
   /// is the cursor's position.
   Char {
-    start: Pos,
-    end: Pos,
+    start    : Pos,
+    end      : Pos,
     inclusive: bool,
   },
   /// A range of whole lines.
   Line {
-    start: usize,
-    end: usize,
+    start    : usize,
+    end      : usize,
     inclusive: bool,
   },
   Block {
     start: Pos,
-    end: Pos,
+    end  : Pos,
   },
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Cursor {
-  pub pos: Pos,
+  pub pos      : Pos,
   pub exclusive: bool,
 }

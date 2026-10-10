@@ -40,8 +40,8 @@ trait DirJump {
 
   /// The function executed in [`Builtin::execute`](super::Builtin::execute)
   fn exec_jump(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let dir_list = self.dir_list();
-    let dir_jump = self.dir_jump();
+    let dir_list      = self.dir_list();
+    let dir_jump      = self.dir_jump();
     let fire_autocmds = !args.has_opt("no-autocmd");
 
     if args.has_opt("list") {

@@ -11,7 +11,6 @@ impl super::Builtin for KeyMapBuiltin {
   fn strict_opts(&self) -> bool {
     true
   }
-  #[rustfmt::skip]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("normal"     | b'n'),
@@ -25,20 +24,19 @@ impl super::Builtin for KeyMapBuiltin {
       opt!("remove"           ).argc(1),
     ]
   }
-  #[rustfmt::skip]
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let span = args.span();
-    let remove = args.opt_value("remove");
-    let remap = args.has_opt("recursive");
+    let     span   = args.span();
+    let     remove = args.opt_value("remove");
+    let     remap  = args.has_opt("recursive");
 
-    let mut flags = KeyMapFlags::empty();
-    flags.set(KeyMapFlags::NORMAL,     args.has_opt("normal"    ));
-    flags.set(KeyMapFlags::INSERT,     args.has_opt("insert"    ));
-    flags.set(KeyMapFlags::VISUAL,     args.has_opt("visual"    ));
-    flags.set(KeyMapFlags::EX,         args.has_opt("ex"        ));
+    let mut flags  = KeyMapFlags::empty();
+    flags.set(KeyMapFlags::NORMAL, args.has_opt("normal"));
+    flags.set(KeyMapFlags::INSERT, args.has_opt("insert"));
+    flags.set(KeyMapFlags::VISUAL, args.has_opt("visual"));
+    flags.set(KeyMapFlags::EX, args.has_opt("ex"));
     flags.set(KeyMapFlags::OP_PENDING, args.has_opt("op-pending"));
-    flags.set(KeyMapFlags::REPLACE,    args.has_opt("replace"   ));
-    flags.set(KeyMapFlags::EMACS,      args.has_opt("emacs"     ));
+    flags.set(KeyMapFlags::REPLACE, args.has_opt("replace"));
+    flags.set(KeyMapFlags::EMACS, args.has_opt("emacs"));
 
     if args.no_arguments() && remove.is_none() {
       display_keymaps(flags);
@@ -116,9 +114,9 @@ mod tests {
   #[test]
   fn compare_exact_match() {
     let km = KeyMap {
-      flags: KeyMapFlags::NORMAL,
-      remap: false,
-      keys: "jk".into(),
+      flags : KeyMapFlags::NORMAL,
+      remap : false,
+      keys  : "jk".into(),
       action: "<ESC>".into(),
     };
     let keys = expand_keymap("jk");
@@ -128,9 +126,9 @@ mod tests {
   #[test]
   fn compare_prefix_match() {
     let km = KeyMap {
-      flags: KeyMapFlags::NORMAL,
-      remap: false,
-      keys: "jk".into(),
+      flags : KeyMapFlags::NORMAL,
+      remap : false,
+      keys  : "jk".into(),
       action: "<ESC>".into(),
     };
     let keys = expand_keymap("j");
@@ -140,9 +138,9 @@ mod tests {
   #[test]
   fn compare_no_match() {
     let km = KeyMap {
-      flags: KeyMapFlags::NORMAL,
-      remap: false,
-      keys: "jk".into(),
+      flags : KeyMapFlags::NORMAL,
+      remap : false,
+      keys  : "jk".into(),
       action: "<ESC>".into(),
     };
     let keys = expand_keymap("zz");

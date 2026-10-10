@@ -107,7 +107,7 @@ pub(crate) fn send_to_socket(msg: &str) -> ShResult<()> {
   let Some(path) = try_var!("SHED_SOCK") else {
     return Err(sherr!(InternalErr, "Socket path not found"));
   };
-  let mut stream = UnixStream::connect(path)?;
+  let mut stream  = UnixStream::connect(path)?;
 
   let mut payload = String::with_capacity(msg.len() + 1);
   payload.push_str(msg);
@@ -131,12 +131,12 @@ pub(crate) enum StatusHeader {
 impl StatusHeader {
   fn from_bytes(s: &[u8]) -> Option<Self> {
     match s.to_ascii_lowercase().as_slice() {
-      b"code" => Some(Self::ExitCode),
+      b"code"    => Some(Self::ExitCode),
       b"command" => Some(Self::CommandName),
       b"runtime" => Some(Self::Runtime),
-      b"pid" => Some(Self::Pid),
-      b"pgid" => Some(Self::Pgid),
-      _ => None,
+      b"pid"     => Some(Self::Pid),
+      b"pgid"    => Some(Self::Pgid),
+      _          => None,
     }
   }
   fn all_headers() -> Vec<Self> {
@@ -217,8 +217,8 @@ impl QueryHeader {
     let mut flags = VarFlags::empty();
     while let Some(flag) = args.next() {
       match flag.to_ascii_lowercase().as_slice() {
-        b"export" => flags |= VarFlags::EXPORT,
-        b"local" => flags |= VarFlags::LOCAL,
+        b"export"   => flags |= VarFlags::EXPORT,
+        b"local"    => flags |= VarFlags::LOCAL,
         b"readonly" => flags |= VarFlags::READONLY,
         _ => {
           return Err(sherr!(
@@ -236,9 +236,9 @@ impl QueryHeader {
     args: &mut impl Iterator<Item = &'a [u8]>,
   ) -> ShResult<Self> {
     match query_kind.to_ascii_lowercase().as_slice() {
-      b"cwd" => Ok(QueryHeader::Cwd),
+      b"cwd"    => Ok(QueryHeader::Cwd),
       b"status" => Self::parse_status(args),
-      b"var" => Self::parse_var(args),
+      b"var"    => Self::parse_var(args),
       _ => Err(sherr!(
         ParseErr,
         "Unknown query kind in 'query' request: {}",
@@ -320,7 +320,7 @@ impl SocketRequest {
 
     let header = match kind {
       b"post-error" => PrivateHeader::PostError(payload.into()),
-      _ => return err,
+      _             => return err,
     };
 
     Ok(Self::Private(header))
@@ -341,25 +341,25 @@ impl SocketRequest {
     // take care of no-argument requests
     match request_kind.trim() {
       b"subscribe" => return Ok(Self::Subscribe),
-      b"redraw" => return Ok(Self::RefreshPrompt),
-      _ => {}
+      b"redraw"    => return Ok(Self::RefreshPrompt),
+      _            => {}
     }
 
-    let rest = r[request_kind.len()..].trim();
+    let     rest  = r[request_kind.len()..].trim();
     let mut bytes = SliceCursor::new(rest);
 
     // skip separator bytes
     bytes.bump_while(|b| !b.is_ascii_alphanumeric() && b.is_ascii_graphic());
-    let sep_end = bytes.pos();
+    let     sep_end   = bytes.pos();
 
     // split the rest on the separator bytes
-    let remainder = bytes.into_slice();
-    let mut args = remainder.split_str(&rest[..sep_end]);
+    let     remainder = bytes.into_slice();
+    let mut args      = remainder.split_str(&rest[..sep_end]);
 
     match request_kind.trim() {
-      b"msg" => Self::parse_msg(&mut args),
+      b"msg"   => Self::parse_msg(&mut args),
       b"query" => Self::parse_query(&mut args),
-      b"line" => Self::parse_line(&mut args),
+      b"line"  => Self::parse_line(&mut args),
 
       _ => Err(sherr!(
         ParseErr,
@@ -415,8 +415,8 @@ impl SocketRequest {
         match header2 {
           b"buffer" => Ok(Self::LineGet(LineHeader::Buffer)),
           b"cursor" => Ok(Self::LineGet(LineHeader::Cursor)),
-          b"hint" => Ok(Self::LineGet(LineHeader::Hint)),
-          b"mode" => Ok(Self::LineGet(LineHeader::Mode)),
+          b"hint"   => Ok(Self::LineGet(LineHeader::Hint)),
+          b"mode"   => Ok(Self::LineGet(LineHeader::Mode)),
           b"anchor" => Ok(Self::LineGet(LineHeader::Anchor)),
           _ => Err(sherr!(
             ParseErr,
@@ -438,8 +438,8 @@ impl SocketRequest {
         match header2 {
           b"buffer" => Ok(Self::LineSet(LineHeader::Buffer, value.into())),
           b"cursor" => Ok(Self::LineSet(LineHeader::Cursor, value.into())),
-          b"hint" => Ok(Self::LineSet(LineHeader::Hint, value.into())),
-          b"mode" => Ok(Self::LineSet(LineHeader::Mode, value.into())),
+          b"hint"   => Ok(Self::LineSet(LineHeader::Hint, value.into())),
+          b"mode"   => Ok(Self::LineSet(LineHeader::Mode, value.into())),
           b"anchor" => Ok(Self::LineSet(LineHeader::Anchor, value.into())),
           _ => Err(sherr!(
             ParseErr,
@@ -468,8 +468,8 @@ impl SocketRequest {
 #[derive(Debug)]
 pub(crate) struct ShedSocket {
   listener: UnixListener,
-  pid: Pid,
-  path: PathBuf,
+  pid     : Pid,
+  path    : PathBuf,
 }
 
 impl ShedSocket {
@@ -507,7 +507,7 @@ impl ShedSocket {
       ));
     }
 
-    let pid = Pid::this();
+    let pid       = Pid::this();
     let sock_path = sock_dir.join(format!("{pid}.sock"));
     std::fs::remove_file(&sock_path).ok();
 
@@ -516,7 +516,7 @@ impl ShedSocket {
     // set the permissions for the socket
     // default is read/write for user, no access for group/other
     // this can be overridden using the $SHED_SOCK_MODE env var.
-    let mode = Self::mode();
+    let mode     = Self::mode();
 
     fchmodat(
       nix::fcntl::AT_FDCWD,
@@ -581,7 +581,7 @@ pub(super) fn handle_socket_request(
   match request {
     SocketRequest::PostSystemMessage(msg) => system_msg!("{msg}"),
     SocketRequest::PostStatusMessage(msg) => status_msg!("{msg}"),
-    SocketRequest::RefreshPrompt => kill(Pid::this(), Signal::SIGUSR1)?,
+    SocketRequest::RefreshPrompt          => kill(Pid::this(), Signal::SIGUSR1)?,
     SocketRequest::LineGet(_) | SocketRequest::LineSet(_, _) | SocketRequest::LineSendKeys(_) => {
       return handle_line_request(request, &conn, readline);
     }
@@ -617,7 +617,7 @@ fn handle_query_request(header: QueryHeader, conn: &UnixStream) -> ShResult<Opti
     }
     QueryHeader::SetVar(var, val, flags) => {
       let var_name = &var.to_str_lossy();
-      let val = VarKind::string(val.to_str_lossy().into());
+      let val      = VarKind::string(val.to_str_lossy().into());
 
       Shed::vars_mut(|v| v.set_var(var_name, val, flags)).ok();
     }
@@ -743,7 +743,7 @@ fn handle_line_set(
   match header {
     LineHeader::Buffer => {
       let joined = readline.editor().to_string();
-      let pos = readline.editor().cursor_to_flat();
+      let pos    = readline.editor().cursor_to_flat();
 
       readline.editor_mut().edit(|this| {
         this.set_buffer(&value);
@@ -1185,8 +1185,8 @@ mod tests {
   ) -> (Vec<u8>, ShResult<Option<ReadlineEvent>>) {
     let (tx, mut rx) = UnixStream::pair().unwrap();
     rx.set_read_timeout(Some(Duration::from_millis(200))).ok();
-    let result = handle_socket_request(tx, req, readline);
-    let mut buf = Vec::new();
+    let     result = handle_socket_request(tx, req, readline);
+    let mut buf    = Vec::new();
     rx.read_to_end(&mut buf).ok();
     (buf, result)
   }
@@ -1199,35 +1199,35 @@ mod tests {
 
   #[test]
   fn handler_post_system_message_writes_ok() {
-    let _g = TestGuard::new();
-    let mut rl = fresh_readline();
-    let (resp, _) = run_handler(SocketRequest::PostSystemMessage("hi".into()), &mut rl);
+    let     _g        = TestGuard::new();
+    let mut rl        = fresh_readline();
+    let     (resp, _) = run_handler(SocketRequest::PostSystemMessage("hi".into()), &mut rl);
     assert_eq!(resp, b"ok\n");
   }
 
   #[test]
   fn handler_post_system_message_queues_msg() {
-    let g = TestGuard::new();
-    let mut rl = fresh_readline();
-    let (_, _) = run_handler(SocketRequest::PostSystemMessage("queued".into()), &mut rl);
-    let out = g.read_output();
+    let     g      = TestGuard::new();
+    let mut rl     = fresh_readline();
+    let     (_, _) = run_handler(SocketRequest::PostSystemMessage("queued".into()), &mut rl);
+    let     out    = g.read_output();
     assert!(out.contains("queued"), "got: {out:?}");
   }
 
   #[test]
   fn handler_post_status_message_writes_ok() {
-    let _g = TestGuard::new();
-    let mut rl = fresh_readline();
-    let (resp, _) = run_handler(SocketRequest::PostStatusMessage("hi".into()), &mut rl);
+    let     _g        = TestGuard::new();
+    let mut rl        = fresh_readline();
+    let     (resp, _) = run_handler(SocketRequest::PostStatusMessage("hi".into()), &mut rl);
     assert_eq!(resp, b"ok\n");
   }
 
   #[test]
   fn handler_post_status_message_queues_msg() {
-    let _g = TestGuard::new();
-    let mut rl = fresh_readline();
-    let (_, _) = run_handler(SocketRequest::PostStatusMessage("queued".into()), &mut rl);
-    let popped = Shed::pop_status_msg();
+    let     _g     = TestGuard::new();
+    let mut rl     = fresh_readline();
+    let     (_, _) = run_handler(SocketRequest::PostStatusMessage("queued".into()), &mut rl);
+    let     popped = Shed::pop_status_msg();
     assert!(popped.is_some());
     assert!(popped.unwrap().contains("queued"));
   }
@@ -1236,7 +1236,7 @@ mod tests {
 
   #[test]
   fn handler_line_get_buffer_returns_current_buffer() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     rl.editor_mut().edit(|e| e.set_buffer("hello world"));
     let (resp, _) = run_handler(SocketRequest::LineGet(LineHeader::Buffer), &mut rl);
@@ -1245,17 +1245,17 @@ mod tests {
 
   #[test]
   fn handler_line_get_buffer_empty() {
-    let _g = TestGuard::new();
-    let mut rl = fresh_readline();
-    let (resp, _) = run_handler(SocketRequest::LineGet(LineHeader::Buffer), &mut rl);
+    let     _g        = TestGuard::new();
+    let mut rl        = fresh_readline();
+    let     (resp, _) = run_handler(SocketRequest::LineGet(LineHeader::Buffer), &mut rl);
     assert_eq!(resp, b"\n");
   }
 
   #[test]
   fn handler_line_get_mode_returns_mode_string() {
-    let _g = TestGuard::new();
-    let mut rl = fresh_readline();
-    let (resp, _) = run_handler(SocketRequest::LineGet(LineHeader::Mode), &mut rl);
+    let     _g        = TestGuard::new();
+    let mut rl        = fresh_readline();
+    let     (resp, _) = run_handler(SocketRequest::LineGet(LineHeader::Mode), &mut rl);
     // exact string depends on default mode; just check it's non-empty
     // and ends with a newline.
     assert!(resp.ends_with(b"\n"));
@@ -1266,7 +1266,7 @@ mod tests {
 
   #[test]
   fn handler_line_set_buffer_replaces_buffer() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     let (_, _) = run_handler(
       SocketRequest::LineSet(LineHeader::Buffer, "set-from-socket".into()),
@@ -1277,7 +1277,7 @@ mod tests {
 
   #[test]
   fn handler_line_set_buffer_round_trip_via_get() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     let _ = run_handler(
       SocketRequest::LineSet(LineHeader::Buffer, "abc".into()),
@@ -1291,9 +1291,9 @@ mod tests {
 
   #[test]
   fn handler_query_cwd_returns_current_dir() {
-    let _g = TestGuard::new();
-    let mut rl = fresh_readline();
-    let (resp, _) = run_handler(SocketRequest::Query(QueryHeader::Cwd), &mut rl);
+    let     _g        = TestGuard::new();
+    let mut rl        = fresh_readline();
+    let     (resp, _) = run_handler(SocketRequest::Query(QueryHeader::Cwd), &mut rl);
     let expected = std::env::current_dir()
       .unwrap()
       .to_string_lossy()
@@ -1315,7 +1315,7 @@ mod tests {
 
   #[test]
   fn handler_query_get_var_unknown_returns_blank_line() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     let (resp, _) = run_handler(
       SocketRequest::Query(QueryHeader::GetVar("DEFINITELY_NOT_SET_zzz".into())),
@@ -1326,7 +1326,7 @@ mod tests {
 
   #[test]
   fn handler_queryset_var_persists_and_ok() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     let (resp, _) = run_handler(
       SocketRequest::Query(QueryHeader::SetVar(
@@ -1372,7 +1372,7 @@ mod tests {
 
   #[test]
   fn handler_line_get_cursor_returns_flat_position() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     rl.editor_mut().edit(|e| e.set_buffer("abcdef"));
     rl.editor_mut().set_cursor_from_flat(3);
@@ -1382,15 +1382,15 @@ mod tests {
 
   #[test]
   fn handler_line_get_anchor_returns_blank_when_unset() {
-    let _g = TestGuard::new();
-    let mut rl = fresh_readline();
-    let (resp, _) = run_handler(SocketRequest::LineGet(LineHeader::Anchor), &mut rl);
+    let     _g        = TestGuard::new();
+    let mut rl        = fresh_readline();
+    let     (resp, _) = run_handler(SocketRequest::LineGet(LineHeader::Anchor), &mut rl);
     assert_eq!(resp, b"\n");
   }
 
   #[test]
   fn handler_line_get_anchor_returns_set_position() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     rl.editor_mut().edit(|e| {
       e.set_buffer("abcdef");
@@ -1403,15 +1403,15 @@ mod tests {
 
   #[test]
   fn handler_line_get_hint_returns_blank_when_unset() {
-    let _g = TestGuard::new();
-    let mut rl = fresh_readline();
-    let (resp, _) = run_handler(SocketRequest::LineGet(LineHeader::Hint), &mut rl);
+    let     _g        = TestGuard::new();
+    let mut rl        = fresh_readline();
+    let     (resp, _) = run_handler(SocketRequest::LineGet(LineHeader::Hint), &mut rl);
     assert_eq!(resp, b"\n");
   }
 
   #[test]
   fn handler_line_get_hint_returns_hint_text() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     rl.editor_mut()
       .set_hint(Some(Hint::Override(Lines::to_lines("suggestion"))));
@@ -1423,7 +1423,7 @@ mod tests {
   fn handler_line_set_hint_applies_even_with_empty_buffer() {
     // Override hints bypass the empty-buffer gate that suppresses
     // auto-suggested (History) hints.
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     let _ = run_handler(
       SocketRequest::LineSet(LineHeader::Hint, "external".into()),
@@ -1453,7 +1453,7 @@ mod tests {
 
   #[test]
   fn handler_line_set_cursor_flat_position() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     rl.editor_mut().edit(|e| e.set_buffer("abcdef"));
     let _ = run_handler(
@@ -1465,7 +1465,7 @@ mod tests {
 
   #[test]
   fn handler_line_set_cursor_row_col() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     rl.editor_mut().edit(|e| e.set_buffer("ab\ncd\nef"));
     let _ = run_handler(
@@ -1479,7 +1479,7 @@ mod tests {
 
   #[test]
   fn handler_line_set_cursor_garbage_value_is_noop() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     rl.editor_mut().edit(|e| e.set_buffer("abcdef"));
     rl.editor_mut().set_cursor_from_flat(2);
@@ -1492,7 +1492,7 @@ mod tests {
 
   #[test]
   fn handler_line_set_anchor_flat_position() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     rl.editor_mut().edit(|e| {
       e.set_buffer("abcdef");
@@ -1507,7 +1507,7 @@ mod tests {
 
   #[test]
   fn handler_line_set_hint_round_trip() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     let _ = run_handler(
       SocketRequest::LineSet(LineHeader::Hint, "hinttext".into()),
@@ -1519,7 +1519,7 @@ mod tests {
 
   #[test]
   fn handler_line_set_mode_unknown_returns_early_with_none() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     let (_, result) = run_handler(
       SocketRequest::LineSet(LineHeader::Mode, "not-a-real-mode".into()),
@@ -1534,7 +1534,7 @@ mod tests {
 
   #[test]
   fn handler_line_send_keys_types_into_buffer() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     let keys = vec![
       KeyEvent(
@@ -1578,7 +1578,7 @@ mod tests {
 
   #[test]
   fn handler_query_status_command_name_without_job() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     let (resp, _) = run_handler(
       SocketRequest::Query(QueryHeader::Status(vec![StatusHeader::CommandName])),
@@ -1602,7 +1602,7 @@ mod tests {
 
   #[test]
   fn handler_query_status_pid_without_job() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     let (resp, _) = run_handler(
       SocketRequest::Query(QueryHeader::Status(vec![StatusHeader::Pid])),
@@ -1626,7 +1626,7 @@ mod tests {
 
   #[test]
   fn handler_query_status_runtime_empty_when_no_timing() {
-    let _g = TestGuard::new();
+    let     _g = TestGuard::new();
     let mut rl = fresh_readline();
     let (resp, _) = run_handler(
       SocketRequest::Query(QueryHeader::Status(vec![StatusHeader::Runtime])),

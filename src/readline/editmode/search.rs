@@ -13,13 +13,13 @@ trait SearchMode {
   fn command(&self) -> EditCmd {
     EditCmd {
       register: RegisterName::default(),
-      verb: None,
-      motion: Some(motion!(
+      verb    : None,
+      motion  : Some(motion!(
         self.count(),
         Motion::Search(self.pattern(), self.direction())
       )),
-      raw_seq: self.pattern().to_string(),
-      flags: CmdFlags::EXIT_CUR_MODE,
+      raw_seq : self.pattern().to_string(),
+      flags   : CmdFlags::EXIT_CUR_MODE,
     }
   }
   fn count(&self) -> usize;
@@ -151,17 +151,17 @@ impl<S: SearchMode> EditMode for S {
       }
       key!(Backspace) if self.pattern().is_empty() => Some(EditCmd {
         register: RegisterName::default(),
-        verb: None,
-        motion: None,
-        flags: CmdFlags::EXIT_CUR_MODE | CmdFlags::IS_CANCEL,
-        raw_seq: String::new(),
+        verb    : None,
+        motion  : None,
+        flags   : CmdFlags::EXIT_CUR_MODE | CmdFlags::IS_CANCEL,
+        raw_seq : String::new(),
       }),
       key!(Esc) => Some(EditCmd {
         register: RegisterName::default(),
-        verb: None,
-        motion: None,
-        flags: CmdFlags::EXIT_CUR_MODE | CmdFlags::IS_CANCEL,
-        raw_seq: String::new(),
+        verb    : None,
+        motion  : None,
+        flags   : CmdFlags::EXIT_CUR_MODE | CmdFlags::IS_CANCEL,
+        raw_seq : String::new(),
       }),
       _ => self.query_handle_key(key),
     }

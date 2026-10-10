@@ -50,8 +50,8 @@ pub(crate) fn dispatch_deferred_cmd(cmd: DeferredAst) -> bool {
         return true;
       }
 
-      ShErrKind::FuncReturn(_) => Some("return"),
-      ShErrKind::LoopBreak(_) => Some("break"),
+      ShErrKind::FuncReturn(_)   => Some("return"),
+      ShErrKind::LoopBreak(_)    => Some("break"),
       ShErrKind::LoopContinue(_) => Some("continue"),
 
       ShErrKind::CleanExit(code) => {
@@ -89,7 +89,7 @@ impl super::Dispatcher {
     }
 
     let mut elem_iter = elements.ids();
-    let mut skip = false;
+    let mut skip      = false;
     while let Some(element) = elem_iter.next() {
       let ConjunctNode { cmd, operator } = &tree[element];
       if !skip {
@@ -98,8 +98,8 @@ impl super::Dispatcher {
 
       let status = Shed::get_status();
       skip = match operator {
-        ConjunctOp::And => status != 0,
-        ConjunctOp::Or => status == 0,
+        ConjunctOp::And  => status != 0,
+        ConjunctOp::Or   => status == 0,
         ConjunctOp::Null => break,
       };
     }
@@ -151,7 +151,7 @@ impl super::Dispatcher {
     trace.push(tree[*ctx].clone());
 
     // enable set -e -o pipefail temporarily
-    let errexit = shopt!(set.errexit);
+    let errexit  = shopt!(set.errexit);
     let pipefail = shopt!(set.pipefail);
     shopt_mut!(set.errexit = true);
     shopt_mut!(set.pipefail = true);
@@ -231,17 +231,17 @@ impl super::Dispatcher {
   where
     F: FnMut(&mut Self, &Ast) -> ShResult<()>,
   {
-    let fork_builtins = Shed::meta_mut(MetaTab::take_fork);
+    let fork_builtins   = Shed::meta_mut(MetaTab::take_fork);
     let fork_var_redirs = fork_builtins || node::node_forks(tree, node_id);
-    let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(fork_var_redirs));
+    let _redir_forks    = Shed::meta_mut(|m| m.enter_redir_fork(fork_var_redirs));
 
-    let blame = tree.span_for(node_id);
-    let node = &tree[node_id];
-    let redirs = &tree[node.redirs];
+    let blame           = tree.span_for(node_id);
+    let node            = &tree[node_id];
+    let redirs          = &tree[node.redirs];
 
-    let redirs = RedirSet::from(redirs);
+    let redirs          = RedirSet::from(redirs);
     let guard = match Sinks::try_apply_set(&redirs, false) {
-      Ok(g) => g,
+      Ok(g)  => g,
       Err(e) => return e.report_or_propagate(tree.span_for(node_id)),
     };
 
@@ -279,18 +279,18 @@ impl super::Dispatcher {
     };
 
     let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(true));
-    let span = tree.span_for(*body);
+    let span         = tree.span_for(*body);
 
-    let redirs = RedirSet::from(&tree[subsh.redirs]);
+    let redirs       = RedirSet::from(&tree[subsh.redirs]);
     let _guard = match Sinks::try_apply_set(&redirs, false) {
-      Ok(g) => g,
+      Ok(g)  => g,
       Err(e) => return e.report_or_propagate(tree.span_for(subsh_id)),
     };
 
-    let body_raw = span.slice();
-    let body_raw = body_raw.to_str_lossy();
+    let body_raw     = span.slice();
+    let body_raw     = body_raw.to_str_lossy();
     let body_display = body_raw.graphemes(true).take(70).collect::<String>();
-    let name = format!("( {body_display} )");
+    let name         = format!("( {body_display} )");
 
     self.run_fork(name.as_bytes(), ForkKind::Subshell, tree, *body, |s| {
       super::catch_exit(|| s.dispatch_node(tree, *body), super::exit_with);
@@ -354,8 +354,8 @@ impl super::Dispatcher {
           LoopKind::Until => status != 0,
         }
       };
-      let CondNode { cond, body } = tree[*cond_node];
-      let mut last_body_status = 0;
+      let     CondNode { cond, body } = tree[*cond_node];
+      let mut last_body_status        = 0;
       'outer: loop {
         {
           // condition scope

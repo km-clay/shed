@@ -346,9 +346,9 @@ pub(crate) trait Builtin: Sync {
     if stdin.isatty() {
       return None;
     }
-    let mut buf = Vec::new();
+    let mut buf   = Vec::new();
     let mut chunk = procio::take_scratch();
-    let mut sink = SinkIo(stdin);
+    let mut sink  = SinkIo(stdin);
 
     loop {
       match sink.read(&mut chunk) {
@@ -374,8 +374,8 @@ pub(crate) trait Builtin: Sync {
     node_id: NodeId,
     dispatcher: &mut Dispatcher,
   ) -> ShResult<()> {
-    let node = &tree[node_id];
-    let cmd = node.get_command().unwrap();
+    let node    = &tree[node_id];
+    let cmd     = node.get_command().unwrap();
     let cmd_raw = tree[cmd].slice();
 
     let context = node.context;
@@ -405,16 +405,16 @@ pub(crate) trait Builtin: Sync {
 
     // Set up redirections here so we can attach the guard to propagated errors.
     let redirs: RedirSet = RedirSet::from(&tree[node.redirs]);
-    let fatal = self.is_special() && !Shed::term(Terminal::interactive);
+    let fatal            = self.is_special() && !Shed::term(Terminal::interactive);
     let guard = match Sinks::try_apply_set(&redirs, fatal) {
-      Ok(g) => g,
+      Ok(g)  => g,
       Err(e) => return e.report_or_propagate(tree.span_for(node_id)),
     };
 
     if fork_builtins {
       // Register ChildProc in current job
       let timer = dispatcher.take_timer();
-      let job = dispatcher.job_stack.curr_job_mut().unwrap();
+      let job   = dispatcher.job_stack.curr_job_mut().unwrap();
       let child_pgid = if let Some(pgid) = job.pgid() {
         pgid
       } else {
@@ -481,8 +481,8 @@ pub(crate) trait Builtin: Sync {
   }
   /// Parse arguments and options, pack `BuiltinArgs`, run `self.execute()`
   fn run_builtin(&self, tree: &Ast, node_id: NodeId, _dispatcher: &mut Dispatcher) -> ShResult<()> {
-    let node = &tree[node_id];
-    let span = tree[node.get_span()];
+    let node     = &tree[node_id];
+    let span     = tree[node.get_span()];
     let no_split = node.flags.contains(NdFlags::NO_SPLIT);
     let NdRule::Command {
       assignments: _,
@@ -494,7 +494,7 @@ pub(crate) trait Builtin: Sync {
 
     let cmd_span = argv.first().map_or_else(|| span, |tk| tree[tk].span);
 
-    let parsed = self.get_argv_and_opts(cmd_span, &tree[*argv], no_split)?;
+    let parsed   = self.get_argv_and_opts(cmd_span, &tree[*argv], no_split)?;
 
     if !node.flags.contains(NdFlags::NO_TRACE) {
       // Trace the flat, in-order expansion (options + their args intact),
@@ -514,7 +514,7 @@ pub(crate) trait Builtin: Sync {
 }
 
 pub(crate) struct Usage {
-  args: Option<&'static str>,
+  args       : Option<&'static str>,
   description: &'static str,
 }
 
@@ -541,9 +541,9 @@ macro_rules! sub_command {
 }
 
 pub(crate) struct SubCommand {
-  name: &'static str,
+  name   : &'static str,
   handler: &'static dyn Builtin,
-  usage: Option<Usage>,
+  usage  : Option<Usage>,
 }
 
 impl SubCommand {
@@ -594,7 +594,7 @@ pub(super) trait BuiltinRouter {
   where
     Self: Sized,
   {
-    let mut router = self as &dyn BuiltinRouter;
+    let mut router  = self as &dyn BuiltinRouter;
     let mut arg_idx = 1;
 
     while let Some(arg) = argv.get(arg_idx)
@@ -692,7 +692,7 @@ pub(super) trait BuiltinRouter {
   fn sub_usage(&self) -> String {
     use std::fmt::Write;
     let subs = self.sub_commands();
-    let cmd = self.name();
+    let cmd  = self.name();
 
     let width = subs
       .iter()
@@ -706,12 +706,12 @@ pub(super) trait BuiltinRouter {
 
     let mut out = format!("usage: {cmd} <subcommand> ...\n");
     for sub in subs {
-      let name = sub.name();
-      let mut call = varstr!("{name}");
+      let     name  = sub.name();
+      let mut call  = varstr!("{name}");
 
-      let usage = sub.usage();
-      let args = usage.and_then(Usage::args);
-      let desc = usage.map(Usage::description);
+      let     usage = sub.usage();
+      let     args  = usage.and_then(Usage::args);
+      let     desc  = usage.map(Usage::description);
 
       if let Some(args) = args {
         call = varstr!("{call} {args}");
@@ -874,10 +874,10 @@ impl Builtin for BuiltinBuiltin {
     };
 
     // copy the wrapped invocation into its own ast, then dispatch
-    let mut sub_ast = tree.break_off(node_id);
-    let inner_argv = sub_ast.alloc_tokens(inner_argv);
+    let mut sub_ast    = tree.break_off(node_id);
+    let     inner_argv = sub_ast.alloc_tokens(inner_argv);
 
-    let fwd_id = sub_ast.get_root().expect("forwarded command has no root");
+    let     fwd_id     = sub_ast.get_root().expect("forwarded command has no root");
     let NdRule::Command { assignments, .. } = &sub_ast[fwd_id].class else {
       unreachable!()
     };
@@ -936,12 +936,12 @@ impl Builtin for CommandBuiltin {
     }
 
     let mut use_default_path = false;
-    let mut print_path = false;
-    let mut print_type = false;
-    let mut seen_dd = false;
+    let mut print_path       = false;
+    let mut print_type       = false;
+    let mut seen_dd          = false;
 
-    let iter = argv.into_iter();
-    let mut rest = vec![];
+    let     iter             = argv.into_iter();
+    let mut rest             = vec![];
 
     for tk in iter {
       if !rest.is_empty() || seen_dd {
@@ -976,8 +976,8 @@ impl Builtin for CommandBuiltin {
 
     argv = rest;
 
-    let mut sub_ast = tree.break_off(node_id);
-    let inner_argv = sub_ast.alloc_tokens(argv);
+    let mut sub_ast    = tree.break_off(node_id);
+    let     inner_argv = sub_ast.alloc_tokens(argv);
     let root = sub_ast
       .get_root()
       .expect("command: forwarded node has no root");
@@ -1031,7 +1031,7 @@ impl CommandBuiltin {
         return util::with_status(2);
       };
       let name_word = tree[name].word();
-      let name_str = name_word.to_str_lossy();
+      let name_str  = name_word.to_str_lossy();
       match cmd::which_util(&name_str) {
         Some(util) => match util.kind() {
           UtilKind::Alias => {
@@ -1043,7 +1043,7 @@ impl CommandBuiltin {
               escape::shell_quote(&alias.body().to_str_lossy())
             );
           }
-          UtilKind::Function | UtilKind::Builtin => outln!("{name_str}"),
+          UtilKind::Function | UtilKind::Builtin   => outln!("{name_str}"),
           UtilKind::Command(p) | UtilKind::File(p) => outln!("{}", p.display()),
         },
         None if KEYWORDS.contains(&name_str.as_bytes()) => outln!("{name_str}"),
@@ -1057,7 +1057,7 @@ impl CommandBuiltin {
         return util::with_status(2);
       };
       let name_word = tree[name].word();
-      let name_str = name_word.to_str_lossy();
+      let name_str  = name_word.to_str_lossy();
       match cmd::which_util(&name_str) {
         Some(util) => match util.kind() {
           UtilKind::Alias => {
@@ -1070,7 +1070,7 @@ impl CommandBuiltin {
             );
           }
           UtilKind::Function => outln!("{name_str} is a function"),
-          UtilKind::Builtin => outln!("{name_str} is a shell builtin"),
+          UtilKind::Builtin  => outln!("{name_str} is a shell builtin"),
           UtilKind::Command(p) | UtilKind::File(p) => {
             outln!("{name_str} is {}", p.display());
           }
@@ -1297,7 +1297,7 @@ pub(crate) mod tests {
   fn prefix_assign_to_special_with_allexport_persists_and_exports() {
     let _g = TestGuard::new();
     test_input("set -a; FOO=bar export").unwrap();
-    let var = Shed::vars(|v| v.try_get_var_meta("FOO")).unwrap();
+    let var   = Shed::vars(|v| v.try_get_var_meta("FOO")).unwrap();
     let flags = var.flags();
     assert!(flags.contains(VarFlags::EXPORT));
   }
@@ -1386,7 +1386,7 @@ pub(crate) mod tests {
 
   #[test]
   fn command_v_not_found_is_silent_and_127() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let res = test_input("command -v __hopefully__not__a__command__");
     assert!(res.is_ok());
     assert_eq!(state::Shed::get_status(), 127);
@@ -1447,7 +1447,7 @@ pub(crate) mod tests {
   #[expect(non_snake_case)]
   fn command_v_and_V_together_errors() {
     let _g = TestGuard::new();
-    let _ = test_input("command -v -V echo");
+    let _  = test_input("command -v -V echo");
     assert_ne!(state::Shed::get_status(), 0);
   }
 
@@ -1455,7 +1455,7 @@ pub(crate) mod tests {
   #[expect(non_snake_case)]
   fn command_V_and_v_together_errors() {
     let _g = TestGuard::new();
-    let _ = test_input("command -V -v echo");
+    let _  = test_input("command -V -v echo");
     assert_ne!(state::Shed::get_status(), 0);
   }
 
@@ -1473,7 +1473,7 @@ pub(crate) mod tests {
   #[test]
   fn command_invalid_flag_errors() {
     let _g = TestGuard::new();
-    let _ = test_input("command -Z something");
+    let _  = test_input("command -Z something");
     assert_ne!(state::Shed::get_status(), 0);
   }
 
@@ -1521,8 +1521,8 @@ pub(crate) mod tests {
   // verifies the builtin (not execve) path is taken. See also bash/dash.
   #[test]
   fn command_invokes_cd_builtin() {
-    let _g = TestGuard::new();
-    let old_dir = env::current_dir().unwrap();
+    let _g       = TestGuard::new();
+    let old_dir  = env::current_dir().unwrap();
     let temp_dir = TempDir::new().unwrap();
 
     test_input(format!("command cd {}", temp_dir.path().display())).unwrap();
@@ -1543,8 +1543,8 @@ pub(crate) mod tests {
   // builtin after expansion, so it must behave the same as `command`.
   #[test]
   fn backslash_command_invokes_cd_builtin() {
-    let _g = TestGuard::new();
-    let old_dir = env::current_dir().unwrap();
+    let _g       = TestGuard::new();
+    let old_dir  = env::current_dir().unwrap();
     let temp_dir = TempDir::new().unwrap();
 
     test_input(format!("\\command cd {}", temp_dir.path().display())).unwrap();

@@ -158,14 +158,14 @@ pub(crate) fn dispatch_deferred_cmds() {
 
 /// Arguments to the execvpe function
 pub(crate) struct ExecArgs {
-  pub cmd: (CString, Span),
+  pub cmd : (CString, Span),
   pub argv: Rc<[CString]>,
   pub envp: Rc<[CString]>,
 }
 
 impl ExecArgs {
   pub(crate) fn from_expanded(argv: Vec<(VarStr, Span)>) -> Self {
-    let cmd = Self::get_cmd(&argv);
+    let cmd  = Self::get_cmd(&argv);
     let argv = Self::get_argv(argv);
     let envp = Self::get_envp();
     Self { cmd, argv, envp }
@@ -195,7 +195,7 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
     loop {
       match &ast[id].class {
         NdRule::Command { .. } => return Some(id),
-        NdRule::Pipeline { cmds } if cmds.len() == 1 => id = cmds.get(0),
+        NdRule::Pipeline { cmds } if cmds.len() == 1            => id = cmds.get(0),
         NdRule::Conjunction { elements } if elements.len() == 1 => id = ast[elements.get(0)].cmd,
         _ => return None,
       }
@@ -244,7 +244,7 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
     return Ok(());
   }
 
-  let mut ast = parser.into_ast();
+  let mut ast        = parser.into_ast();
 
   let mut dispatcher = Dispatcher::new(name);
   // exec_cmd expects a job on the stack (normally set up by exec_pipeline).
@@ -257,7 +257,7 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
   // (bypassing pipeline setup).
   let single_root = match ast.roots() {
     [only] => Some(*only),
-    _ => None,
+    _      => None,
   };
   if let Some(cmd_id) = single_root.and_then(|root| single_command_id(&ast, root)) {
     ast[cmd_id].flags |= NdFlags::NO_FORK;
@@ -305,8 +305,8 @@ pub(crate) fn exec_input(mut input: VarStr, source_name: Option<VarStr>) -> ShRe
     super::lex::LexFlags::empty()
   };
 
-  let source_name = source_name.unwrap_or("<unknown>".into());
-  let mut parser = ParsedSrc::with_name(source_name.clone(), input).with_lex_flags(lex_flags);
+  let     source_name = source_name.unwrap_or("<unknown>".into());
+  let mut parser      = ParsedSrc::with_name(source_name.clone(), input).with_lex_flags(lex_flags);
 
   if let Err(errors) = parser.parse_src() {
     for error in errors {
@@ -321,10 +321,10 @@ pub(crate) fn exec_input(mut input: VarStr, source_name: Option<VarStr>) -> ShRe
 }
 
 pub(crate) struct Dispatcher {
-  source_name: VarStr,
+  source_name  : VarStr,
   pub job_stack: JobStack,
-  timer_stack: Vec<Option<CmdTimer>>,
-  fg_job: bool,
+  timer_stack  : Vec<Option<CmdTimer>>,
+  fg_job       : bool,
 }
 
 impl Dispatcher {
@@ -360,23 +360,23 @@ impl Dispatcher {
       }
 
       match tree[node].class {
-        NdRule::List { .. } => self.exec_list(tree, node),
+        NdRule::List { .. }        => self.exec_list(tree, node),
         NdRule::Conjunction { .. } => self.exec_conjunction(tree, node),
-        NdRule::Pipeline { .. } => self.exec_pipeline(tree, node),
-        NdRule::IfNode { .. } => self.exec_if(tree, node),
-        NdRule::LoopNode { .. } => self.exec_loop(tree, node),
-        NdRule::ForNode { .. } => self.exec_for_arr(tree, node),
-        NdRule::ForArith { .. } => self.exec_for_arith(tree, node),
-        NdRule::CaseNode { .. } => self.exec_case(tree, node),
-        NdRule::BraceGrp { .. } => self.exec_brc_grp(tree, node),
-        NdRule::Subshell { .. } => self.exec_subsh(tree, node),
-        NdRule::Negate { .. } => self.exec_negated(tree, node),
-        NdRule::Timed { .. } => self.exec_timed(tree, node),
-        NdRule::Command { .. } => self.dispatch_cmd(tree, node),
-        NdRule::TryNode { .. } => self.exec_try(tree, node),
-        NdRule::DeferNode { .. } => Self::exec_defer(tree, node),
+        NdRule::Pipeline { .. }    => self.exec_pipeline(tree, node),
+        NdRule::IfNode { .. }      => self.exec_if(tree, node),
+        NdRule::LoopNode { .. }    => self.exec_loop(tree, node),
+        NdRule::ForNode { .. }     => self.exec_for_arr(tree, node),
+        NdRule::ForArith { .. }    => self.exec_for_arith(tree, node),
+        NdRule::CaseNode { .. }    => self.exec_case(tree, node),
+        NdRule::BraceGrp { .. }    => self.exec_brc_grp(tree, node),
+        NdRule::Subshell { .. }    => self.exec_subsh(tree, node),
+        NdRule::Negate { .. }      => self.exec_negated(tree, node),
+        NdRule::Timed { .. }       => self.exec_timed(tree, node),
+        NdRule::Command { .. }     => self.dispatch_cmd(tree, node),
+        NdRule::TryNode { .. }     => self.exec_try(tree, node),
+        NdRule::DeferNode { .. }   => Self::exec_defer(tree, node),
 
-        NdRule::FuncDef { .. } => Self::exec_func_def(tree, node),
+        NdRule::FuncDef { .. }    => Self::exec_func_def(tree, node),
         NdRule::Arithmetic { .. } => Self::exec_arith(tree, node),
         NdRule::Assignment { .. } => unreachable!(),
       }
@@ -457,17 +457,17 @@ impl Dispatcher {
     let NdRule::Arithmetic { body } = &tree[arith].class else {
       unreachable!()
     };
-    let span = tree.span_for(arith);
-    let body = tree[*body].slice();
-    let result = arithmetic::expand_arithmetic_wrapped(Some(span), body.as_bytes())?;
+    let span     = tree.span_for(arith);
+    let body     = tree[*body].slice();
+    let result   = arithmetic::expand_arithmetic_wrapped(Some(span), body.as_bytes())?;
     let val: f64 = result.to_str_lossy().parse().unwrap_or(0.0);
     Shed::set_status_from_bool(val != 0.0);
     Ok(())
   }
   fn exec_builtin(&mut self, tree: &Ast, cmd_id: NodeId, cmd_name: &[u8]) -> ShResult<()> {
     let fork_builtins = Shed::meta_mut(MetaTab::take_fork);
-    let _redir_forks = Shed::meta_mut(|m| m.enter_redir_fork(fork_builtins));
-    let span = tree.span_for(cmd_id);
+    let _redir_forks  = Shed::meta_mut(|m| m.enter_redir_fork(fork_builtins));
+    let span          = tree.span_for(cmd_id);
 
     let Some(builtin) = builtin::lookup_builtin(cmd_name) else {
       sherr!(NotFound @ span, "builtin not found: {}", cmd_name.to_str_lossy()).print_error();
@@ -503,11 +503,11 @@ impl Dispatcher {
     node: NodeId,
     f: impl FnOnce(&mut Self),
   ) -> ShResult<()> {
-    let span = tree.span_for(node);
+    let span          = tree.span_for(node);
     let existing_pgid = self.job_stack.curr_job_mut().unwrap().pgid();
-    let interactive = Shed::term(Terminal::interactive);
+    let interactive   = Shed::term(Terminal::interactive);
 
-    let res = traced_fork(span, kind);
+    let res           = traced_fork(span, kind);
 
     match res? {
       ForkResult::Child => {
@@ -551,7 +551,7 @@ impl Dispatcher {
         }
 
         let timer = self.take_timer();
-        let job = self.job_stack.curr_job_mut().unwrap();
+        let job   = self.job_stack.curr_job_mut().unwrap();
         let child_pgid = if let Some(pgid) = existing_pgid {
           pgid
         } else if interactive {

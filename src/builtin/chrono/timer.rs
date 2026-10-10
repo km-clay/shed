@@ -47,8 +47,8 @@ impl Builtin for List {
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut arguments = args.arguments();
-    let mut fmt = None;
-    let mut fmt_span = None;
+    let mut fmt       = None;
+    let mut fmt_span  = None;
 
     if let Some((arg, span)) = arguments.next()
       && WatchName::new(arg.clone()).promote_err(span)?.is_none()
@@ -183,9 +183,9 @@ impl Builtin for Status {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut arguments = args.arguments();
 
-    let mut name = None;
-    let mut fmt = None;
-    let mut fmt_span = None;
+    let mut name      = None;
+    let mut fmt       = None;
+    let mut fmt_span  = None;
 
     if let Some((arg, span)) = arguments.next() {
       let watch_name = WatchName::new(arg.clone()).promote_err(span)?;
@@ -256,7 +256,7 @@ mod tests {
 
   #[test]
   fn accumulates_across_stop_resume_cycles() {
-    let t = Instant::now();
+    let     t = Instant::now();
     let mut w = StopWatch::default();
 
     w.start_at(t);
@@ -273,7 +273,7 @@ mod tests {
 
   #[test]
   fn running_timer_includes_time_since_resume() {
-    let t = Instant::now();
+    let     t = Instant::now();
     let mut w = StopWatch::default();
 
     w.start_at(t);
@@ -285,7 +285,7 @@ mod tests {
 
   #[test]
   fn stopped_timer_does_not_advance() {
-    let t = Instant::now();
+    let     t = Instant::now();
     let mut w = StopWatch::default();
 
     w.start_at(t);
@@ -297,7 +297,7 @@ mod tests {
 
   #[test]
   fn stop_and_resume_are_idempotent() {
-    let t = Instant::now();
+    let     t = Instant::now();
     let mut w = StopWatch::default();
 
     w.start_at(t);
@@ -320,7 +320,7 @@ mod tests {
 
   #[test]
   fn start_clears_previous_elapsed() {
-    let t = Instant::now();
+    let     t = Instant::now();
     let mut w = StopWatch::default();
 
     w.start_at(t);
@@ -332,7 +332,7 @@ mod tests {
 
   #[test]
   fn reset_zeroes_and_stops() {
-    let t = Instant::now();
+    let     t = Instant::now();
     let mut w = StopWatch::default();
 
     w.start_at(t);

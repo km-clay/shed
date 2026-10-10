@@ -849,7 +849,7 @@ fn parse_heredoc_multiword_delimiter() {
 #[test]
 fn parse_two_heredocs_on_one_line() {
   let input = "cat <<A; cat <<B\nfoo\nA\nbar\nB";
-  let ast = get_ast(input).unwrap();
+  let ast   = get_ast(input).unwrap();
   assert_eq!(ast.roots().len(), 1);
   let root = ast.get_root().unwrap();
   let NdRule::List { commands } = &ast[root].class else {
@@ -1426,16 +1426,16 @@ fn parse_not_basic() {
 #[test]
 fn parse_not_matches_bang_structure() {
   // `not` and `!` should produce identical node structures.
-  let bang_ast = get_ast("! false").unwrap();
-  let not_ast = get_ast("not false").unwrap();
+  let     bang_ast   = get_ast("! false").unwrap();
+  let     not_ast    = get_ast("not false").unwrap();
 
   let mut bang_kinds = vec![];
-  let bang_root = bang_ast.get_root().unwrap();
+  let     bang_root  = bang_ast.get_root().unwrap();
   bang_ast.walk_tree(bang_root, &mut |id, tree| {
     bang_kinds.push(tree[id].class.as_nd_kind());
   });
   let mut not_kinds = vec![];
-  let not_root = not_ast.get_root().unwrap();
+  let     not_root  = not_ast.get_root().unwrap();
   not_ast.walk_tree(not_root, &mut |id, tree| {
     not_kinds.push(tree[id].class.as_nd_kind());
   });
@@ -1573,8 +1573,8 @@ fn pipefail_triggers_errexit_on_intermediate_failure() {
   // the shell at the pipeline boundary. The echo should never run.
   // test_input returns Err when errexit interrupts; that's expected here.
   let guard = TestGuard::new();
-  let _ = test_input("set -e -o pipefail; false | true; echo should-not-print");
-  let out = guard.read_output();
+  let _     = test_input("set -e -o pipefail; false | true; echo should-not-print");
+  let out   = guard.read_output();
   assert!(
     !out.contains("should-not-print"),
     "errexit should fire on pipefail status; got: {out:?}"
@@ -1667,16 +1667,16 @@ fn parse_defer_brace_group_body() {
 fn parse_defer_matches_time_structure() {
   // defer and time both take a single block as body and wrap it the
   // same way (no extra list-of-conjunctions layer like try has).
-  let time_ast = get_ast("time echo x").unwrap();
-  let defer_ast = get_ast("defer echo x").unwrap();
+  let     time_ast   = get_ast("time echo x").unwrap();
+  let     defer_ast  = get_ast("defer echo x").unwrap();
 
   let mut time_kinds = vec![];
-  let time_root = time_ast.get_root().unwrap();
+  let     time_root  = time_ast.get_root().unwrap();
   time_ast.walk_tree(time_root, &mut |id, tree| {
     time_kinds.push(tree[id].class.as_nd_kind());
   });
   let mut defer_kinds = vec![];
-  let defer_root = defer_ast.get_root().unwrap();
+  let     defer_root  = defer_ast.get_root().unwrap();
   defer_ast.walk_tree(defer_root, &mut |id, tree| {
     defer_kinds.push(tree[id].class.as_nd_kind());
   });
@@ -1704,7 +1704,7 @@ fn parse_defer_missing_body_errors() {
 fn defer_fires_at_brace_group_exit() {
   let guard = TestGuard::new();
   test_input("{ defer echo bye; echo hi; }").unwrap();
-  let out = guard.read_output();
+  let out              = guard.read_output();
   let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
   assert_eq!(lines, vec!["hi", "bye"]);
 }
@@ -1713,7 +1713,7 @@ fn defer_fires_at_brace_group_exit() {
 fn defer_lifo_in_brace_group() {
   let guard = TestGuard::new();
   test_input("{ defer echo a; defer echo b; defer echo c; }").unwrap();
-  let out = guard.read_output();
+  let out              = guard.read_output();
   let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
   assert_eq!(lines, vec!["c", "b", "a"]);
 }
@@ -1723,7 +1723,7 @@ fn defer_lifo_in_function() {
   let guard = TestGuard::new();
   test_input("foo() { defer echo a; defer echo b; defer echo c; }").unwrap();
   test_input("foo").unwrap();
-  let out = guard.read_output();
+  let out              = guard.read_output();
   let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
   assert_eq!(lines, vec!["c", "b", "a"]);
 }
@@ -1734,7 +1734,7 @@ fn defer_nested_scope_isolation() {
   // outer one does.
   let guard = TestGuard::new();
   test_input("{ defer echo outer; { defer echo inner; }; echo middle; }").unwrap();
-  let out = guard.read_output();
+  let out              = guard.read_output();
   let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
   assert_eq!(lines, vec!["inner", "middle", "outer"]);
 }
@@ -1790,7 +1790,7 @@ fn defer_brace_group_body_runs_in_order() {
   // bottom (only the registration of defers themselves is LIFO).
   let guard = TestGuard::new();
   test_input("{ defer { echo a; echo b; echo c; }; }").unwrap();
-  let out = guard.read_output();
+  let out              = guard.read_output();
   let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
   assert_eq!(lines, vec!["a", "b", "c"]);
 }
@@ -1816,9 +1816,9 @@ fn deferred_exit_halts_remaining_defers_and_latches_code() {
   // LIFO, so `echo B` (registered last) runs, `exit 3` then halts the drain,
   // and `echo A` (registered first) is skipped. The exit code is latched into
   // QUIT_CODE so it survives the status save/restore around the defer drain.
-  let guard = TestGuard::new();
-  let _ = test_input("{ defer echo A; defer exit 3; defer echo B; }");
-  let out = guard.read_output();
+  let guard            = TestGuard::new();
+  let _                = test_input("{ defer echo A; defer exit 3; defer echo B; }");
+  let out              = guard.read_output();
   let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
   assert_eq!(
     lines,
@@ -1839,8 +1839,8 @@ fn deferred_exit_skips_outer_defers_but_plain_exit_runs_them() {
   // asymmetry is intentional; lock it in so a refactor can't silently flip it.
   {
     let guard = TestGuard::new();
-    let _ = test_input("{ defer echo OUTER; { defer exit 0; echo inner; }; echo NOPE; }");
-    let out = guard.read_output();
+    let _     = test_input("{ defer echo OUTER; { defer exit 0; echo inner; }; echo NOPE; }");
+    let out   = guard.read_output();
     let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
     assert_eq!(
       lines,
@@ -1849,9 +1849,9 @@ fn deferred_exit_skips_outer_defers_but_plain_exit_runs_them() {
     );
   }
   {
-    let guard = TestGuard::new();
-    let _ = test_input("{ defer echo OUTER; { echo inner; exit 0; }; echo NOPE; }");
-    let out = guard.read_output();
+    let guard            = TestGuard::new();
+    let _                = test_input("{ defer echo OUTER; { echo inner; exit 0; }; echo NOPE; }");
+    let out              = guard.read_output();
     let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
     assert_eq!(
       lines,
@@ -1864,7 +1864,7 @@ fn deferred_exit_skips_outer_defers_but_plain_exit_runs_them() {
 /// Strip ANSI CSI (`ESC[…m`) sequences so traceback assertions match on the
 /// rendered text, not the color codes ariadne wraps it in.
 fn strip_ansi(s: &str) -> String {
-  let mut out = String::new();
+  let mut out   = String::new();
   let mut chars = s.chars();
   while let Some(c) = chars.next() {
     if c == '\x1b' {
@@ -1890,8 +1890,8 @@ fn strip_ansi(s: &str) -> String {
 #[test]
 fn traceback_function_error_shows_call_chain() {
   let guard = TestGuard::new();
-  let _ = test_input("f() { nonexistent_xyz_123; }; f");
-  let out = strip_ansi(&guard.read_output());
+  let _     = test_input("f() { nonexistent_xyz_123; }; f");
+  let out   = strip_ansi(&guard.read_output());
   for expect in [
     "command not found",
     "in function 'f' defined here",
@@ -1907,8 +1907,8 @@ fn traceback_function_error_shows_call_chain() {
 #[test]
 fn traceback_nested_function_error_shows_full_chain() {
   let guard = TestGuard::new();
-  let _ = test_input("g() { nonexistent_xyz_123; }; f() { g; }; f");
-  let out = strip_ansi(&guard.read_output());
+  let _     = test_input("g() { nonexistent_xyz_123; }; f() { g; }; f");
+  let out   = strip_ansi(&guard.read_output());
   for expect in [
     "command not found",
     "in function 'g' defined here",
@@ -1927,7 +1927,7 @@ fn traceback_nested_function_error_shows_full_chain() {
 fn traceback_errexit_in_function_is_bare() {
   // `set -e` surfaces just the failing command; no function call-chain context.
   let _guard = TestGuard::new();
-  let err = test_input("set -e; f() { false; echo NOPE; }; f").unwrap_err();
+  let err    = test_input("set -e; f() { false; echo NOPE; }; f").unwrap_err();
   let labels = err.label_messages();
   assert!(
     labels
@@ -1947,8 +1947,8 @@ fn traceback_propagating_builtin_error_shows_call_chain() {
   // top — it must still carry the call chain (unlike a forked command error,
   // it never dies in a child).
   let guard = TestGuard::new();
-  let _ = test_input("f() { cd /nonexistent_dir_xyz_987; }; f");
-  let out = strip_ansi(&guard.read_output());
+  let _     = test_input("f() { cd /nonexistent_dir_xyz_987; }; f");
+  let out   = strip_ansi(&guard.read_output());
   for expect in ["in function 'f' defined here", "in call to function 'f'"] {
     assert!(
       out.contains(expect),
@@ -1964,7 +1964,7 @@ fn traceback_raise_in_function_surfaces_message() {
   // test harness's frame depth; the collapsed rendering is verified
   // byte-for-byte against the eager baseline separately.)
   let _guard = TestGuard::new();
-  let err = test_input("f() { raise MyErr \"boom\"; }; f").unwrap_err();
+  let err    = test_input("f() { raise MyErr \"boom\"; }; f").unwrap_err();
   let labels = err.label_messages();
   assert!(
     labels.iter().any(|l| l.contains("boom")),

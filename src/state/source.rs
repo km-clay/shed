@@ -50,7 +50,7 @@ impl Display for SourceId {
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub(crate) struct SourceHandle {
   ptr: Arc<Source>,
-  id: SourceId,
+  id : SourceId,
 }
 
 impl SourceHandle {
@@ -68,7 +68,7 @@ impl SourceHandle {
   pub(crate) fn share_handle(&self) -> Self {
     Self {
       ptr: Arc::clone(&self.ptr),
-      id: self.id,
+      id : self.id,
     }
   }
 }
@@ -80,7 +80,7 @@ impl SourceHandle {
 /// but any attempt to access the source text will panic.
 #[derive(Debug)]
 pub(crate) struct StrongSpan {
-  span: Span,
+  span  : Span,
   handle: Option<SourceHandle>,
 }
 
@@ -88,7 +88,7 @@ impl Span {
   /// Upgrade a [`Span`] to a [`StrongSpan`], which carries a `SourceHandle` with it.
   pub(crate) fn upgrade(self) -> StrongSpan {
     StrongSpan {
-      span: self,
+      span  : self,
       handle: handle_for(self.source()),
     }
   }
@@ -97,7 +97,7 @@ impl Span {
 impl Clone for StrongSpan {
   fn clone(&self) -> Self {
     Self {
-      span: self.span,
+      span  : self.span,
       handle: self.handle.as_ref().map(SourceHandle::share_handle),
     }
   }
@@ -146,7 +146,7 @@ impl Deref for SourceHandle {
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub(crate) struct Source {
-  name: Option<VarStr>,
+  name   : Option<VarStr>,
   content: VarStr,
 }
 
@@ -164,10 +164,10 @@ impl SourceRegistry {
   }
 
   fn register(&mut self, name: Option<VarStr>, src: VarStr) -> SourceHandle {
-    let id = SourceId(SRC_GENERATION.fetch_add(1, Ordering::AcqRel));
+    let id     = SourceId(SRC_GENERATION.fetch_add(1, Ordering::AcqRel));
 
     let source = Arc::new(Source { name, content: src });
-    let weak = Arc::downgrade(&source);
+    let weak   = Arc::downgrade(&source);
     self.sources.insert(id, weak);
     SourceHandle { ptr: source, id }
   }
@@ -202,8 +202,8 @@ pub(crate) fn get_source_name(id: SourceId) -> Option<VarStr> {
 
 pub(crate) fn slice_source(span: Span) -> Option<VarStr> {
   let start = span.start();
-  let end = span.end();
-  let id = span.source();
+  let end   = span.end();
+  let id    = span.source();
   let source = LAST_SOURCE.with(|slot| {
     if let Some((s_id, src)) = &*slot.borrow()
       && *s_id == id

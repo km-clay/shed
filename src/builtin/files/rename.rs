@@ -12,7 +12,6 @@ impl Builtin for Rename {
   fn strict_opts(&self) -> bool {
     true
   }
-  #[rustfmt::skip]
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut paths = args.arguments();
 

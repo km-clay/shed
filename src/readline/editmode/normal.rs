@@ -14,16 +14,16 @@ use super::{
 
 #[derive(Debug)]
 pub(crate) struct ViNormal {
-  parser: ViParser,
-  pending_seq: String,
+  parser       : ViParser,
+  pending_seq  : String,
   pending_flags: CmdFlags,
 }
 
 impl ViNormal {
   pub(crate) fn new() -> Self {
     Self {
-      parser: ViParser::new(None, None, Self::validate_combination),
-      pending_seq: String::new(),
+      parser       : ViParser::new(None, None, Self::validate_combination),
+      pending_seq  : String::new(),
       pending_flags: CmdFlags::empty(),
     }
   }
@@ -43,7 +43,7 @@ impl ViNormal {
           };
         }
         Some(_) => return CmdState::Complete,
-        None => return CmdState::Pending,
+        None    => return CmdState::Pending,
       }
     }
     if let Some(verb) = verb
@@ -51,7 +51,7 @@ impl ViNormal {
     {
       match verb {
         Verb::Put(_) => CmdState::Complete,
-        _ => CmdState::Pending,
+        _            => CmdState::Pending,
       }
     } else {
       CmdState::Complete
@@ -85,18 +85,18 @@ impl EditMode for ViNormal {
     let mut cmd: Option<EditCmd> = match key {
       key!('V') => Some(EditCmd {
         register: RegisterName::default(),
-        verb: Some(verb!(Verb::VisualModeLine)),
-        motion: None,
-        raw_seq: String::new(),
-        flags: self.flags(),
+        verb    : Some(verb!(Verb::VisualModeLine)),
+        motion  : None,
+        raw_seq : String::new(),
+        flags   : self.flags(),
       }),
       E(K::ExMode, _) => {
         return Some(EditCmd {
           register: RegisterName::default(),
-          verb: Some(verb!(Verb::ExMode)),
-          motion: None,
-          raw_seq: self.take_cmd(),
-          flags: self.flags(),
+          verb    : Some(verb!(Verb::ExMode)),
+          motion  : None,
+          raw_seq : self.take_cmd(),
+          flags   : self.flags(),
         });
       }
       key!(Ctrl + 'a') => {
@@ -104,10 +104,10 @@ impl EditMode for ViNormal {
         self.pending_seq.clear();
         Some(EditCmd {
           register: RegisterName::default(),
-          verb: Some(verb!(Verb::IncrementNumber(count))),
-          motion: None,
-          raw_seq: String::new(),
-          flags: self.flags(),
+          verb    : Some(verb!(Verb::IncrementNumber(count))),
+          motion  : None,
+          raw_seq : String::new(),
+          flags   : self.flags(),
         })
       }
       key!(Ctrl + 'x') => {
@@ -115,50 +115,50 @@ impl EditMode for ViNormal {
         self.pending_seq.clear();
         Some(EditCmd {
           register: RegisterName::default(),
-          verb: Some(verb!(Verb::DecrementNumber(count))),
-          motion: None,
-          raw_seq: String::new(),
-          flags: self.flags(),
+          verb    : Some(verb!(Verb::DecrementNumber(count))),
+          motion  : None,
+          raw_seq : String::new(),
+          flags   : self.flags(),
         })
       }
       key!(Ctrl + 'g') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: RegisterName::default(),
-          verb: Some(verb!(Verb::PrintPosition)),
-          motion: None,
-          raw_seq: String::new(),
-          flags: self.flags(),
+          verb    : Some(verb!(Verb::PrintPosition)),
+          motion  : None,
+          raw_seq : String::new(),
+          flags   : self.flags(),
         })
       }
       key!(Ctrl + 'd') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: RegisterName::default(),
-          verb: None,
-          motion: Some(motion!(Motion::HalfScreenDown)),
-          raw_seq: String::new(),
-          flags: self.flags(),
+          verb    : None,
+          motion  : Some(motion!(Motion::HalfScreenDown)),
+          raw_seq : String::new(),
+          flags   : self.flags(),
         })
       }
       key!(Ctrl + 'u') => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: RegisterName::default(),
-          verb: None,
-          motion: Some(motion!(Motion::HalfScreenUp)),
-          raw_seq: String::new(),
-          flags: self.flags(),
+          verb    : None,
+          motion  : Some(motion!(Motion::HalfScreenUp)),
+          raw_seq : String::new(),
+          flags   : self.flags(),
         })
       }
       key!(Enter) => {
         self.pending_seq.clear();
         Some(EditCmd {
           register: RegisterName::default(),
-          verb: None,
-          motion: Some(motion!(Motion::LineDown)),
-          raw_seq: String::new(),
-          flags: self.flags() | CmdFlags::IS_SUBMIT,
+          verb    : None,
+          motion  : Some(motion!(Motion::LineDown)),
+          raw_seq : String::new(),
+          flags   : self.flags() | CmdFlags::IS_SUBMIT,
         })
       }
       E(K::Char(ch), M::NONE) => {
@@ -177,20 +177,20 @@ impl EditMode for ViNormal {
       }
       key!(Backspace) => Some(EditCmd {
         register: RegisterName::default(),
-        verb: None,
-        motion: Some(motion!(Motion::BackwardChar)),
-        raw_seq: String::new(),
-        flags: self.flags(),
+        verb    : None,
+        motion  : Some(motion!(Motion::BackwardChar)),
+        raw_seq : String::new(),
+        flags   : self.flags(),
       }),
       key!(Ctrl + 'r') => {
         let mut chars = self.pending_seq.chars().peekable();
-        let count = Self::parse_count(&mut chars).unwrap_or(1);
+        let     count = Self::parse_count(&mut chars).unwrap_or(1);
         Some(EditCmd {
           register: RegisterName::default(),
-          verb: Some(verb!(count, Verb::Redo)),
-          motion: None,
-          raw_seq: self.take_cmd(),
-          flags: self.flags(),
+          verb    : Some(verb!(count, Verb::Redo)),
+          motion  : None,
+          raw_seq : self.take_cmd(),
+          flags   : self.flags(),
         })
       }
       E(K::Esc, _) => {

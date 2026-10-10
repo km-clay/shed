@@ -33,15 +33,15 @@ impl super::Builtin for Trap {
   }
 
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let mut list_signals = false;
-    let mut print = false;
-    let (arg_vec, opts) = args.take_argv();
+    let mut list_signals    = false;
+    let mut print           = false;
+    let     (arg_vec, opts) = args.take_argv();
 
     for opt in opts {
       match opt.key() {
-        "list" => list_signals = true,
+        "list"  => list_signals = true,
         "print" => print = true,
-        _ => return Err(sherr!(ExecFail @ opt.span(), "trap: Unsupported option '{opt}'")),
+        _       => return Err(sherr!(ExecFail @ opt.span(), "trap: Unsupported option '{opt}'")),
       }
     }
 
@@ -94,8 +94,8 @@ impl super::Builtin for Trap {
 
     let mut arg_iter = arg_vec.into_iter();
 
-    let command = arg_iter.next().unwrap().0;
-    let mut targets = vec![];
+    let     command  = arg_iter.next().unwrap().0;
+    let mut targets  = vec![];
 
     for (arg, span) in arg_iter {
       let target = TrapTarget::parse(&arg).promote_err(span)?;
@@ -206,7 +206,7 @@ mod tests {
   fn trap_multiple_signals() {
     let _g = TestGuard::new();
     test_input("trap 'handle' INT TERM").unwrap();
-    let int = Shed::logic(|l| l.get_trap(TrapTarget::Signal(Signal::SIGINT)));
+    let int  = Shed::logic(|l| l.get_trap(TrapTarget::Signal(Signal::SIGINT)));
     let term = Shed::logic(|l| l.get_trap(TrapTarget::Signal(Signal::SIGTERM)));
     assert_eq!(int.unwrap(), "handle");
     assert_eq!(term.unwrap(), "handle");

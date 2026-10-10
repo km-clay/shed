@@ -31,10 +31,10 @@ bitflags! {
 #[derive(Clone, Default, Debug)]
 pub(crate) struct EditCmd {
   pub register: RegisterName,
-  pub verb: Option<Cmd<Verb>>,
-  pub motion: Option<Cmd<Motion>>,
-  pub raw_seq: String,
-  pub flags: CmdFlags,
+  pub verb    : Option<Cmd<Verb>>,
+  pub motion  : Option<Cmd<Motion>>,
+  pub raw_seq : String,
+  pub flags   : CmdFlags,
 }
 
 impl EditCmd {
@@ -79,7 +79,7 @@ impl EditCmd {
     ) {
       let count = self.verb().map_or(1, |v| v.0);
       let offset = match self.verb().map(|v| &v.1) {
-        Some(Verb::HistoryUp) => -(count as isize),
+        Some(Verb::HistoryUp)   => -(count as isize),
         Some(Verb::HistoryDown) => count as isize,
         _ => 0,
       };
@@ -90,7 +90,7 @@ impl EditCmd {
     ) {
       let count = self.motion().map_or(1, |m| m.0);
       let offset = match self.motion().map(|m| &m.1) {
-        Some(Motion::LineUp) => -(count as isize),
+        Some(Motion::LineUp)   => -(count as isize),
         Some(Motion::LineDown) => count as isize,
         _ => 0,
       };
@@ -120,7 +120,7 @@ impl EditCmd {
     };
     let Cmd(v_count, _) = verb;
     let Cmd(m_count, _) = motion;
-    let product = *v_count * *m_count;
+    let product         = *v_count * *m_count;
     verb.0 = 1;
     motion.0 = product;
   }
@@ -164,9 +164,9 @@ impl EditCmd {
       ifs.push(';');
       match &v.1 {
         Verb::AcceptLineOrNewline => true,
-        Verb::InsertChar(ch) => ifs.contains(*ch),
+        Verb::InsertChar(ch)      => ifs.contains(*ch),
         Verb::Insert(s) => s.len() == 1 && ifs.contains(s.to_str_lossy().chars().next().unwrap()),
-        _ => false,
+        _               => false,
       }
     })
   }
@@ -180,14 +180,14 @@ impl EditCmd {
   pub(crate) fn plain_write() -> Self {
     EditCmd {
       register: RegisterName::default(),
-      verb: Some(verb!(Verb::ExCmd(ExNode {
+      verb    : Some(verb!(Verb::ExCmd(ExNode {
         address: None,
-        bang: false,
-        kind: ExNdRule::Write(WriteDest::File(None)),
+        bang   : false,
+        kind   : ExNdRule::Write(WriteDest::File(None)),
       }))),
-      motion: None,
-      raw_seq: String::new(),
-      flags: CmdFlags::empty(),
+      motion  : None,
+      raw_seq : String::new(),
+      flags   : CmdFlags::empty(),
     }
   }
 }
@@ -196,7 +196,7 @@ impl EditCmd {
 /// looking for a Normal leaf. Returns the seq if found.
 fn find_normal_seq(node: &ExNode) -> Option<(&str, bool)> {
   match &node.kind {
-    ExNdRule::Normal { seq, bang } => Some((seq, *bang)),
+    ExNdRule::Normal { seq, bang }  => Some((seq, *bang)),
     ExNdRule::Global { nested, .. } => find_normal_seq(nested),
     _ => None,
   }
@@ -281,7 +281,7 @@ pub(super) fn invert_char_motion(motion: Cmd<Motion>) -> Cmd<Motion> {
     return motion;
   };
   let new_dir = match dir {
-    Direction::Forward => Direction::Backward,
+    Direction::Forward  => Direction::Backward,
     Direction::Backward => Direction::Forward,
   };
   Cmd(count, Motion::CharSearch(new_dir, dest, ch))
@@ -522,7 +522,7 @@ impl Motion {
             Direction::Backward,
           )),
           'E' => Some(Motion::WordMotion(To::End, Word::Big, Direction::Backward)),
-          _ => None,
+          _   => None,
         }
       }
       _ => None,

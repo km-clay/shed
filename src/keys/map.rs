@@ -35,15 +35,15 @@ impl Display for KeyMapFlags {
     write!(f, "-")?;
     for flag in self.iter() {
       match flag {
-        KeyMapFlags::INSERT => write!(f, "i")?,
-        KeyMapFlags::NORMAL => write!(f, "n")?,
-        KeyMapFlags::VISUAL => write!(f, "v")?,
-        KeyMapFlags::EX => write!(f, "x")?,
+        KeyMapFlags::INSERT     => write!(f, "i")?,
+        KeyMapFlags::NORMAL     => write!(f, "n")?,
+        KeyMapFlags::VISUAL     => write!(f, "v")?,
+        KeyMapFlags::EX         => write!(f, "x")?,
         KeyMapFlags::OP_PENDING => write!(f, "o")?,
-        KeyMapFlags::REPLACE => write!(f, "r")?,
-        KeyMapFlags::VERBATIM => write!(f, "V")?,
-        KeyMapFlags::EMACS => write!(f, "e")?,
-        KeyMapFlags::REMOTE => write!(f, "R")?,
+        KeyMapFlags::REPLACE    => write!(f, "r")?,
+        KeyMapFlags::VERBATIM   => write!(f, "V")?,
+        KeyMapFlags::EMACS      => write!(f, "e")?,
+        KeyMapFlags::REMOTE     => write!(f, "R")?,
         _ => break,
       }
     }
@@ -60,10 +60,10 @@ pub(crate) enum KeyMapMatch {
 
 #[derive(Debug, Clone)]
 pub(crate) struct KeyMap {
-  pub flags: KeyMapFlags,
-  pub keys: VarStr,
+  pub flags : KeyMapFlags,
+  pub keys  : VarStr,
   pub action: VarStr,
-  pub remap: bool,
+  pub remap : bool,
 }
 
 impl KeyMap {
@@ -87,8 +87,8 @@ impl KeyMap {
 
 impl Display for KeyMap {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let flags = self.flags.to_string();
-    let keys = escape::shell_quote(&self.keys.to_str_lossy());
+    let flags  = self.flags.to_string();
+    let keys   = escape::shell_quote(&self.keys.to_str_lossy());
     let action = escape::shell_quote(&self.action.to_str_lossy());
 
     if self.remap {

@@ -17,8 +17,8 @@ use super::{BuiltinArgs, ReadLimit, opt::OptSpec};
 
 #[derive(Debug, Clone, Copy)]
 struct IntSpec {
-  width: Option<u8>,
-  signed: bool,
+  width        : Option<u8>,
+  signed       : bool,
   little_endian: bool,
 }
 
@@ -51,12 +51,12 @@ impl IntSpec {
   }
   fn parse_width(s: &str) -> ShResult<u8> {
     match s {
-      "8" => Ok(1),
-      "16" => Ok(2),
-      "32" => Ok(4),
-      "64" => Ok(8),
+      "8"   => Ok(1),
+      "16"  => Ok(2),
+      "32"  => Ok(4),
+      "64"  => Ok(8),
       "128" => Ok(16),
-      _ => Err(sherr!(ParseErr, "invalid integer width: {s}")),
+      _     => Err(sherr!(ParseErr, "invalid integer width: {s}")),
     }
   }
   fn parse_type(s: &str) -> ShResult<(bool, Option<u8>)> {
@@ -67,7 +67,7 @@ impl IntSpec {
     let signed = match s.chars().next().unwrap() {
       'i' => true,
       'u' => false,
-      _ => return Err(sherr!(ParseErr, "invalid integer type: {s}")),
+      _   => return Err(sherr!(ParseErr, "invalid integer type: {s}")),
     };
     let width = Self::parse_width(&s[1..])?;
 
@@ -76,7 +76,7 @@ impl IntSpec {
 
   fn decode(self, bytes: &[u8]) -> VarStr {
     debug_assert!(self.width.is_some());
-    let width = u32::from(self.width.unwrap());
+    let     width     = u32::from(self.width.unwrap());
 
     let mut val: u128 = 0;
     if self.little_endian {
@@ -107,10 +107,10 @@ impl IntSpec {
 
   fn encode(self, val: i128) -> Vec<u8> {
     debug_assert!(self.width.is_some());
-    let width = self.width.unwrap();
+    let     width = self.width.unwrap();
 
-    let u = val as u128;
-    let mut out = Vec::with_capacity(width as usize);
+    let     u     = val as u128;
+    let mut out   = Vec::with_capacity(width as usize);
     let bits = if self.little_endian {
       itertools::Either::Left(0..width)
     } else {
@@ -126,7 +126,6 @@ impl IntSpec {
 }
 
 pub(crate) struct ReadInt;
-#[rustfmt::skip]
 impl super::Builtin for ReadInt {
   fn strict_opts(&self) -> bool {
     true
@@ -150,44 +149,32 @@ impl super::Builtin for ReadInt {
     let spec = IntSpec::from_args(&args).promote_err(args.cmd_span())?;
 
     if spec.width.is_none() && (args.has_opt("at-most") || args.has_opt("exactly")) {
-      return Err(sherr!(ParseErr @ args.cmd_span(), "cannot specify -n or -N without --width or --type")).with_code(2);
+      return Err(
+        sherr!(ParseErr @ args.cmd_span(), "cannot specify -n or -N without --width or --type"),
+      )
+      .with_code(2);
     }
 
-    let reader = procio::stdin_sink()?;
+    let     reader = procio::stdin_sink()?;
     let mut writer = SinkIo(procio::stdout_sink()?);
 
-    let limit = args.opt_value("at-most")
+    let limit = args
+      .opt_value("at-most")
       .map(|v| ReadLimit::at_most(&v))
-      .or_else(|| {
-        args.opt_value("exactly")
-          .map(|v| ReadLimit::exactly(&v))
-      })
+      .or_else(|| args.opt_value("exactly").map(|v| ReadLimit::exactly(&v)))
       .transpose()
       .promote_err(args.cmd_span())?
       .unwrap_or_default();
 
     match spec.width {
-      Some(w) => Self::sized_read(
-        usize::from(w),
-        limit,
-        &reader,
-        &mut writer,
-        spec,
-        &args,
-      ).promote_err(args.cmd_span()),
+      Some(w) => Self::sized_read(usize::from(w), limit, &reader, &mut writer, spec, &args)
+        .promote_err(args.cmd_span()),
 
-      None => Self::inferred_read(
-        &reader,
-        &mut writer,
-        spec,
-        &args,
-      ).promote_err(args.cmd_span())
+      None => Self::inferred_read(&reader, &mut writer, spec, &args).promote_err(args.cmd_span()),
     }
-
   }
 }
 
-#[rustfmt::skip]
 impl ReadInt {
   fn inferred_read(
     reader: &Arc<dyn Sink>,
@@ -196,11 +183,10 @@ impl ReadInt {
     args: &BuiltinArgs,
   ) -> ShResult<()> {
     let mut buf = vec![0u8; 17];
-    let got = super::fill(reader, &mut buf)
-      .promote_err(args.cmd_span())?;
+    let     got = super::fill(reader, &mut buf).promote_err(args.cmd_span())?;
 
     if got == 0 {
-      return util::with_status(1)
+      return util::with_status(1);
     }
     if got > 16 {
       return Err(sherr!(ExecFail @ args.cmd_span(), "input too long to infer width: got {got} bytes, max 16"));
@@ -219,36 +205,35 @@ impl ReadInt {
     spec: IntSpec,
     args: &BuiltinArgs,
   ) -> ShResult<()> {
-    let want = limit.wanted();
+    let     want  = limit.wanted();
 
-    let mut buf = vec![0u8; width * want];
-    let     got = super::fill(reader, &mut buf).promote_err(args.cmd_span())?;
+    let mut buf   = vec![0u8; width * want];
+    let     got   = super::fill(reader, &mut buf).promote_err(args.cmd_span())?;
 
-    let whole = got / width;
-    let rem   = got % width;
+    let     whole = got / width;
+    let     rem   = got % width;
 
     if rem != 0 {
       return Err(sherr!(ExecFail, "trailing {rem} bytes do not form a complete integer"));
     }
 
-    if let ReadLimit::Exactly(_) = limit && whole < want {
+    if let ReadLimit::Exactly(_) = limit
+      && whole < want
+    {
       return Err(sherr!(ExecFail, "expected {want} integers, got {whole}"));
     }
 
     if whole == 0 {
-      return util::with_status(1)
+      return util::with_status(1);
     }
 
-    let vals = buf[..got]
-      .chunks_exact(width)
-      .map(|c| spec.decode(c));
+    let vals = buf[..got].chunks_exact(width).map(|c| spec.decode(c));
 
     super::emit(vals, writer, args).promote_err(args.cmd_span())
   }
 }
 
 pub(crate) struct WriteInt;
-#[rustfmt::skip]
 impl super::Builtin for WriteInt {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
@@ -259,16 +244,17 @@ impl super::Builtin for WriteInt {
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     if !args.has_opt("width") && !args.has_opt("type") {
-      return Err(sherr!(ParseErr @ args.cmd_span(), "must specify --width or --type")).with_code(2);
+      return Err(sherr!(ParseErr @ args.cmd_span(), "must specify --width or --type"))
+        .with_code(2);
     }
-    let spec = IntSpec::from_args(&args).promote_err(args.cmd_span())?;
-    let mut out = SinkIo(procio::stdout_sink()?);
+    let     spec = IntSpec::from_args(&args).promote_err(args.cmd_span())?;
+    let mut out  = SinkIo(procio::stdout_sink()?);
 
     if let Some(input) = self.get_input(&mut args) {
       // ifs split the input, like read
       // ifs chars are probably not hex digits, so this should be fine
-      let span = args.cmd_span();
-      let ifs = params::get_separators();
+      let span   = args.cmd_span();
+      let ifs    = params::get_separators();
 
       let fields = strops::ifs_split(&input, &ifs, None);
 
@@ -281,7 +267,7 @@ impl super::Builtin for WriteInt {
       }
     } else {
       if args.no_arguments() {
-        return util::with_status(1)
+        return util::with_status(1);
       };
 
       // arg case, used mainly to consume arrays created by readint
@@ -317,8 +303,8 @@ mod tests {
   }
 
   fn fails(cmd: &str) -> bool {
-    let g = TestGuard::new();
-    let _ = test_input(cmd);
+    let g   = TestGuard::new();
+    let _   = test_input(cmd);
     let out = g.read_output();
     out.contains("Error") || out.trim_end().ends_with("st=1") || out.trim_end().ends_with("st=2")
   }

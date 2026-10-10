@@ -112,14 +112,14 @@ impl super::Builtin for ExCmd {
 
     for (arg, span) in args.arguments() {
       let (name, value) = strops::split_assignment_raw(arg);
-      let name = &name.to_str_lossy();
+      let name          = &name.to_str_lossy();
 
       if !remove && let Some(value) = value {
         Shed::logic_mut(|l| l.insert_ex_alias(name, &value.into(), span));
       } else {
         match Shed::logic(|l| l.get_ex_alias(name)) {
           Some(_) if remove => Shed::logic_mut(|l| l.remove_ex_alias(name)),
-          Some(alias) => outln_bytes(&vars::display_as_var(name.as_bytes(), alias.body())),
+          Some(alias)       => outln_bytes(&vars::display_as_var(name.as_bytes(), alias.body())),
           None => return Err(sherr!(SyntaxErr @ span,"Unknown ex command alias '{name}'")),
         }
       }
@@ -177,7 +177,7 @@ mod tests {
     guard.read_output();
 
     test_input("alias").unwrap();
-    let out = guard.read_output();
+    let out              = guard.read_output();
     let lines: Vec<&str> = out.lines().collect();
 
     assert!(lines.len() >= 3);

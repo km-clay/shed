@@ -123,8 +123,8 @@ impl super::LineBuf {
       }
       let pos = self.cursor.pos;
       let motion = MotionKind::Char {
-        start: pos,
-        end: pos,
+        start    : pos,
+        end      : pos,
         inclusive: true,
       };
       self.motion_mutation(&motion, &f);
@@ -135,7 +135,7 @@ impl super::LineBuf {
     let Some(motion) = self.eval_motion(cmd)? else {
       return Ok(());
     };
-    let content = self.yank_range(&motion);
+    let content     = self.yank_range(&motion);
     let reg_content = RegisterContent::from_extracted(content.clone(), &motion);
 
     let content_raw = content.join();
@@ -182,8 +182,8 @@ impl super::LineBuf {
         unreachable!()
       };
       let (insert_target, _) = util::ordered(*start, *end);
-      let n_lines = self.lines.len();
-      let content = self.delete_range(&motion);
+      let n_lines            = self.lines.len();
+      let content            = self.delete_range(&motion);
       self.fix_cursor();
       if n_lines > 1 {
         // clamp insert target at new length
@@ -218,9 +218,9 @@ impl super::LineBuf {
         self.set_row(s);
         if *verb == Verb::Change {
           // we've gotta indent
-          let (start, _) = self.indent_levels_for_row(self.row());
-          let line = self.cur_line_mut();
-          let mut col = 0;
+          let     (start, _) = self.indent_levels_for_row(self.row());
+          let     line       = self.cur_line_mut();
+          let mut col        = 0;
           for tab in std::iter::repeat_n(Grapheme::from('\t'), start) {
             line.0.insert(col, tab);
             col += 1;
@@ -266,7 +266,7 @@ impl super::LineBuf {
       content.iter().map(Line::len).sum::<usize>() + content.len().saturating_sub(1); // adds the newlines too
 
     let (s, e) = util::ordered(span.0, span.1);
-    let _old = self.extract_span((s, e), false);
+    let _old   = self.extract_span((s, e), false);
 
     self.set_cursor(s);
     self.insert_lines_at(s, content);
@@ -412,7 +412,7 @@ impl super::LineBuf {
     let Some(content) = register.read_from_register() else {
       return Ok(());
     };
-    let mut effective_anchor = anchor;
+    let mut effective_anchor             = anchor;
     let mut selection_start: Option<Pos> = None;
 
     if let Some(motion) = self.select_range() {
@@ -429,14 +429,14 @@ impl super::LineBuf {
     }
     match content {
       RegisterContent::Span(lines) => {
-        let move_cursor = lines.len() == 1 && lines[0].len() > 1;
+        let move_cursor        = lines.len() == 1 && lines[0].len() > 1;
         let content_len: usize = lines.iter().map(Line::len).sum();
-        let row = selection_start.map_or_else(|| self.row(), |p| p.row);
+        let row                = selection_start.map_or_else(|| self.row(), |p| p.row);
         let col = if let Some(start) = selection_start {
           start.col.min(self.lines.get(row).map_or(0, Line::len))
         } else {
           match effective_anchor {
-            Anchor::After => (self.col() + 1).min(self.cur_line().len()),
+            Anchor::After  => (self.col() + 1).min(self.cur_line().len()),
             Anchor::Before => self.col(),
           }
         };
@@ -448,8 +448,8 @@ impl super::LineBuf {
 
         self.insert_lines_at(pos, Lines(lines));
 
-        let end_len = self.lines[row].len();
-        let mut delta = end_len.saturating_sub(start_len);
+        let     end_len = self.lines[row].len();
+        let mut delta   = end_len.saturating_sub(start_len);
         if let Anchor::Before = effective_anchor {
           delta = delta.saturating_sub(1);
         }
@@ -466,7 +466,7 @@ impl super::LineBuf {
       }
       RegisterContent::Line(lines) => {
         let row = match anchor {
-          Anchor::After => self.row() + 1,
+          Anchor::After  => self.row() + 1,
           Anchor::Before => self.row(),
         };
         for (i, line) in lines.iter().cloned().enumerate() {
@@ -491,7 +491,7 @@ impl super::LineBuf {
         let pos = Pos {
           row: self.row(),
           col: match effective_anchor {
-            Anchor::After => (self.col() + 1).min(self.cur_line().len()),
+            Anchor::After  => (self.col() + 1).min(self.cur_line().len()),
             Anchor::Before => self.col(),
           },
         };
@@ -504,13 +504,13 @@ impl super::LineBuf {
   fn break_line_verb(&mut self, anchor: Anchor) {
     match anchor {
       Anchor::After => {
-        let row = self.row();
+        let row    = self.row();
         let target = (row + 1).min(self.lines.len());
         self.lines.insert(target, Line::default());
 
-        let (start, _) = self.indent_levels_for_row(target);
-        let line = self.line_mut(target);
-        let mut col = 0;
+        let     (start, _) = self.indent_levels_for_row(target);
+        let     line       = self.line_mut(target);
+        let mut col        = 0;
         for tab in std::iter::repeat_n(Grapheme::from('\t'), start) {
           line.insert(0, tab);
           col += 1;
@@ -522,9 +522,9 @@ impl super::LineBuf {
         let row = self.row();
         self.lines.insert(row, Line::default());
 
-        let (start, _) = self.indent_levels_for_row(row);
-        let line = self.line_mut(row);
-        let mut col = 0;
+        let     (start, _) = self.indent_levels_for_row(row);
+        let     line       = self.line_mut(row);
+        let mut col        = 0;
         for tab in std::iter::repeat_n(Grapheme::from('\t'), start) {
           line.insert(0, tab);
           col += 1;
@@ -589,13 +589,13 @@ impl super::LineBuf {
     self.set_cursor(new_anchor);
   }
   fn join_lines(&mut self, cmd: &EditCmd, count: usize) -> ShResult<()> {
-    let old_exclusive = self.cursor.exclusive;
-    let mut row = self.row();
-    let mut count = count;
+    let     old_exclusive = self.cursor.exclusive;
+    let mut row           = self.row();
+    let mut count         = count;
     let range = match self.eval_motion(cmd)? {
       Some(MotionKind::Line { start, end, .. }) => Some((start, end)),
       Some(MotionKind::Char { start, end, .. }) => Some((start.row, end.row)),
-      Some(MotionKind::Block { .. }) => return Ok(()),
+      Some(MotionKind::Block { .. })            => return Ok(()),
       None => match self.select_range() {
         Some(Motion::LineRange(s_addr, e_addr)) => {
           let s = self
@@ -629,10 +629,10 @@ impl super::LineBuf {
         break;
       }
 
-      let mut next_line = self.lines.remove(row + 1).trim_start();
-      let this_line = self.line_mut(row);
-      let this_has_ws = this_line.0.last().is_some_and(Grapheme::is_ws);
-      let join_with_space = !this_has_ws && !this_line.is_empty() && !next_line.is_empty();
+      let mut next_line       = self.lines.remove(row + 1).trim_start();
+      let     this_line       = self.line_mut(row);
+      let     this_has_ws     = this_line.0.last().is_some_and(Grapheme::is_ws);
+      let     join_with_space = !this_has_ws && !this_line.is_empty() && !next_line.is_empty();
 
       if join_with_space {
         next_line.insert_char(0, ' ');
@@ -665,7 +665,7 @@ impl super::LineBuf {
     let lines = match motion {
       MotionKind::Char { start, end, .. } => self.line_iter_mut(util::ordered(start.row, end.row)),
       MotionKind::Line { start, end, .. } => self.line_iter_mut(util::ordered(start, end)),
-      MotionKind::Block { .. } => unimplemented!(),
+      MotionKind::Block { .. }            => unimplemented!(),
     };
     let mut col_offset = 0;
     for line in lines {
@@ -700,12 +700,12 @@ impl super::LineBuf {
     Ok(())
   }
   fn report_position(&mut self) {
-    let num_lines = self.lines.len();
-    let row = self.row() + 1;
-    let col = self.col() + 1;
+    let num_lines       = self.lines.len();
+    let row             = self.row() + 1;
+    let col             = self.col() + 1;
     let total_graphemes = self.count_graphemes();
-    let (left, _) = self.lines.clone().split_lines(self.cursor.pos);
-    let total_in_left = left.iter().map(Line::len).sum::<usize>();
+    let (left, _)       = self.lines.clone().split_lines(self.cursor.pos);
+    let total_in_left   = left.iter().map(Line::len).sum::<usize>();
     let percentage = if total_graphemes > 0 {
       (total_in_left as f64 / total_graphemes as f64) * 100.0
     } else {
@@ -748,10 +748,10 @@ impl super::LineBuf {
     else {
       return;
     };
-    let end = if inclusive { end.col_add(1) } else { end };
+    let end            = if inclusive { end.col_add(1) } else { end };
     let this_word_span = (start, end);
 
-    let back_count = if self.cursor_on_ws() { 1 } else { 2 };
+    let back_count     = if self.cursor_on_ws() { 1 } else { 2 };
 
     let MotionKind::Char { end, .. } = self.eval_word_motion(
       back_count,
@@ -772,7 +772,7 @@ impl super::LineBuf {
     else {
       return;
     };
-    let end = if inclusive { end.col_add(1) } else { end };
+    let end            = if inclusive { end.col_add(1) } else { end };
     let prev_word_span = (start, end);
 
     // Bail if the spans overlap or are the same word
@@ -811,23 +811,23 @@ impl super::LineBuf {
   }
   fn format_adjusted(word: &str, inc: i64) -> Option<String> {
     if word.starts_with("0x") {
-      let body = word.strip_prefix("0x").unwrap();
-      let width = body.len();
-      let num = i64::from_str_radix(body, 16).ok()?;
+      let body    = word.strip_prefix("0x").unwrap();
+      let width   = body.len();
+      let num     = i64::from_str_radix(body, 16).ok()?;
       let new_num = num + inc;
 
       Some(format!("0x{new_num:0>width$x}"))
     } else if word.starts_with("0b") {
-      let body = word.strip_prefix("0b").unwrap();
-      let width = body.len();
-      let num = i64::from_str_radix(body, 2).ok()?;
+      let body    = word.strip_prefix("0b").unwrap();
+      let width   = body.len();
+      let num     = i64::from_str_radix(body, 2).ok()?;
       let new_num = num + inc;
 
       Some(format!("0b{new_num:0>width$b}"))
     } else if word.starts_with("0o") {
-      let body = word.strip_prefix("0o").unwrap();
-      let width = body.len();
-      let num = i64::from_str_radix(body, 8).ok()?;
+      let body    = word.strip_prefix("0o").unwrap();
+      let width   = body.len();
+      let num     = i64::from_str_radix(body, 8).ok()?;
       let new_num = num + inc;
 
       Some(format!("0o{new_num:0>width$o}"))

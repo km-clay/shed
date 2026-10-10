@@ -21,12 +21,12 @@ fn has_braces(span: Option<Span>, s: &[u8]) -> bool {
   }
   let s = var::expand_raw(span, &mut SegStream::from_bytes(s).cursor())
     .map_or_else(|_| VarStr::from(s), |sg| VarStr::from(sg.into_bytes()));
-  let mut bytes = SliceCursor::new(&s);
-  let mut depth = 0;
-  let mut found_open = false;
-  let mut has_comma = false;
-  let mut has_range = false;
-  let mut qt_state = QuoteState::default();
+  let mut bytes           = SliceCursor::new(&s);
+  let mut depth           = 0;
+  let mut found_open      = false;
+  let mut has_comma       = false;
+  let mut has_range       = false;
+  let mut qt_state        = QuoteState::default();
   let mut last_was_dollar = false;
 
   match_loop!(bytes.next_byte() => b, {
@@ -72,7 +72,7 @@ pub(super) fn expand_braces_full(span: Option<Span>, input: &[u8]) -> Vec<VarStr
   // Keep expanding until no results contain braces
   loop {
     let mut any_expanded = false;
-    let mut new_results = Vec::new();
+    let mut new_results  = Vec::new();
 
     for word in results {
       if has_braces(span, &word) {
@@ -137,8 +137,8 @@ fn expand_one_brace(word: &[u8]) -> Vec<VarStr> {
 /// Extract prefix, inner, and suffix from a brace expression.
 /// "pre{a,b}post" -> Some(("pre", "a,b", "post"))
 fn get_brace_parts(word: &[u8]) -> Option<(VarStr, VarStr, VarStr)> {
-  let mut bytes = word.iter().copied().peekable();
-  let mut prefix = util::scratch_buf();
+  let mut bytes    = word.iter().copied().peekable();
+  let mut prefix   = util::scratch_buf();
   let mut qt_state = QuoteState::default();
 
   // Find the opening brace
@@ -212,10 +212,10 @@ fn get_brace_parts(word: &[u8]) -> Option<(VarStr, VarStr, VarStr)> {
 /// "a,b,c" -> ["a", "b", "c"]
 /// "a,{b,c},d" -> ["a", "{b,c}", "d"]
 fn split_brace_inner(inner: &[u8]) -> Vec<VarStr> {
-  let mut parts = Vec::new();
-  let mut current = util::scratch_buf();
-  let mut bytes = inner.iter().copied().peekable();
-  let mut depth = 0;
+  let mut parts    = Vec::new();
+  let mut current  = util::scratch_buf();
+  let mut bytes    = inner.iter().copied().peekable();
+  let mut depth    = 0;
   let mut qt_state = QuoteState::default();
 
   match_loop!(bytes.next() => byte, {
@@ -259,12 +259,12 @@ fn try_expand_range(inner: &[u8]) -> Option<Vec<VarStr>> {
   match parts.len() {
     2 => {
       let start = parts[0];
-      let end = parts[1];
+      let end   = parts[1];
       expand_range(start, end, 1)
     }
     3 => {
-      let start = parts[0];
-      let end = parts[1];
+      let start     = parts[0];
+      let end       = parts[1];
       let step: i32 = util::parse_bytes(parts[2])?;
       if step == 0 {
         return None;
@@ -279,8 +279,8 @@ fn expand_range(start: &[u8], end: &[u8], step: usize) -> Option<Vec<VarStr>> {
   // Try character range first
   if is_alpha_range_bound(start) && is_alpha_range_bound(end) {
     let start_char = start.chars().next()? as u8;
-    let end_char = end.chars().next()? as u8;
-    let reverse = end_char < start_char;
+    let end_char   = end.chars().next()? as u8;
+    let reverse    = end_char < start_char;
 
     let (lo, hi) = if reverse {
       (end_char, start_char)
@@ -303,12 +303,12 @@ fn expand_range(start: &[u8], end: &[u8], step: usize) -> Option<Vec<VarStr>> {
   // Try numeric range
   if is_numeric_range_bound(start) && is_numeric_range_bound(end) {
     let start_num: i32 = util::parse_bytes(start)?;
-    let end_num: i32 = util::parse_bytes(end)?;
-    let reverse = end_num < start_num;
+    let end_num  : i32 = util::parse_bytes(end)?;
+    let reverse        = end_num < start_num;
 
     // Handle zero-padding
-    let pad_width = start.len().max(end.len());
-    let needs_padding = start.starts_with(b"0") || end.starts_with(b"0");
+    let pad_width      = start.len().max(end.len());
+    let needs_padding  = start.starts_with(b"0") || end.starts_with(b"0");
 
     let (lo, hi) = if reverse {
       (end_num, start_num)

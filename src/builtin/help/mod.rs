@@ -41,7 +41,7 @@ use nix::{
 pub(crate) const HELP_PAGE_INSTALL_DIR: Option<&str> = option_env!("SHED_HELP_DIR");
 
 struct PageStack {
-  stack: Vec<HelpPager>,
+  stack    : Vec<HelpPager>,
   pager_idx: usize,
 }
 
@@ -49,7 +49,7 @@ impl PageStack {
   fn new(content: &str, line: usize, filename: Option<String>) -> Option<Self> {
     let pager = HelpPager::new(content, line, filename)?;
     Some(Self {
-      stack: vec![pager],
+      stack    : vec![pager],
       pager_idx: 0,
     })
   }
@@ -137,11 +137,11 @@ impl super::Builtin for Help {
     });
 
     let (arg_vec, opts) = args.take_argv();
-    let list_tags = opts.iter().any(|o| o.key() == "list-tags");
+    let list_tags       = opts.iter().any(|o| o.key() == "list-tags");
 
     // Join all of the word-split arguments into a single string
     // Preserve the span too
-    let topic = (!arg_vec.is_empty()).then(|| super::join_raw_args(arg_vec));
+    let topic           = (!arg_vec.is_empty()).then(|| super::join_raw_args(arg_vec));
 
     if list_tags {
       let tags = get_all_tags()?;
@@ -189,9 +189,9 @@ fn embedded_pages(shadowed: &HashSet<String>) -> impl Iterator<Item = &'static s
 }
 
 pub(super) fn get_all_tags() -> ShResult<Vec<ScoredTag>> {
-  let mut tags = vec![];
+  let mut tags  = vec![];
 
-  let hpath = var!("SHED_HPATH");
+  let     hpath = var!("SHED_HPATH");
   let mut hpath_names: HashSet<String> = HashSet::default();
 
   for entry in paths::path_list_entries(&hpath.to_str_lossy()) {
@@ -333,7 +333,7 @@ pub(super) fn resume_help() -> ShResult<()> {
   let existing = PAGE_STACK.with(|cell| cell.borrow_mut().take());
   match existing {
     Some(page_stack) => run_pager(page_stack),
-    None => open_help_index(),
+    None             => open_help_index(),
   }
 }
 
@@ -347,7 +347,7 @@ fn run_pager(mut page_stack: PageStack) -> ShResult<()> {
   // Same input pattern as in main.rs. If there's no tty we can't run the pager,
   // but we still fall through to stash the stack so a later resume is coherent.
   if let Some(tty) = Shed::term(|t| t.tty().map(|fd| fd.as_raw_fd())) {
-    let tty_fd = PollFd::new(unsafe { BorrowedFd::borrow_raw(tty) }, PollFlags::POLLIN);
+    let tty_fd     = PollFd::new(unsafe { BorrowedFd::borrow_raw(tty) }, PollFlags::POLLIN);
 
     // restores terminal state on drop
     let _tui_guard = Shed::term_mut(Terminal::prepare_for_pager);
@@ -363,7 +363,7 @@ fn run_pager(mut page_stack: PageStack) -> ShResult<()> {
             // timeout? eof?
             break;
           }
-          Ok(_) => { /* fall through */ }
+          Ok(_)             => { /* fall through */ }
           Err(Errno::EINTR) => continue, // just retry
           Err(e) => {
             return Err(sherr!(
@@ -379,11 +379,11 @@ fn run_pager(mut page_stack: PageStack) -> ShResult<()> {
 
       match res {
         PagerEvent::OpenRef(crossref) => page_stack.open_page(&crossref)?,
-        PagerEvent::Forward => page_stack.forward(),
-        PagerEvent::Back => page_stack.back(),
-        PagerEvent::ClosePage => page_stack.close_page(),
-        PagerEvent::Continue => (),
-        PagerEvent::ExitPager => break,
+        PagerEvent::Forward           => page_stack.forward(),
+        PagerEvent::Back              => page_stack.back(),
+        PagerEvent::ClosePage         => page_stack.close_page(),
+        PagerEvent::Continue          => (),
+        PagerEvent::ExitPager         => break,
       }
     }
   }
@@ -395,7 +395,7 @@ fn run_pager(mut page_stack: PageStack) -> ShResult<()> {
 
 #[derive(Clone, Debug)]
 pub(super) struct ScoredTag {
-  tag: ScoredCandidate,
+  tag : ScoredCandidate,
   line: usize,
   file: String,
 }
@@ -561,8 +561,8 @@ mod open_help_tests {
 
   #[test]
   fn get_hpath_help() {
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g      = TestGuard::new();
+    let dir     = tempfile::TempDir::new().unwrap();
     let dir_raw = dir.path().display().to_string();
     set_var!("SHED_HPATH", VarKind::Str(dir_raw.into()); EXPORT).unwrap();
     let file_path = dir.path().join("some_help_file.txt");
@@ -579,13 +579,13 @@ mod open_help_tests {
 
   #[test]
   fn get_hpath_tag_help() {
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g      = TestGuard::new();
+    let dir     = tempfile::TempDir::new().unwrap();
     let dir_raw = dir.path().display().to_string();
     set_var!("SHED_HPATH", VarKind::Str(dir_raw.into()); EXPORT).unwrap();
     let file_path = dir.path().join("some_help_file.txt");
 
-    let body = "This is some help content\nmore content  *more-content*\nfoo bar biz";
+    let body      = "This is some help content\nmore content  *more-content*\nfoo bar biz";
     std::fs::write(&file_path, body).unwrap();
     let (line, content, filename) = get_help_content("more-content").unwrap();
 
@@ -610,7 +610,7 @@ mod open_help_tests {
       )
     })
     .unwrap();
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir       = tempfile::TempDir::new().unwrap();
     let file_path = dir.path().join("mytopic.txt");
     std::fs::write(&file_path, "direct file body").unwrap();
 
@@ -622,10 +622,10 @@ mod open_help_tests {
 
   #[test]
   fn get_help_content_direct_file_takes_precedence_over_hpath_match() {
-    let _g = TestGuard::new();
+    let _g        = TestGuard::new();
     let hpath_dir = tempfile::TempDir::new().unwrap();
     // Stage an hpath file that *would* match if direct lookup failed.
-    let shadow = hpath_dir.path().join("mytopic.txt");
+    let shadow    = hpath_dir.path().join("mytopic.txt");
     std::fs::write(&shadow, "hpath shadow").unwrap();
     Shed::vars_mut(|v| {
       v.set_var(
@@ -638,7 +638,7 @@ mod open_help_tests {
 
     // The direct lookup hits a different file with the same stem.
     let other_dir = tempfile::TempDir::new().unwrap();
-    let direct = other_dir.path().join("mytopic.txt");
+    let direct    = other_dir.path().join("mytopic.txt");
     std::fs::write(&direct, "direct wins").unwrap();
 
     let (_, content, _) = get_help_content(&direct.to_string_lossy()).unwrap();
@@ -723,7 +723,7 @@ mod open_help_tests {
   fn get_help_content_hpath_skips_subdir_entries() {
     // HPATH dir contains a subdirectory AND a file. The loop must skip
     // the subdir (`!path.is_file() → continue`) but still find the file.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::create_dir(dir.path().join("a_subdir")).unwrap();
     let file_path = dir.path().join("zzzz_unique.txt");
@@ -867,8 +867,8 @@ mod get_all_tags_tests {
 
   #[test]
   fn hpath_files_contribute_tags() {
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g   = TestGuard::new();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("custom_help.txt");
     std::fs::write(
       &path,
@@ -883,7 +883,7 @@ mod get_all_tags_tests {
       )
       .unwrap();
     });
-    let tags = get_all_tags().unwrap();
+    let tags             = get_all_tags().unwrap();
     let names: Vec<&str> = tags.iter().map(|t| t.tag.candidate.content()).collect();
     assert!(names.contains(&"unique-test-tag-xyz"), "got: {names:?}");
   }
@@ -906,7 +906,7 @@ mod get_all_tags_tests {
 
   #[test]
   fn hpath_subdirectory_entries_skipped() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = tempfile::TempDir::new().unwrap();
     // Create a subdir (should be skipped) and a regular file with a tag.
     std::fs::create_dir(dir.path().join("a_subdir")).unwrap();
@@ -923,7 +923,7 @@ mod get_all_tags_tests {
       )
       .unwrap();
     });
-    let tags = get_all_tags().unwrap();
+    let tags             = get_all_tags().unwrap();
     let names: Vec<&str> = tags.iter().map(|t| t.tag.candidate.content()).collect();
     assert!(names.contains(&"hpath-skip-test-tag"), "got: {names:?}");
   }

@@ -55,7 +55,7 @@ pub(crate) fn append_register(ch: Option<char>, buf: RegisterContent) {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RegisterName {
-  name: Option<char>,
+  name  : Option<char>,
   append: bool,
 }
 
@@ -66,7 +66,7 @@ impl RegisterName {
     };
 
     let append = ch.is_uppercase();
-    let name = ch.to_ascii_lowercase();
+    let name   = ch.to_ascii_lowercase();
     Self {
       name: Some(name),
       append,
@@ -101,7 +101,7 @@ impl RegisterName {
 impl Default for RegisterName {
   fn default() -> Self {
     Self {
-      name: None,
+      name  : None,
       append: false,
     }
   }
@@ -125,8 +125,8 @@ pub(crate) enum RegisterContent {
 impl RegisterContent {
   pub(crate) fn from_extracted(content: Lines, motion: &MotionKind) -> Self {
     match motion {
-      MotionKind::Char { .. } => RegisterContent::Span(content.into_vec()),
-      MotionKind::Line { .. } => RegisterContent::Line(content.into_vec()),
+      MotionKind::Char { .. }  => RegisterContent::Span(content.into_vec()),
+      MotionKind::Line { .. }  => RegisterContent::Line(content.into_vec()),
       MotionKind::Block { .. } => RegisterContent::Block(content.into_vec()),
     }
   }
@@ -183,7 +183,7 @@ impl TryFrom<char> for Selection {
     match value {
       '*' => Ok(Self::Primary),
       '+' => Ok(Self::Clipboard),
-      _ => Err(sherr!(ParseErr, "Invalid selection register: {value}")),
+      _   => Err(sherr!(ParseErr, "Invalid selection register: {value}")),
     }
   }
 }
@@ -276,33 +276,33 @@ impl ClipboardProvider {
   pub(super) fn copy_argv(self, sel: Selection) -> Option<&'static str> {
     Some(match (self, sel) {
       (Self::WlCopy, Selection::Clipboard) => "wl-copy",
-      (Self::WlCopy, Selection::Primary) => "wl-copy --primary",
-      (Self::Wayclip, Selection::Primary) => "wayclip --primary",
-      (Self::Xsel, Selection::Clipboard) => "xsel --clipboard --input",
-      (Self::Xsel, Selection::Primary) => "xsel --primary --input",
-      (Self::Xclip, Selection::Clipboard) => "xclip -selection clipboard",
-      (Self::Xclip, Selection::Primary) => "xclip -selection primary",
+      (Self::WlCopy, Selection::Primary)   => "wl-copy --primary",
+      (Self::Wayclip, Selection::Primary)  => "wayclip --primary",
+      (Self::Xsel, Selection::Clipboard)   => "xsel --clipboard --input",
+      (Self::Xsel, Selection::Primary)     => "xsel --primary --input",
+      (Self::Xclip, Selection::Clipboard)  => "xclip -selection clipboard",
+      (Self::Xclip, Selection::Primary)    => "xclip -selection primary",
       (Self::Wayclip, _) => "waycopy",
-      (Self::Termux, _) => "termux-clipboard-set",
-      (Self::Tmux, _) => "tmux load-buffer -",
-      (Self::PbCopy, _) => "pbcopy",
-      (Self::Osc52, _) => return None,
+      (Self::Termux, _)  => "termux-clipboard-set",
+      (Self::Tmux, _)    => "tmux load-buffer -",
+      (Self::PbCopy, _)  => "pbcopy",
+      (Self::Osc52, _)   => return None,
     })
   }
 
   pub(super) fn paste_argv(self, sel: Selection) -> Option<&'static str> {
     Some(match (self, sel) {
       (Self::WlCopy, Selection::Clipboard) => "wl-paste",
-      (Self::WlCopy, Selection::Primary) => "wl-paste --primary",
-      (Self::Xsel, Selection::Clipboard) => "xsel --clipboard --output",
-      (Self::Xsel, Selection::Primary) => "xsel --primary --output",
-      (Self::Xclip, Selection::Clipboard) => "xclip -selection clipboard -o",
-      (Self::Xclip, Selection::Primary) => "xclip -selection primary -o",
+      (Self::WlCopy, Selection::Primary)   => "wl-paste --primary",
+      (Self::Xsel, Selection::Clipboard)   => "xsel --clipboard --output",
+      (Self::Xsel, Selection::Primary)     => "xsel --primary --output",
+      (Self::Xclip, Selection::Clipboard)  => "xclip -selection clipboard -o",
+      (Self::Xclip, Selection::Primary)    => "xclip -selection primary -o",
       (Self::Wayclip, _) => "waypaste",
-      (Self::Termux, _) => "termux-clipboard-get",
-      (Self::Tmux, _) => "tmux save-buffer -",
-      (Self::PbCopy, _) => "pbpaste",
-      (Self::Osc52, _) => return None,
+      (Self::Termux, _)  => "termux-clipboard-get",
+      (Self::Tmux, _)    => "tmux save-buffer -",
+      (Self::PbCopy, _)  => "pbpaste",
+      (Self::Osc52, _)   => return None,
     })
   }
 }

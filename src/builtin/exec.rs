@@ -25,11 +25,11 @@ impl super::Builtin for Exec {
 
     params::dec_sh_lvl().ok();
 
-    let args = ExecArgs::from_expanded(arg_vec);
+    let args        = ExecArgs::from_expanded(arg_vec);
 
-    let cmd = &args.cmd.0;
-    let span = args.cmd.1;
-    let cmd_str = cmd.to_string_lossy();
+    let cmd         = &args.cmd.0;
+    let span        = args.cmd.1;
+    let cmd_str     = cmd.to_string_lossy();
 
     let _term_guard = Shed::term_mut(Terminal::prepare_for_exec);
 
@@ -41,7 +41,7 @@ impl super::Builtin for Exec {
       return Err(sherr!(IoErr(e.kind()) @ span, "failed to commit redirects: {e}"));
     }
 
-    let Err(e) = posix::execvpe(cmd, &args.argv, &args.envp);
+    let Err(e)  = posix::execvpe(cmd, &args.argv, &args.envp);
 
     // execvpe only returns on error
     let cmd_str = cmd.to_str().unwrap().to_string();

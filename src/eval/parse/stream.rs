@@ -123,13 +123,13 @@ pub(super) fn split_for_arith_tk(
   tree: &mut Ast,
   tk: &Tk,
 ) -> ShResult<Option<(NodeId, NodeId, NodeId)>> {
-  let span = tk.span;
-  let mut tks = strops::split_tk(&tk.strip_arith_header()?, b";").into_iter();
+  let     span = tk.span;
+  let mut tks  = strops::split_tk(&tk.strip_arith_header()?, b";").into_iter();
 
   let Some(init_tk) = tks.next() else {
     return Err(sherr!(ParseErr @ span, "Missing init statement"));
   };
-  let span = tree.alloc(init_tk.span);
+  let span    = tree.alloc(init_tk.span);
   let init_tk = tree.alloc(init_tk);
   let init = Node {
     class: NdRule::Arithmetic { body: init_tk },
@@ -144,12 +144,12 @@ pub(super) fn split_for_arith_tk(
   };
 
   let cond_tk_span = tree.alloc(cond_tk.span);
-  let cond_tk = tree.alloc(cond_tk);
+  let cond_tk      = tree.alloc(cond_tk);
   let cond = Node {
-    class: NdRule::Arithmetic { body: cond_tk },
-    flags: NdFlags::empty(),
-    redirs: None,
-    span: cond_tk_span,
+    class  : NdRule::Arithmetic { body: cond_tk },
+    flags  : NdFlags::empty(),
+    redirs : None,
+    span   : cond_tk_span,
     context: None,
   };
 
@@ -158,13 +158,13 @@ pub(super) fn split_for_arith_tk(
   };
 
   let step_tk_span = tree.alloc(step_tk.span);
-  let step_tk = tree.alloc(step_tk);
+  let step_tk      = tree.alloc(step_tk);
 
   let step = Node {
-    class: NdRule::Arithmetic { body: step_tk },
-    flags: NdFlags::empty(),
-    redirs: None,
-    span: step_tk_span,
+    class  : NdRule::Arithmetic { body: step_tk },
+    flags  : NdFlags::empty(),
+    redirs : None,
+    span   : step_tk_span,
     context: None,
   };
 

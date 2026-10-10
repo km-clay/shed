@@ -28,63 +28,64 @@ impl CharSet {
 }
 
 pub(super) struct Trim;
-#[rustfmt::skip]
-  impl Builtin for Trim {
-    fn opts(&self) -> Vec<OptSpec> {
-      vec![
-        opt!("end"           | b'e'   ),
-        opt!("start"         | b's'   ),
-        opt!("end-matches"   | b'E', 1),
-        opt!("start-matches" | b'S', 1),
-        opt!("matches"       | b'm', 1),
-      ]
-    }
-    fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
-      let string = self.get_input_str(&mut args).unwrap_or_else(|| {
-        argv::join_raw_arg_iter(args.arguments()).0
-      });
+impl Builtin for Trim {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      opt!("end"           | b'e'   ),
+      opt!("start"         | b's'   ),
+      opt!("end-matches"   | b'E', 1),
+      opt!("start-matches" | b'S', 1),
+      opt!("matches"       | b'm', 1),
+    ]
+  }
+  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
+    let string = self
+      .get_input_str(&mut args)
+      .unwrap_or_else(|| argv::join_raw_arg_iter(args.arguments()).0);
 
-      // if neither `--start` nor `--end` is specified, default to trimming both ends
-      let want_end   = args.has_opt("end")   || args.has_opt("end-matches")   || args.has_opt("matches");
-      let want_start = args.has_opt("start") || args.has_opt("start-matches") || args.has_opt("matches");
+    // if neither `--start` nor `--end` is specified, default to trimming both ends
+    let want_end = args.has_opt("end") || args.has_opt("end-matches") || args.has_opt("matches");
+    let want_start =
+      args.has_opt("start") || args.has_opt("start-matches") || args.has_opt("matches");
 
-      let (start, end) = if want_start || want_end {
-        (want_start, want_end)
-      } else {
-        (true, true)
-      };
+    let (start, end) = if want_start || want_end {
+      (want_start, want_end)
+    } else {
+      (true, true)
+    };
 
-      let shared = args.opt_value("matches");
-      let e_spec = args.opt_value("end-matches");
-      let s_spec = args.opt_value("start-matches");
+    let shared = args.opt_value("matches");
+    let e_spec = args.opt_value("end-matches");
+    let s_spec = args.opt_value("start-matches");
 
-      let is_ascii = e_spec.iter()
-        .chain(s_spec.iter())
-        .chain(shared.iter())
-        .all(|s| s.is_ascii());
+    let is_ascii = e_spec
+      .iter()
+      .chain(s_spec.iter())
+      .chain(shared.iter())
+      .all(|s| s.is_ascii());
 
-      let join = |spec: Option<VarStr>| -> VarStr {
-        match (spec, shared.as_ref()) {
-          (None,           None)         => VarStr::from(" \t\n\r"),
-          (Some(spec),     None)         => spec,
-          (None,           Some(shared)) => shared.clone(),
-          (Some(mut spec), Some(shared)) => {
-            spec.push_slice(shared.as_bytes());
-            spec
-          }
+    let join = |spec: Option<VarStr>| -> VarStr {
+      match (spec, shared.as_ref()) {
+        (None, None)         => VarStr::from(" \t\n\r"),
+        (Some(spec), None)   => spec,
+        (None, Some(shared)) => shared.clone(),
+        (Some(mut spec), Some(shared)) => {
+          spec.push_slice(shared.as_bytes());
+          spec
         }
-      };
-
-      let end_matches   = end.then(||   join(e_spec));
-      let start_matches = start.then(|| join(s_spec));
-
-      if is_ascii {
-        Self::trim_raw(&string, end_matches, start_matches)
-      } else {
-        Self::trim(&string, end_matches, start_matches)
       }
+    };
+
+    let end_matches   = end.then(|| join(e_spec));
+    let start_matches = start.then(|| join(s_spec));
+
+    if is_ascii {
+      Self::trim_raw(&string, end_matches, start_matches)
+    } else {
+      Self::trim(&string, end_matches, start_matches)
     }
   }
+}
 
 impl Trim {
   fn trim(
@@ -92,11 +93,11 @@ impl Trim {
     end_matches: Option<VarStr>,
     start_matches: Option<VarStr>,
   ) -> ShResult<()> {
-    let input = string.to_string();
-    let end_matches = end_matches.map(|s| s.to_string());
-    let start_matches = start_matches.map(|s| s.to_string());
+    let     input         = string.to_string();
+    let     end_matches   = end_matches.map(|s| s.to_string());
+    let     start_matches = start_matches.map(|s| s.to_string());
 
-    let mut out = input.as_str();
+    let mut out           = input.as_str();
     if let Some(end) = end_matches {
       let set = CharSet::new(end);
 

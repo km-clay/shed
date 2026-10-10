@@ -39,7 +39,7 @@ enum Conversion {
 /// non-fatal (the `0` fallback is still rendered), so the error rides in the
 /// source rather than aborting `render`.
 struct PrintfArgs {
-  args: Peekable<std::vec::IntoIter<Vec<u8>>>,
+  args  : Peekable<std::vec::IntoIter<Vec<u8>>>,
   errors: Vec<PrintfErr>,
 }
 
@@ -68,23 +68,23 @@ impl StrFmt for PrintfFmt {
 
     match b {
       b'd' | b'i' => Ok(Conversion::SignedDecimal),
-      b'u' => Ok(Conversion::UnsignedDecimal),
-      b'o' => Ok(Conversion::UnsignedOctal),
-      b'x' => Ok(Conversion::UnsignedHex(Case::Lower)),
-      b'X' => Ok(Conversion::UnsignedHex(Case::Upper)),
-      b'f' => Ok(Conversion::FixedPointDecimal),
-      b'e' => Ok(Conversion::Scientific(Case::Lower)),
-      b'E' => Ok(Conversion::Scientific(Case::Upper)),
-      b'g' => Ok(Conversion::ShortestFloat(Case::Lower)),
-      b'G' => Ok(Conversion::ShortestFloat(Case::Upper)),
-      b'c' => Ok(Conversion::Char),
-      b's' => Ok(Conversion::Str),
-      b'r' => Ok(Conversion::RepeatStr),
-      b'b' => Ok(Conversion::AnsiC),
-      b'q' => Ok(Conversion::ShellQuote),
-      b'h' => Ok(Conversion::HumanSize),
-      b'(' => Ok(Conversion::StrfTime(strops::parse_paren_strftime(cur)?)),
-      _ => Err(sherr!(ParseErr, "invalid conversion specification")),
+      b'u'        => Ok(Conversion::UnsignedDecimal),
+      b'o'        => Ok(Conversion::UnsignedOctal),
+      b'x'        => Ok(Conversion::UnsignedHex(Case::Lower)),
+      b'X'        => Ok(Conversion::UnsignedHex(Case::Upper)),
+      b'f'        => Ok(Conversion::FixedPointDecimal),
+      b'e'        => Ok(Conversion::Scientific(Case::Lower)),
+      b'E'        => Ok(Conversion::Scientific(Case::Upper)),
+      b'g'        => Ok(Conversion::ShortestFloat(Case::Lower)),
+      b'G'        => Ok(Conversion::ShortestFloat(Case::Upper)),
+      b'c'        => Ok(Conversion::Char),
+      b's'        => Ok(Conversion::Str),
+      b'r'        => Ok(Conversion::RepeatStr),
+      b'b'        => Ok(Conversion::AnsiC),
+      b'q'        => Ok(Conversion::ShellQuote),
+      b'h'        => Ok(Conversion::HumanSize),
+      b'('        => Ok(Conversion::StrfTime(strops::parse_paren_strftime(cur)?)),
+      _           => Err(sherr!(ParseErr, "invalid conversion specification")),
     }
   }
 
@@ -95,9 +95,8 @@ impl StrFmt for PrintfFmt {
     src: &mut Self::Source,
   ) -> ShResult<Field> {
     let flags = field.flags();
-    let prec = prec_of(field);
+    let prec  = prec_of(field);
 
-    #[rustfmt::skip]
     let rendered = match conv {
       Conversion::SignedDecimal       => render_signed(src, flags, prec),
       Conversion::UnsignedDecimal     => render_unsigned(src, prec),
@@ -107,12 +106,12 @@ impl StrFmt for PrintfFmt {
       Conversion::Scientific(case)    => render_scientific(src, flags, prec, *case),
       Conversion::ShortestFloat(case) => render_shortest(src, flags, prec, *case),
       Conversion::HumanSize           => render_human(src),
-      Conversion::Char                => render_char(src),
-      Conversion::Str                 => render_str(src, prec),
-      Conversion::RepeatStr           => render_repeat(src, field),
-      Conversion::AnsiC               => render_ansi_c(src, prec),
-      Conversion::ShellQuote          => render_shell_quote(src),
-      Conversion::StrfTime(fmt)       => render_strftime(src, &fmt.to_str_lossy())?,
+      Conversion::Char          => render_char(src),
+      Conversion::Str           => render_str(src, prec),
+      Conversion::RepeatStr     => render_repeat(src, field),
+      Conversion::AnsiC         => render_ansi_c(src, prec),
+      Conversion::ShellQuote    => render_shell_quote(src),
+      Conversion::StrfTime(fmt) => render_strftime(src, &fmt.to_str_lossy())?,
     };
 
     Ok(rendered)
@@ -134,15 +133,15 @@ fn parse_num_arg<T: ParseRadix + Default>(arg: Option<Vec<u8>>) -> Result<T, Pri
   if let Some((&quote, rest)) = arg.split_first()
     && matches!(quote, b'\'' | b'"')
   {
-    let byte = rest.first().copied().unwrap_or(0);
+    let byte   = rest.first().copied().unwrap_or(0);
     let byte_s = varstr!("{byte}");
-    let n = ParseRadix::parse_radix(&byte_s.to_str_lossy()).unwrap_or_default();
+    let n      = ParseRadix::parse_radix(&byte_s.to_str_lossy()).unwrap_or_default();
     return Ok(n);
   }
 
   match ParseRadix::parse_radix(&arg.to_str_lossy()) {
     Some(v) => Ok(v),
-    None => Err(PrintfErr::BadNumber(arg.to_str_lossy().into())),
+    None    => Err(PrintfErr::BadNumber(arg.to_str_lossy().into())),
   }
 }
 
@@ -163,7 +162,7 @@ fn parse_float_arg(arg: Option<Vec<u8>>) -> (f64, Option<PrintfErr>) {
   }
 
   match arg.to_str_lossy().trim().parse::<f64>() {
-    Ok(v) => (v, None),
+    Ok(v)  => (v, None),
     Err(_) => (0.0, Some(PrintfErr::BadNumber(arg.to_str_lossy().into()))),
   }
 }
@@ -209,7 +208,7 @@ fn render_int(src: &mut PrintfArgs, flags: Option<FmtFlags>, prec: Option<usize>
     }
   };
 
-  let sign = flags.and_then(|f| sign_for(n.is_negative(), f));
+  let     sign   = flags.and_then(|f| sign_for(n.is_negative(), f));
 
   let mut digits = n.unsigned_abs().to_string();
   if let Some(p) = prec {
@@ -273,10 +272,10 @@ fn render_hex(src: &mut PrintfArgs, flags: FmtFlags, prec: Option<usize>, case: 
 fn render_fixed(src: &mut PrintfArgs, flags: FmtFlags, prec: Option<usize>) -> Field {
   let (f, err) = parse_float_arg(src.args.next());
   src.errors.extend(err);
-  let p = prec.unwrap_or(6);
+  let p    = prec.unwrap_or(6);
 
   let body = format!("{f:.p$}");
-  let abs = body.trim_start_matches('-').as_bytes().to_vec();
+  let abs  = body.trim_start_matches('-').as_bytes().to_vec();
   let sign = sign_for(f.is_sign_negative() && f != 0.0, flags);
 
   // For floats, zero-padding applies independent of precision (precision
@@ -299,8 +298,8 @@ fn render_scientific(
     Case::Upper => format!("{f:.p$E}"),
   };
   let normalized = normalize_exponent(raw.as_bytes());
-  let abs = normalized.trim_start_with(|c| c == '-').to_vec();
-  let sign = sign_for(f.is_sign_negative() && f != 0.0, flags);
+  let abs        = normalized.trim_start_with(|c| c == '-').to_vec();
+  let sign       = sign_for(f.is_sign_negative() && f != 0.0, flags);
 
   Field::numeric_padded(abs, sign, None, true)
 }
@@ -314,7 +313,7 @@ fn render_shortest(
   let (f, err) = parse_float_arg(src.args.next());
   src.errors.extend(err);
   // %g: precision is number of significant digits (default 6, minimum 1).
-  let p = prec.unwrap_or(6).max(1);
+  let p       = prec.unwrap_or(6).max(1);
 
   // POSIX %g: use scientific when exponent < -4 or >= precision.
   let abs_val = f.abs();
@@ -339,7 +338,7 @@ fn render_shortest(
       strip_trailing_zeros(&normalized)
     }
   } else {
-    let fp = (p as i32 - 1 - exp).max(0) as usize;
+    let fp  = (p as i32 - 1 - exp).max(0) as usize;
     let raw = format!("{f:.fp$}").into_bytes();
     if flags.contains(FmtFlags::ALT) {
       raw
@@ -347,7 +346,7 @@ fn render_shortest(
       strip_trailing_zeros(&raw)
     }
   };
-  let abs = body.trim_start_with(|c| c == '-').to_vec();
+  let abs  = body.trim_start_with(|c| c == '-').to_vec();
   let sign = sign_for(f.is_sign_negative() && f != 0.0, flags);
 
   Field::numeric_padded(abs, sign, None, true)
@@ -376,7 +375,7 @@ fn render_str(src: &mut PrintfArgs, prec: Option<usize>) -> Field {
   let s = src.args.next().unwrap_or_default();
   let s = match prec {
     Some(p) => s.get(..p).unwrap_or(&s).to_vec(),
-    None => s,
+    None    => s,
   };
   Field::string(s)
 }
@@ -394,17 +393,17 @@ fn render_repeat(src: &mut PrintfArgs, field: &FieldParams) -> Field {
 }
 
 fn render_ansi_c(src: &mut PrintfArgs, prec: Option<usize>) -> Field {
-  let s = src.args.next().unwrap_or_default();
+  let s        = src.args.next().unwrap_or_default();
   let expanded = escape::expand_ansi_c(&s);
   let truncated = match prec {
     Some(p) => expanded.into_iter().take(p).collect(),
-    None => expanded,
+    None    => expanded,
   };
   Field::string(truncated)
 }
 
 fn render_shell_quote(src: &mut PrintfArgs) -> Field {
-  let s = src.args.next().unwrap_or_default();
+  let s      = src.args.next().unwrap_or_default();
   let quoted = escape::shell_quote_bytes(&s);
   Field::string(quoted)
 }
@@ -412,7 +411,7 @@ fn render_shell_quote(src: &mut PrintfArgs) -> Field {
 fn render_strftime(src: &mut PrintfArgs, format: &str) -> ShResult<Field> {
   use crate::state::{Shed, meta::MetaTab};
   use chrono::{Local, TimeZone};
-  let arg = src.args.next().unwrap_or_else(|| b"-1".to_vec());
+  let arg       = src.args.next().unwrap_or_else(|| b"-1".to_vec());
   let secs: i64 = VarStr::from(arg).parse().unwrap_or(-1);
 
   let dt = if secs == -1 {
@@ -422,8 +421,8 @@ fn render_strftime(src: &mut PrintfArgs, format: &str) -> ShResult<Field> {
     // Shell start time: convert the monotonic Instant we recorded at startup
     // into a wall-clock time by subtracting its elapsed duration from "now".
     let shell_start_instant = Shed::meta(MetaTab::shell_time);
-    let elapsed = shell_start_instant.elapsed();
-    let now = Local::now();
+    let elapsed             = shell_start_instant.elapsed();
+    let now                 = Local::now();
     chrono::Duration::from_std(elapsed)
       .ok()
       .and_then(|d| now.checked_sub_signed(d))
@@ -448,13 +447,13 @@ fn normalize_exponent(s: &[u8]) -> Vec<u8> {
     return s.to_vec();
   };
   let (mantissa, exp_part) = s.split_at(epos);
-  let exp_char = exp_part.chars().next().unwrap();
-  let rest = &exp_part[exp_char.len_utf8()..];
+  let exp_char             = exp_part.chars().next().unwrap();
+  let rest                 = &exp_part[exp_char.len_utf8()..];
 
   let (sign, digits) = match rest.chars().next() {
     Some('-') => ('-', &rest[1..]),
     Some('+') => ('+', &rest[1..]),
-    _ => ('+', rest),
+    _         => ('+', rest),
   };
 
   let padded = if digits.chars().count() < 2 {
@@ -511,9 +510,9 @@ impl super::Builtin for Printf {
     true
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let (arg_vec, _) = args.take_argv();
+    let     (arg_vec, _) = args.take_argv();
 
-    let mut arg_iter = arg_vec.into_iter();
+    let mut arg_iter     = arg_vec.into_iter();
     let mut first = arg_iter
       .next()
       .ok_or_else(|| sherr!(ExecFail, "printf: missing format string"))?;
@@ -524,19 +523,19 @@ impl super::Builtin for Printf {
         .ok_or_else(|| sherr!(ExecFail, "printf: missing format string"))?;
     }
 
-    let (format_str, _) = first;
-    let formatter = StrFormatter::parse(&PrintfFmt, format_str.as_bytes())?;
+    let (format_str, _)         = first;
+    let formatter               = StrFormatter::parse(&PrintfFmt, format_str.as_bytes())?;
     let remaining: Vec<Vec<u8>> = arg_iter.map(|(s, _)| s.as_bytes().to_vec()).collect();
 
     let mut src = PrintfArgs {
-      args: remaining.into_iter().peekable(),
+      args  : remaining.into_iter().peekable(),
       errors: vec![],
     };
 
     // Set when any present numeric argument fails to convert; printf still emits
     // the `0` fallback and continues, but exits non-zero (POSIX).
     let mut had_error = false;
-    let mut out = vec![];
+    let mut out       = vec![];
 
     if formatter.has_specs() {
       // Recycle the format string until args are exhausted. If a full cycle

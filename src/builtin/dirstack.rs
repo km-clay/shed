@@ -26,13 +26,13 @@ fn is_index_arg(arg: &str) -> bool {
 struct DirStackArgs {
   no_cd: bool,
   index: Option<StackIdx>,
-  dir: Option<PathBuf>,
+  dir  : Option<PathBuf>,
 }
 
 fn parse_dirstack_args(args: &super::BuiltinArgs, cmd: &str) -> ShResult<DirStackArgs> {
-  let no_cd = args.has_opt("no_cd");
+  let     no_cd = args.has_opt("no_cd");
   let mut index = None;
-  let mut dir = None;
+  let mut dir   = None;
 
   for (arg, _) in args.arguments() {
     if is_index_arg(&arg.to_str_lossy()) {
@@ -70,11 +70,11 @@ impl super::Builtin for PushDir {
     vec![OptSpec::new_short("no_cd", b'n')]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let blame = args.span();
+    let blame  = args.span();
     let parsed = parse_dirstack_args(&args, "pushd")?;
 
     if let Some(idx) = parsed.index {
-      let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+      let     cwd   = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
       // Rotate a *copy* of the visible stack (`[cwd] + deque`); the real stack
       // is only committed after a successful cd, so a failed cd (e.g. the
       // target was removed from disk) leaves it untouched rather than dropping
@@ -94,7 +94,7 @@ impl super::Builtin for PushDir {
         ));
       }
       match idx {
-        StackIdx::FromTop(n) => stack.rotate_left(n),
+        StackIdx::FromTop(n)    => stack.rotate_left(n),
         StackIdx::FromBottom(n) => stack.rotate_right(n + 1),
       }
       // The rotated top becomes the new cwd (and is dropped from the stack when
@@ -138,7 +138,7 @@ impl super::Builtin for PopDir {
     vec![OptSpec::new_short("no_cd", b'n')]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let blame = args.span();
+    let blame  = args.span();
     let parsed = parse_dirstack_args(&args, "popd")?;
 
     if let Some(idx) = parsed.index {
@@ -161,7 +161,7 @@ impl super::Builtin for PopDir {
           // +N (N>0): remove (N-1)th stored entry, no cd
           Shed::meta_mut(|m| {
             let dirs = m.dirs_mut();
-            let idx = n - 1;
+            let idx  = n - 1;
             if idx >= dirs.len() {
               return Err(sherr!(
                 ExecFail @ blame,
@@ -220,19 +220,19 @@ impl super::Builtin for Dirs {
     ]
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let mut abbreviate_home = true;
-    let mut one_per_line = false;
+    let mut abbreviate_home      = true;
+    let mut one_per_line         = false;
     let mut one_per_line_indexed = false;
-    let mut clear_stack = false;
+    let mut clear_stack          = false;
+    let     blame                = args.span();
     let mut target_idx: Option<StackIdx> = None;
-    let blame = args.span();
 
     for opt in args.options() {
       match opt.key() {
-        "one_per_line" => one_per_line = true,
+        "one_per_line"         => one_per_line = true,
         "one_per_line_indexed" => one_per_line_indexed = true,
-        "clear_stack" => clear_stack = true,
-        "no_home_truncation" => abbreviate_home = false,
+        "clear_stack"          => clear_stack = true,
+        "no_home_truncation"   => abbreviate_home = false,
         _ => {}
       }
     }
@@ -264,7 +264,7 @@ impl super::Builtin for Dirs {
 
     let mut dirs: Vec<Vec<u8>> = Shed::meta(|m| {
       let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
-      let stack = [current_dir].into_iter().chain(m.dirs().clone());
+      let stack       = [current_dir].into_iter().chain(m.dirs().clone());
 
       if abbreviate_home {
         stack.map(|d| paths::display_path_bytes(&d)).collect()
@@ -276,7 +276,7 @@ impl super::Builtin for Dirs {
     let indexed = target_idx.is_some();
     if let Some(idx) = target_idx {
       let target = match idx {
-        StackIdx::FromTop(n) => dirs.get(n),
+        StackIdx::FromTop(n)    => dirs.get(n),
         StackIdx::FromBottom(n) => dirs.get(dirs.len().saturating_sub(n + 1)),
       };
 
@@ -344,7 +344,7 @@ enum StackIdx {
 
 fn print_dirs() -> ShResult<()> {
   let current_dir = env::current_dir()?;
-  let dirs_iter = Shed::meta(|m| m.dirs().clone().into_iter());
+  let dirs_iter   = Shed::meta(|m| m.dirs().clone().into_iter());
   let all_dirs: Vec<Vec<u8>> = [current_dir]
     .into_iter()
     .chain(dirs_iter)
@@ -417,7 +417,7 @@ pub(super) mod tests {
 
   #[test]
   fn test_pushd_interactive() {
-    let g = TestGuard::new();
+    let g           = TestGuard::new();
     let current_dir = env::current_dir().unwrap();
 
     test_input("pushd /tmp").unwrap();
@@ -431,17 +431,17 @@ pub(super) mod tests {
     assert_eq!(dir_stack.len(), 1);
     assert_eq!(dir_stack[0], current_dir);
 
-    let out = g.read_output();
-    let path = super::truncate_home_path(&current_dir.to_string_lossy());
+    let out       = g.read_output();
+    let path      = super::truncate_home_path(&current_dir.to_string_lossy());
     let tmp_canon = canon(PathBuf::from("/tmp")).to_string_lossy().to_string();
     assert_eq!(out, format!("{tmp_canon} {path}\n"));
   }
 
   #[test]
   fn test_popd_interactive() {
-    let g = TestGuard::new();
+    let g           = TestGuard::new();
     let current_dir = env::current_dir().unwrap();
-    let tempdir = TempDir::new().unwrap();
+    let tempdir     = TempDir::new().unwrap();
     let tempdir_raw = tempdir.path().to_path_buf().to_string_lossy().to_string();
 
     test_input(format!("pushd {tempdir_raw}")).unwrap();
@@ -456,7 +456,7 @@ pub(super) mod tests {
     test_input("popd").unwrap();
 
     assert_eq!(env::current_dir().unwrap(), current_dir);
-    let out = g.read_output();
+    let out  = g.read_output();
     let path = super::truncate_home_path(&current_dir.to_string_lossy());
     assert_eq!(out, format!("{path}\n"));
   }
@@ -471,12 +471,12 @@ pub(super) mod tests {
 
   #[test]
   fn test_pushd_multiple_then_popd() {
-    let g = TestGuard::new();
+    let g        = TestGuard::new();
     let original = env::current_dir().unwrap();
-    let tmp1 = TempDir::new().unwrap();
-    let tmp2 = TempDir::new().unwrap();
-    let path1 = canon(tmp1.path());
-    let path2 = canon(tmp2.path());
+    let tmp1     = TempDir::new().unwrap();
+    let tmp2     = TempDir::new().unwrap();
+    let path1    = canon(tmp1.path());
+    let path2    = canon(tmp2.path());
 
     test_input(format!("pushd {}", path1.display())).unwrap();
     test_input(format!("pushd {}", path2.display())).unwrap();
@@ -500,12 +500,12 @@ pub(super) mod tests {
 
   #[test]
   fn test_pushd_rotate_plus() {
-    let g = TestGuard::new();
+    let g        = TestGuard::new();
     let original = env::current_dir().unwrap();
-    let tmp1 = TempDir::new().unwrap();
-    let tmp2 = TempDir::new().unwrap();
-    let path1 = canon(tmp1.path());
-    let path2 = canon(tmp2.path());
+    let tmp1     = TempDir::new().unwrap();
+    let tmp2     = TempDir::new().unwrap();
+    let path1    = canon(tmp1.path());
+    let path2    = canon(tmp2.path());
 
     // Build stack: cwd=original, then pushd path1, pushd path2
     // Stack after: cwd=path2, [path1, original]
@@ -529,8 +529,8 @@ pub(super) mod tests {
     let _g = TestGuard::new();
     state::Shed::meta_mut(|m| m.dirs_mut().clear());
     let original = env::current_dir().unwrap();
-    let tmp = TempDir::new().unwrap();
-    let path = canon(tmp.path());
+    let tmp      = TempDir::new().unwrap();
+    let path     = canon(tmp.path());
 
     test_input(format!("pushd -n {}", path.display())).unwrap();
 
@@ -553,14 +553,14 @@ pub(super) mod tests {
     // is now committed only after a successful cd.
     let _g = TestGuard::new();
     state::Shed::meta_mut(|m| m.dirs_mut().clear());
-    let tmp = TempDir::new().unwrap();
+    let tmp  = TempDir::new().unwrap();
     let path = canon(tmp.path());
     test_input(format!("pushd -n {}", path.display())).unwrap();
     let before: Vec<PathBuf> = state::Shed::meta(|m| m.dirs().iter().cloned().collect());
 
     // Remove the target from disk, then try to rotate-and-cd onto it.
     std::fs::remove_dir_all(tmp.path()).unwrap();
-    let _ = test_input("pushd +1");
+    let _                   = test_input("pushd +1");
 
     let after: Vec<PathBuf> = state::Shed::meta(|m| m.dirs().iter().cloned().collect());
     assert_eq!(before, after, "cd failure must not corrupt the stack");
@@ -568,7 +568,7 @@ pub(super) mod tests {
 
   #[test]
   fn test_dirs_clear() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let tmp = TempDir::new().unwrap();
 
     test_input(format!("pushd {}", tmp.path().display())).unwrap();
@@ -580,16 +580,16 @@ pub(super) mod tests {
 
   #[test]
   fn test_dirs_one_per_line() {
-    let g = TestGuard::new();
+    let g        = TestGuard::new();
     let original = env::current_dir().unwrap();
-    let tmp = TempDir::new().unwrap();
-    let path = canon(tmp.path());
+    let tmp      = TempDir::new().unwrap();
+    let path     = canon(tmp.path());
 
     test_input(format!("pushd {}", path.display())).unwrap();
     g.read_output();
 
     test_input("dirs -p").unwrap();
-    let out = g.read_output();
+    let out              = g.read_output();
     let lines: Vec<&str> = out.split('\n').filter(|l| !l.is_empty()).collect();
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0], super::truncate_home_path(&path.to_string_lossy()));
@@ -601,12 +601,12 @@ pub(super) mod tests {
 
   #[test]
   fn test_popd_indexed_from_top() {
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let original = env::current_dir().unwrap();
-    let tmp1 = TempDir::new().unwrap();
-    let tmp2 = TempDir::new().unwrap();
-    let path1 = canon(tmp1.path());
-    let path2 = canon(tmp2.path());
+    let tmp1     = TempDir::new().unwrap();
+    let tmp2     = TempDir::new().unwrap();
+    let path1    = canon(tmp1.path());
+    let path2    = canon(tmp2.path());
 
     // Stack: cwd=path2, [path1, original]
     test_input(format!("pushd {}", path1.display())).unwrap();
@@ -744,8 +744,8 @@ pub(super) mod tests {
     let _g = TestGuard::new();
     clear_stack();
     let original = env::current_dir().unwrap();
-    let tmp = TempDir::new().unwrap();
-    let path = tmp.path().to_path_buf();
+    let tmp      = TempDir::new().unwrap();
+    let path     = tmp.path().to_path_buf();
     test_input(format!("pushd {}", path.display())).unwrap();
     test_input("popd +0").unwrap();
     // +0 pops top and cds back.
@@ -766,8 +766,8 @@ pub(super) mod tests {
   fn popd_minus_index_removes_from_bottom() {
     let _g = TestGuard::new();
     clear_stack();
-    let tmp1 = TempDir::new().unwrap();
-    let tmp2 = TempDir::new().unwrap();
+    let tmp1  = TempDir::new().unwrap();
+    let tmp2  = TempDir::new().unwrap();
     let path1 = canon(tmp1.path());
     let path2 = canon(tmp2.path());
     // Stack: cwd=path2, dirs=[path1, original]
@@ -794,7 +794,7 @@ pub(super) mod tests {
   fn popd_n_flag_pops_without_cd() {
     let _g = TestGuard::new();
     clear_stack();
-    let tmp = TempDir::new().unwrap();
+    let tmp  = TempDir::new().unwrap();
     let path = tmp.path().to_path_buf();
     test_input(format!("pushd {}", path.display())).unwrap();
     let before_cwd = env::current_dir().unwrap();

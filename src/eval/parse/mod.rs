@@ -42,11 +42,11 @@ use super::lex::{self, LexFlags, LexStream, Span, Tk, TkFlags, TkRule};
 /// The parsed AST along with the source input it parsed
 #[derive(Debug)]
 pub(crate) struct ParsedSrc {
-  pub src: SourceHandle,
-  pub ast: Ast,
-  pub lex_flags: LexFlags,
+  pub src        : SourceHandle,
+  pub ast        : Ast,
+  pub lex_flags  : LexFlags,
   pub parse_flags: ParseFlags,
-  pub context: LabelCtx,
+  pub context    : LabelCtx,
 }
 
 impl ParsedSrc {
@@ -64,14 +64,14 @@ impl ParsedSrc {
     };
     let handle = match name {
       Some(n) => state::register_named_source(n, src),
-      None => state::register_source(src),
+      None    => state::register_source(src),
     };
     Self {
-      src: handle,
-      ast: Ast::new(),
-      lex_flags: LexFlags::empty(),
+      src        : handle,
+      ast        : Ast::new(),
+      lex_flags  : LexFlags::empty(),
       parse_flags: ParseFlags::empty(),
-      context: VecDeque::new().into(),
+      context    : VecDeque::new().into(),
     }
   }
   pub(crate) fn with_lex_flags(mut self, flags: LexFlags) -> Self {
@@ -139,11 +139,11 @@ bitflags! {
 }
 
 struct ParseStream {
-  pub tokens: Vec<Tk>,
-  pub tree: Ast,
-  pub cursor: usize,
+  pub tokens : Vec<Tk>,
+  pub tree   : Ast,
+  pub cursor : usize,
   pub context: LabelCtx,
-  pub flags: ParseFlags,
+  pub flags  : ParseFlags,
 }
 
 impl Debug for ParseStream {
@@ -173,7 +173,7 @@ impl ParseStream {
     self
   }
   fn parse_cmd_list(&mut self) -> ShResult<Option<NodeId>> {
-    let mut commands = vec![];
+    let mut commands           = vec![];
     let mut span: Option<Span> = None;
     while let Some(cmd) = self.parse_conjunction()? {
       extend_span!(span, self.tree.span_for(cmd));
@@ -182,16 +182,16 @@ impl ParseStream {
 
     let node = (!commands.is_empty()).then(|| {
       let commands = self.tree.alloc_children(commands);
-      let span = self.tree.alloc(span.unwrap_or_default());
-      let node = node!(self, span, NdRule::List { commands });
+      let span     = self.tree.alloc(span.unwrap_or_default());
+      let node     = node!(self, span, NdRule::List { commands });
       self.tree.alloc(node)
     });
 
     Ok(node)
   }
   fn parse_conjunction(&mut self) -> ShResult<Option<NodeId>> {
-    let mut elements = vec![];
-    let mut span: Option<Span> = None;
+    let mut elements                  = vec![];
+    let mut span       : Option<Span> = None;
 
     let mut dangling_op: Option<Span> = None;
     while let Some(block) = self.parse_block(true)? {
@@ -201,8 +201,8 @@ impl ParseStream {
 
       let conjunct_op = match self.next_tk_class() {
         TkRule::And => ConjunctOp::And,
-        TkRule::Or => ConjunctOp::Or,
-        _ => ConjunctOp::Null,
+        TkRule::Or  => ConjunctOp::Or,
+        _           => ConjunctOp::Null,
       };
 
       // A `&&`/`||` may only directly follow a pipeline, not a separator:
@@ -222,7 +222,7 @@ impl ParseStream {
       }
 
       let conjunction = ConjunctNode {
-        cmd: block,
+        cmd     : block,
         operator: conjunct_op,
       };
 
@@ -253,8 +253,8 @@ impl ParseStream {
       Ok(None)
     } else {
       let elements = self.tree.alloc_conjuncts(elements);
-      let span = self.tree.alloc(span.unwrap_or_default());
-      let node = node!(self, span, NdRule::Conjunction { elements });
+      let span     = self.tree.alloc(span.unwrap_or_default());
+      let node     = node!(self, span, NdRule::Conjunction { elements });
       Ok(Some(self.tree.alloc(node)))
     }
   }
@@ -335,8 +335,8 @@ impl Iterator for ParseStream {
       Ok(None) => match self.peek_tk() {
         None => None,
         Some(tk) => {
-          let class = tk.class.clone();
-          let mut span = Some(tk.span);
+          let     class = tk.class.clone();
+          let mut span  = Some(tk.span);
           self.panic_mode(&mut span);
           Some(Err(parse_err!(self, span, "Unexpected token: {class:?}")))
         }

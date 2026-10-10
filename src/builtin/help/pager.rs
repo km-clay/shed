@@ -65,7 +65,7 @@ impl SearchQuery {
 }
 
 struct CrossRef {
-  span: MarkedSpan,
+  span  : MarkedSpan,
   target: Option<String>,
 }
 
@@ -88,25 +88,25 @@ impl From<(MarkedSpan, Option<String>)> for CrossRef {
 }
 
 struct ClickableRef {
-  row: usize,
+  row      : usize,
   col_start: usize,
-  col_end: usize,
-  ref_idx: usize,
+  col_end  : usize,
+  ref_idx  : usize,
 }
 
 pub(super) struct HelpPager {
-  search: SearchQuery,
-  ref_keys: Vec<(usize, char)>,
+  search    : SearchQuery,
+  ref_keys  : Vec<(usize, char)>,
   cross_refs: Vec<CrossRef>,
   click_refs: Vec<ClickableRef>,
-  hovered: Option<usize>, // index into cross_refs
+  hovered   : Option<usize>, // index into cross_refs
 
   jump_dist: usize,
 
   scroll_offset: usize,
-  filename: Option<String>,
-  content: StyledHelp,
-  render_cache: Option<(u64, String)>,
+  filename     : Option<String>,
+  content      : StyledHelp,
+  render_cache : Option<(u64, String)>,
 }
 
 impl HelpPager {
@@ -146,7 +146,7 @@ impl HelpPager {
   fn render_fingerprint(&self) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    let c = self.content.content();
+    let     c = self.content.content();
     c.len().hash(&mut h);
     self.hovered.hash(&mut h);
     self.search.active_result_idx1.hash(&mut h);
@@ -159,7 +159,7 @@ impl HelpPager {
   }
 
   pub(super) fn cross_refs_in_viewport(&self) -> Vec<usize> {
-    let top = self.scroll_offset;
+    let top    = self.scroll_offset;
     let t_rows = Shed::term(Terminal::t_rows).saturating_sub(1);
     let bottom = top + t_rows;
 
@@ -185,7 +185,7 @@ impl HelpPager {
 
     // Build click map for cross-references in viewport
     self.click_refs.clear();
-    let scroll = self.scroll_offset;
+    let scroll      = self.scroll_offset;
     let content_str = self.content.content();
     for (idx, c_ref) in self.cross_refs.iter().enumerate() {
       let line_no = c_ref.span().line_no(content_str);
@@ -199,7 +199,7 @@ impl HelpPager {
       let line_text = &content_str[line_start..];
 
       let col_start = ui::calc_str_width(&line_text[..prefix_range.start]);
-      let col_end = ui::calc_str_width(&line_text[..postfix_range.end]);
+      let col_end   = ui::calc_str_width(&line_text[..postfix_range.end]);
 
       self.click_refs.push(ClickableRef {
         row: screen_row,
@@ -242,8 +242,8 @@ impl HelpPager {
         if let Some(c_ref) = self.cross_refs.get(*ref_idx) {
           // insert hint key text
           overlays.push(Overlay::Insert {
-            pos: c_ref.span().content_range().end,
-            text: format!("[{ch}]"),
+            pos  : c_ref.span().content_range().end,
+            text : format!("[{ch}]"),
             style: hint_key_style(),
           });
         }
@@ -281,7 +281,7 @@ impl HelpPager {
     if self.search.active {
       let query = self.search.editor.buf.to_string();
       let prefix = match self.search.dir {
-        Direction::Forward => '/',
+        Direction::Forward  => '/',
         Direction::Backward => '?',
       };
       write_term!("\x1b[1;7;4m {prefix}{query} \x1b[0m",).ok();
@@ -295,9 +295,9 @@ impl HelpPager {
 
   pub(super) fn handle_input(&mut self) -> ShResult<PagerEvent> {
     Shed::term_mut(Terminal::read)?;
-    let keys = Shed::term_mut(Terminal::drain_keys);
+    let     keys = Shed::term_mut(Terminal::drain_keys);
 
-    let mut res = PagerEvent::Continue;
+    let mut res  = PagerEvent::Continue;
     for key in keys {
       res = self.handle_key(key)?;
     }
@@ -359,7 +359,7 @@ impl HelpPager {
         let dir = match ch {
           '?' => Direction::Backward,
           '/' => Direction::Forward,
-          _ => unreachable!(),
+          _   => unreachable!(),
         };
 
         self.search.active = true;
@@ -379,7 +379,7 @@ impl HelpPager {
           .map(|(i, _)| *i)
         {
           self.ref_keys.clear();
-          let c_ref = &self.cross_refs[index];
+          let c_ref  = &self.cross_refs[index];
           let target = c_ref.resolve_target(self.content());
 
           return Ok(PagerEvent::OpenRef(target));
@@ -392,7 +392,7 @@ impl HelpPager {
         match dir {
           'n' => self.jump_to_match(Direction::Forward),
           'N' => self.jump_to_match(Direction::Backward),
-          _ => unreachable!(),
+          _   => unreachable!(),
         }
         return Ok(PagerEvent::Continue);
       }
@@ -403,13 +403,13 @@ impl HelpPager {
       key!('G') => PagerCmd::BottomOfPage,
 
       key!('d') | key!(PageDown) => PagerCmd::Scroll(self.jump_dist.cast_signed()),
-      key!('u') | key!(PageUp) => PagerCmd::Scroll(-self.jump_dist.cast_signed()),
+      key!('u') | key!(PageUp)   => PagerCmd::Scroll(-self.jump_dist.cast_signed()),
 
       key!(ScrollDown) | key!(Down) | key!('j') | key!(Enter) if !self.search.active => {
         PagerCmd::Scroll(1)
       }
-      key!(ScrollUp) | key!(Up) | key!('k') => PagerCmd::Scroll(-1),
-      key!(Back) | key!(Left) | key!('h') => return Ok(PagerEvent::Back),
+      key!(ScrollUp) | key!(Up) | key!('k')   => PagerCmd::Scroll(-1),
+      key!(Back) | key!(Left) | key!('h')     => return Ok(PagerEvent::Back),
       key!(Forward) | key!(Right) | key!('l') => return Ok(PagerEvent::Forward),
 
       KeyEvent(KeyCode::MousePos(row, col), _) => {
@@ -436,11 +436,11 @@ impl HelpPager {
     if self.search.editor.buf.to_string().is_empty() || !self.search.active {
       return;
     }
-    let pat = self.search.editor.buf.to_string();
-    let re = Regex::new(&regex::escape(&pat)).unwrap();
+    let pat     = self.search.editor.buf.to_string();
+    let re      = Regex::new(&regex::escape(&pat)).unwrap();
 
     let visible = self.content.visible();
-    let map = self.content.visible_to_baked();
+    let map     = self.content.visible_to_baked();
 
     // search the visible string, and map the visible bytes
     // back to the styled content byte positions
@@ -525,7 +525,7 @@ impl HelpPager {
       if self.search.active_result_idx1 > 0 {
         let current_range = self.search.results[self.search.active_result_idx1 - 1];
         match dir {
-          Direction::Forward => *start > current_range.1,
+          Direction::Forward  => *start > current_range.1,
           Direction::Backward => *start < current_range.0,
         }
       } else {
@@ -534,19 +534,19 @@ impl HelpPager {
     });
 
     let found = match dir {
-      Direction::Forward => after_anchor.min_by_key(|(start, _)| *start),
+      Direction::Forward  => after_anchor.min_by_key(|(start, _)| *start),
       Direction::Backward => after_anchor.max_by_key(|(start, _)| *start),
     };
 
     // If nothing found past anchor, wrap around
     let found = found.or_else(|| match dir {
-      Direction::Forward => self.search.results.iter().min_by_key(|(start, _)| *start),
+      Direction::Forward  => self.search.results.iter().min_by_key(|(start, _)| *start),
       Direction::Backward => self.search.results.iter().max_by_key(|(start, _)| *start),
     });
 
     let height = Shed::term(Terminal::t_rows).saturating_sub(1); // Get current terminal height
     if let Some((start, _)) = found {
-      let line_no = line_for(start);
+      let line_no    = line_for(start);
 
       // Check if the target line is already in the viewport
       let is_visible = line_no >= self.scroll_offset && line_no < (self.scroll_offset + height);
@@ -584,8 +584,8 @@ impl HelpPager {
       self.search.reset();
     }
 
-    let mut chars = HintChars::new();
-    let c_refs = self.cross_refs_in_viewport();
+    let mut chars  = HintChars::new();
+    let     c_refs = self.cross_refs_in_viewport();
 
     for i in c_refs {
       if let Some(ch) = chars.next() {
@@ -605,7 +605,7 @@ impl HelpPager {
 
   fn handle_hover(&mut self, row: usize, col: usize) -> ShResult<PagerEvent> {
     let (row, col) = (row.saturating_sub(1), col.saturating_sub(1));
-    let new_hover = self.click_ref_from_pos(row, col).map(|cr| cr.ref_idx);
+    let new_hover  = self.click_ref_from_pos(row, col).map(|cr| cr.ref_idx);
 
     if new_hover != self.hovered {
       self.hovered = new_hover;
@@ -622,7 +622,7 @@ impl HelpPager {
       .iter()
       .find(|cr| cr.row == row && col >= cr.col_start && col < cr.col_end)
     {
-      let c_ref = &self.cross_refs[cr.ref_idx];
+      let c_ref  = &self.cross_refs[cr.ref_idx];
       let target = c_ref.resolve_target(self.content());
 
       return PagerEvent::OpenRef(target);
@@ -643,7 +643,7 @@ impl HelpPager {
       }
       PagerCmd::BottomOfPage => {
         let content_rows = Shed::term(Terminal::t_rows).saturating_sub(1);
-        let n_lines = self.content().lines().count();
+        let n_lines      = self.content().lines().count();
         self.scroll_offset = n_lines.saturating_sub(content_rows);
       }
     }
@@ -713,14 +713,14 @@ mod tests {
   #[test]
   fn handle_key_q_exits() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let ev = p.handle_key(key(K::Char('q'))).unwrap();
+    let ev          = p.handle_key(key(K::Char('q'))).unwrap();
     assert!(matches!(ev, PagerEvent::ExitPager));
   }
 
   #[test]
   fn handle_key_esc_with_no_state_exits() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let ev = p.handle_key(key(K::Esc)).unwrap();
+    let ev          = p.handle_key(key(K::Esc)).unwrap();
     assert!(matches!(ev, PagerEvent::ClosePage));
   }
 
@@ -729,7 +729,7 @@ mod tests {
   #[test]
   fn handle_key_j_scrolls_down_one_line() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let before = p.scroll_offset;
+    let before      = p.scroll_offset;
     p.handle_key(key(K::Char('j'))).unwrap();
     assert_eq!(p.scroll_offset, (before + 1).min(p.max_scroll()));
   }
@@ -786,7 +786,7 @@ mod tests {
   #[test]
   fn handle_key_d_half_page_down() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let jump = p.jump_dist;
+    let jump        = p.jump_dist;
     p.handle_key(key(K::Char('d'))).unwrap();
     assert_eq!(p.scroll_offset, jump.min(p.max_scroll()));
   }
@@ -796,7 +796,7 @@ mod tests {
     let (_g, mut p) = pager_with(SAMPLE);
     p.handle_key(key(K::Char('G'))).unwrap();
     let before = p.scroll_offset;
-    let jump = p.jump_dist;
+    let jump   = p.jump_dist;
     p.handle_key(key(K::Char('u'))).unwrap();
     assert_eq!(p.scroll_offset, before.saturating_sub(jump));
   }
@@ -806,21 +806,21 @@ mod tests {
   #[test]
   fn handle_key_h_returns_back() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let ev = p.handle_key(key(K::Char('h'))).unwrap();
+    let ev          = p.handle_key(key(K::Char('h'))).unwrap();
     assert!(matches!(ev, PagerEvent::Back));
   }
 
   #[test]
   fn handle_key_l_returns_forward() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let ev = p.handle_key(key(K::Char('l'))).unwrap();
+    let ev          = p.handle_key(key(K::Char('l'))).unwrap();
     assert!(matches!(ev, PagerEvent::Forward));
   }
 
   #[test]
   fn handle_key_left_and_back_match_h() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let ev = p.handle_key(key(K::Left)).unwrap();
+    let ev          = p.handle_key(key(K::Left)).unwrap();
     assert!(matches!(ev, PagerEvent::Back));
     let ev = p.handle_key(key(K::Back)).unwrap();
     assert!(matches!(ev, PagerEvent::Back));
@@ -829,7 +829,7 @@ mod tests {
   #[test]
   fn handle_key_right_and_forward_match_l() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let ev = p.handle_key(key(K::Right)).unwrap();
+    let ev          = p.handle_key(key(K::Right)).unwrap();
     assert!(matches!(ev, PagerEvent::Forward));
     let ev = p.handle_key(key(K::Forward)).unwrap();
     assert!(matches!(ev, PagerEvent::Forward));
@@ -840,7 +840,7 @@ mod tests {
   #[test]
   fn handle_key_slash_starts_forward_search() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let ev = p.handle_key(key(K::Char('/'))).unwrap();
+    let ev          = p.handle_key(key(K::Char('/'))).unwrap();
     assert!(matches!(ev, PagerEvent::Continue));
     assert!(p.search.active);
     assert!(matches!(p.search.dir, Direction::Forward));
@@ -849,7 +849,7 @@ mod tests {
   #[test]
   fn handle_key_question_starts_backward_search() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let ev = p.handle_key(key(K::Char('?'))).unwrap();
+    let ev          = p.handle_key(key(K::Char('?'))).unwrap();
     assert!(matches!(ev, PagerEvent::Continue));
     assert!(p.search.active);
     assert!(matches!(p.search.dir, Direction::Backward));
@@ -906,7 +906,7 @@ mod tests {
     // Our SAMPLE has no cross-refs, so enter_hint_mode produces an empty
     // ref_keys list. Either way the function should not error.
     let (_g, mut p) = pager_with(SAMPLE);
-    let ev = p.handle_key(key(K::Tab)).unwrap();
+    let ev          = p.handle_key(key(K::Tab)).unwrap();
     assert!(matches!(ev, PagerEvent::Continue));
   }
 
@@ -945,7 +945,7 @@ mod tests {
   #[test]
   fn handle_key_n_capital_n_dont_error_with_no_search() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let ev = p.handle_key(key(K::Char('n'))).unwrap();
+    let ev          = p.handle_key(key(K::Char('n'))).unwrap();
     assert!(matches!(ev, PagerEvent::Continue));
     let ev = p.handle_key(key(K::Char('N'))).unwrap();
     assert!(matches!(ev, PagerEvent::Continue));
@@ -956,7 +956,7 @@ mod tests {
   #[test]
   fn handle_key_unhandled_char_is_continue() {
     let (_g, mut p) = pager_with(SAMPLE);
-    let ev = p.handle_key(key(K::Char('z'))).unwrap();
+    let ev          = p.handle_key(key(K::Char('z'))).unwrap();
     assert!(matches!(ev, PagerEvent::Continue));
   }
 }

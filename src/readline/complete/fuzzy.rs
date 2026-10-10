@@ -47,7 +47,7 @@ pub(crate) fn one_line(s: &str) -> String {
   for ch in s.chars() {
     match ch {
       '\n' | '\r' => out.push('\u{2424}'),
-      '\t' => out.push_str("    "),
+      '\t'        => out.push_str("    "),
       c if c.is_control() => {}
       c => out.push(c),
     }
@@ -90,7 +90,7 @@ pub(crate) fn emphasize_grid(text: &str, hl: impl Fn(usize) -> bool) -> String {
 /// SGR. Inserts only zero-width escapes, so callers must measure widths on the
 /// plain text before calling this.
 fn emphasize(text: &str, hl: impl Fn(usize) -> bool, emph_on: &str) -> String {
-  let mut out = String::with_capacity(text.len());
+  let mut out    = String::with_capacity(text.len());
   let mut active = false;
   for (i, ch) in text.chars().enumerate() {
     if hl(i) && !active {
@@ -123,7 +123,7 @@ pub(crate) fn match_positions(text: &str, query: &str) -> Vec<usize> {
 }
 
 fn subseq_window(candidate: &[char], query: &[char]) -> Option<(usize, usize)> {
-  let mut qi = 0;
+  let mut qi    = 0;
   let mut first = 0;
 
   for (i, &c) in candidate.iter().enumerate() {
@@ -172,8 +172,8 @@ pub(crate) fn is_subsequence(candidate: &str, query: &[char]) -> bool {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ClampedUsize {
-  val: usize,
-  max: usize,
+  val : usize,
+  max : usize,
   wrap: bool,
 }
 
@@ -259,7 +259,7 @@ impl ScoredCandidate {
   }
   pub(crate) fn fuzzy_score_with(&mut self, other: &str, cb: ScoreCallback) -> i32 {
     let query_chars: Vec<char> = other.chars().collect();
-    let score = cb(&self.candidate, &query_chars, self.penalize_len_diff);
+    let score                  = cb(&self.candidate, &query_chars, self.penalize_len_diff);
     self.score = Some(score);
     score
   }
@@ -363,11 +363,11 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
       // running_gap = max over k <= i-2 of `prev[k] + k*GAP_EXTEND` (plus its
       // argmax). Adding the i-dependent term below recovers the affine gap
       // penalty for the best gapped predecessor in O(1).
-      let mut running_gap = NEG;
+      let mut running_gap   = NEG;
       let mut running_gap_k = usize::MAX;
 
       for i in start..end {
-        let mut best = NEG;
+        let mut best   = NEG;
         let mut best_k = usize::MAX;
 
         // Consecutive predecessor (k = i-1, no gap).
@@ -409,8 +409,8 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
     }
 
     // Best end position for the last query char.
-    let mut best_i = None;
-    let prev_chars = prev.iter().enumerate().take(end).skip(start);
+    let mut best_i     = None;
+    let     prev_chars = prev.iter().enumerate().take(end).skip(start);
 
     for (i, &c) in prev_chars {
       if c > best_score {
@@ -424,7 +424,7 @@ fn fuzzy_align(candidate: &[char], query: &[char], track: bool) -> Option<(i32, 
 
   let positions = if track {
     let mut positions = vec![0usize; m];
-    let mut i = best_i;
+    let mut i         = best_i;
     for j in (1..m).rev() {
       positions[j] = i;
       i = parent[j][i];
@@ -466,7 +466,7 @@ pub(crate) struct FuzzyLayout {
 
 #[derive(Default, Debug)]
 pub(crate) struct QueryEditor {
-  mode: Emacs,
+  mode   : Emacs,
   linebuf: LineBuf,
 }
 
@@ -492,8 +492,8 @@ pub(crate) enum SelectorResponse {
 
 /// Sender for candidates streamed asynchronously to the fuzzy picker
 pub(crate) struct CandidateSink {
-  tx: mpsc::Sender<Vec<Candidate>>,
-  wake: OwnedFd,
+  tx    : mpsc::Sender<Vec<Candidate>>,
+  wake  : OwnedFd,
   cancel: Arc<AtomicBool>,
 }
 
@@ -519,10 +519,10 @@ impl CandidateSink {
 /// Receiver for candidates streamed asynchronously to the fuzzy picker.
 #[derive(Debug)]
 pub(crate) struct CandidateStream {
-  rx: mpsc::Receiver<Vec<Candidate>>,
+  rx     : mpsc::Receiver<Vec<Candidate>>,
   wake_rd: OwnedFd,
-  cancel: Arc<AtomicBool>,
-  handle: Option<thread::JoinHandle<()>>,
+  cancel : Arc<AtomicBool>,
+  handle : Option<thread::JoinHandle<()>>,
 }
 
 impl CandidateStream {
@@ -530,9 +530,9 @@ impl CandidateStream {
   where
     F: FnOnce(CandidateSink) + Send + 'static,
   {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx)           = mpsc::channel();
     let (wake_rd, wake_wr) = procio::pipes_high_nonblocking()?;
-    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel             = Arc::new(AtomicBool::new(false));
     let sink = CandidateSink {
       tx,
       wake: wake_wr,
@@ -576,13 +576,13 @@ impl Drop for CandidateStream {
 
 #[derive(Debug, Default)]
 pub(crate) struct FuzzyBuilder {
-  entries: Vec<(String, i32)>,
+  entries     : Vec<(String, i32)>,
   search_query: Option<String>,
-  placeholder: Option<String>,
-  score_cb: Option<ScoreCallback>,
+  placeholder : Option<String>,
+  score_cb    : Option<ScoreCallback>,
   highlight_cb: Option<HighlightCallback>,
-  inline: bool,
-  stream: Option<CandidateStream>,
+  inline      : bool,
+  stream      : Option<CandidateStream>,
 }
 
 impl FuzzyBuilder {
@@ -638,9 +638,9 @@ impl FuzzyBuilder {
       .into_iter()
       .map(|(text, weight)| Candidate::from(text).with_weight(weight))
       .collect();
-    let search_query = search_query.as_deref().unwrap_or_default();
+    let     search_query = search_query.as_deref().unwrap_or_default();
 
-    let mut selector = FuzzySelector::new();
+    let mut selector     = FuzzySelector::new();
     selector.set_placeholder(placeholder);
     selector.set_inline(inline);
     selector.set_score_cb(score_cb);
@@ -658,12 +658,12 @@ impl FuzzyBuilder {
     let Some(tty) = Shed::term(Terminal::tty) else {
       return Ok(None); // not attached to a terminal
     };
-    let _raw = Shed::term_mut(Terminal::raw_mode_guard)?;
-    let inline = self.inline;
+    let     _raw          = Shed::term_mut(Terminal::raw_mode_guard)?;
+    let     inline        = self.inline;
 
-    let mut selector = self.build();
+    let mut selector      = self.build();
 
-    let restore_style = Shed::term(Terminal::cursor_style);
+    let     restore_style = Shed::term(Terminal::cursor_style);
     defer! {
       exec_term!(TermCtl::Cursor(SetStyle(restore_style))).ok();
     };
@@ -679,7 +679,7 @@ impl FuzzyBuilder {
       queue_term!(TermCtl::Cursor(Forward(col as u16))).ok();
       exec_term!(TermCtl::Cursor(SetStyle(CursorStyle::Beam(true)))).ok();
 
-      let mut decided = None;
+      let mut decided  = None;
       let mut poll_fds = vec![tty_fd.clone()];
       if let Some(s) = &stream {
         poll_fds.push(PollFd::new(
@@ -699,7 +699,7 @@ impl FuzzyBuilder {
             for key in Shed::term_mut(Terminal::drain_keys) {
               match selector.handle_key(key)? {
                 SelectorResponse::Accept(c) => decided = Some(Some(c.as_str().to_string())),
-                SelectorResponse::Dismiss => decided = Some(None),
+                SelectorResponse::Dismiss   => decided = Some(None),
                 SelectorResponse::Preview(_) | SelectorResponse::Consumed => {}
               }
               if decided.is_some() {
@@ -757,7 +757,7 @@ pub(crate) fn fuzzy_best_match(
   transform: Option<QueryTransform>,
 ) -> Option<String> {
   let score_cb = cb.unwrap_or(fuzzy_match_score);
-  let query = transform.map_or_else(|| query.to_string(), |f| f(query));
+  let query    = transform.map_or_else(|| query.to_string(), |f| f(query));
   entries
     .into_iter()
     .filter_map(|(text, weight)| {
@@ -796,9 +796,9 @@ pub(crate) struct FuzzySelector {
   /// `draw` skips the leading newline and `clear` erases its own row too.
   inline: bool,
 
-  score_cb: Option<ScoreCallback>,
+  score_cb       : Option<ScoreCallback>,
   query_transform: Option<QueryTransform>,
-  highlight_cb: Option<HighlightCallback>,
+  highlight_cb   : Option<HighlightCallback>,
   /// The raw query run through `query_transform` (or the raw query when none).
   /// Scoring and match highlighting both use this so they stay consistent.
   effective_query: String,
@@ -808,7 +808,7 @@ pub(crate) struct FuzzySelector {
 
 #[derive(Debug)]
 pub(crate) struct FuzzyCompleter {
-  completer: SimpleCompleter,
+  completer   : SimpleCompleter,
   pub selector: FuzzySelector,
 }
 
@@ -859,8 +859,8 @@ impl FuzzySelector {
 
   /// Column of the query cursor on the query line, past the `► ` leader.
   pub(crate) fn query_cursor_col(&self) -> usize {
-    let raw = self.query.linebuf.to_string();
-    let flat = self.query.linebuf.cursor_to_flat();
+    let raw            = self.query.linebuf.to_string();
+    let flat           = self.query.linebuf.cursor_to_flat();
     let before: String = raw.chars().take(flat).collect();
     Self::LEADER_W + ui::calc_str_width(&caret_notation(&before))
   }
@@ -918,7 +918,7 @@ impl FuzzySelector {
       .query_transform
       .map_or_else(|| raw.clone(), |f| f(&raw));
     let query_chars: Vec<char> = query.chars().collect();
-    let score_fn = self.score_cb.unwrap_or(fuzzy_match_score);
+    let score_fn               = self.score_cb.unwrap_or(fuzzy_match_score);
 
     // The `extends` fast path retains a subset of the previous results, which is
     // only valid when more typed chars mean fewer matches. A query transform
@@ -986,8 +986,8 @@ impl FuzzySelector {
     batch: Vec<ScoredCandidate>,
   ) -> Vec<ScoredCandidate> {
     let mut out = Vec::with_capacity(existing.len() + batch.len());
-    let mut a = existing.into_iter().peekable();
-    let mut b = batch.into_iter().peekable();
+    let mut a   = existing.into_iter().peekable();
+    let mut b   = batch.into_iter().peekable();
     while let (Some(x), Some(y)) = (a.peek(), b.peek()) {
       if Self::cmp_display(x, y) == std::cmp::Ordering::Greater {
         out.push(b.next().unwrap());
@@ -1012,7 +1012,7 @@ impl FuzzySelector {
       return;
     }
     let query_chars: Vec<char> = self.effective_query.chars().collect();
-    let score_fn = self.score_cb.unwrap_or(fuzzy_match_score);
+    let score_fn               = self.score_cb.unwrap_or(fuzzy_match_score);
 
     let mut batch: Vec<ScoredCandidate> = arrivals
       .iter()
@@ -1078,8 +1078,8 @@ impl FuzzySelector {
 
   /// Scroll horizontally so the selected cell's column is on screen.
   fn ensure_cursor_visible(&mut self, t_cols: usize) {
-    let cursor = self.cursor.get();
-    let n = self.filtered.len();
+    let cursor   = self.cursor.get();
+    let n        = self.filtered.len();
     let filtered = &self.filtered;
     super::grid::scroll_into_view(
       cursor,
@@ -1101,10 +1101,10 @@ impl FuzzySelector {
     // line, with empty cells as underlined spaces. The real hardware cursor
     // (a blinking beam) marks the position, so there's no fake cursor here.
     let field_width = t_cols.saturating_sub(Self::LEADER_W + 1);
-    let query = caret_notation(&self.query.linebuf.to_string());
+    let query       = caret_notation(&self.query.linebuf.to_string());
     let (body, used) = match self.placeholder.as_ref() {
       Some(placeholder) if query.is_empty() => {
-        let hint = truncate_to_width(placeholder, field_width);
+        let hint  = truncate_to_width(placeholder, field_width);
         let width = ui::calc_str_width(&hint);
         (format!("\x1b[2m{hint}\x1b[22m"), width)
       }
@@ -1129,9 +1129,9 @@ impl FuzzySelector {
     if self.filtered.is_empty() {
       return 2;
     }
-    let rows = GridLayout::MAX_VISIBLE_ROWS;
-    let n = self.filtered.len();
-    let first = self.scroll_col * rows;
+    let rows      = GridLayout::MAX_VISIBLE_ROWS;
+    let n         = self.filtered.len();
+    let first     = self.scroll_col * rows;
     let grid_rows = rows.min(n.saturating_sub(first)).max(1);
     // Query line + grid rows + the "Items x to y of z" counter.
     1 + grid_rows + 1
@@ -1142,7 +1142,7 @@ impl FuzzySelector {
   fn nav_response(&self) -> SelectorResponse {
     match self.selected_candidate() {
       Some(cand) => SelectorResponse::Preview(cand),
-      None => SelectorResponse::Consumed,
+      None       => SelectorResponse::Consumed,
     }
   }
 
@@ -1158,7 +1158,7 @@ impl FuzzySelector {
       }
       key!(Enter) => match self.filtered.get(self.cursor.get()) {
         Some(selected) => Ok(SelectorResponse::Accept(selected.candidate.clone())),
-        None => Ok(SelectorResponse::Dismiss),
+        None           => Ok(SelectorResponse::Dismiss),
       },
       key!(Tab) | key!(Down) => {
         self.cursor.wrap_add(1);
@@ -1258,17 +1258,17 @@ impl FuzzySelector {
       write_term!("\x1b[2m(no matches)\x1b[22m").ok();
       rows_drawn += 1;
     } else {
-      let col_widths = self.visible_window(t_cols);
-      let num_cols = col_widths.len().max(1);
-      let cursor_pos = self.cursor.get();
-      let n = self.filtered.len();
-      let first = self.scroll_col * rows;
+      let col_widths   = self.visible_window(t_cols);
+      let num_cols     = col_widths.len().max(1);
+      let cursor_pos   = self.cursor.get();
+      let n            = self.filtered.len();
+      let first        = self.scroll_col * rows;
       // The first visible column has the lowest indices, so it's the tallest.
-      let grid_rows = rows.min(n - first);
-      let visible_end = ((self.scroll_col + num_cols) * rows).min(n);
+      let grid_rows    = rows.min(n - first);
+      let visible_end  = ((self.scroll_col + num_cols) * rows).min(n);
       // Highlight against the effective (transformed) query so matches line up
       // with what was actually scored.
-      let query = self.effective_query.clone();
+      let query        = self.effective_query.clone();
       let highlight_cb = self.highlight_cb;
 
       // Column-major: cell (col c, row r) is candidate `(scroll_col + c) * rows + r`.
@@ -1281,7 +1281,7 @@ impl FuzzySelector {
             break; // later columns at this row are exhausted too
           }
 
-          let avail = width.saturating_sub(Self::LEADER_W);
+          let     avail      = width.saturating_sub(Self::LEADER_W);
 
           let mut name_plain = one_line(&self.filtered[idx].candidate.display());
           if ui::calc_str_width(&name_plain) > avail {
@@ -1294,14 +1294,14 @@ impl FuzzySelector {
           let positions = highlight_cb
             .and_then(|cb| cb(&name_plain, &query))
             .unwrap_or_else(|| match_positions(&name_plain, &query));
-          let name = emphasize_fuzzy(&name_plain, |i| positions.binary_search(&i).is_ok());
+          let name      = emphasize_fuzzy(&name_plain, |i| positions.binary_search(&i).is_ok());
 
           // Per-column max name width, so descriptions align (like the grid).
           let col_start = (self.scroll_col + c) * rows;
-          let col_end = (col_start + rows).min(n);
+          let col_end   = (col_start + rows).min(n);
           let (col_name_max, _) = Self::col_dims(&self.filtered[col_start..col_end]);
 
-          let is_selected = idx == cursor_pos;
+          let is_selected       = idx == cursor_pos;
 
           let cell = if let Some(desc) = self.filtered[idx]
             .candidate
@@ -1311,15 +1311,15 @@ impl FuzzySelector {
             // Aligned position is after col_name_max + a 2-col gap; if the
             // desc doesn't fit there it may extend left into the name-pad,
             // and past that it truncates with an ellipsis.
-            let desc_w_full = ui::calc_str_width(desc) + 2; // includes parens
-            let aligned_avail = avail.saturating_sub(col_name_max + 2);
+            let desc_w_full      = ui::calc_str_width(desc) + 2; // includes parens
+            let aligned_avail    = avail.saturating_sub(col_name_max + 2);
             let max_extend_avail = avail.saturating_sub(name_w + 2);
 
             let (pad_chars, desc_text) = if desc_w_full <= aligned_avail {
               (col_name_max.saturating_sub(name_w), format!("({desc})"))
             } else if desc_w_full <= max_extend_avail {
               let need = desc_w_full - aligned_avail;
-              let pad = col_name_max.saturating_sub(name_w).saturating_sub(need);
+              let pad  = col_name_max.saturating_sub(name_w).saturating_sub(need);
               (pad, format!("({desc})"))
             } else {
               let truncated = truncate_to_width(desc, max_extend_avail.saturating_sub(3));
@@ -1327,7 +1327,7 @@ impl FuzzySelector {
             };
 
             let name_pad = " ".repeat(pad_chars);
-            let used = name_w + pad_chars + 2 + ui::calc_str_width(&desc_text);
+            let used     = name_w + pad_chars + 2 + ui::calc_str_width(&desc_text);
             let trailing = " ".repeat(avail.saturating_sub(used));
 
             if is_selected {
@@ -1409,7 +1409,7 @@ impl Default for FuzzyCompleter {
   fn default() -> Self {
     Self {
       completer: SimpleCompleter::default(),
-      selector: FuzzySelector::new(),
+      selector : FuzzySelector::new(),
     }
   }
 }
@@ -1429,7 +1429,7 @@ impl Completer for FuzzyCompleter {
   fn get_completed_line(&self, candidate: &str) -> String {
     log::debug!("Getting completed line for candidate: {candidate}");
 
-    let selected = self.selector.selected_candidate().unwrap_or_default();
+    let selected     = self.selector.selected_candidate().unwrap_or_default();
     let (start, end) = self.completer.token_span;
     // Wholesale replace `token_span` with the candidate. See
     // `SimpleCompleter::get_completed_line` for the rationale.
@@ -1458,7 +1458,7 @@ impl Completer for FuzzyCompleter {
       return Ok(None);
     } else if candidates.len() == 1 {
       self.selector.filtered = candidates.into_iter().map(ScoredCandidate::from).collect();
-      let selected = self.selector.filtered[0].candidate.content().to_string();
+      let selected  = self.selector.filtered[0].candidate.content().to_string();
       let completed = self.get_completed_line(&selected);
       // Preserve the inner completer's match-kind; only the spliced line changes.
       return Ok(inner.map(|m| m.with_line(completed)));
@@ -1473,10 +1473,10 @@ impl Completer for FuzzyCompleter {
 
   fn handle_key(&mut self, key: K) -> ShResult<CompResponse> {
     match self.selector.handle_key(key)? {
-      SelectorResponse::Accept(s) => Ok(CompResponse::Accept(s)),
+      SelectorResponse::Accept(s)  => Ok(CompResponse::Accept(s)),
       SelectorResponse::Preview(s) => Ok(CompResponse::Preview(s)),
-      SelectorResponse::Dismiss => Ok(CompResponse::Dismiss),
-      SelectorResponse::Consumed => Ok(CompResponse::Consumed),
+      SelectorResponse::Dismiss    => Ok(CompResponse::Dismiss),
+      SelectorResponse::Consumed   => Ok(CompResponse::Consumed),
     }
   }
   fn clear(&mut self) {

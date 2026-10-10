@@ -22,7 +22,7 @@ impl super::Builtin for Shopt {
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
-    let print_help = opts.iter().any(|o| o.key() == "print-help");
+    let print_help      = opts.iter().any(|o| o.key() == "print-help");
 
     if arg_vec.is_empty() {
       let output = Shed::shopts_mut(ShOpts::display_opts)?;
@@ -37,7 +37,7 @@ impl super::Builtin for Shopt {
       // for both `shopt key` and `shopt key=value`.
       let (key, value) = match arg.to_str_lossy().split_once('=') {
         Some((k, v)) => (k.into(), Some(VarStr::from(v))),
-        None => (arg.clone(), None),
+        None         => (arg.clone(), None),
       };
 
       if let Some((_, new_key)) = DEPRECATED_SHOPTS
@@ -50,7 +50,7 @@ impl super::Builtin for Shopt {
         .print_error();
         arg = match value {
           Some(v) => varstr!("{new_key}={v}"),
-          None => (*new_key).into(),
+          None    => (*new_key).into(),
         };
       }
 

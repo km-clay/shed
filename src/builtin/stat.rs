@@ -41,11 +41,11 @@ impl StrFmt for FileFmt {
       return Err(sherr!(ExecFail, "stat: Incomplete format specifier"));
     };
     Ok(match b {
-      b'a' => FileConv::Perms(StatDisplay::Machine(Base::Octal)),
-      b'A' => FileConv::Perms(StatDisplay::Human),
-      b'b' => FileConv::AllocBlocks,
-      b'B' => FileConv::BlockSize,
-      b'C' => FileConv::SecCtx,
+      b'a'               => FileConv::Perms(StatDisplay::Machine(Base::Octal)),
+      b'A'               => FileConv::Perms(StatDisplay::Human),
+      b'b'               => FileConv::AllocBlocks,
+      b'B'               => FileConv::BlockSize,
+      b'C'               => FileConv::SecCtx,
       b'd' | b'D' | b'R' => FileConv::DevType(Device::DevType(Base::Hex)),
       first @ (b'H' | b'L') => {
         let Some(next) = cur.next_byte() else {
@@ -162,7 +162,7 @@ impl StrFmt for FsFmt {
     src: &mut Self::Source,
   ) -> ShResult<Field> {
     let mut body = String::new();
-    let name = src.path.clone();
+    let     name = src.path.clone();
     conv
       .format(&mut body, &name.to_str_lossy(), src)
       .map_err(|e| sherr!(ExecFail, "stat: Failed to format field: {e}"))?;
@@ -304,27 +304,27 @@ impl FileInfo {
         let mode = self.st_mode & 0o7777;
         match base {
           Base::Decimal => write!(f, "{mode}"),
-          Base::Octal => write!(f, "{mode:04o}"),
-          Base::Hex => write!(f, "{mode:x}"),
+          Base::Octal   => write!(f, "{mode:04o}"),
+          Base::Hex     => write!(f, "{mode:x}"),
         }
       }
       StatDisplay::Human => {
         let mode = self.st_mode;
         let ty = match mode & 0o170_000 {
-          S_IFREG => '-',
-          S_IFDIR => 'd',
-          S_IFLNK => 'l',
-          S_IFCHR => 'c',
-          S_IFBLK => 'b',
+          S_IFREG  => '-',
+          S_IFDIR  => 'd',
+          S_IFLNK  => 'l',
+          S_IFCHR  => 'c',
+          S_IFBLK  => 'b',
           S_IFSOCK => 's',
-          S_IFIFO => 'p',
-          _ => '?',
+          S_IFIFO  => 'p',
+          _        => '?',
         };
         write!(f, "{ty}")?;
 
-        let other = mode & 0o007;
-        let group = mode & 0o070;
-        let owner = mode & 0o700;
+        let other    = mode & 0o007;
+        let group    = mode & 0o070;
+        let owner    = mode & 0o700;
         let bit_grps = [other, group, owner];
         for (i, grp) in bit_grps.iter().enumerate().rev() {
           let bits = grp >> (3 * i); // shift down to the leading triple
@@ -335,14 +335,14 @@ impl FileInfo {
             _ => unreachable!(),
           };
 
-          let exec = bits & 0o1 != 0;
+          let exec    = bits & 0o1 != 0;
           let special = mode & x_mask != 0;
-          let sp = if i == 0 { 't' } else { 's' };
+          let sp      = if i == 0 { 't' } else { 's' };
           let x_ch = match (special, exec) {
             (false, false) => '-',
-            (false, true) => 'x',
-            (true, true) => sp,
-            (true, false) => sp.to_ascii_uppercase(),
+            (false, true)  => 'x',
+            (true, true)   => sp,
+            (true, false)  => sp.to_ascii_uppercase(),
           };
 
           if bits & 0o4 != 0 {
@@ -367,8 +367,8 @@ impl FileInfo {
     match display {
       StatDisplay::Machine(base) => match base {
         Base::Decimal => write!(f, "{size}"),
-        Base::Octal => write!(f, "{size:o}"),
-        Base::Hex => write!(f, "{size:x}"),
+        Base::Octal   => write!(f, "{size:o}"),
+        Base::Hex     => write!(f, "{size:x}"),
       },
       StatDisplay::Human => strops::format_size(size as u64, f),
     }
@@ -383,13 +383,13 @@ impl FileInfo {
           "regular file"
         }
       }
-      S_IFDIR => "directory",
-      S_IFLNK => "symbolic link",
-      S_IFCHR => "character special file",
-      S_IFBLK => "block special file",
+      S_IFDIR  => "directory",
+      S_IFLNK  => "symbolic link",
+      S_IFCHR  => "character special file",
+      S_IFBLK  => "block special file",
       S_IFSOCK => "socket",
-      S_IFIFO => "fifo",
-      _ => "weird file",
+      S_IFIFO  => "fifo",
+      _        => "weird file",
     };
     write!(f, "{ty}")
   }
@@ -405,7 +405,7 @@ impl FileInfo {
       return write!(f, "?");
     };
     let attr = c"security.selinux";
-    let len = unsafe { libc::lgetxattr(path.as_ptr(), attr.as_ptr(), std::ptr::null_mut(), 0) };
+    let len  = unsafe { libc::lgetxattr(path.as_ptr(), attr.as_ptr(), std::ptr::null_mut(), 0) };
     if len <= 0 {
       return write!(f, "?");
     }
@@ -434,14 +434,14 @@ impl FileInfo {
   fn fmt_gid_name(&self, f: &mut impl fmt::Write) -> fmt::Result {
     match nix::unistd::Group::from_gid(nix::unistd::Gid::from_raw(self.st_gid)) {
       Ok(Some(group)) => write!(f, "{}", group.name),
-      _ => write!(f, "{}", self.st_gid),
+      _               => write!(f, "{}", self.st_gid),
     }
   }
 
   fn fmt_uid_name(&self, f: &mut impl fmt::Write) -> fmt::Result {
     match nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(self.st_uid)) {
       Ok(Some(user)) => write!(f, "{}", user.name),
-      _ => write!(f, "{}", self.st_uid),
+      _              => write!(f, "{}", self.st_uid),
     }
   }
 
@@ -452,9 +452,9 @@ impl FileInfo {
     let Ok(meta) = std::fs::metadata(&canon) else {
       return write!(f, "?");
     };
-    let dev = meta.dev();
+    let     dev = meta.dev();
 
-    let mut mp = canon.as_path();
+    let mut mp  = canon.as_path();
     while let Some(parent) = mp.parent() {
       match std::fs::metadata(parent) {
         Ok(p) if p.dev() == dev => mp = parent, // climb
@@ -479,9 +479,9 @@ impl FileInfo {
 
   #[expect(clippy::similar_names)]
   fn fmt_dev_type(&self, f: &mut impl fmt::Write, device: Device) -> fmt::Result {
-    let major_dev = libc::major(self.st_dev as libc::dev_t);
+    let major_dev  = libc::major(self.st_dev as libc::dev_t);
     let major_rdev = libc::major(self.st_rdev as libc::dev_t);
-    let minor_dev = libc::minor(self.st_dev as libc::dev_t);
+    let minor_dev  = libc::minor(self.st_dev as libc::dev_t);
     let minor_rdev = libc::minor(self.st_rdev as libc::dev_t);
 
     match device {
@@ -489,29 +489,29 @@ impl FileInfo {
       Device::MinorNumber => write!(f, "{minor_dev}"),
       Device::MajorDevType(base) => match base {
         Base::Decimal => write!(f, "{major_rdev}"),
-        Base::Octal => write!(f, "{major_rdev:o}"),
-        Base::Hex => write!(f, "{major_rdev:x}"),
+        Base::Octal   => write!(f, "{major_rdev:o}"),
+        Base::Hex     => write!(f, "{major_rdev:x}"),
       },
       Device::MinorDevType(base) => match base {
         Base::Decimal => write!(f, "{minor_rdev}"),
-        Base::Octal => write!(f, "{minor_rdev:o}"),
-        Base::Hex => write!(f, "{minor_rdev:x}"),
+        Base::Octal   => write!(f, "{minor_rdev:o}"),
+        Base::Hex     => write!(f, "{minor_rdev:x}"),
       },
       Device::DevType(base) => match base {
         Base::Decimal => write!(f, "{major_dev}:{minor_dev}"),
-        Base::Octal => write!(f, "{major_dev:o}:{minor_dev:o}"),
-        Base::Hex => write!(f, "{major_dev:x}:{minor_dev:x}"),
+        Base::Octal   => write!(f, "{major_dev:o}:{minor_dev:o}"),
+        Base::Hex     => write!(f, "{major_dev:x}:{minor_dev:x}"),
       },
     }
   }
 
   fn fmt_time(&self, f: &mut impl fmt::Write, time: FileTime) -> fmt::Result {
     let (time, display) = match time {
-      FileTime::Access(time_display) => (self.st_atime, time_display),
-      FileTime::Modify(time_display) => (self.st_mtime, time_display),
+      FileTime::Access(time_display)     => (self.st_atime, time_display),
+      FileTime::Modify(time_display)     => (self.st_mtime, time_display),
       FileTime::StatChange(time_display) => (self.st_ctime, time_display),
       FileTime::Birth(time_display) => match self.st_btime {
-        None => return write!(f, "-"),
+        None        => return write!(f, "-"),
         Some(btime) => (btime, time_display),
       },
     };
@@ -644,13 +644,13 @@ impl FsInfo {
         let id = self.fs_type_id.unwrap_or(0);
         match base {
           Base::Decimal => write!(f, "{id}"),
-          Base::Octal => write!(f, "{id:o}"),
-          Base::Hex => write!(f, "{id:x}"),
+          Base::Octal   => write!(f, "{id:o}"),
+          Base::Hex     => write!(f, "{id:x}"),
         }
       }
       StatDisplay::Human => match &self.fs_type_name {
         Some(name) => write!(f, "{name}"),
-        None => write!(f, "UNKNOWN"),
+        None       => write!(f, "UNKNOWN"),
       },
     }
   }
@@ -671,15 +671,22 @@ fn fs_type_of(path: &VarStr) -> (Option<u64>, Option<VarStr>) {
 #[cfg(not(linux_like))]
 fn fs_type_of(path: &VarStr) -> (Option<u64>, Option<VarStr>) {
   match statfs::statfs::<Path>(path.as_ref()) {
-    Ok(s) => (None, Some(s.filesystem_type_name().to_string().into())),
+    Ok(s)  => (None, Some(s.filesystem_type_name().to_string().into())),
     Err(_) => (None, None),
   }
 }
 
 impl FsConv {
-  #[rustfmt::skip]
   fn format(&self, f: &mut impl fmt::Write, name: &str, stat: &FsInfo) -> fmt::Result {
-    let FsInfo { block_size, fundamental_bs, total_nodes, free_nodes, fs_id, name_max, .. } = stat;
+    let FsInfo {
+      block_size,
+      fundamental_bs,
+      total_nodes,
+      free_nodes,
+      fs_id,
+      name_max,
+      ..
+    } = stat;
     match self {
       FsConv::FileName /*=======*/ => write!(f, "{name}"),
       FsConv::TotalNodes /*=====*/ => write!(f, "{total_nodes}"),
@@ -718,57 +725,57 @@ impl FsConv {
 #[cfg(linux_like)]
 fn fs_type_readable(id: statfs::FsType) -> &'static str {
   match id {
-    statfs::ADFS_SUPER_MAGIC => "adfs",
-    statfs::AFFS_SUPER_MAGIC => "affs",
-    statfs::AFS_SUPER_MAGIC => "afs",
-    statfs::AUTOFS_SUPER_MAGIC => "autofs",
-    statfs::BPF_FS_MAGIC => "bpf",
-    statfs::BTRFS_SUPER_MAGIC => "btrfs",
-    statfs::CGROUP2_SUPER_MAGIC => "cgroup2",
-    statfs::CGROUP_SUPER_MAGIC => "cgroup",
-    statfs::CODA_SUPER_MAGIC => "coda",
-    statfs::CRAMFS_MAGIC => "cramfs",
-    statfs::DEBUGFS_MAGIC => "debugfs",
-    statfs::DEVPTS_SUPER_MAGIC => "devpts",
-    statfs::ECRYPTFS_SUPER_MAGIC => "ecryptfs",
-    statfs::EFS_SUPER_MAGIC => "efs",
-    statfs::EXT2_SUPER_MAGIC => "ext2/ext3/ext4", // all ext filesystems use the same number for some reason
-    statfs::F2FS_SUPER_MAGIC => "f2fs",
-    statfs::FUSE_SUPER_MAGIC => "fuse",
-    statfs::FUTEXFS_SUPER_MAGIC => "futexfs",
-    statfs::HOSTFS_SUPER_MAGIC => "hostfs",
-    statfs::HPFS_SUPER_MAGIC => "hpfs",
-    statfs::HUGETLBFS_MAGIC => "hugetlbfs",
-    statfs::ISOFS_SUPER_MAGIC => "isofs",
-    statfs::JFFS2_SUPER_MAGIC => "jffs2",
-    statfs::MINIX2_SUPER_MAGIC => "minix2",
-    statfs::MINIX2_SUPER_MAGIC2 => "minix2",
-    statfs::MINIX3_SUPER_MAGIC => "minix3",
-    statfs::MINIX_SUPER_MAGIC => "minix",
-    statfs::MINIX_SUPER_MAGIC2 => "minix",
-    statfs::MSDOS_SUPER_MAGIC => "msdos",
-    statfs::NCP_SUPER_MAGIC => "ncp",
-    statfs::NFS_SUPER_MAGIC => "nfs",
-    statfs::NILFS_SUPER_MAGIC => "nilfs",
-    statfs::NSFS_MAGIC => "nsfs",
-    statfs::OCFS2_SUPER_MAGIC => "ocfs2",
-    statfs::OPENPROM_SUPER_MAGIC => "openprom",
+    statfs::ADFS_SUPER_MAGIC      => "adfs",
+    statfs::AFFS_SUPER_MAGIC      => "affs",
+    statfs::AFS_SUPER_MAGIC       => "afs",
+    statfs::AUTOFS_SUPER_MAGIC    => "autofs",
+    statfs::BPF_FS_MAGIC          => "bpf",
+    statfs::BTRFS_SUPER_MAGIC     => "btrfs",
+    statfs::CGROUP2_SUPER_MAGIC   => "cgroup2",
+    statfs::CGROUP_SUPER_MAGIC    => "cgroup",
+    statfs::CODA_SUPER_MAGIC      => "coda",
+    statfs::CRAMFS_MAGIC          => "cramfs",
+    statfs::DEBUGFS_MAGIC         => "debugfs",
+    statfs::DEVPTS_SUPER_MAGIC    => "devpts",
+    statfs::ECRYPTFS_SUPER_MAGIC  => "ecryptfs",
+    statfs::EFS_SUPER_MAGIC       => "efs",
+    statfs::EXT2_SUPER_MAGIC      => "ext2/ext3/ext4", // all ext filesystems use the same number for some reason
+    statfs::F2FS_SUPER_MAGIC      => "f2fs",
+    statfs::FUSE_SUPER_MAGIC      => "fuse",
+    statfs::FUTEXFS_SUPER_MAGIC   => "futexfs",
+    statfs::HOSTFS_SUPER_MAGIC    => "hostfs",
+    statfs::HPFS_SUPER_MAGIC      => "hpfs",
+    statfs::HUGETLBFS_MAGIC       => "hugetlbfs",
+    statfs::ISOFS_SUPER_MAGIC     => "isofs",
+    statfs::JFFS2_SUPER_MAGIC     => "jffs2",
+    statfs::MINIX2_SUPER_MAGIC    => "minix2",
+    statfs::MINIX2_SUPER_MAGIC2   => "minix2",
+    statfs::MINIX3_SUPER_MAGIC    => "minix3",
+    statfs::MINIX_SUPER_MAGIC     => "minix",
+    statfs::MINIX_SUPER_MAGIC2    => "minix",
+    statfs::MSDOS_SUPER_MAGIC     => "msdos",
+    statfs::NCP_SUPER_MAGIC       => "ncp",
+    statfs::NFS_SUPER_MAGIC       => "nfs",
+    statfs::NILFS_SUPER_MAGIC     => "nilfs",
+    statfs::NSFS_MAGIC            => "nsfs",
+    statfs::OCFS2_SUPER_MAGIC     => "ocfs2",
+    statfs::OPENPROM_SUPER_MAGIC  => "openprom",
     statfs::OVERLAYFS_SUPER_MAGIC => "overlayfs",
-    statfs::PROC_SUPER_MAGIC => "proc",
-    statfs::QNX4_SUPER_MAGIC => "qnx4",
-    statfs::QNX6_SUPER_MAGIC => "qnx6",
-    statfs::RDTGROUP_SUPER_MAGIC => "rdtgroup",
-    statfs::REISERFS_SUPER_MAGIC => "reiserfs",
-    statfs::SECURITYFS_MAGIC => "securityfs",
-    statfs::SELINUX_MAGIC => "selinux",
-    statfs::SMACK_MAGIC => "smack",
-    statfs::SMB_SUPER_MAGIC => "smb",
-    statfs::SYSFS_MAGIC => "sysfs",
-    statfs::TMPFS_MAGIC => "tmpfs",
-    statfs::TRACEFS_MAGIC => "tracefs",
-    statfs::UDF_SUPER_MAGIC => "udf",
+    statfs::PROC_SUPER_MAGIC      => "proc",
+    statfs::QNX4_SUPER_MAGIC      => "qnx4",
+    statfs::QNX6_SUPER_MAGIC      => "qnx6",
+    statfs::RDTGROUP_SUPER_MAGIC  => "rdtgroup",
+    statfs::REISERFS_SUPER_MAGIC  => "reiserfs",
+    statfs::SECURITYFS_MAGIC      => "securityfs",
+    statfs::SELINUX_MAGIC         => "selinux",
+    statfs::SMACK_MAGIC           => "smack",
+    statfs::SMB_SUPER_MAGIC       => "smb",
+    statfs::SYSFS_MAGIC           => "sysfs",
+    statfs::TMPFS_MAGIC           => "tmpfs",
+    statfs::TRACEFS_MAGIC         => "tracefs",
+    statfs::UDF_SUPER_MAGIC       => "udf",
     statfs::USBDEVICE_SUPER_MAGIC => "usbdevice",
-    statfs::XENFS_SUPER_MAGIC => "xenfs",
+    statfs::XENFS_SUPER_MAGIC     => "xenfs",
     // nix excludes this magic on musl and ohos
     #[cfg(all(not(target_env = "musl"), not(target_env = "ohos")))]
     statfs::XFS_SUPER_MAGIC => "xfs",
@@ -781,7 +788,6 @@ impl super::Builtin for Stat {
   fn strict_opts(&self) -> bool {
     true
   }
-  #[rustfmt::skip]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("dereference" | b'L'   ),
@@ -792,13 +798,13 @@ impl super::Builtin for Stat {
     ]
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let deref = args.has_opt("dereference");
-    let fs_stat = args.has_opt("file-system");
-    let terse = args.has_opt("terse");
-    let mut format = args.opt_value("format");
-    let human = args.has_opt("human");
+    let     deref        = args.has_opt("dereference");
+    let     fs_stat      = args.has_opt("file-system");
+    let     terse        = args.has_opt("terse");
+    let mut format       = args.opt_value("format");
+    let     human        = args.has_opt("human");
 
-    let (arg_vec, _) = args.take_argv();
+    let     (arg_vec, _) = args.take_argv();
 
     if arg_vec.is_empty() {
       return Err(sherr!(ExecFail @ args.cmd_span(), "stat: Missing file operand").with_code(2));
@@ -883,8 +889,8 @@ impl Stat {
     args: impl IntoIterator<Item = T>,
     mut make_src: impl FnMut(T) -> Option<S::Source>,
   ) -> ShResult<i32> {
-    let fmt = strops::StrFormatter::parse(set, format)?;
-    let mut buf = vec![];
+    let     fmt    = strops::StrFormatter::parse(set, format)?;
+    let mut buf    = vec![];
     let mut status = 0;
 
     for arg in args {
@@ -914,8 +920,8 @@ mod tests {
   /// Build a `FileInfo` for `path` and render `fmt` against it.
   fn render(deref: bool, path: &str, fmt: &str) -> String {
     let mut info = FileInfo::new(deref, path.into()).unwrap();
-    let f = strops::StrFormatter::parse(&FileFmt, fmt.as_bytes()).unwrap();
-    let mut out = vec![];
+    let     f    = strops::StrFormatter::parse(&FileFmt, fmt.as_bytes()).unwrap();
+    let mut out  = vec![];
     f.render(&mut info, &mut out).unwrap();
     out.to_str_lossy().into_owned()
   }
@@ -929,7 +935,7 @@ mod tests {
   #[test]
   fn perms_symbolic_and_octal() {
     let _g = TestGuard::new();
-    let f = NamedTempFile::new().unwrap();
+    let f  = NamedTempFile::new().unwrap();
     chmod(f.path(), 0o644);
     let p = f.path().to_str().unwrap();
     assert_eq!(render(false, p, "%A"), "-rw-r--r--");
@@ -939,7 +945,7 @@ mod tests {
   #[test]
   fn perms_executable() {
     let _g = TestGuard::new();
-    let f = NamedTempFile::new().unwrap();
+    let f  = NamedTempFile::new().unwrap();
     chmod(f.path(), 0o755);
     assert_eq!(
       render(false, f.path().to_str().unwrap(), "%A"),
@@ -949,7 +955,7 @@ mod tests {
 
   #[test]
   fn sticky_directory() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     chmod(dir.path(), 0o1777);
     assert_eq!(
@@ -960,8 +966,8 @@ mod tests {
 
   #[test]
   fn file_type_words() {
-    let _g = TestGuard::new();
-    let mut f = NamedTempFile::new().unwrap();
+    let     _g = TestGuard::new();
+    let mut f  = NamedTempFile::new().unwrap();
     // A zero-byte regular file is GNU's "regular empty file".
     assert_eq!(
       render(false, f.path().to_str().unwrap(), "%F"),
@@ -982,8 +988,8 @@ mod tests {
 
   #[test]
   fn symlink_lstat_vs_dereference() {
-    let _g = TestGuard::new();
-    let dir = TempDir::new().unwrap();
+    let _g     = TestGuard::new();
+    let dir    = TempDir::new().unwrap();
     let target = dir.path().join("target");
     std::fs::write(&target, "hi").unwrap();
     let link = dir.path().join("link");
@@ -998,8 +1004,8 @@ mod tests {
 
   #[test]
   fn size_and_links() {
-    let _g = TestGuard::new();
-    let mut f = NamedTempFile::new().unwrap();
+    let     _g = TestGuard::new();
+    let mut f  = NamedTempFile::new().unwrap();
     f.write_all(b"hello").unwrap();
     f.flush().unwrap();
     let p = f.path().to_str().unwrap();
@@ -1010,16 +1016,16 @@ mod tests {
   #[test]
   fn literal_and_percent_escape() {
     let _g = TestGuard::new();
-    let f = NamedTempFile::new().unwrap();
-    let p = f.path().to_str().unwrap();
+    let f  = NamedTempFile::new().unwrap();
+    let p  = f.path().to_str().unwrap();
     assert_eq!(render(false, p, "x%%y"), "x%y");
     assert_eq!(render(false, p, "name=%n"), format!("name={p}"));
   }
 
   #[test]
   fn uid_matches_current_user() {
-    let _g = TestGuard::new();
-    let f = NamedTempFile::new().unwrap();
+    let _g  = TestGuard::new();
+    let f   = NamedTempFile::new().unwrap();
     let uid = nix::unistd::Uid::current().to_string();
     assert_eq!(render(false, f.path().to_str().unwrap(), "%u"), uid);
   }

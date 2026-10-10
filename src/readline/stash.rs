@@ -8,8 +8,8 @@ use super::{ShResult, sherr};
 
 #[derive(Debug)]
 pub(crate) struct StashedCmd {
-  pub name: Option<VarStr>,
-  pub buffer: VarStr,
+  pub name      : Option<VarStr>,
+  pub buffer    : VarStr,
   pub cursor_pos: VarStr, // absolute grapheme pos or row:col
 }
 
@@ -163,8 +163,8 @@ impl Stash {
         Ok((
           row.get::<_, i64>(0)?,
           StashedCmd {
-            name: None,
-            buffer: row.get(1)?,
+            name      : None,
+            buffer    : row.get(1)?,
             cursor_pos: row.get(2)?,
           },
         ))
@@ -192,7 +192,7 @@ impl Stash {
       return Err(sherr!(ParseErr, "stashed command name cannot be a number"));
     }
     let cursor = format!("{row}:{col}");
-    let conn = self.lock();
+    let conn   = self.lock();
     if let Some(ref name) = name {
       conn.execute("DELETE FROM stash WHERE name = ?1", [name])?;
     }
@@ -217,8 +217,8 @@ impl Stash {
     let Some(cmd) = stmt
       .query_row([n as i64], |row| {
         Ok(StashedCmd {
-          name: None,
-          buffer: row.get(0)?,
+          name      : None,
+          buffer    : row.get(0)?,
           cursor_pos: row.get(1)?,
         })
       })
@@ -241,8 +241,8 @@ impl Stash {
     let Some(cmd) = stmt
       .query_row([name], |row| {
         Ok(StashedCmd {
-          name: Some(name.into()),
-          buffer: row.get(0)?,
+          name      : Some(name.into()),
+          buffer    : row.get(0)?,
           cursor_pos: row.get(1)?,
         })
       })

@@ -275,7 +275,7 @@ fn declare_p_emits_ansi_c_for_non_utf8_value() {
 fn export_p_emits_ansi_c_for_non_utf8_value() {
   let guard = TestGuard::new();
   test_input("x=$(printf 'a\\377b'); export x; export -p").unwrap();
-  let out = guard.read_output_bytes();
+  let out    = guard.read_output_bytes();
   let needle = b"export x=$'a\\xffb'";
   assert!(
     out.windows(needle.len()).any(|w| w == needle),
@@ -287,7 +287,7 @@ fn export_p_emits_ansi_c_for_non_utf8_value() {
 fn set_dump_emits_ansi_c_for_non_utf8_value() {
   let guard = TestGuard::new();
   test_input("x=$(printf 'a\\377b'); set").unwrap();
-  let out = guard.read_output_bytes();
+  let out    = guard.read_output_bytes();
   let needle = b"x=$'a\\xffb'";
   assert!(
     out.windows(needle.len()).any(|w| w == needle),
@@ -366,8 +366,8 @@ fn unquote_dollar_quote_preserves_non_utf8() {
 #[test]
 fn cd_and_pwd_preserve_non_utf8_dir() {
   use std::os::unix::ffi::OsStrExt;
-  let guard = TestGuard::new();
-  let tmp = tempfile::TempDir::new().unwrap();
+  let guard  = TestGuard::new();
+  let tmp    = tempfile::TempDir::new().unwrap();
   let subdir = tmp.path().join(std::ffi::OsStr::from_bytes(b"ba\xffd"));
   std::fs::create_dir(&subdir).unwrap();
 

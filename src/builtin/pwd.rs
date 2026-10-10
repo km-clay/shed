@@ -20,14 +20,14 @@ impl super::Builtin for Pwd {
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let mut logical = true;
+    let mut logical  = true;
     let mut truncate = false;
 
     for opt in args.options() {
       match opt.key() {
-        "logical" => logical = true,
+        "logical"  => logical = true,
         "physical" => logical = false,
-        "trunc" => truncate = true,
+        "trunc"    => truncate = true,
         _ => return Err(sherr!(ParseErr @ opt.span(), "Invalid option: {opt}").with_code(2)),
       }
     }
@@ -94,7 +94,7 @@ mod tests {
   #[test]
   fn pwd_prints_cwd() {
     let guard = TestGuard::new();
-    let cwd = env::current_dir().unwrap();
+    let cwd   = env::current_dir().unwrap();
 
     test_input("pwd").unwrap();
     let out = guard.read_output();
@@ -104,7 +104,7 @@ mod tests {
   #[test]
   fn pwd_after_cd() {
     let guard = TestGuard::new();
-    let tmp = TempDir::new().unwrap();
+    let tmp   = TempDir::new().unwrap();
 
     test_input(format!("cd {}", tmp.path().display())).unwrap();
     guard.read_output();
@@ -127,9 +127,9 @@ mod tests {
   #[test]
   fn pwd_p_canonicalizes_through_symlink() {
     let guard = TestGuard::new();
-    let tmp = TempDir::new().unwrap();
-    let real = tmp.path().join("real");
-    let link = tmp.path().join("link");
+    let tmp   = TempDir::new().unwrap();
+    let real  = tmp.path().join("real");
+    let link  = tmp.path().join("link");
     std::fs::create_dir(&real).unwrap();
     std::os::unix::fs::symlink(&real, &link).unwrap();
 
@@ -143,9 +143,9 @@ mod tests {
   #[test]
   fn pwd_l_uses_pwd_var_when_valid() {
     let guard = TestGuard::new();
-    let tmp = TempDir::new().unwrap();
-    let real = tmp.path().join("real");
-    let link = tmp.path().join("link");
+    let tmp   = TempDir::new().unwrap();
+    let real  = tmp.path().join("real");
+    let link  = tmp.path().join("link");
     std::fs::create_dir(&real).unwrap();
     std::os::unix::fs::symlink(&real, &link).unwrap();
 
@@ -169,7 +169,7 @@ mod tests {
   #[test]
   fn pwd_l_falls_back_when_pwd_stale() {
     let guard = TestGuard::new();
-    let tmp = TempDir::new().unwrap();
+    let tmp   = TempDir::new().unwrap();
 
     test_input(format!("cd {}", tmp.path().display())).unwrap();
     guard.read_output();

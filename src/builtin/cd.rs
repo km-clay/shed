@@ -25,13 +25,13 @@ impl super::Builtin for Cd {
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut resolve_syms = false;
-    let mut try_cd_path = false;
-    let mut print_dir = false;
+    let mut try_cd_path  = false;
+    let mut print_dir    = false;
 
     for opt in args.options() {
       match opt.key() {
         "physical" => resolve_syms = true,
-        "logical" => resolve_syms = false,
+        "logical"  => resolve_syms = false,
         _ => return Err(sherr!(ParseErr @ opt.span(), "Invalid option: {opt}").with_code(2)),
       }
     }
@@ -77,12 +77,12 @@ impl super::Builtin for Cd {
     let target = if resolve_syms {
       match std::fs::canonicalize(&new_dir) {
         Ok(canon) => canon,
-        Err(_) => new_dir,
+        Err(_)    => new_dir,
       }
     } else {
       match logical_pwd.as_deref() {
         Some(logical) => PathBuf::from(logical),
-        None => new_dir,
+        None          => new_dir,
       }
     };
 
@@ -146,8 +146,8 @@ pub(super) mod tests {
 
   #[test]
   fn cd_simple() {
-    let _g = TestGuard::new();
-    let old_dir = env::current_dir().unwrap();
+    let _g       = TestGuard::new();
+    let old_dir  = env::current_dir().unwrap();
     let temp_dir = TempDir::new().unwrap();
 
     test_input(format!("cd {}", temp_dir.path().display())).unwrap();
@@ -167,13 +167,13 @@ pub(super) mod tests {
     // chdir the *logical* path so the kernel cwd matches $PWD (POSIX cd -L).
     // Previously `..` was resolved physically, desyncing the kernel cwd from
     // $PWD when the symlink's parent differed from its target's parent.
-    let _g = TestGuard::new();
-    let base = TempDir::new().unwrap();
+    let _g       = TestGuard::new();
+    let base     = TempDir::new().unwrap();
     // Canonicalize up front so /tmp being a symlink (e.g. on macOS) can't skew
     // the comparison.
-    let root = canon(base.path());
+    let root     = canon(base.path());
     let parent_a = root.join("A");
-    let target = root.join("B").join("target");
+    let target   = root.join("B").join("target");
     fs::create_dir_all(&parent_a).unwrap();
     fs::create_dir_all(&target).unwrap();
     let link = parent_a.join("link");
@@ -183,7 +183,7 @@ pub(super) mod tests {
     test_input("cd ..").unwrap();
 
     let kernel = env::current_dir().unwrap().display().to_string();
-    let pwd = var!("PWD").to_string();
+    let pwd    = var!("PWD").to_string();
     // The core of the bug: kernel cwd and $PWD must agree.
     assert_eq!(kernel, pwd, "kernel cwd must match $PWD (no desync)");
     // And both must be the logical parent A, not the target's physical parent B.
@@ -196,7 +196,7 @@ pub(super) mod tests {
 
   #[test]
   fn cd_no_args_goes_home() {
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
     Shed::vars_mut(|v| {
       v.set_var(
@@ -218,9 +218,9 @@ pub(super) mod tests {
 
   #[test]
   fn cd_relative_path() {
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
-    let sub = temp_dir.path().join("child");
+    let sub      = temp_dir.path().join("child");
     fs::create_dir(&sub).unwrap();
 
     test_input(format!("cd {}", temp_dir.path().display())).unwrap();
@@ -234,7 +234,7 @@ pub(super) mod tests {
 
   #[test]
   fn cd_status_zero_on_success() {
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
 
     test_input(format!("cd {}", temp_dir.path().display())).unwrap();
@@ -253,8 +253,8 @@ pub(super) mod tests {
 
   #[test]
   fn cd_file_not_directory_fails() {
-    let _g = TestGuard::new();
-    let temp_dir = TempDir::new().unwrap();
+    let _g        = TestGuard::new();
+    let temp_dir  = TempDir::new().unwrap();
     let file_path = temp_dir.path().join("afile.txt");
     fs::write(&file_path, "hello").unwrap();
 
@@ -266,7 +266,7 @@ pub(super) mod tests {
 
   #[test]
   fn cd_multiple_times() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let dir_a = TempDir::new().unwrap();
     let dir_b = TempDir::new().unwrap();
 
@@ -285,9 +285,9 @@ pub(super) mod tests {
 
   #[test]
   fn cd_nested_subdirectories() {
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
-    let deep = temp_dir.path().join("a").join("b").join("c");
+    let deep     = temp_dir.path().join("a").join("b").join("c");
     fs::create_dir_all(&deep).unwrap();
 
     test_input(format!("cd {}", deep.display())).unwrap();
@@ -301,7 +301,7 @@ pub(super) mod tests {
 
   #[test]
   fn cd_fires_post_change_dir_autocmd() {
-    let guard = TestGuard::new();
+    let guard    = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
 
     test_input("autocmd post-change-dir 'echo cd-hook-fired'").unwrap();
@@ -314,7 +314,7 @@ pub(super) mod tests {
 
   #[test]
   fn cd_fires_pre_change_dir_autocmd() {
-    let guard = TestGuard::new();
+    let guard    = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
 
     test_input("autocmd pre-change-dir 'echo pre-cd'").unwrap();
@@ -329,7 +329,7 @@ pub(super) mod tests {
 
   #[test]
   fn cd_sets_oldpwd() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let dir_a = TempDir::new().unwrap();
     let dir_b = TempDir::new().unwrap();
 
@@ -346,7 +346,7 @@ pub(super) mod tests {
 
   #[test]
   fn cd_sets_pwd_var() {
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
 
     test_input(format!("cd {}", temp_dir.path().display())).unwrap();
@@ -360,7 +360,7 @@ pub(super) mod tests {
 
   #[test]
   fn cd_hyphen_goes_to_oldpwd() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let dir_a = TempDir::new().unwrap();
     let dir_b = TempDir::new().unwrap();
 
@@ -377,7 +377,7 @@ pub(super) mod tests {
 
   #[test]
   fn cd_hyphen_toggles() {
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let dir_a = TempDir::new().unwrap();
     let dir_b = TempDir::new().unwrap();
 
@@ -397,8 +397,8 @@ pub(super) mod tests {
 
   #[test]
   fn cd_uses_cdpath() {
-    let _g = TestGuard::new();
-    let base = TempDir::new().unwrap();
+    let _g     = TestGuard::new();
+    let base   = TempDir::new().unwrap();
     let target = base.path().join("mydir");
     fs::create_dir(&target).unwrap();
 
@@ -421,8 +421,8 @@ pub(super) mod tests {
 
   #[test]
   fn cd_cdpath_skips_nonexistent() {
-    let _g = TestGuard::new();
-    let base = TempDir::new().unwrap();
+    let _g     = TestGuard::new();
+    let base   = TempDir::new().unwrap();
     let target = base.path().join("realdir");
     fs::create_dir(&target).unwrap();
 
@@ -445,9 +445,9 @@ pub(super) mod tests {
 
   #[test]
   fn cd_cdpath_not_used_for_absolute() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let target = TempDir::new().unwrap();
-    let decoy = TempDir::new().unwrap();
+    let decoy  = TempDir::new().unwrap();
 
     Shed::vars_mut(|v| {
       v.set_var(
@@ -468,9 +468,9 @@ pub(super) mod tests {
 
   #[test]
   fn cd_cdpath_not_used_for_dot() {
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
-    let sub = temp_dir.path().join("child");
+    let sub      = temp_dir.path().join("child");
     fs::create_dir(&sub).unwrap();
 
     test_input(format!("cd {}", temp_dir.path().display())).unwrap();
@@ -492,9 +492,9 @@ pub(super) mod tests {
 
   #[test]
   fn cd_empty_cdpath_does_not_print() {
-    let g = TestGuard::new();
+    let g        = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
-    let sub = temp_dir.path().join("child");
+    let sub      = temp_dir.path().join("child");
     fs::create_dir(&sub).unwrap();
 
     test_input(format!("cd {}", temp_dir.path().display())).unwrap();
@@ -515,7 +515,7 @@ pub(super) mod tests {
 
   #[test]
   fn cd_p_resolves_symlinks() {
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
     let real_dir = temp_dir.path().join("real");
     let link_dir = temp_dir.path().join("link");
@@ -524,7 +524,7 @@ pub(super) mod tests {
 
     test_input(format!("cd -P {}", link_dir.display())).unwrap();
 
-    let cwd = env::current_dir().unwrap();
+    let cwd            = env::current_dir().unwrap();
     let canonical_real = fs::canonicalize(&real_dir).unwrap();
     assert_eq!(
       cwd.display().to_string(),
@@ -539,7 +539,7 @@ pub(super) mod tests {
     // The bug from #73: by default `cd` should NOT resolve symlinks when
     // setting $PWD. The kernel cwd is canonical (no avoiding that), but
     // $PWD should reflect what the user typed.
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
     let real_dir = temp_dir.path().join("real");
     let link_dir = temp_dir.path().join("link");
@@ -556,10 +556,10 @@ pub(super) mod tests {
   fn cd_l_dotdot_pops_lexically() {
     // After `cd /a/symlink-to-b`, `cd ..` with -L should land in /a (the
     // parent of the symlink path), not in the parent of the real dir.
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
-    let real = temp_dir.path().join("real");
-    let link = temp_dir.path().join("link");
+    let real     = temp_dir.path().join("real");
+    let link     = temp_dir.path().join("link");
     fs::create_dir(&real).unwrap();
     std::os::unix::fs::symlink(&real, &link).unwrap();
 
@@ -572,9 +572,9 @@ pub(super) mod tests {
 
   #[test]
   fn cd_l_normalizes_dotdot_in_input() {
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
-    let sub = temp_dir.path().join("sub");
+    let sub      = temp_dir.path().join("sub");
     fs::create_dir(&sub).unwrap();
 
     let weird = format!("{}/sub/../sub", temp_dir.path().display());
@@ -587,10 +587,10 @@ pub(super) mod tests {
   #[test]
   fn cd_p_pwd_is_canonical() {
     // Sanity: with -P, $PWD matches the kernel cwd (symlinks resolved).
-    let _g = TestGuard::new();
+    let _g       = TestGuard::new();
     let temp_dir = TempDir::new().unwrap();
-    let real = temp_dir.path().join("real");
-    let link = temp_dir.path().join("link");
+    let real     = temp_dir.path().join("real");
+    let link     = temp_dir.path().join("link");
     fs::create_dir(&real).unwrap();
     std::os::unix::fs::symlink(&real, &link).unwrap();
 

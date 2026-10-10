@@ -61,7 +61,7 @@ impl super::Builtin for Forget {
       return util::with_status(0);
     }
 
-    let mut spec = ForgetSpec::new();
+    let mut spec     = ForgetSpec::new();
     let mut excepted = false;
 
     for opt in args.options() {

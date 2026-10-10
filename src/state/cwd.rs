@@ -55,7 +55,7 @@ pub(crate) fn change_dir_with_pwd<P: AsRef<Path>>(
   is_new_dir: bool,
   fire_autocmds: bool,
 ) -> ShResult<()> {
-  let dir = dir.as_ref();
+  let dir     = dir.as_ref();
   let dir_raw = paths::path_to_varstr(dir);
 
   defer! {

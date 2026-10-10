@@ -26,12 +26,12 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub(crate) struct HistEntry {
-  pub runtime: Duration,
+  pub runtime  : Duration,
   pub timestamp: SystemTime,
-  pub command: String,
-  pub cwd: String,
-  pub status: i32,
-  pub token: Uuid,
+  pub command  : String,
+  pub cwd      : String,
+  pub status   : i32,
+  pub token    : Uuid,
 }
 
 type HistTables = HashMap<CacheKey, Vec<HistEntry>>;
@@ -84,12 +84,12 @@ fn timestamp_secs(ts: SystemTime) -> i64 {
 impl Default for HistEntry {
   fn default() -> Self {
     Self {
-      runtime: Duration::default(),
+      runtime  : Duration::default(),
       timestamp: SystemTime::now(),
-      command: String::new(),
-      cwd: String::new(),
-      status: 0,
-      token: Uuid::new_v4(),
+      command  : String::new(),
+      cwd      : String::new(),
+      status   : 0,
+      token    : Uuid::new_v4(),
     }
   }
 }
@@ -129,7 +129,7 @@ fn query_since(since_ts: i64, conn: &Connection, table: &Table, branch: &Branch)
   };
   match stmt.query_map(rusqlite::params![**branch, since_ts], History::row_to_entry) {
     Ok(iter) => iter.filter_map(Result::ok).collect(),
-    Err(_) => vec![],
+    Err(_)   => vec![],
   }
 }
 
@@ -179,12 +179,12 @@ fn query_masked(
 
   let rows = match prefix {
     Some(p) => stmt.query_map(rusqlite::params![**branch, p], History::row_to_entry),
-    None => stmt.query_map(rusqlite::params![**branch], History::row_to_entry),
+    None    => stmt.query_map(rusqlite::params![**branch], History::row_to_entry),
   };
 
   match rows {
     Ok(iter) => iter.filter_map(Result::ok).collect(),
-    Err(_) => vec![],
+    Err(_)   => vec![],
   }
 }
 
@@ -273,33 +273,33 @@ impl From<&str> for Branch {
 type Parent = Option<String>;
 type Joint = Option<String>;
 pub(crate) struct ReflogEntry {
-  pub table: Table,
-  pub branch: Branch,
-  pub old_head: Option<String>,
-  pub new_head: Option<String>,
-  pub op: String,
+  pub table    : Table,
+  pub branch   : Branch,
+  pub old_head : Option<String>,
+  pub new_head : Option<String>,
+  pub op       : String,
   pub timestamp: SystemTime,
 }
 pub(crate) struct HistDump {
-  pub entries: Vec<(HistEntry, Parent, Joint)>,
+  pub entries : Vec<(HistEntry, Parent, Joint)>,
   pub branches: Vec<(String, Parent)>,
-  pub reflog: Vec<ReflogEntry>,
+  pub reflog  : Vec<ReflogEntry>,
 }
 
 #[derive(Debug)]
 pub(crate) struct History {
-  pub pending: Option<LineBuf>,
+  pub pending     : Option<LineBuf>,
   pub fuzzy_finder: Option<FuzzySelector>,
-  pub cursor: usize,
-  pub virt_cursor: usize,
+  pub cursor      : usize,
+  pub virt_cursor : usize,
 
-  conn: Arc<Mutex<Connection>>,
-  table: Table,
-  branch: Branch,
+  conn       : Arc<Mutex<Connection>>,
+  table      : Table,
+  branch     : Branch,
   search_mask: Vec<HistEntry>,
-  mask_stale: bool,
-  no_matches: bool,
-  max_size: Option<u32>,
+  mask_stale : bool,
+  no_matches : bool,
+  max_size   : Option<u32>,
 }
 
 impl History {
@@ -321,9 +321,9 @@ impl History {
   /// (e.g. `hist` in a pipeline) where the inherited connection is fenced off
   /// and migrating or writing isn't possible.
   pub(crate) fn attach(conn: Arc<Mutex<Connection>>, table: &str, branch: &str) -> Self {
-    let max_hist = shopt!(history.max_entries);
-    let max_size = (max_hist >= 0).then_some(max_hist as u32);
-    let table: Table = table.into();
+    let max_hist       = shopt!(history.max_entries);
+    let max_size       = (max_hist >= 0).then_some(max_hist as u32);
+    let table : Table  = table.into();
     let branch: Branch = branch.into();
 
     Self {
@@ -342,8 +342,8 @@ impl History {
   }
 
   pub(crate) fn new(conn: Arc<Mutex<Connection>>, table: &str, branch: &str) -> ShResult<Self> {
-    let max_hist = shopt!(history.max_entries);
-    let table: Table = table.into();
+    let max_hist       = shopt!(history.max_entries);
+    let table : Table  = table.into();
     let branch: Branch = branch.into();
 
     Self::init_db(
@@ -385,7 +385,7 @@ impl History {
     // concurrently and mutate the caches while we're loading; when the load
     // completes we merge by treating any commands already in the cache
     // (added by push during load) as the authoritative newer entry.
-    let table = hist.table.clone();
+    let table  = hist.table.clone();
     let branch = hist.branch.clone();
     std::thread::spawn(move || {
       do_something_that_opens_fds_that_we_cant_access_hack(MIN_INTERNAL_FD, || {
@@ -438,23 +438,23 @@ impl History {
   }
 
   pub(crate) fn empty(table: &str, branch: &str) -> Self {
-    let conn = Connection::open_in_memory().expect("Failed to open in-memory database");
-    let table: Table = table.into();
+    let conn           = Connection::open_in_memory().expect("Failed to open in-memory database");
+    let table : Table  = table.into();
     let branch: Branch = branch.into();
     Self::init_db(&conn, &table).expect("Failed to initialize in-memory database");
 
     Self {
-      conn: Arc::new(Mutex::new(conn)),
-      table: Table(table.to_string()),
-      branch: Branch(branch.to_string()),
-      pending: None,
-      search_mask: vec![],
-      mask_stale: true,
+      conn        : Arc::new(Mutex::new(conn)),
+      table       : Table(table.to_string()),
+      branch      : Branch(branch.to_string()),
+      pending     : None,
+      search_mask : vec![],
+      mask_stale  : true,
       fuzzy_finder: None,
-      no_matches: false,
-      cursor: 0,
-      virt_cursor: 0,
-      max_size: None,
+      no_matches  : false,
+      cursor      : 0,
+      virt_cursor : 0,
+      max_size    : None,
     }
   }
 
@@ -597,7 +597,7 @@ impl History {
     Ok(())
   }
   pub(crate) fn dump_all(&self) -> ShResult<HistDump> {
-    let conn = self.lock();
+    let conn  = self.lock();
     let table = &self.table;
 
     // get entries
@@ -610,9 +610,9 @@ impl History {
     ))?;
     let entries = ent_stmt
       .query_map([], |r| {
-        let ent = Self::row_to_entry(r)?;
+        let ent    = Self::row_to_entry(r)?;
         let parent = r.get::<_, Option<String>>(6)?;
-        let joint = r.get::<_, Option<String>>(7)?;
+        let joint  = r.get::<_, Option<String>>(7)?;
         Ok((ent, parent, joint))
       })?
       .collect::<Result<Vec<_>, _>>()?;
@@ -642,10 +642,10 @@ impl History {
     )?;
     let reflog = reflog_stmt
       .query_map(rusqlite::params![**table], |r| {
-        let branch = r.get::<_, String>(0)?;
-        let old_head = r.get::<_, Option<String>>(1)?;
-        let new_head = r.get::<_, Option<String>>(2)?;
-        let op = r.get::<_, String>(3)?;
+        let branch    = r.get::<_, String>(0)?;
+        let old_head  = r.get::<_, Option<String>>(1)?;
+        let new_head  = r.get::<_, Option<String>>(2)?;
+        let op        = r.get::<_, String>(3)?;
         let timestamp = r.get::<_, i64>(4)?;
         Ok(ReflogEntry {
           table: table.clone(),
@@ -926,7 +926,7 @@ impl History {
       // "fully merged" = the branch's tip is reachable from the current branch.
       let merged = match Self::head_conn(&conn, &self.table, &self.branch)? {
         Some(cur) => Self::is_reachable(&conn, &self.table, &cur.to_string(), &target_head)?,
-        None => false, // an unborn current branch can't have merged anything
+        None      => false, // an unborn current branch can't have merged anything
       };
       if !merged {
         return Err(sherr!(
@@ -1000,8 +1000,8 @@ impl History {
       }
     }
 
-    let token = Uuid::new_v4().to_string();
-    let ts = timestamp_secs(SystemTime::now());
+    let token  = Uuid::new_v4().to_string();
+    let ts     = timestamp_secs(SystemTime::now());
     let new_id = Self::last_id_conn(&conn, &self.table) + 1;
     conn.execute(
       &format!(
@@ -1086,7 +1086,7 @@ impl History {
 
   fn trim_to_max(&self) {
     let Some(max) = self.max_size else { return };
-    let count = self.unique_command_count();
+    let count  = self.unique_command_count();
     let excess = count - i64::from(max);
     if excess <= 0 {
       return;
@@ -1149,14 +1149,14 @@ impl History {
     where_clause: &str,
     params: &[&dyn rusqlite::ToSql],
   ) -> ShResult<Vec<(i64, HistEntry)>> {
-    let entries = self.query(where_clause, params)?;
-    let table = &self.table;
+    let entries      = self.query(where_clause, params)?;
+    let table        = &self.table;
 
     let table_backup = format!("{table}_backup");
-    let table_tmp = format!("{table}_tmp");
+    let table_tmp    = format!("{table}_tmp");
 
-    let conn = self.lock();
-    let tx = conn.unchecked_transaction()?;
+    let conn         = self.lock();
+    let tx           = conn.unchecked_transaction()?;
 
     // gotta un-dangle any branch nodes that depended on the deleted stuff
     // and rebase them to any surviving nodes
@@ -1319,11 +1319,11 @@ impl History {
 
   /// Restores the history table from the rolling backup created by the last delete operation.
   pub(crate) fn restore_backup(&self) -> ShResult<i64> {
-    let table = &self.table;
+    let table        = &self.table;
     let table_backup = format!("{table}_backup");
-    let table_tmp = format!("{table}_tmp");
+    let table_tmp    = format!("{table}_tmp");
 
-    let conn = self.lock();
+    let conn         = self.lock();
     let has_backup: bool = conn.query_row(
       "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name=?1",
       [&table_backup],
@@ -1412,11 +1412,11 @@ impl History {
   }
 
   pub(crate) fn sort_by_timestamp(&self) -> ShResult<()> {
-    let table = &self.table;
+    let table     = &self.table;
     let table_tmp = format!("{table}_tmp");
 
-    let conn = self.lock();
-    let tx = conn.unchecked_transaction()?;
+    let conn      = self.lock();
+    let tx        = conn.unchecked_transaction()?;
     tx.execute_batch(&format!(
       r"
 			CREATE TABLE {table_tmp} (
@@ -1476,9 +1476,9 @@ impl History {
     let sql = format!(
       "SELECT command, timestamp, runtime, cwd, status, token, id FROM {table} {where_clause}"
     );
-    let conn = self.lock();
+    let     conn = self.lock();
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params, |row| Ok((row.get(6)?, Self::row_to_entry(row)?)))?;
+    let     rows = stmt.query_map(params, |row| Ok((row.get(6)?, Self::row_to_entry(row)?)))?;
 
     Ok(rows.filter_map(Result::ok).collect())
   }
@@ -1493,7 +1493,7 @@ impl History {
     tail: &str,
     params: &[&dyn rusqlite::ToSql],
   ) -> ShResult<Vec<(i64, HistEntry)>> {
-    let table = &self.table;
+    let table      = &self.table;
     let branch_idx = params.len() + 1;
     let where_ = if conditions.trim().is_empty() {
       "WHERE token IN (SELECT token FROM reachable) AND joint IS NULL".to_string()
@@ -1520,7 +1520,7 @@ impl History {
     let mut all: Vec<&dyn rusqlite::ToSql> = params.to_vec();
     all.push(&branch);
 
-    let conn = self.lock();
+    let     conn = self.lock();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(all.as_slice(), |row| {
       Ok((row.get(6)?, Self::row_to_entry(row)?))
@@ -1553,7 +1553,7 @@ impl History {
   #[cfg_attr(not(test), allow(dead_code))]
   pub(crate) fn push_entry(&self, entry: HistEntry) -> ShResult<Option<Uuid>> {
     let cached = entry.clone();
-    let res = Self::push_entry_conn(&self.lock(), &self.table, &self.branch, entry);
+    let res    = Self::push_entry_conn(&self.lock(), &self.table, &self.branch, entry);
     if matches!(res, Ok(Some(_))) {
       self.cache_entry(cached);
     }
@@ -1601,7 +1601,7 @@ impl History {
     if Self::token_exists(conn, table, token) {
       return Ok(None);
     }
-    let parent = Self::head_entry_conn(conn, table, branch)?;
+    let parent       = Self::head_entry_conn(conn, table, branch)?;
     let parent_token = parent.as_ref().map(|e| e.token.to_string());
 
     if shopt!(history.ignore_dupes) && parent.as_ref().map(|e| &e.command) == Some(&command) {
@@ -1609,7 +1609,7 @@ impl History {
     }
 
     let timestamp = timestamp_secs(timestamp);
-    let new_id = Self::last_id_conn(conn, table) + 1;
+    let new_id    = Self::last_id_conn(conn, table) + 1;
     conn.execute(
       &format!(
         "
@@ -1764,12 +1764,12 @@ impl History {
 
   pub(crate) fn row_to_entry(row: &rusqlite::Row) -> Result<HistEntry, rusqlite::Error> {
     Ok(HistEntry {
-      command: row.get(0)?,
+      command  : row.get(0)?,
       timestamp: UNIX_EPOCH + Duration::from_secs(row.get::<_, i64>(1)? as u64),
-      runtime: Duration::from_micros(row.get::<_, i64>(2)? as u64),
-      cwd: row.get(3).unwrap_or_default(),
-      status: row.get(4).unwrap_or(0),
-      token: Uuid::from_str(row.get::<_, String>(5)?.as_str()).unwrap_or_default(),
+      runtime  : Duration::from_micros(row.get::<_, i64>(2)? as u64),
+      cwd      : row.get(3).unwrap_or_default(),
+      status   : row.get(4).unwrap_or(0),
+      token    : Uuid::from_str(row.get::<_, String>(5)?.as_str()).unwrap_or_default(),
     })
   }
 
@@ -1788,7 +1788,7 @@ impl History {
   }
 
   pub(crate) fn update_pending_cmd(&mut self, buf: (&str, usize)) {
-    let cmd = buf.0.to_string();
+    let cmd        = buf.0.to_string();
     let cursor_pos = buf.1;
 
     if !self.at_pending() {
@@ -1846,7 +1846,7 @@ impl History {
   /// this session hasn't cached yet.
   #[cfg(test)]
   pub(crate) fn insert_raw_for_test(&self, command: &str, timestamp: i64) {
-    let conn = self.lock();
+    let conn   = self.lock();
     let new_id = Self::last_id_conn(&conn, &self.table) + 1;
     self.insert_raw_conn(&conn, command, new_id, timestamp);
   }
@@ -1911,7 +1911,7 @@ impl History {
       return None;
     }
     let entries = HIST_ENTRIES.read().ok()?;
-    let table = entries.get(&self.cache_key())?;
+    let table   = entries.get(&self.cache_key())?;
     table
       .iter()
       .rev()
@@ -1921,8 +1921,8 @@ impl History {
 
   pub(crate) fn refresh_hist_entries(&self) -> usize {
     let cache_key = self.cache_key();
-    let entries = query_masked(None, &self.lock(), &self.table, &self.branch);
-    let total = entries.len();
+    let entries   = query_masked(None, &self.lock(), &self.table, &self.branch);
+    let total     = entries.len();
     let max_ts = entries
       .iter()
       .filter_map(|e| e.timestamp.duration_since(std::time::UNIX_EPOCH).ok())
@@ -1973,8 +1973,8 @@ impl History {
   pub(crate) fn virtual_scroll_direction(&self) -> Option<Direction> {
     match self.virt_cursor.cmp(&self.cursor) {
       Ordering::Greater => Some(Direction::Forward),
-      Ordering::Equal => None,
-      Ordering::Less => Some(Direction::Backward),
+      Ordering::Equal   => None,
+      Ordering::Less    => Some(Direction::Backward),
     }
   }
 

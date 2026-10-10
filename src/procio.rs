@@ -166,7 +166,7 @@ impl ScratchGuard {
     match scratch {
       Some(mut slot) => match slot.take() {
         ScratchSlot::Available(buf) => Self(Some(Scratch::Global(buf))),
-        ScratchSlot::Taken => Self(Some(Scratch::new_local())),
+        ScratchSlot::Taken          => Self(Some(Scratch::new_local())),
       },
       None => Self(Some(Scratch::new_global())),
     }
@@ -566,7 +566,7 @@ impl RedirBldr {
     };
 
     match target {
-      RedirTarget::Var(name) if class.is_var_op() => Ok(RedirSpec::var(fd, name, class)),
+      RedirTarget::Var(name) if class.is_var_op()   => Ok(RedirSpec::var(fd, name, class)),
       RedirTarget::Path(path) if class.is_file_op() => Ok(RedirSpec::file(fd, path, class)),
       RedirTarget::Close => Ok(RedirSpec::close(fd)),
       RedirTarget::Fd(src_fd) if class.is_dup_op() => Ok(RedirSpec::dup(src_fd, fd, class)),
@@ -608,12 +608,12 @@ impl RedirBldr {
   /// Attempt parsing a redirection operator from a byte slice.
   /// Returns a `RedirBldr` with the parsed components, or an error if the input is invalid.
   pub(crate) fn parse(bytes: &[u8]) -> ShResult<Self> {
-    let mut cur = SliceCursor::new(bytes);
-    let mut src_fd = util::scratch_buf();
+    let mut cur     = SliceCursor::new(bytes);
+    let mut src_fd  = util::scratch_buf();
     let mut src_var = None;
-    let mut tgt_fd = util::scratch_buf();
+    let mut tgt_fd  = util::scratch_buf();
     let mut tgt_var = None;
-    let mut redir = RedirBldr::new();
+    let mut redir   = RedirBldr::new();
 
     // throaway macro for reading variable names in '>@var' redirs
     macro_rules! read_name {
@@ -621,9 +621,9 @@ impl RedirBldr {
         let name = VarStr::from(&bytes[cur.pos()..]);
         if name.is_empty() {
           return Err(sherr!(
-            ParseErr,
-            "expected a variable name after '@' in redirection"
-          ));
+                                            ParseErr,
+                                            "expected a variable name after '@' in redirection"
+                                          ));
         }
         redir = redir.with_target(RedirTarget::Var(name)).with_class($ty);
       };
@@ -759,7 +759,7 @@ impl TryFrom<Tk> for RedirBldr {
     } else {
       match Self::parse(&tk.slice()) {
         Ok(bldr) => Ok(bldr.with_span(span)),
-        Err(e) => Err(e.promote(span)),
+        Err(e)   => Err(e.promote(span)),
       }
     }
   }
@@ -842,26 +842,26 @@ pub(super) enum RedirTarget {
 #[derive(Debug, Clone)]
 pub(super) enum RedirSpec {
   File {
-    fd: FdSlot,
+    fd  : FdSlot,
     path: Tk,
     mode: RedirType,
   },
   Var {
-    fd: FdSlot,
+    fd  : FdSlot,
     name: VarStr,
     mode: RedirType,
   },
   Dup {
     from: FdSlot,
-    to: FdSlot,
+    to  : FdSlot,
     mode: RedirType,
   },
   Close {
     fd: FdSlot,
   },
   Buffer {
-    fd: FdSlot,
-    buf: VarStr,
+    fd   : FdSlot,
+    buf  : VarStr,
     flags: TkFlags,
   },
 }
@@ -904,7 +904,7 @@ impl RedirSpec {
         *mode
       }
 
-      RedirSpec::Close { .. } => RedirType::Null,
+      RedirSpec::Close { .. }  => RedirType::Null,
       RedirSpec::Buffer { .. } => RedirType::HereDoc,
     }
   }
@@ -918,7 +918,7 @@ impl RedirSpec {
     let sink: Arc<dyn Sink> = match self {
       RedirSpec::Var { name, mode, .. } => match mode {
         RedirType::ReadVar => {
-          let vn = expand_var_target(name)?;
+          let vn  = expand_var_target(name)?;
           let var = Shed::vars(|v| v.resolve_var(&vn).unwrap_or_default());
 
           Arc::new(BufSink::from_bytes(var.as_bytes()))
@@ -1018,7 +1018,7 @@ impl RedirSet {
   ///
   /// Returns (`in_redirs`, `out_redirs`)
   pub(crate) fn split_by_channel(self) -> (RedirSet, RedirSet) {
-    let mut in_redirs = vec![];
+    let mut in_redirs  = vec![];
     let mut out_redirs = vec![];
     for spec in self.0 {
       if spec.mode().is_input() {
@@ -1056,16 +1056,16 @@ impl From<RedirSpec> for RedirSet {
 
 #[derive(Clone)]
 struct PipeFrame {
-  owner: Pid,
-  pipes: Vec<Weak<dyn Sink>>,
+  owner   : Pid,
+  pipes   : Vec<Weak<dyn Sink>>,
   deferred: Vec<Arc<dyn Sink>>,
 }
 
 impl PipeFrame {
   fn new() -> Self {
     Self {
-      owner: Pid::this(),
-      pipes: Vec::new(),
+      owner   : Pid::this(),
+      pipes   : Vec::new(),
       deferred: Vec::new(),
     }
   }
@@ -1270,14 +1270,14 @@ pub(crate) fn drain_sink(sink: &dyn Sink) -> io::Result<Vec<u8>> {
 
 pub(crate) struct BufSink {
   cursor: Mutex<Cursor<Vec<u8>>>,
-  os_fd: OnceLock<OwnedFd>,
+  os_fd : OnceLock<OwnedFd>,
 }
 
 impl BufSink {
   pub(crate) fn from_bytes(bytes: &[u8]) -> Self {
     Self {
       cursor: Mutex::new(Cursor::new(bytes.to_vec())),
-      os_fd: OnceLock::new(),
+      os_fd : OnceLock::new(),
     }
   }
 
@@ -1288,7 +1288,7 @@ impl BufSink {
 
     let fd = {
       let cur = self.cursor.lock().unwrap();
-      let fd = scratch_fd()?;
+      let fd  = scratch_fd()?;
       write_all_to_fd(fd.as_fd(), cur.get_ref());
       unistd::lseek(fd.as_fd(), cur.position() as i64, unistd::Whence::SeekSet)?;
       fd
@@ -1306,25 +1306,24 @@ impl BufSink {
   }
 }
 
-#[rustfmt::skip]
 #[expect(clippy::single_match_else)]
 impl Sink for BufSink {
   fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
     match self.os_fd.get() {
       Some(fd) => unistd::read(fd.as_fd(), buf).map_err(io::Error::from),
-      None => self.cursor.lock().unwrap().read(buf),
+      None     => self.cursor.lock().unwrap().read(buf),
     }
   }
   fn write(&self, buf: &[u8]) -> io::Result<usize> {
     match self.os_fd.get() {
       Some(fd) => unistd::write(fd.as_fd(), buf).map_err(io::Error::from),
-      None => self.cursor.lock().unwrap().write(buf),
+      None     => self.cursor.lock().unwrap().write(buf),
     }
   }
   fn flush(&self) -> io::Result<()> {
     match self.os_fd.get() {
       Some(fd) => unistd::fsync(fd.as_fd()).map_err(io::Error::from),
-      None => Ok(()),
+      None     => Ok(()),
     }
   }
   fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
@@ -1372,8 +1371,8 @@ pub(crate) enum OsPipe {
 impl OsPipe {
   pub(crate) fn pipes() -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
     let (r, w) = pipes_high()?;
-    let w = Arc::new(Self::Write(OsSink::new(w)));
-    let r = Arc::new(Self::Read(OsSink::new(r)));
+    let w      = Arc::new(Self::Write(OsSink::new(w)));
+    let r      = Arc::new(Self::Read(OsSink::new(r)));
     Ok((r, w))
   }
   pub(crate) fn pipes_with(
@@ -1383,8 +1382,8 @@ impl OsPipe {
     packet: bool,
   ) -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
     let (r, w) = pipes_high_with(cloexec, nonblock, size, packet)?;
-    let w = Arc::new(Self::Write(OsSink::new(w)));
-    let r = Arc::new(Self::Read(OsSink::new(r)));
+    let w      = Arc::new(Self::Write(OsSink::new(w)));
+    let r      = Arc::new(Self::Read(OsSink::new(r)));
     Ok((r, w))
   }
 }
@@ -1416,7 +1415,7 @@ impl Sink for OsPipe {
 
   fn kind(&self) -> SinkKind {
     match self {
-      Self::Read(_) => SinkKind::ReadPipe,
+      Self::Read(_)  => SinkKind::ReadPipe,
       Self::Write(_) => SinkKind::WritePipe,
     }
   }
@@ -1431,21 +1430,21 @@ impl Sink for OsPipe {
 }
 
 pub(crate) struct PipeBuf {
-  queue: VecDeque<u8>,
+  queue      : VecDeque<u8>,
   writer_open: bool,
   reader_open: bool,
-  limit: usize,
-  truncated: bool,
+  limit      : usize,
+  truncated  : bool,
 }
 
 impl PipeBuf {
   pub(crate) fn new() -> Self {
     Self {
-      queue: VecDeque::new(),
+      queue      : VecDeque::new(),
       writer_open: true,
       reader_open: true,
-      limit: *shopt!(core.max_read_limit) as usize,
-      truncated: false,
+      limit      : *shopt!(core.max_read_limit) as usize,
+      truncated  : false,
     }
   }
 
@@ -1475,7 +1474,7 @@ impl Sink for PipeSink {
     match self {
       Self::Read(buf) => {
         let mut buf = buf.lock().unwrap();
-        let n = out.len().min(buf.queue.len());
+        let     n   = out.len().min(buf.queue.len());
         for (slot, byte) in out.iter_mut().zip(buf.queue.drain(..n)) {
           *slot = byte;
         }
@@ -1512,7 +1511,7 @@ impl Sink for PipeSink {
   }
   fn poll(&self, _timeout: Option<PollTimeout>) -> io::Result<usize> {
     match self {
-      Self::Read(b) => Ok(b.lock().unwrap().queue.len()),
+      Self::Read(b)  => Ok(b.lock().unwrap().queue.len()),
       Self::Write(_) => Err(ebadf()),
     }
   }
@@ -1529,7 +1528,7 @@ impl Sink for PipeSink {
   }
   fn kind(&self) -> SinkKind {
     match self {
-      Self::Read(_) => SinkKind::ReadPipe,
+      Self::Read(_)  => SinkKind::ReadPipe,
       Self::Write(_) => SinkKind::WritePipe,
     }
   }
@@ -1546,14 +1545,14 @@ impl Drop for PipeSink {
 
 /// A thread-safe version of [`PipeBuf`]
 pub(crate) struct ThreadPipe {
-  buf: Mutex<PipeBuf>,
+  buf  : Mutex<PipeBuf>,
   notif: Condvar,
 }
 
 impl ThreadPipe {
   pub(crate) fn new() -> Self {
     Self {
-      buf: Mutex::new(PipeBuf::new()),
+      buf  : Mutex::new(PipeBuf::new()),
       notif: Condvar::new(),
     }
   }
@@ -1656,7 +1655,7 @@ impl Sink for ThreadSink {
   }
   fn kind(&self) -> SinkKind {
     match self {
-      ThreadSink::Read(_) => SinkKind::ReadPipe,
+      ThreadSink::Read(_)  => SinkKind::ReadPipe,
       ThreadSink::Write(_) => SinkKind::WritePipe,
     }
   }
@@ -1711,7 +1710,7 @@ impl Drop for ThreadSink {
 }
 
 pub(crate) struct OsSink {
-  fd: OwnedFd,
+  fd    : OwnedFd,
   is_tty: bool,
 }
 impl OsSink {
@@ -1736,7 +1735,7 @@ impl Sink for OsSink {
     let mut fds = [PollFd::new(self.fd.as_fd(), PollFlags::POLLIN)];
 
     match nix::poll::poll(&mut fds, timeout) {
-      Ok(n) => Ok(n as usize),
+      Ok(n)  => Ok(n as usize),
       Err(e) => Err(io::Error::from_raw_os_error(e as i32)),
     }
   }
@@ -1760,8 +1759,8 @@ impl Sink for OsSink {
   fn seek(&self, pos: io::SeekFrom) -> io::Result<u64> {
     let (whence, off) = match pos {
       io::SeekFrom::Current(o) => (unistd::Whence::SeekCur, o),
-      io::SeekFrom::Start(o) => (unistd::Whence::SeekSet, o as i64),
-      io::SeekFrom::End(o) => (unistd::Whence::SeekEnd, o),
+      io::SeekFrom::Start(o)   => (unistd::Whence::SeekSet, o as i64),
+      io::SeekFrom::End(o)     => (unistd::Whence::SeekEnd, o),
     };
 
     unistd::lseek(self.fd.as_fd(), off, whence)
@@ -1800,7 +1799,7 @@ impl Sink for NullSink {
     match self.devnull_fd.get() {
       None => {
         let devnull = fcntl::open("/dev/null", OFlag::O_RDWR | OFlag::O_CLOEXEC, Mode::empty())?;
-        let _ = self.devnull_fd.set(devnull);
+        let _       = self.devnull_fd.set(devnull);
         self.as_os_fd()
       }
       Some(fd) => Ok(fd.as_fd()),
@@ -1851,8 +1850,8 @@ impl Sink for CloseSink {
 pub(crate) struct SinkControl {
   suspended: AtomicBool,
   cancelled: AtomicBool,
-  lock: Mutex<()>,
-  cv: Condvar,
+  lock     : Mutex<()>,
+  cv       : Condvar,
 }
 
 impl SinkControl {
@@ -1860,8 +1859,8 @@ impl SinkControl {
     Self {
       suspended: AtomicBool::new(false),
       cancelled: AtomicBool::new(false),
-      lock: Mutex::new(()),
-      cv: Condvar::new(),
+      lock     : Mutex::new(()),
+      cv       : Condvar::new(),
     }
   }
   fn suspended(&self) -> bool {
@@ -1907,7 +1906,7 @@ impl SinkControl {
 ///
 /// Used for job control of threaded builtins
 pub(crate) struct GatedSink {
-  sink: Arc<dyn Sink>,
+  sink   : Arc<dyn Sink>,
   control: Arc<SinkControl>,
 }
 
@@ -2015,9 +2014,9 @@ impl std::fmt::Write for SinkIo {
 }
 
 pub(crate) struct SinkLines {
-  sink: Arc<dyn Sink>,
+  sink    : Arc<dyn Sink>,
   overflow: Vec<u8>,
-  eof: bool,
+  eof     : bool,
 }
 impl SinkLines {
   pub(crate) fn new(sink: Arc<dyn Sink>) -> Self {
@@ -2058,13 +2057,13 @@ impl SinkLines {
 
 struct VarSinkPipes {
   write: Arc<dyn Sink>,
-  read: Arc<dyn Sink>,
+  read : Arc<dyn Sink>,
 }
 
 struct VarSink {
-  name: VarName,
-  pipes: OnceLock<VarSinkPipes>,
-  buf: Mutex<Vec<u8>>,
+  name       : VarName,
+  pipes      : OnceLock<VarSinkPipes>,
+  buf        : Mutex<Vec<u8>>,
   creator_pid: Pid,
 }
 
@@ -2080,8 +2079,8 @@ impl VarSink {
 
   pub(crate) fn new_external(name: VarName, buf: Vec<u8>) -> ShResult<Self> {
     let (read, write) = OsPipe::pipes()?;
-    let pipes = OnceLock::new();
-    let _ = pipes.set(VarSinkPipes { write, read });
+    let pipes         = OnceLock::new();
+    let _             = pipes.set(VarSinkPipes { write, read });
 
     Ok(Self {
       name,
@@ -2105,7 +2104,7 @@ impl VarSink {
     }
 
     let (read, write) = OsPipe::pipes()?;
-    let _ = self.pipes.set(VarSinkPipes { write, read });
+    let _             = self.pipes.set(VarSinkPipes { write, read });
     Ok(self.pipes.get().expect("just set"))
   }
 
@@ -2322,8 +2321,8 @@ impl Sinks {
 
   pub(crate) fn sink_pipes() -> (Arc<dyn Sink>, Arc<dyn Sink>) {
     let (read, write) = PipeSink::new();
-    let read = Arc::new(read);
-    let write = Arc::new(write);
+    let read          = Arc::new(read);
+    let write         = Arc::new(write);
     (read, write)
   }
   pub(crate) fn os_pipes() -> io::Result<(Arc<dyn Sink>, Arc<dyn Sink>)> {
@@ -2398,7 +2397,7 @@ impl Sinks {
       return Some(s.clone());
     }
 
-    let owned = dup_high(unsafe { BorrowedFd::borrow_raw(fd) }).ok()?;
+    let owned               = dup_high(unsafe { BorrowedFd::borrow_raw(fd) }).ok()?;
     let sink: Arc<dyn Sink> = Arc::new(OsSink::new(owned));
     self.table.insert(fd, sink.clone());
     Some(sink)
@@ -2440,13 +2439,13 @@ impl Sinks {
   }
   pub(crate) fn input_available(&mut self) -> bool {
     match self.get_stdin() {
-      None => false,
+      None       => false,
       Some(sink) => sink.has_data(),
     }
   }
   fn base(fd: RawFd) -> io::Result<Arc<dyn Sink>> {
     let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-    let owned = dup_high(borrowed)?;
+    let owned    = dup_high(borrowed)?;
     Ok(Arc::new(OsSink::new(owned)))
   }
 
@@ -2511,7 +2510,7 @@ impl RedirGuard {
   fn apply_sink_from(&mut self, fd: ResolvedFd, sink: Arc<dyn Sink>) -> ShResult<()> {
     validate_fd(fd.get())?;
     let is_new = fd.is_new();
-    let fd = fd.get();
+    let fd     = fd.get();
 
     // everything above 10 is off limits for new FDs
     // but closing them is fine
@@ -2540,7 +2539,7 @@ impl RedirGuard {
   pub(crate) fn apply(&mut self, r: &RedirSpec) -> ShResult<()> {
     let resolved = r.target_fd_origin()?;
 
-    let sink = r.as_sink()?; // runs expansion. careful!
+    let sink     = r.as_sink()?; // runs expansion. careful!
     self.apply_sink_from(resolved, sink)
   }
 
@@ -2654,11 +2653,11 @@ impl Deref for CappedRead {
 }
 
 pub(crate) fn read_capped(fd: BorrowedFd) -> ShResult<CappedRead> {
-  let limit = shopt!(core.max_read_limit);
+  let     limit         = shopt!(core.max_read_limit);
 
-  let mut buf = Vec::new();
-  let mut tmp_buf = take_scratch();
-  let mut remaining = *limit as usize;
+  let mut buf           = Vec::new();
+  let mut tmp_buf       = take_scratch();
+  let mut remaining     = *limit as usize;
   let mut was_truncated = false;
 
   loop {
@@ -2693,7 +2692,7 @@ pub(crate) fn read_capped(fd: BorrowedFd) -> ShResult<CappedRead> {
 /// Convert a vector of bytes to a string, replacing invalid UTF-8 sequences with the replacement character.
 pub(super) fn bytes_to_string(buf: Vec<u8>) -> String {
   match String::from_utf8(buf) {
-    Ok(s) => s,
+    Ok(s)  => s,
     Err(e) => String::from_utf8_lossy(&e.into_bytes()).into_owned(),
   }
 }
@@ -2722,7 +2721,7 @@ pub(crate) fn stream_to_sink(fd: BorrowedFd) -> ShResult<()> {
   let Some(out) = Shed::sinks(Sinks::get_stdout) else {
     return Ok(());
   };
-  let mut buf = take_scratch(); // 8 KiB
+  let mut buf  = take_scratch(); // 8 KiB
   let mut sink = SinkIo(out);
 
   loop {
@@ -2734,7 +2733,7 @@ pub(crate) fn stream_to_sink(fd: BorrowedFd) -> ShResult<()> {
         }
       }
       Err(Errno::EINTR) => signal::check_signals()?,
-      Err(e) => return Err(e.into()),
+      Err(e)            => return Err(e.into()),
     }
   }
 
@@ -2770,10 +2769,10 @@ pub(crate) fn write_all_to_fd_checked(fd: BorrowedFd, bytes: &[u8]) -> ShResult<
   let mut written = 0;
   while written < bytes.len() {
     match write(fd, &bytes[written..]) {
-      Ok(0) => return Err(sherr!(ExecFail, "write to fd returned zero bytes")),
-      Ok(n) => written += n,
+      Ok(0)             => return Err(sherr!(ExecFail, "write to fd returned zero bytes")),
+      Ok(n)             => written += n,
       Err(Errno::EINTR) => signal::check_signals()?,
-      Err(e) => return Err(e.into()),
+      Err(e)            => return Err(e.into()),
     }
   }
   Ok(())
@@ -2824,7 +2823,7 @@ pub(super) fn capture_command(
     ForkResult::Parent { child } => {
       std::mem::drop(wpipe);
 
-      let stdin_pipe = stdin_pipe.map(|(_, w)| w); // drops read
+      let stdin_pipe   = stdin_pipe.map(|(_, w)| w); // drops read
       let capture_pipe = rpipe.as_os_fd()?;
 
       // feed stdin from a thread while we read stdout here, doing both on one thread is dangerous
@@ -2848,8 +2847,8 @@ pub(super) fn capture_command(
       };
 
       let truncated = sink.was_truncated();
-      let size = sink.limit();
-      let captured = sink.into_inner();
+      let size      = sink.limit();
+      let captured  = sink.into_inner();
 
       // A large captured transient (e.g. `$(fd)`, `$(find ~)`) leaves the arena
       // grown once freed; flag it so the next prompt trims it back.
@@ -2859,9 +2858,9 @@ pub(super) fn capture_command(
 
       let status = loop {
         match waitpid(child, Some(WtFlag::WUNTRACED)) {
-          Ok(status) => break status,
+          Ok(status)        => break status,
           Err(Errno::EINTR) => (),
-          Err(e) => return Err(e.into()),
+          Err(e)            => return Err(e.into()),
         }
       };
 
@@ -2895,7 +2894,7 @@ fn expand_fd(word: &Tk) -> ShResult<Option<RawFd>> {
   }
   let word_val = words.iter().next().unwrap();
   let word_val = word_val.to_str_lossy();
-  let src = word_val.trim();
+  let src      = word_val.trim();
 
   // A word that expands to `-` closes the target fd, mirroring `>&-`.
   if src == "-" {
@@ -2914,7 +2913,7 @@ fn expand_fd(word: &Tk) -> ShResult<Option<RawFd>> {
 /// Open a file for redirection, respecting the `noclobber` shell option for output redirections.
 pub(super) fn open_redir_file(class: RedirType, path: &VarStr) -> ShResult<OwnedFd> {
   let file: OwnedFd = get_redir_file(class, path)?.into();
-  let file = move_high(file)?;
+  let file          = move_high(file)?;
   Ok(file)
 }
 
@@ -2957,10 +2956,10 @@ pub(super) fn get_redir_file<P: AsRef<Path>>(class: RedirType, path: P) -> ShRes
 /// Read all bytes from stdin into a vector, returning an error if the read fails.
 /// If a SIGINT is pending, set the status to 130 and return an empty vector.
 pub(super) fn read_input() -> ShResult<Vec<u8>> {
-  let _guard = stdin_is_tty().then(|| Shed::term_mut(Terminal::prepare_for_exec));
-  let sink = stdin_sink()?;
+  let     _guard   = stdin_is_tty().then(|| Shed::term_mut(Terminal::prepare_for_exec));
+  let     sink     = stdin_sink()?;
 
-  let mut input = vec![];
+  let mut input    = vec![];
   let mut read_buf = take_scratch();
 
   loop {
@@ -2990,8 +2989,8 @@ pub(crate) mod tests {
   /// rather than sharing the pooled one.
   #[test]
   fn nested_scratch_guards_do_not_share_a_buffer() {
-    let mut outer = ScratchGuard::take_scratch();
-    let outer_ptr = outer.as_mut_ptr();
+    let mut outer     = ScratchGuard::take_scratch();
+    let     outer_ptr = outer.as_mut_ptr();
     assert!(
       matches!(outer.0, Some(Scratch::Global(_))),
       "the first guard on a thread should hold the pooled buffer"
@@ -3034,8 +3033,8 @@ pub(crate) mod tests {
   /// install that buffer over the pooled one.
   #[test]
   fn a_nested_guard_does_not_overwrite_the_pooled_buffer() {
-    let mut outer = ScratchGuard::take_scratch();
-    let pooled = outer.as_mut_ptr();
+    let mut outer  = ScratchGuard::take_scratch();
+    let     pooled = outer.as_mut_ptr();
 
     {
       let mut inner = ScratchGuard::take_scratch();
@@ -3066,8 +3065,8 @@ pub(crate) mod tests {
       .map(|_| {
         let barrier = Arc::clone(&barrier);
         std::thread::spawn(move || {
-          let mut g = ScratchGuard::take_scratch();
-          let ptr = g.as_mut_ptr() as usize;
+          let mut g   = ScratchGuard::take_scratch();
+          let     ptr = g.as_mut_ptr() as usize;
           barrier.wait(); // both threads hold a guard past this point
           ptr
         })
@@ -3285,7 +3284,7 @@ pub(crate) mod tests {
     if !has_cmds(&["cat"]) {
       return;
     }
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("xs");
     std::fs::write(&path, vec![b'x'; 100_000]).unwrap();
     let g = TestGuard::new();
@@ -3307,8 +3306,8 @@ pub(crate) mod tests {
     use super::{CloseSink, OsSink, Sinks};
     use crate::state::Shed;
 
-    let _g = TestGuard::new();
-    let fd = 7;
+    let _g   = TestGuard::new();
+    let fd   = 7;
 
     // install a real sink at `fd`, like `accept` or `exec N<file` would
     let file = std::fs::File::open("/dev/null").unwrap();
@@ -3342,9 +3341,9 @@ pub(crate) mod tests {
 
   #[test]
   fn append_file_redir() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("append.txt");
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
 
     test_input(format!("echo first > {}", path.display())).unwrap();
     test_input(format!("echo second >> {}", path.display())).unwrap();
@@ -3358,7 +3357,7 @@ pub(crate) mod tests {
     if !has_cmd("cat") {
       return;
     }
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("input.txt");
     std::fs::write(&path, "hello from file\n").unwrap();
     let g = TestGuard::new();
@@ -3371,9 +3370,9 @@ pub(crate) mod tests {
 
   #[test]
   fn stderr_redir_to_file() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("err.txt");
-    let g = TestGuard::new();
+    let g    = TestGuard::new();
 
     test_input(format!("echo error msg 2> {} >&2", path.display())).unwrap();
 
@@ -3386,9 +3385,9 @@ pub(crate) mod tests {
 
   #[test]
   fn output_redir_clobber() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("clobber.txt");
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
 
     test_input(format!("echo first > {}", path.display())).unwrap();
     test_input(format!("echo second > {}", path.display())).unwrap();
@@ -3418,9 +3417,9 @@ pub(crate) mod tests {
 
   #[test]
   fn fd_duplication() {
-    let dir = tempfile::TempDir::new().unwrap();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("dup.txt");
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
 
     test_input(format!(
       "{{ echo out; echo err >&2; }} > {} 2>&1",

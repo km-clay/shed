@@ -265,7 +265,7 @@ pub(crate) fn open_db_conn() -> ShResult<Connection> {
 /// writes (the file is expected to already be migrated by the parent).
 pub(crate) fn open_db_conn_readonly() -> ShResult<Connection> {
   let db_path = history_db_path();
-  let conn = Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+  let conn    = Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
   conn.busy_timeout(std::time::Duration::from_secs(5)).ok();
   Ok(conn)
 }

@@ -215,16 +215,16 @@ fn hex_val(b: u8) -> Option<u8> {
     b'0'..=b'9' => Some(b - b'0'),
     b'a'..=b'f' => Some(b - b'a' + 10),
     b'A'..=b'F' => Some(b - b'A' + 10),
-    _ => None,
+    _           => None,
   }
 }
 
 impl FromStr for Uuid {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-    let err = || sherr!(ParseErr, "invalid UUID string: {s}");
-    let mut buf = [0u8; 16];
-    let mut i = 0;
+    let     err   = || sherr!(ParseErr, "invalid UUID string: {s}");
+    let mut buf   = [0u8; 16];
+    let mut i     = 0;
     let mut bytes = SliceCursor::new(s.as_bytes());
 
     while let Some(b) = bytes.next_byte() {
@@ -251,7 +251,7 @@ impl FromStr for Uuid {
 impl Display for Uuid {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let mut out = [0u8; 36];
-    let mut i = 0;
+    let mut i   = 0;
 
     for (j, &b) in self.0.iter().enumerate() {
       if matches!(j, 4 | 6 | 8 | 10) {

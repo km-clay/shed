@@ -36,7 +36,7 @@ impl Input {
       Self::Stdin(procio::bytes_to_string(procio::read_input()?))
     } else if !args.script_args.is_empty() {
       // script path argument
-      let path = PathBuf::from(args.script_args.remove(0));
+      let path    = PathBuf::from(args.script_args.remove(0));
       let content = read_script(&path)?;
 
       Self::Script(content, path)
@@ -51,7 +51,7 @@ impl Input {
   }
   fn into_content(self) -> String {
     match self {
-      Input::Script(content, _) => content,
+      Input::Script(content, _)             => content,
       Input::DashC(cmd) | Input::Stdin(cmd) => cmd,
     }
   }
@@ -86,8 +86,8 @@ fn execute_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
       } else {
         let script_args = std::mem::take(&mut args.script_args);
         match input {
-          Input::Stdin(cmd) => exec_stdin(cmd, script_args),
-          Input::DashC(cmd) => execute::exec_dash_c(&cmd, script_args),
+          Input::Stdin(cmd)            => exec_stdin(cmd, script_args),
+          Input::DashC(cmd)            => execute::exec_dash_c(&cmd, script_args),
           Input::Script(content, path) => run_script(content, path, script_args),
         }
       }
@@ -100,7 +100,7 @@ fn execute_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
 pub(crate) fn exec_stdin(commands: String, args: Vec<String>) -> ShResult<()> {
   Shed::vars_mut(|v| {
     let scope = v.cur_scope_mut();
-    let zero = scope.sh_argv().front().cloned().unwrap_or_default();
+    let zero  = scope.sh_argv().front().cloned().unwrap_or_default();
     scope.sh_argv_mut().clear();
     scope.bpush_arg(zero);
     for arg in args {
@@ -117,7 +117,7 @@ pub(crate) fn exec_stdin(commands: String, args: Vec<String>) -> ShResult<()> {
 }
 
 pub(crate) fn read_script<P: AsRef<Path>>(path: P) -> ShResult<String> {
-  let path = path.as_ref();
+  let path        = path.as_ref();
   let source_path = paths::display_path(path);
 
   if !path.is_file() {
@@ -131,7 +131,7 @@ pub(crate) fn read_script<P: AsRef<Path>>(path: P) -> ShResult<String> {
 
     match reason {
       Some(r) => errln!("shed: Failed to open '{source_path}': {r}"),
-      None => errln!("shed: Failed to open {source_path}: Not a regular file"),
+      None    => errln!("shed: Failed to open {source_path}: Not a regular file"),
     }
 
     QUIT_CODE.store(1, Ordering::SeqCst);

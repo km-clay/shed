@@ -28,15 +28,15 @@ impl super::Builtin for Autoload {
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut path = false;
-    let mut now = false;
+    let mut now  = false;
     let mut comp = false;
 
     for opt in args.options() {
       match opt.key() {
         "path" => path = true,
-        "now" => now = true,
+        "now"  => now = true,
         "comp" => comp = true,
-        _ => return Err(sherr!(ParseErr @ opt.span(), "unknown option {opt}").with_code(2)),
+        _      => return Err(sherr!(ParseErr @ opt.span(), "unknown option {opt}").with_code(2)),
       }
     }
 

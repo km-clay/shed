@@ -332,7 +332,7 @@ fn set_e_aborts_on_failing_builtin() {
   // following command from running, same as for external commands.
   // Regression guard against builtins being silently exempted from
   // errexit checks.
-  let g = TestGuard::new();
+  let g      = TestGuard::new();
   let result = test_input("set -e; cd /__set_e_test_no_such_dir_xyz__; echo SHOULD_NOT_RUN");
   assert!(
     result.is_err(),
@@ -1108,33 +1108,33 @@ mod is_in_path_tests {
 
   #[test]
   fn abs_path_to_executable_returns_true() {
-    let _g = TestGuard::new();
-    let dir = TempDir::new().unwrap();
-    let exe = make_exec(dir.path(), "prog");
+    let _g     = TestGuard::new();
+    let dir    = TempDir::new().unwrap();
+    let exe    = make_exec(dir.path(), "prog");
     let handle = state::register_source(exe.to_string_lossy());
     assert!(is_in_path(&tk(&handle)));
   }
 
   #[test]
   fn abs_path_to_nonexistent_returns_false() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let handle = state::register_source("/this/path/should/never/exist/xyz123");
     assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
   fn abs_path_to_directory_returns_false() {
-    let _g = TestGuard::new();
-    let dir = TempDir::new().unwrap();
+    let _g     = TestGuard::new();
+    let dir    = TempDir::new().unwrap();
     let handle = state::register_source(dir.path().to_string_lossy());
     assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
   fn abs_path_to_non_executable_returns_false() {
-    let _g = TestGuard::new();
-    let dir = TempDir::new().unwrap();
-    let p = make_non_exec(dir.path(), "data.txt");
+    let _g     = TestGuard::new();
+    let dir    = TempDir::new().unwrap();
+    let p      = make_non_exec(dir.path(), "data.txt");
     let handle = state::register_source(p.to_string_lossy());
     assert!(!is_in_path(&tk(&handle)));
   }
@@ -1142,9 +1142,9 @@ mod is_in_path_tests {
   #[test]
   fn abs_path_executable_only_group_bit_returns_true() {
     // 0o111 mask matches any of user/group/other exec bits.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
-    let p = dir.path().join("only_group");
+    let p   = dir.path().join("only_group");
     std::fs::write(&p, "").unwrap();
     let mut perms = std::fs::metadata(&p).unwrap().permissions();
     perms.set_mode(0o010); // group-execute only
@@ -1157,7 +1157,7 @@ mod is_in_path_tests {
 
   #[test]
   fn bare_name_found_in_path() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     make_exec(dir.path(), "myprog");
     test_input(format!("PATH={}", dir.path().display())).unwrap();
@@ -1167,7 +1167,7 @@ mod is_in_path_tests {
 
   #[test]
   fn bare_name_not_in_path_returns_false() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     test_input(format!("PATH={}", dir.path().display())).unwrap();
     let handle = state::register_source("definitely_not_a_program_xyz");
@@ -1211,7 +1211,7 @@ mod is_in_path_tests {
 
   #[test]
   fn bare_name_skips_directory_entry() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     // Create a *directory* with the program name — should not match.
     std::fs::create_dir(dir.path().join("subprog")).unwrap();
@@ -1222,7 +1222,7 @@ mod is_in_path_tests {
 
   #[test]
   fn bare_name_skips_non_executable() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     make_non_exec(dir.path(), "noexec");
     test_input(format!("PATH={}", dir.path().display())).unwrap();
@@ -1232,7 +1232,7 @@ mod is_in_path_tests {
 
   #[test]
   fn bare_name_falls_through_nonexistent_path_entry() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     make_exec(dir.path(), "real");
     test_input(format!("PATH=/nonexistent/xyz:{}", dir.path().display())).unwrap();
@@ -1253,8 +1253,8 @@ mod is_in_path_tests {
 
   #[test]
   fn dot_slash_executable_in_cwd_returns_true() {
-    let mut g = TestGuard::new();
-    let dir = g.in_temp_dir();
+    let mut g   = TestGuard::new();
+    let     dir = g.in_temp_dir();
     make_exec(&dir, "prog");
     let handle = state::register_source("./prog");
     assert!(is_in_path(&tk(&handle)));
@@ -1262,16 +1262,16 @@ mod is_in_path_tests {
 
   #[test]
   fn dot_slash_nonexistent_returns_false() {
-    let mut g = TestGuard::new();
-    let _dir = g.in_temp_dir();
-    let handle = state::register_source("./nope_xyz");
+    let mut g      = TestGuard::new();
+    let     _dir   = g.in_temp_dir();
+    let     handle = state::register_source("./nope_xyz");
     assert!(!is_in_path(&tk(&handle)));
   }
 
   #[test]
   fn dot_slash_non_executable_returns_false() {
-    let mut g = TestGuard::new();
-    let dir = g.in_temp_dir();
+    let mut g   = TestGuard::new();
+    let     dir = g.in_temp_dir();
     make_non_exec(&dir, "data.txt");
     let handle = state::register_source("./data.txt");
     assert!(!is_in_path(&tk(&handle)));
@@ -1279,8 +1279,8 @@ mod is_in_path_tests {
 
   #[test]
   fn dot_slash_directory_returns_false() {
-    let mut g = TestGuard::new();
-    let dir = g.in_temp_dir();
+    let mut g   = TestGuard::new();
+    let     dir = g.in_temp_dir();
     std::fs::create_dir(dir.join("subdir")).unwrap();
     let handle = state::register_source("./subdir");
     assert!(!is_in_path(&tk(&handle)));
@@ -1288,8 +1288,8 @@ mod is_in_path_tests {
 
   #[test]
   fn dotdot_slash_executable_returns_true() {
-    let mut g = TestGuard::new();
-    let dir = g.in_temp_dir();
+    let mut g   = TestGuard::new();
+    let     dir = g.in_temp_dir();
     make_exec(&dir, "outerprog");
     let inner = dir.join("inner");
     std::fs::create_dir(&inner).unwrap();
@@ -1303,7 +1303,7 @@ mod is_in_path_tests {
   #[test]
   fn absolute_path_does_not_consult_path_var() {
     // Even with a bogus PATH, an absolute path is resolved directly.
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     let exe = make_exec(dir.path(), "prog");
     test_input("PATH=/nonexistent/xyz").unwrap();
@@ -1315,7 +1315,7 @@ mod is_in_path_tests {
 
   #[test]
   fn expansion_resolves_var_to_path() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     let exe = make_exec(dir.path(), "prog");
     test_input(format!("MYEXE={}", exe.display())).unwrap();
@@ -1325,7 +1325,7 @@ mod is_in_path_tests {
 
   #[test]
   fn expansion_resolves_var_to_bare_name_in_path() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let dir = TempDir::new().unwrap();
     make_exec(dir.path(), "myprog");
     test_input(format!("PATH={}", dir.path().display())).unwrap();
@@ -1336,7 +1336,7 @@ mod is_in_path_tests {
 
   #[test]
   fn unset_var_expansion_yields_empty_returns_false() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     // An unset, unquoted var expands to nothing; first word is None,
     // so the function bails out with false.
     let handle = state::register_source("$UNSET_VAR_FOR_ISINPATH_TEST_xyz");

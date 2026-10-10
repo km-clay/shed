@@ -75,8 +75,8 @@ impl Count {
       .parse::<i32>()
       .map_err(|v| sherr!(ParseErr, "invalid {opt} value: '{v}'"))?;
     match n.cmp(&-1) {
-      Ordering::Less => Err(sherr!(ParseErr, "{opt} value must be -1 or greater")),
-      Ordering::Equal => Ok(Self::Infinite),
+      Ordering::Less    => Err(sherr!(ParseErr, "{opt} value must be -1 or greater")),
+      Ordering::Equal   => Ok(Self::Infinite),
       Ordering::Greater => Ok(Self::Exact(n.unsigned_abs())),
     }
   }
@@ -97,57 +97,80 @@ impl Count {
 
 struct EverySpec {
   starting: Option<DateTime<Utc>>,
-  until: Option<DateTime<Utc>>,
-  queue: Option<Count>,
-  retry: Option<Count>,
-  times: Option<u32>,
-  now: bool,
+  until   : Option<DateTime<Utc>>,
+  queue   : Option<Count>,
+  retry   : Option<Count>,
+  times   : Option<u32>,
+  now     : bool,
   catch_up: bool,
 }
 
 impl EverySpec {
-  #[rustfmt::skip]
   fn from_args(args: &BuiltinArgs) -> ShResult<Self> {
-    let starting = args.opt_value("starting").map(|v| {
-      strops::TimeReader::interpret(&v.to_str_lossy())
-        .promote_err(args.opt_span("starting").unwrap())
-        .with_code(2)
-    }).transpose()?;
+    let starting = args
+      .opt_value("starting")
+      .map(|v| {
+        strops::TimeReader::interpret(&v.to_str_lossy())
+          .promote_err(args.opt_span("starting").unwrap())
+          .with_code(2)
+      })
+      .transpose()?;
 
-    let until = args.opt_value("until").map(|v| {
-      strops::TimeReader::interpret(&v.to_str_lossy())
-        .promote_err(args.opt_span("until").unwrap())
-        .with_code(2)
-    }).transpose()?;
+    let until = args
+      .opt_value("until")
+      .map(|v| {
+        strops::TimeReader::interpret(&v.to_str_lossy())
+          .promote_err(args.opt_span("until").unwrap())
+          .with_code(2)
+      })
+      .transpose()?;
 
-    let queue = args.opt_value("queue").map(|v| {
-      Count::parse_queue(&v)
-        .promote_err(args.opt_span("queue").unwrap())
-        .with_code(2)
-    }).transpose()?;
+    let queue = args
+      .opt_value("queue")
+      .map(|v| {
+        Count::parse_queue(&v)
+          .promote_err(args.opt_span("queue").unwrap())
+          .with_code(2)
+      })
+      .transpose()?;
 
-    let retry = args.opt_value("retry").map(|v| {
-      Count::parse_retry(&v)
-        .promote_err(args.opt_span("retry").unwrap())
-        .with_code(2)
-    }).transpose()?;
+    let retry = args
+      .opt_value("retry")
+      .map(|v| {
+        Count::parse_retry(&v)
+          .promote_err(args.opt_span("retry").unwrap())
+          .with_code(2)
+      })
+      .transpose()?;
 
-    let times = args.opt_value("times").map(|v| {
-      v.parse::<u32>()
-        .map_err(|v| sherr!(ParseErr @ args.opt_span("times").unwrap(), "invalid times value: '{v}'"))
-        .with_code(2)
-    }).transpose()?;
+    let times = args
+      .opt_value("times")
+      .map(|v| {
+        v.parse::<u32>()
+          .map_err(|v| {
+            sherr!(ParseErr @ args.opt_span("times").unwrap(), "invalid times value: '{v}'")
+          })
+          .with_code(2)
+      })
+      .transpose()?;
 
     let catch_up = args.has_opt("catch-up");
-    let now = args.has_opt("now");
+    let now      = args.has_opt("now");
 
-    Ok(Self { starting, until, queue, retry, times, now, catch_up })
+    Ok(Self {
+      starting,
+      until,
+      queue,
+      retry,
+      times,
+      now,
+      catch_up,
+    })
   }
 }
 
 pub(super) struct Every;
 impl Builtin for Every {
-  #[rustfmt::skip]
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("starting",        1),
@@ -197,9 +220,9 @@ impl Builtin for Every {
       )
     };
 
-    let mut status = 0;
-    let mut runs = 0;
-    let (mut debt, mut next_k) = initial_state(get_k(anchor, every, clock), catch_up, queue);
+    let mut status                 = 0;
+    let mut runs                   = 0;
+    let     (mut debt, mut next_k) = initial_state(get_k(anchor, every, clock), catch_up, queue);
     if now {
       debt += 1;
     }

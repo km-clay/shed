@@ -125,8 +125,8 @@ pub(crate) struct Expander {
 
 impl Expander {
   pub(crate) fn new(raw: &Tk) -> Self {
-    let tk_raw = raw.slice();
-    let mut new = Self::from_raw(&tk_raw, raw.flags);
+    let     tk_raw = raw.slice();
+    let mut new    = Self::from_raw(&tk_raw, raw.flags);
     new.span = Some(raw.span);
     new
   }
@@ -188,7 +188,7 @@ impl Expander {
     }
 
     let mark_split = !self.flags.contains(TkFlags::IS_HEREDOC) && !self.nosplit;
-    let raw = self.expand_inner(mark_split)?;
+    let raw        = self.expand_inner(mark_split)?;
 
     let words: Vec<stream::SegStream> = if mark_split {
       Self::split_words(&raw)
@@ -209,7 +209,7 @@ impl Expander {
         continue;
       }
 
-      let pattern_bytes = escape::markers_to_glob_escapes(&word);
+      let pattern_bytes   = escape::markers_to_glob_escapes(&word);
       let literal: VarStr = word.into_bytes().into();
 
       if !glob::might_be_glob(&pattern_bytes) {
@@ -236,9 +236,9 @@ impl Expander {
     Ok(raw.into_bytes().into())
   }
   pub(crate) fn expand_keep_quotes(self) -> ShResult<VarStr> {
-    let raw = self.expand_inner(false)?;
+    let     raw          = self.expand_inner(false)?;
     let mut out: Vec<u8> = Vec::new();
-    let mut cursor = raw.cursor();
+    let mut cursor       = raw.cursor();
     while let Some(unit) = cursor.next() {
       match unit {
         stream::Unit::Byte(b) => out.push(b),
@@ -266,17 +266,17 @@ impl Expander {
   pub(crate) fn split_words(raw: &stream::SegStream) -> Vec<stream::SegStream> {
     use stream::{Marker, SegStream, Unit};
     let mut words: Vec<SegStream> = vec![];
-    let mut cursor = raw.cursor();
-    let mut cur_word = SegStream::new();
-    let mut was_quoted = false;
-    let ifs = params::get_separators();
+    let mut cursor                = raw.cursor();
+    let mut cur_word              = SegStream::new();
+    let mut was_quoted            = false;
+    let     ifs                   = params::get_separators();
     // Delimiter-run tracking: whitespace and non-whitespace IFS chars combine
     // into one run that delimits a single field. A second non-WS IFS in the
     // same run emits an additional empty field (per POSIX step 5).
-    let mut in_delim_run = false;
-    let mut delim_has_non_ws = false;
+    let mut in_delim_run          = false;
+    let mut delim_has_non_ws      = false;
 
-    let mut expansion_depth = 0;
+    let mut expansion_depth       = 0;
 
     'outer: while let Some(unit) = cursor.next() {
       match unit {
@@ -417,7 +417,7 @@ mod tests {
         '\u{fdd9}' => Some(Marker::Escape),
         '\u{fde1}' => Some(Marker::ExpandStart),
         '\u{fde2}' => Some(Marker::ExpandEnd),
-        _ => None,
+        _          => None,
       };
       if let Some(m) = marker {
         seg.push_marker(m);
@@ -437,16 +437,16 @@ mod tests {
         StreamSeg::Mark(m) => out.push(match m {
           Marker::Quote(Quote::Double) => '\u{fdd0}',
           Marker::Quote(Quote::Single) => '\u{fdd1}',
-          Marker::TildeSub => '\u{fdd2}',
-          Marker::ProcSub(ProcSubKind::In) => '\u{fdd3}',
+          Marker::TildeSub             => '\u{fdd2}',
+          Marker::ProcSub(ProcSubKind::In)  => '\u{fdd3}',
           Marker::ProcSub(ProcSubKind::Out) => '\u{fdd4}',
-          Marker::NullExpand => '\u{fdd5}',
-          Marker::ArgSep => '\u{fdd6}',
-          Marker::Subshell => '\u{fdd7}',
-          Marker::VarSub => '\u{fdd8}',
-          Marker::Escape => '\u{fdd9}',
+          Marker::NullExpand  => '\u{fdd5}',
+          Marker::ArgSep      => '\u{fdd6}',
+          Marker::Subshell    => '\u{fdd7}',
+          Marker::VarSub      => '\u{fdd8}',
+          Marker::Escape      => '\u{fdd9}',
           Marker::ExpandStart => '\u{fde1}',
-          Marker::ExpandEnd => '\u{fde2}',
+          Marker::ExpandEnd   => '\u{fde2}',
         }),
       }
     }
@@ -527,7 +527,7 @@ mod tests {
   fn word_split_quoted_no_split() {
     let _guard = TestGuard::new();
 
-    let raw = format!("{}hello world{}", markers::DUB_QUOTE, markers::DUB_QUOTE);
+    let raw    = format!("{}hello world{}", markers::DUB_QUOTE, markers::DUB_QUOTE);
     let exp = Expander {
       span: None,
       allow_side_effects: true,
@@ -546,7 +546,7 @@ mod tests {
   fn word_split_escaped_space() {
     let _guard = TestGuard::new();
 
-    let raw = format!("hello{}world", render(&escape::unescape_str(b"\\ ")));
+    let raw    = format!("hello{}world", render(&escape::unescape_str(b"\\ ")));
     let exp = Expander {
       span: None,
       allow_side_effects: true,
@@ -563,7 +563,7 @@ mod tests {
   fn word_split_escaped_tab() {
     let _guard = TestGuard::new();
 
-    let raw = format!("hello{}world", render(&escape::unescape_str(b"\\\t")));
+    let raw    = format!("hello{}world", render(&escape::unescape_str(b"\\\t")));
     let exp = Expander {
       span: None,
       allow_side_effects: true,

@@ -35,7 +35,7 @@ pub(crate) enum TermEvent {
   PrimaryDevAttr,
   KittyKbdFlags,
   Capabilities {
-    name: String,
+    name  : String,
     _value: Option<String>,
   },
 }
@@ -57,8 +57,8 @@ impl Display for SemVer {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match (self.major, self.minor, self.patch) {
       (Some(major), Some(minor), Some(patch)) => write!(f, "{major}.{minor}.{patch}"),
-      (Some(major), Some(minor), None) => write!(f, "{major}.{minor}"),
-      (Some(major), None, None) => write!(f, "{major}"),
+      (Some(major), Some(minor), None)        => write!(f, "{major}.{minor}"),
+      (Some(major), None, None)               => write!(f, "{major}"),
       _ => write!(f, "unknown"),
     }
   }
@@ -130,9 +130,9 @@ impl XtVersion {
       return None;
     }
     let mut parts = rest.split('.');
-    let major = parts.next()?.parse::<u32>().ok()?;
-    let minor = parts.next()?.parse::<u32>().ok()?;
-    let patch = parts.next()?.parse::<u32>().ok()?;
+    let     major = parts.next()?.parse::<u32>().ok()?;
+    let     minor = parts.next()?.parse::<u32>().ok()?;
+    let     patch = parts.next()?.parse::<u32>().ok()?;
     Some(Self::Iterm2(semver!(major, minor, patch)))
   }
 
@@ -143,8 +143,8 @@ impl XtVersion {
     }
     let mut parts = rest.split('.');
     // tmux minor may carry a trailing letter (e.g. "3.5a"); take leading digits only.
-    let major = parse_leading_u32(parts.next()?)?;
-    let minor = parse_leading_u32(parts.next()?)?;
+    let     major = parse_leading_u32(parts.next()?)?;
+    let     minor = parse_leading_u32(parts.next()?)?;
     Some(Self::Tmux(semver!(major, minor)))
   }
 
@@ -166,22 +166,22 @@ fn parse_leading_u32(s: &str) -> Option<u32> {
 
 #[derive(Debug, Default, Clone)]
 struct EventParser {
-  events: VecDeque<TermEvent>,
-  ss3_pending: bool,
-  paste_buf: Option<String>,
-  dcs_buf: Option<String>,
-  dcs_kind: Option<DcsKind>,
+  events       : VecDeque<TermEvent>,
+  ss3_pending  : bool,
+  paste_buf    : Option<String>,
+  dcs_buf      : Option<String>,
+  dcs_kind     : Option<DcsKind>,
   dcs_supported: bool,
 }
 
 impl EventParser {
   pub(crate) fn new() -> Self {
     Self {
-      events: VecDeque::new(),
-      ss3_pending: false,
-      paste_buf: None,
-      dcs_buf: None,
-      dcs_kind: None,
+      events       : VecDeque::new(),
+      ss3_pending  : false,
+      paste_buf    : None,
+      dcs_buf      : None,
+      dcs_kind     : None,
       dcs_supported: false,
     }
   }
@@ -209,7 +209,7 @@ impl EventParser {
 
     let (name_hex, value_hex) = match buf.split_once('=') {
       Some((n, v)) => (n, Some(v)),
-      None => (buf.as_str(), None),
+      None         => (buf.as_str(), None),
     };
     let Some(name) = Self::decode_hex(name_hex) else {
       return;
@@ -282,7 +282,7 @@ impl vte::Perform for EventParser {
   fn unhook(&mut self) {
     let Some(kind) = self.dcs_kind else { return };
     match kind {
-      DcsKind::XtGetCap => self.parse_term_cap(),
+      DcsKind::XtGetCap  => self.parse_term_cap(),
       DcsKind::XtVersion => self.parse_xtversion(),
     }
   }
@@ -426,26 +426,26 @@ impl vte::Perform for EventParser {
       // Special keys with tilde: CSI num ~ or CSI num;mod ~
       ([], '~') => {
         let key_num = params.first().copied().unwrap_or(0);
-        let mods = params.get(1).map_or(ModKeys::empty(), ModKeys::from);
+        let mods    = params.get(1).map_or(ModKeys::empty(), ModKeys::from);
         let key = match key_num {
           1 | 7 => KeyCode::Home,
-          2 => KeyCode::Insert,
-          3 => KeyCode::Delete,
+          2     => KeyCode::Insert,
+          3     => KeyCode::Delete,
           4 | 8 => KeyCode::End,
-          5 => KeyCode::PageUp,
-          6 => KeyCode::PageDown,
-          11 => KeyCode::F(1),
-          12 => KeyCode::F(2),
-          13 => KeyCode::F(3),
-          14 => KeyCode::F(4),
-          15 => KeyCode::F(5),
-          17 => KeyCode::F(6),
-          18 => KeyCode::F(7),
-          19 => KeyCode::F(8),
-          20 => KeyCode::F(9),
-          21 => KeyCode::F(10),
-          23 => KeyCode::F(11),
-          24 => KeyCode::F(12),
+          5     => KeyCode::PageUp,
+          6     => KeyCode::PageDown,
+          11    => KeyCode::F(1),
+          12    => KeyCode::F(2),
+          13    => KeyCode::F(3),
+          14    => KeyCode::F(4),
+          15    => KeyCode::F(5),
+          17    => KeyCode::F(6),
+          18    => KeyCode::F(7),
+          19    => KeyCode::F(8),
+          20    => KeyCode::F(9),
+          21    => KeyCode::F(10),
+          23    => KeyCode::F(11),
+          24    => KeyCode::F(12),
           200 => {
             self.paste_buf = Some(String::new());
             return;
@@ -466,8 +466,8 @@ impl vte::Perform for EventParser {
       ([], 'u') => {
         // kitty keyboard protocol: CSI code;mod;text u
         let codepoint = params.first().copied().unwrap_or(0);
-        let mods = params.get(1).map_or(ModKeys::empty(), ModKeys::from);
-        let text = params.get(2).copied().unwrap_or(codepoint);
+        let mods      = params.get(1).map_or(ModKeys::empty(), ModKeys::from);
+        let text      = params.get(2).copied().unwrap_or(codepoint);
 
         let (ch, mods) = if text != codepoint && mods.contains(ModKeys::SHIFT) {
           // Kitty reported something like 'Shift+7' and text is '&'
@@ -479,9 +479,9 @@ impl vte::Perform for EventParser {
         };
 
         let key = match ch {
-          9 => KeyCode::Tab,
-          13 => KeyCode::Enter,
-          27 => KeyCode::Esc,
+          9   => KeyCode::Tab,
+          13  => KeyCode::Enter,
+          27  => KeyCode::Esc,
           127 => KeyCode::Backspace,
           _ => {
             if let Some(c) = char::from_u32(u32::from(ch)) {
@@ -503,8 +503,8 @@ impl vte::Perform for EventParser {
 
         let button = params.first().copied().unwrap_or(0);
         match button {
-          64 => TermEvent::Key(KeyEvent(KeyCode::ScrollUp, ModKeys::empty())),
-          65 => TermEvent::Key(KeyEvent(KeyCode::ScrollDown, ModKeys::empty())),
+          64  => TermEvent::Key(KeyEvent(KeyCode::ScrollUp, ModKeys::empty())),
+          65  => TermEvent::Key(KeyEvent(KeyCode::ScrollDown, ModKeys::empty())),
           128 => TermEvent::Key(KeyEvent(KeyCode::Back, ModKeys::empty())),
           129 => TermEvent::Key(KeyEvent(KeyCode::Forward, ModKeys::empty())),
           _ => {
@@ -512,9 +512,9 @@ impl vte::Perform for EventParser {
             let row = params.get(2).copied().unwrap_or(0) as usize;
 
             match button {
-              0 => TermEvent::Key(KeyEvent(KeyCode::LeftClick(row, col), ModKeys::empty())),
-              1 => TermEvent::Key(KeyEvent(KeyCode::MiddleClick(row, col), ModKeys::empty())),
-              2 => TermEvent::Key(KeyEvent(KeyCode::RightClick(row, col), ModKeys::empty())),
+              0  => TermEvent::Key(KeyEvent(KeyCode::LeftClick(row, col), ModKeys::empty())),
+              1  => TermEvent::Key(KeyEvent(KeyCode::MiddleClick(row, col), ModKeys::empty())),
+              2  => TermEvent::Key(KeyEvent(KeyCode::RightClick(row, col), ModKeys::empty())),
               35 => TermEvent::Key(KeyEvent(KeyCode::MousePos(row, col), ModKeys::empty())),
               _ => {
                 // Other mouse events we don't care about
@@ -585,7 +585,7 @@ impl PollReader {
       return None;
     }
     let bytes: Vec<u8> = self.byte_buf.drain(..).collect();
-    let verbatim_str = bytes_to_string(bytes);
+    let verbatim_str   = bytes_to_string(bytes);
     Some(KeyEvent(
       KeyCode::Verbatim(verbatim_str.into()),
       ModKeys::empty(),
@@ -701,7 +701,7 @@ mod tests {
   /// return every event produced.
   fn feed(bytes: &[u8]) -> Vec<TermEvent> {
     let mut parser = vte::Parser::new();
-    let mut ep = EventParser::new();
+    let mut ep     = EventParser::new();
     parser.advance(&mut ep, bytes);
     let mut events = vec![];
     while let Some(e) = ep.pop() {
@@ -1095,15 +1095,15 @@ mod tests {
 
   #[test]
   fn read_event_empty_buf_returns_none() {
-    let mut r = PollReader::new();
-    let ev = r.read_event();
+    let mut r  = PollReader::new();
+    let     ev = r.read_event();
     assert!(ev.is_none());
   }
 
   #[test]
   fn read_event_lone_esc_byte_returns_escape_key() {
-    let mut r = pr_with_bytes(b"\x1b");
-    let ev = r.read_event().unwrap();
+    let mut r  = pr_with_bytes(b"\x1b");
+    let     ev = r.read_event().unwrap();
     match ev {
       TermEvent::Key(KeyEvent(KeyCode::Esc, m)) => {
         assert_eq!(m, ModKeys::empty());
@@ -1115,8 +1115,8 @@ mod tests {
   #[test]
   fn read_event_esc_plus_printable_returns_alt_key() {
     // ESC + 'a' → Alt+A (upper-cased per the implementation).
-    let mut r = pr_with_bytes(b"\x1ba");
-    let ev = r.read_event().unwrap();
+    let mut r  = pr_with_bytes(b"\x1ba");
+    let     ev = r.read_event().unwrap();
     match ev {
       TermEvent::Key(KeyEvent(KeyCode::Char(c), m)) => {
         assert_eq!(c, 'A');
@@ -1129,16 +1129,16 @@ mod tests {
   #[test]
   fn read_event_esc_plus_unhandled_returns_lone_escape() {
     // ESC + 0x7f (DEL) — falls into the "unknown" arm → standalone Esc.
-    let mut r = pr_with_bytes(b"\x1b\x7f");
-    let ev = r.read_event().unwrap();
+    let mut r  = pr_with_bytes(b"\x1b\x7f");
+    let     ev = r.read_event().unwrap();
     assert!(matches!(ev, TermEvent::Key(KeyEvent(KeyCode::Esc, _))));
   }
 
   #[test]
   fn read_event_csi_prefix_parses_through() {
     // ESC + '[' starts a CSI sequence; feed cursor-pos response.
-    let mut r = pr_with_bytes(b"\x1b[5;10R");
-    let ev = r.read_event().unwrap();
+    let mut r  = pr_with_bytes(b"\x1b[5;10R");
+    let     ev = r.read_event().unwrap();
     match ev {
       TermEvent::CursorPos(Rows(r), Cols(c)) => {
         assert_eq!(r, 5);
@@ -1150,8 +1150,8 @@ mod tests {
 
   #[test]
   fn read_event_plain_printable_char_returns_key() {
-    let mut r = pr_with_bytes(b"x");
-    let ev = r.read_event().unwrap();
+    let mut r  = pr_with_bytes(b"x");
+    let     ev = r.read_event().unwrap();
     match ev {
       TermEvent::Key(KeyEvent(KeyCode::Char(c), m)) => {
         assert_eq!(c, 'x');
@@ -1163,10 +1163,10 @@ mod tests {
 
   #[test]
   fn read_event_consumes_bytes() {
-    let mut r = pr_with_bytes(b"ab");
-    let _ = r.read_event().unwrap();
+    let mut r  = pr_with_bytes(b"ab");
+    let     _  = r.read_event().unwrap();
     // After consuming 'a', the buf still has 'b'.
-    let ev = r.read_event().unwrap();
+    let     ev = r.read_event().unwrap();
     match ev {
       TermEvent::Key(KeyEvent(KeyCode::Char(c), _)) => {
         assert_eq!(c, 'b');

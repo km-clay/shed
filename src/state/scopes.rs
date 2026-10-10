@@ -28,7 +28,7 @@ pub(crate) struct ScopeStack {
   /// Scopes that come after that are pushed in functions,
   /// and only contain variables that are defined using `local`.
   scopes: Vec<VarTab>,
-  depth: u32,
+  depth : u32,
 
   /// Global parameters such as $!, $$, etc
   global_params: HashMap<ShellParam, VarStr>,
@@ -384,9 +384,9 @@ impl ScopeStack {
           VarKind::Arr(items) => {
             match idx {
               ArrIndex::AllSplit => {
-                let arg_sep = crate::expand::markers::ARG_SEP.to_string();
-                let start = slice_start.unwrap_or(0);
-                let take = slice_len.unwrap_or(items.len().saturating_sub(start));
+                let arg_sep          = crate::expand::markers::ARG_SEP.to_string();
+                let start            = slice_start.unwrap_or(0);
+                let take             = slice_len.unwrap_or(items.len().saturating_sub(start));
                 let selected: Vec<_> = items.iter().skip(start).take(take).cloned().collect();
 
                 if selected.is_empty() {
@@ -405,7 +405,7 @@ impl ScopeStack {
                   .unwrap_or(' ')
                   .to_string();
                 let start = slice_start.unwrap_or(0);
-                let end = start + slice_len.unwrap_or(items.len().saturating_sub(start));
+                let end   = start + slice_len.unwrap_or(items.len().saturating_sub(start));
                 let sliced = items
                   .iter()
                   .skip(start)
@@ -458,7 +458,7 @@ impl ScopeStack {
                 let mut buf = [0u8; 4];
                 return Ok(VarStr::from(markers::NULL_EXPAND.encode_utf8(&mut buf)));
               }
-              let arg_sep = crate::expand::markers::ARG_SEP.to_string();
+              let arg_sep              = crate::expand::markers::ARG_SEP.to_string();
               let values: Vec<&VarStr> = items.iter().map(|(_, v)| v).collect();
               return Ok(values.join_with(&arg_sep));
             }
@@ -503,7 +503,7 @@ impl ScopeStack {
         && let Some(var) = scope.vars().get(var_name)
       {
         return Some(match var.kind() {
-          VarKind::Arr(items) => (0..items.len()).map(|i| i.to_string().into()).collect(),
+          VarKind::Arr(items)      => (0..items.len()).map(|i| i.to_string().into()).collect(),
           VarKind::AssocArr(items) => items.iter().map(|(k, _)| k.clone()).collect(),
           _ => return None,
         });
@@ -612,7 +612,7 @@ impl ScopeStack {
         };
         return match var.kind() {
           VarKind::Arr(items) => match idx {
-            ArrIndex::Literal(n) => n < items.len(),
+            ArrIndex::Literal(n)  => n < items.len(),
             ArrIndex::FromBack(n) => n >= 1 && n <= items.len(),
             ArrIndex::AllSplit | ArrIndex::AllJoined | ArrIndex::ArgCount => true,
             _ => false,

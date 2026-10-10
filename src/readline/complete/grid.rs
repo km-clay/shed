@@ -16,7 +16,7 @@ use super::{
 /// the caller appends an ellipsis after.
 pub(crate) fn truncate_to_width(s: &str, max_width: usize) -> String {
   let mut out = String::with_capacity(s.len());
-  let mut w = 0;
+  let mut w   = 0;
   for ch in s.chars() {
     let cw = ui::calc_str_width(&ch.to_string());
     if w + cw > max_width {
@@ -55,13 +55,13 @@ pub(crate) fn pack_columns(
   col_width: impl Fn(usize, usize) -> usize,
 ) -> Vec<usize> {
   let mut widths = Vec::new();
-  let mut used = 0usize;
-  let mut col = scroll_col;
+  let mut used   = 0usize;
+  let mut col    = scroll_col;
   while col * rows < n {
     let start = col * rows;
-    let end = (start + rows).min(n);
+    let end   = (start + rows).min(n);
     // A column can never be wider than the terminal.
-    let w = col_width(start, end).min(t_cols);
+    let w     = col_width(start, end).min(t_cols);
     let gap = if widths.is_empty() {
       0
     } else {
@@ -116,8 +116,8 @@ pub(crate) fn step_column(cursor: usize, n: usize, rows: usize, right: bool, wra
   if n == 0 {
     return 0;
   }
-  let row = cursor % rows;
-  let col = cursor / rows;
+  let row      = cursor % rows;
+  let col      = cursor / rows;
   let num_cols = n.div_ceil(rows);
   if right {
     let next = col + 1;
@@ -278,8 +278,8 @@ impl GridSelector {
   }
 
   fn ensure_cursor_visible(&mut self, t_cols: usize) {
-    let cursor = self.cursor.get();
-    let n = self.candidates.len();
+    let cursor     = self.cursor.get();
+    let n          = self.candidates.len();
     let candidates = &self.candidates;
     scroll_into_view(
       cursor,
@@ -298,7 +298,7 @@ impl GridSelector {
       return;
     }
     let t_cols = Shed::term(Terminal::t_cols);
-    let step = self.visible_window(t_cols).len().max(1) * GridLayout::MAX_VISIBLE_ROWS;
+    let step   = self.visible_window(t_cols).len().max(1) * GridLayout::MAX_VISIBLE_ROWS;
     self.cursor.wrap_add(step);
   }
 
@@ -308,7 +308,7 @@ impl GridSelector {
       return;
     }
     let t_cols = Shed::term(Terminal::t_cols);
-    let step = self.visible_window(t_cols).len().max(1) * GridLayout::MAX_VISIBLE_ROWS;
+    let step   = self.visible_window(t_cols).len().max(1) * GridLayout::MAX_VISIBLE_ROWS;
     self.cursor.wrap_sub(step);
   }
 
@@ -318,16 +318,16 @@ impl GridSelector {
     }
 
     let t_cols = Shed::term(Terminal::t_cols);
-    let rows = GridLayout::MAX_VISIBLE_ROWS;
+    let rows   = GridLayout::MAX_VISIBLE_ROWS;
     self.ensure_cursor_visible(t_cols);
 
-    let col_widths = self.visible_window(t_cols);
-    let num_cols = col_widths.len().max(1);
-    let cursor_pos = self.cursor.get();
-    let n = self.candidates.len();
-    let first = self.scroll_col * rows;
+    let col_widths  = self.visible_window(t_cols);
+    let num_cols    = col_widths.len().max(1);
+    let cursor_pos  = self.cursor.get();
+    let n           = self.candidates.len();
+    let first       = self.scroll_col * rows;
     // The first visible column has the lowest indices, so it's the tallest.
-    let grid_rows = rows.min(n - first);
+    let grid_rows   = rows.min(n - first);
     let visible_end = ((self.scroll_col + num_cols) * rows).min(n);
 
     // break the line to move under the prompt
@@ -341,18 +341,18 @@ impl GridSelector {
           break; // later columns at this row are exhausted too
         }
 
-        let col_start = (self.scroll_col + c) * rows;
-        let col_end = (col_start + rows).min(n);
+        let col_start         = (self.scroll_col + c) * rows;
+        let col_end           = (col_start + rows).min(n);
         let (col_name_max, _) = Self::col_dims(&self.candidates[col_start..col_end]);
 
-        let cand = &self.candidates[idx];
-        let name_plain = one_line(cand.as_str());
-        let name_w = ui::calc_str_width(&name_plain);
+        let cand              = &self.candidates[idx];
+        let name_plain        = one_line(cand.as_str());
+        let name_w            = ui::calc_str_width(&name_plain);
         // Emphasize the prefix the candidate shares with the typed token.
-        let prefix_len = common_prefix_len(&self.prefix, &name_plain);
-        let name = emphasize_grid(&name_plain, |i| i < prefix_len);
+        let prefix_len        = common_prefix_len(&self.prefix, &name_plain);
+        let name              = emphasize_grid(&name_plain, |i| i < prefix_len);
 
-        let is_selected = self.has_selection && idx == cursor_pos;
+        let is_selected       = self.has_selection && idx == cursor_pos;
 
         match (&cand.desc, is_selected) {
           (Some(desc), _) if !desc.is_empty() => {
@@ -361,8 +361,8 @@ impl GridSelector {
             // description doesn't fit there, it can extend leftward into
             // the name-pad, down to a minimum 2-char gap after the name.
             // Beyond that point we truncate with an ellipsis.
-            let desc_w_full = ui::calc_str_width(desc) + 2; // includes parens
-            let aligned_avail = col_w.saturating_sub(col_name_max + 2);
+            let desc_w_full      = ui::calc_str_width(desc) + 2; // includes parens
+            let aligned_avail    = col_w.saturating_sub(col_name_max + 2);
             let max_extend_avail = col_w.saturating_sub(name_w + 2);
             let (pad_chars, desc_text) = if desc_w_full <= aligned_avail {
               // Fits at the aligned position; keep alignment.
@@ -371,7 +371,7 @@ impl GridSelector {
               // Doesn't fit aligned, but does fit if we extend into the
               // padding. Reduce the name-pad just enough to fit.
               let need = desc_w_full - aligned_avail;
-              let pad = col_name_max.saturating_sub(name_w).saturating_sub(need);
+              let pad  = col_name_max.saturating_sub(name_w).saturating_sub(need);
               (pad, format!("({desc})"))
             } else {
               // Even fully extended (no name-pad at all) it doesn't fit.
@@ -380,8 +380,8 @@ impl GridSelector {
               (0, format!("({truncated}…)"))
             };
             let name_pad_str = " ".repeat(pad_chars);
-            let used = name_w + pad_chars + 2 + ui::calc_str_width(&desc_text);
-            let trailing = " ".repeat(col_w.saturating_sub(used));
+            let used         = name_w + pad_chars + 2 + ui::calc_str_width(&desc_text);
+            let trailing     = " ".repeat(col_w.saturating_sub(used));
             if is_selected {
               write_term!("\x1b[7m{name}{name_pad_str}  {desc_text}{trailing}\x1b[27m",).ok();
             } else {
@@ -441,14 +441,14 @@ impl GridSelector {
 
 pub(crate) struct GridCompleter {
   completer: SimpleCompleter,
-  selector: GridSelector,
+  selector : GridSelector,
 }
 
 impl GridCompleter {
   pub(crate) fn new() -> Self {
     Self {
       completer: SimpleCompleter::default(),
-      selector: GridSelector::new(),
+      selector : GridSelector::new(),
     }
   }
 
@@ -457,7 +457,7 @@ impl GridCompleter {
   fn preview_response(&self) -> CompResponse {
     match self.selected_candidate() {
       Some(cand) => CompResponse::Preview(cand),
-      None => CompResponse::Consumed,
+      None       => CompResponse::Consumed,
     }
   }
 }
@@ -552,14 +552,14 @@ impl Completer for GridCompleter {
     if self.selector.candidates.is_empty() {
       return Some(0);
     }
-    let t_cols = Shed::term(Terminal::t_cols);
-    let rows = GridLayout::MAX_VISIBLE_ROWS;
-    let n = self.selector.candidates.len();
-    let first = self.selector.scroll_col * rows;
-    let grid_rows = rows.min(n.saturating_sub(first)).max(1);
-    let num_cols = self.selector.visible_window(t_cols).len().max(1);
+    let t_cols      = Shed::term(Terminal::t_cols);
+    let rows        = GridLayout::MAX_VISIBLE_ROWS;
+    let n           = self.selector.candidates.len();
+    let first       = self.selector.scroll_col * rows;
+    let grid_rows   = rows.min(n.saturating_sub(first)).max(1);
+    let num_cols    = self.selector.visible_window(t_cols).len().max(1);
     let visible_end = ((self.selector.scroll_col + num_cols) * rows).min(n);
-    let counter = usize::from(first > 0 || visible_end < n);
+    let counter     = usize::from(first > 0 || visible_end < n);
     Some(grid_rows + counter)
   }
 
@@ -594,7 +594,7 @@ impl Completer for GridCompleter {
       }
       key!(Enter) => match self.selected_candidate() {
         Some(cand) => Ok(CompResponse::Accept(cand)),
-        None => Ok(CompResponse::Dismiss),
+        None       => Ok(CompResponse::Dismiss),
       },
       key!(Esc) | key!(Ctrl + 'c') => Ok(CompResponse::Dismiss),
 

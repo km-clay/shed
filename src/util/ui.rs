@@ -42,43 +42,43 @@ fn rgb_to_xterm16(r: u8, g: u8, b: u8) -> u8 {
 fn apply_fg_rgb(style: Style, r: u8, g: u8, b: u8) -> Style {
   match Shed::term(Terminal::color_mode) {
     None => style,
-    Some(ColorMode::Truecolor) => style.rgb(r, g, b),
+    Some(ColorMode::Truecolor)  => style.rgb(r, g, b),
     Some(ColorMode::Palette256) => style.fixed(rgb_to_xterm256(r, g, b)),
-    Some(ColorMode::Palette16) => style.fixed(rgb_to_xterm16(r, g, b)),
+    Some(ColorMode::Palette16)  => style.fixed(rgb_to_xterm16(r, g, b)),
   }
 }
 
 fn apply_fg_rgb_raw(style: Painted<&str>, r: u8, g: u8, b: u8) -> Painted<&str> {
   match Shed::term(Terminal::color_mode) {
     None => style,
-    Some(ColorMode::Truecolor) => style.rgb(r, g, b),
+    Some(ColorMode::Truecolor)  => style.rgb(r, g, b),
     Some(ColorMode::Palette256) => style.fixed(rgb_to_xterm256(r, g, b)),
-    Some(ColorMode::Palette16) => style.fixed(rgb_to_xterm16(r, g, b)),
+    Some(ColorMode::Palette16)  => style.fixed(rgb_to_xterm16(r, g, b)),
   }
 }
 
 fn apply_bg_rgb(style: Style, r: u8, g: u8, b: u8) -> Style {
   match Shed::term(Terminal::color_mode) {
     None => style,
-    Some(ColorMode::Truecolor) => style.on_rgb(r, g, b),
+    Some(ColorMode::Truecolor)  => style.on_rgb(r, g, b),
     Some(ColorMode::Palette256) => style.on_fixed(rgb_to_xterm256(r, g, b)),
-    Some(ColorMode::Palette16) => style.on_fixed(rgb_to_xterm16(r, g, b)),
+    Some(ColorMode::Palette16)  => style.on_fixed(rgb_to_xterm16(r, g, b)),
   }
 }
 
 fn apply_bg_rgb_raw(style: Painted<&str>, r: u8, g: u8, b: u8) -> Painted<&str> {
   match Shed::term(Terminal::color_mode) {
     None => style,
-    Some(ColorMode::Truecolor) => style.on_rgb(r, g, b),
+    Some(ColorMode::Truecolor)  => style.on_rgb(r, g, b),
     Some(ColorMode::Palette256) => style.on_fixed(rgb_to_xterm256(r, g, b)),
-    Some(ColorMode::Palette16) => style.on_fixed(rgb_to_xterm16(r, g, b)),
+    Some(ColorMode::Palette16)  => style.on_fixed(rgb_to_xterm16(r, g, b)),
   }
 }
 
 /// A wrapper around `yansi::Style`. Defers application of text attributes like bold/italic.
 #[derive(Clone, Debug, Default, Copy)]
 pub(crate) struct PaletteEntry {
-  style: Style,
+  style      : Style,
   decorations: Decorations,
 }
 
@@ -86,7 +86,7 @@ pub(crate) struct PaletteEntry {
 impl PaletteEntry {
   pub(crate) fn new() -> Self {
     Self {
-      style: Style::new().primary().on_primary(),
+      style      : Style::new().primary().on_primary(),
       decorations: Decorations::default(),
     }
   }
@@ -259,13 +259,13 @@ impl PaletteEntry {
 #[expect(clippy::struct_excessive_bools)]
 pub(crate) struct Decorations {
   underline: bool,
-  bold: bool,
-  italic: bool,
-  strike: bool,
-  dimmed: bool,
-  blink: bool,
-  hidden: bool,
-  inverted: bool,
+  bold     : bool,
+  italic   : bool,
+  strike   : bool,
+  dimmed   : bool,
+  blink    : bool,
+  hidden   : bool,
+  inverted : bool,
 }
 
 impl Decorations {
@@ -300,13 +300,13 @@ impl Decorations {
   pub(crate) fn union(self, other: Decorations) -> Self {
     Self {
       underline: self.underline | other.underline,
-      bold: self.bold | other.bold,
-      italic: self.italic | other.italic,
-      strike: self.strike | other.strike,
-      dimmed: self.dimmed | other.dimmed,
-      blink: self.blink | other.blink,
-      hidden: self.hidden | other.hidden,
-      inverted: self.inverted | other.inverted,
+      bold     : self.bold | other.bold,
+      italic   : self.italic | other.italic,
+      strike   : self.strike | other.strike,
+      dimmed   : self.dimmed | other.dimmed,
+      blink    : self.blink | other.blink,
+      hidden   : self.hidden | other.hidden,
+      inverted : self.inverted | other.inverted,
     }
   }
 
@@ -352,7 +352,7 @@ pub(crate) fn pad_line_into(
   right_border: &str,
   cols: usize,
 ) {
-  let used = calc_str_width(content);
+  let used    = calc_str_width(content);
   let padding = cols.saturating_sub(used + 1);
   write!(buf, "{content}").ok();
   for _ in 0..padding {
@@ -432,7 +432,7 @@ pub(crate) fn style_from_description(desc: &str) -> ShResult<PaletteEntry> {
 /// Build an ansi color escape sequence from a plain english description
 pub(crate) fn ansi_from_description(desc: &str) -> ShResult<String> {
   let mut style: Painted<&str> = "".primary().on_primary().linger();
-  let mut words = desc.split_whitespace();
+  let mut words                = desc.split_whitespace();
 
   match_loop!(words.next() => word, {
     "green" => style = style.green(),
@@ -516,8 +516,8 @@ pub(crate) fn hex_to_rgb(hex: &str) -> ShResult<(u8, u8, u8)> {
 pub(crate) fn stylize_loglevel(level: log::Level) -> String {
   let style = match level {
     log::Level::Error => style_from_description("red bold").unwrap(),
-    log::Level::Warn => style_from_description("yellow bold").unwrap(),
-    log::Level::Info => style_from_description("green bold").unwrap(),
+    log::Level::Warn  => style_from_description("yellow bold").unwrap(),
+    log::Level::Info  => style_from_description("green bold").unwrap(),
     log::Level::Debug => style_from_description("blue bold").unwrap(),
     log::Level::Trace => style_from_description("magenta bold").unwrap(),
   };
@@ -540,10 +540,10 @@ impl FromStr for Justify {
   type Err = ShErr;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s.to_lowercase().as_str() {
-      "left" => Ok(Justify::Left),
+      "left"   => Ok(Justify::Left),
       "center" => Ok(Justify::Center),
-      "right" => Ok(Justify::Right),
-      _ => Err(sherr!(ParseErr, "invalid justification '{s}'")),
+      "right"  => Ok(Justify::Right),
+      _        => Err(sherr!(ParseErr, "invalid justification '{s}'")),
     }
   }
 }
@@ -556,7 +556,7 @@ pub(crate) fn truncate_visual(s: &str, max_width: usize, justify: Justify) -> St
 }
 
 pub(crate) fn keep_left(s: &str, max_width: usize) -> String {
-  let mut out = String::new();
+  let mut out     = String::new();
   let mut visible = 0;
   let mut esc_seq = 0u8;
 
@@ -578,8 +578,8 @@ pub(crate) fn keep_right(s: &str, max_width: usize) -> String {
     return s.to_string();
   }
 
-  let mut skip = total - max_width;
-  let mut out = String::new();
+  let mut skip    = total - max_width;
+  let mut out     = String::new();
   let mut esc_seq = 0u8;
 
   for g in s.graphemes(true) {
@@ -635,9 +635,9 @@ pub(crate) fn truncate_with_marker(
       out
     }
     Justify::Center => {
-      let left_w = budget / 2;
-      let right_w = budget - left_w;
-      let mut out = keep_left(s, left_w);
+      let     left_w  = budget / 2;
+      let     right_w = budget - left_w;
+      let mut out     = keep_left(s, left_w);
       out.push_str(marker);
       out.push_str(&keep_right(s, right_w));
       out
@@ -796,7 +796,7 @@ mod truncate_visual_tests {
     // The CSI sequence itself contributes width 0, so even with a
     // tight budget the visible chars after still survive.
     let input = "\x1b[31mhi\x1b[0m";
-    let out = truncate_visual(input, 2, Justify::Left);
+    let out   = truncate_visual(input, 2, Justify::Left);
     // The input's own escapes survive verbatim; nothing is added.
     assert_eq!(out, "\x1b[31mhi\x1b[0m");
   }
@@ -812,7 +812,7 @@ mod truncate_visual_tests {
   #[test]
   fn ansi_only_input_passes_through() {
     let input = "\x1b[31m";
-    let out = truncate_visual(input, 5, Justify::Left);
+    let out   = truncate_visual(input, 5, Justify::Left);
     assert_eq!(out, "\x1b[31m");
   }
 
@@ -840,7 +840,7 @@ mod stylize_loglevel_tests {
       log::Level::Debug,
       log::Level::Trace,
     ] {
-      let out = stylize_loglevel(level);
+      let out  = stylize_loglevel(level);
       let name = format!("{level}");
       assert!(out.contains(&name), "level {level}: {out:?}");
     }
@@ -979,7 +979,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("NO_COLOR", "1");
     let styled = apply_fg_rgb(Style::new(), 200, 50, 75);
-    let out = render(styled);
+    let out    = render(styled);
     // No SGR escape sequence emitted at all.
     assert!(!out.contains('\x1b'), "got: {out:?}");
   }
@@ -990,7 +990,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("SHED_COLOR_MODE", "truecolor");
     let styled = apply_fg_rgb(Style::new(), 12, 34, 56);
-    let out = render(styled);
+    let out    = render(styled);
     // CSI 38 ; 2 ; R ; G ; B  m  for 24-bit foreground.
     assert!(out.contains("38;2;12;34;56"), "got: {out:?}");
   }
@@ -1001,7 +1001,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("SHED_COLOR_MODE", "256");
     let styled = apply_fg_rgb(Style::new(), 255, 0, 0);
-    let out = render(styled);
+    let out    = render(styled);
     // Pure red → xterm256 index 196.
     assert!(out.contains("38;5;196"), "got: {out:?}");
   }
@@ -1012,7 +1012,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("SHED_COLOR_MODE", "16");
     let styled = apply_fg_rgb(Style::new(), 0, 0, 255);
-    let out = render(styled);
+    let out    = render(styled);
     // Pure blue → index 4 (b<<2).
     assert!(out.contains("38;5;4"), "got: {out:?}");
   }
@@ -1025,7 +1025,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("NO_COLOR", "1");
     let styled = apply_bg_rgb(Style::new(), 10, 20, 30);
-    let out = render(styled);
+    let out    = render(styled);
     assert!(!out.contains('\x1b'), "got: {out:?}");
   }
 
@@ -1035,7 +1035,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("SHED_COLOR_MODE", "truecolor");
     let styled = apply_bg_rgb(Style::new(), 12, 34, 56);
-    let out = render(styled);
+    let out    = render(styled);
     // CSI 48 ; 2 ; R ; G ; B m for 24-bit background.
     assert!(out.contains("48;2;12;34;56"), "got: {out:?}");
   }
@@ -1046,7 +1046,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("SHED_COLOR_MODE", "256");
     let styled = apply_bg_rgb(Style::new(), 0, 255, 0);
-    let out = render(styled);
+    let out    = render(styled);
     // Pure green → xterm256 index 46.
     assert!(out.contains("48;5;46"), "got: {out:?}");
   }
@@ -1057,7 +1057,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("SHED_COLOR_MODE", "16");
     let styled = apply_bg_rgb(Style::new(), 255, 0, 0);
-    let out = render(styled);
+    let out    = render(styled);
     // Pure red → index 1.
     assert!(out.contains("48;5;1"), "got: {out:?}");
   }
@@ -1076,7 +1076,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("SHED_COLOR_MODE", "truecolor");
     let painted = apply_fg_rgb_raw("x".paint(Style::new()), 7, 8, 9);
-    let out = render_painted(painted);
+    let out     = render_painted(painted);
     assert!(out.contains("38;2;7;8;9"), "got: {out:?}");
   }
 
@@ -1086,7 +1086,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("NO_COLOR", "1");
     let painted = apply_fg_rgb_raw("x".paint(Style::new()), 7, 8, 9);
-    let out = render_painted(painted);
+    let out     = render_painted(painted);
     assert!(!out.contains('\x1b'), "got: {out:?}");
   }
 
@@ -1098,7 +1098,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("SHED_COLOR_MODE", "truecolor");
     let painted = apply_bg_rgb_raw("x".paint(Style::new()), 7, 8, 9);
-    let out = render_painted(painted);
+    let out     = render_painted(painted);
     assert!(out.contains("48;2;7;8;9"), "got: {out:?}");
   }
 
@@ -1108,7 +1108,7 @@ mod color_application_tests {
     reset_color_env();
     set_var("SHED_COLOR_MODE", "256");
     let painted = apply_bg_rgb_raw("x".paint(Style::new()), 0, 0, 255);
-    let out = render_painted(painted);
+    let out     = render_painted(painted);
     // Pure blue → 21.
     assert!(out.contains("48;5;21"), "got: {out:?}");
   }

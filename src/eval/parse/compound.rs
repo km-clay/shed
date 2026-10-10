@@ -18,7 +18,7 @@ use super::{
 impl ParseStream {
   pub(super) fn parse_func_def(&mut self) -> ShResult<Option<NodeId>> {
     let mut span: Option<Span> = None;
-    let has_func_kw = self.check_keyword(b"function");
+    let     has_func_kw        = self.check_keyword(b"function");
 
     if has_func_kw {
       extend_span!(span, self.next_tk().unwrap().span);
@@ -68,7 +68,7 @@ impl ParseStream {
     }
 
     let name = self.tree.alloc(name);
-    let ctx = self.tree.alloc(ctx);
+    let ctx  = self.tree.alloc(ctx);
     let span = self.tree.alloc(span.unwrap_or_default());
 
     let node = node!(self, span, NdRule::FuncDef { name, body, ctx });
@@ -80,10 +80,10 @@ impl ParseStream {
       return Ok(None);
     }
 
-    let mut span: Option<Span> = None;
+    let mut span     : Option<Span> = None;
     let mut body_span: Option<Span> = None;
 
-    let mut body = vec![];
+    let mut body   = vec![];
     let mut redirs = vec![];
 
     extend_span!(span, self.next_tk().unwrap().span);
@@ -127,18 +127,18 @@ impl ParseStream {
     }
 
     let body_span = self.tree.alloc(body_span.unwrap_or_default());
-    let body = self.tree.alloc_children(body);
+    let body      = self.tree.alloc_children(body);
 
-    let node = node!(self, body_span, NdRule::List { commands: body }, None);
+    let node      = node!(self, body_span, NdRule::List { commands: body }, None);
 
-    let body = self.tree.alloc(node);
+    let body      = self.tree.alloc(node);
 
     self.parse_redir(&mut redirs, &mut span)?;
 
     let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
-    let span = self.tree.alloc(span.unwrap_or_default());
+    let span   = self.tree.alloc(span.unwrap_or_default());
 
-    let node = node!(self, span, NdRule::Subshell { body }, redirs);
+    let node   = node!(self, span, NdRule::Subshell { body }, redirs);
 
     Ok(Some(self.tree.alloc(node)))
   }
@@ -147,10 +147,10 @@ impl ParseStream {
       return Ok(None);
     }
 
-    let mut span: Option<Span> = None;
+    let mut span     : Option<Span> = None;
     let mut body_span: Option<Span> = None;
 
-    let mut body = vec![];
+    let mut body   = vec![];
     let mut redirs = vec![];
 
     extend_span!(span, self.next_tk().unwrap().span);
@@ -191,19 +191,19 @@ impl ParseStream {
     }
 
     let body_span = self.tree.alloc(body_span.unwrap_or_default());
-    let body = self.tree.alloc_children(body);
+    let body      = self.tree.alloc_children(body);
 
-    let node = node!(self, body_span, NdRule::List { commands: body }, None);
-    let body = self.tree.alloc(node);
+    let node      = node!(self, body_span, NdRule::List { commands: body }, None);
+    let body      = self.tree.alloc(node);
 
     if !from_func_def {
       self.parse_redir(&mut redirs, &mut span)?;
     }
 
-    let span = self.tree.alloc(span.unwrap_or_default());
+    let span   = self.tree.alloc(span.unwrap_or_default());
     let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
-    let node = node!(self, span, NdRule::BraceGrp { body }, redirs);
+    let node   = node!(self, span, NdRule::BraceGrp { body }, redirs);
 
     Ok(Some(self.tree.alloc(node)))
   }
@@ -212,7 +212,7 @@ impl ParseStream {
       return Ok(None);
     }
 
-    let mut span: Option<Span> = None;
+    let mut span       : Option<Span>  = None;
 
     let mut case_blocks: Vec<CaseNode> = vec![];
     let mut redirs = vec![];
@@ -300,7 +300,7 @@ impl ParseStream {
         }
         extend_span!(span, self.next_tk().unwrap().span);
       }
-      let mut arm_commands = vec![];
+      let mut arm_commands           = vec![];
       let mut arm_span: Option<Span> = None;
 
       while !found_end {
@@ -321,18 +321,18 @@ impl ParseStream {
         }
       }
 
-      let arm_span = self.tree.alloc(arm_span.unwrap_or_default());
+      let arm_span     = self.tree.alloc(arm_span.unwrap_or_default());
       let arm_commands = self.tree.alloc_children(arm_commands);
 
       let arm_body = node!(
         self,
         arm_span,
         NdRule::List {
-          commands: arm_commands
+          commands: arm_commands,
         }
       );
 
-      let body = self.tree.alloc(arm_body);
+      let body      = self.tree.alloc(arm_body);
 
       let case_node = CaseNode { patterns, body };
       case_blocks.push(case_node);
@@ -351,10 +351,10 @@ impl ParseStream {
       }
     }
 
-    let span = self.tree.alloc(span.unwrap_or_default());
-    let pattern = self.tree.alloc(pattern);
+    let span        = self.tree.alloc(span.unwrap_or_default());
+    let pattern     = self.tree.alloc(pattern);
     let case_blocks = self.tree.alloc_cases(case_blocks);
-    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+    let redirs      = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
     let node = node!(
       self,
@@ -405,9 +405,9 @@ impl ParseStream {
     }
 
     let mut span: Option<Span> = None;
-    let mut redirs = vec![];
+    let mut redirs             = vec![];
 
-    let arith_tk = self.next_tk().unwrap();
+    let     arith_tk           = self.next_tk().unwrap();
     extend_span!(span, arith_tk.clone().span);
 
     self.parse_redir(&mut redirs, &mut span)?;
@@ -416,11 +416,11 @@ impl ParseStream {
       bail!(self, span, "Unexpected argument after arithmetic command");
     }
 
-    let span = self.tree.alloc(span.unwrap_or_default());
-    let body = self.tree.alloc(arith_tk);
+    let span   = self.tree.alloc(span.unwrap_or_default());
+    let body   = self.tree.alloc(arith_tk);
     let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
-    let node = node!(self, span, NdRule::Arithmetic { body }, redirs);
+    let node   = node!(self, span, NdRule::Arithmetic { body }, redirs);
 
     Ok(Some(self.tree.alloc(node)))
   }
@@ -428,7 +428,7 @@ impl ParseStream {
     if (!self.check_keyword(b"not") && !self.check_keyword(b"!")) || !self.next_tk_is_some() {
       return Ok(None);
     }
-    let display = if self.check_keyword(b"!") { "!" } else { "not" };
+    let     display            = if self.check_keyword(b"!") { "!" } else { "not" };
 
     let mut span: Option<Span> = None;
 
@@ -454,8 +454,8 @@ impl ParseStream {
       return Ok(None);
     }
 
-    let mut span: Option<Span> = None;
-    let mut cond_nodes: Vec<CondNode> = vec![];
+    let mut span      : Option<Span>   = None;
+    let mut cond_nodes: Vec<CondNode>  = vec![];
     let mut else_block: Option<NodeId> = None;
     let mut redirs = vec![];
 
@@ -519,9 +519,9 @@ impl ParseStream {
 
     self.assert_separator(&mut span)?;
 
-    let span = self.tree.alloc(span.unwrap_or_default());
+    let span       = self.tree.alloc(span.unwrap_or_default());
     let cond_nodes = self.tree.alloc_conds(cond_nodes);
-    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+    let redirs     = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
     let node = node!(
       self,
@@ -536,9 +536,9 @@ impl ParseStream {
     Ok(Some(self.tree.alloc(node)))
   }
   pub(super) fn parse_for_arith(&mut self, span: &mut Option<Span>) -> ShResult<Option<NodeId>> {
-    let mut redirs = vec![];
+    let mut redirs   = vec![];
 
-    let arith_tk = self.next_tk().unwrap(); // we checked already
+    let     arith_tk = self.next_tk().unwrap(); // we checked already
     extend_span!(*span, arith_tk.clone().span);
     let (init, cond, step) = match stream::split_for_arith_tk(&mut self.tree, &arith_tk)? {
       None => (None, None, None),
@@ -567,7 +567,7 @@ impl ParseStream {
     extend_span!(*span, self.next_tk().unwrap().span);
 
     self.parse_redir(&mut redirs, span)?;
-    let span = self.tree.alloc(span.unwrap_or_default());
+    let span   = self.tree.alloc(span.unwrap_or_default());
     let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
     let node = node!(
@@ -586,19 +586,19 @@ impl ParseStream {
   }
   pub(super) fn parse_for_arr(&mut self, span: &mut Option<Span>) -> ShResult<Option<NodeId>> {
     let mut vars: Vec<Tk> = vec![];
-    let mut arr: Vec<Tk> = vec![];
-    let mut redirs = vec![];
+    let mut arr : Vec<Tk> = vec![];
+    let mut redirs        = vec![];
 
     // Read variable names, stopping at "in", a separator, or "do". Whether an
     // "in" clause is present decides the iteration list: "for x in words"
     // iterates "words" (possibly empty, zero iterations), while "for x" with
     // no "in" iterates the positional parameters ("$@").
-    let mut positional = true;
+    let mut positional    = true;
     let array_checks = |this: &Self| {
       this.peek_tk().map(|tk| {
-        let is_in = *tk.slice() == *b"in";
+        let is_in  = *tk.slice() == *b"in";
         let is_sep = tk.class == TkRule::Sep;
-        let is_do = *tk.slice() == *b"do";
+        let is_do  = *tk.slice() == *b"do";
         (is_in, is_sep, is_do)
       })
     };
@@ -657,9 +657,9 @@ impl ParseStream {
     self.parse_redir(&mut redirs, span)?;
 
     self.assert_separator(span)?;
-    let span = self.tree.alloc(span.unwrap_or_default());
-    let vars = self.tree.alloc_tokens(vars);
-    let arr = self.tree.alloc_tokens(arr);
+    let span   = self.tree.alloc(span.unwrap_or_default());
+    let vars   = self.tree.alloc_tokens(vars);
+    let arr    = self.tree.alloc_tokens(arr);
     let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
     let node = node!(
@@ -696,9 +696,9 @@ impl ParseStream {
     }
 
     let mut span: Option<Span> = None;
-    let mut redirs = vec![];
+    let mut redirs             = vec![];
 
-    let loop_tk = self.next_tk().unwrap();
+    let     loop_tk            = self.next_tk().unwrap();
     let loop_kind: LoopKind = util::parse_bytes(loop_tk.slice().as_bytes()) // LoopKind implements FromStr
       .unwrap();
 
@@ -734,8 +734,8 @@ impl ParseStream {
     self.assert_separator(&mut span)?;
 
     let cond_node = self.tree.alloc(CondNode { cond, body });
-    let span = self.tree.alloc(span.unwrap_or_default());
-    let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
+    let span      = self.tree.alloc(span.unwrap_or_default());
+    let redirs    = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
     let node = node!(
       self,
@@ -755,10 +755,10 @@ impl ParseStream {
     }
 
     let mut span: Option<Span> = None;
-    let mut redirs = vec![];
+    let mut redirs             = vec![];
 
-    let try_tk = self.next_tk().unwrap();
-    let try_tk_span = try_tk.span;
+    let     try_tk             = self.next_tk().unwrap();
+    let     try_tk_span        = try_tk.span;
 
     extend_span!(span, try_tk.span);
     self.catch_separator(&mut span);
@@ -806,10 +806,10 @@ impl ParseStream {
     }
 
     let body_span = self.tree.alloc(body_span.unwrap_or_default());
-    let body = self.tree.alloc_children(body);
+    let body      = self.tree.alloc_children(body);
     let body_node = node!(self, body_span, NdRule::List { commands: body }, None);
 
-    let body = self.tree.alloc(body_node);
+    let body      = self.tree.alloc(body_node);
     self
       .tree
       .walk_tree_mut(body, &mut |id, tree| tree[id].is_err());
@@ -830,8 +830,8 @@ impl ParseStream {
     let mut err = vec![];
 
     while let Some(tk) = self.peek_tk() {
-      let is_sep = tk.class == TkRule::Sep;
-      let is_done = tk.flags.contains(TkFlags::KEYWORD) && tk.slice().as_bytes() == b"done";
+      let is_sep        = tk.class == TkRule::Sep;
+      let is_done       = tk.flags.contains(TkFlags::KEYWORD) && tk.slice().as_bytes() == b"done";
       let is_terminator = matches!(tk.class, TkRule::Comment);
       if is_sep || is_done || is_terminator {
         break;
@@ -846,10 +846,10 @@ impl ParseStream {
     if !self.check_keyword(b"do") {
       self.parse_redir(&mut redirs, &mut span)?;
 
-      let span = self.tree.alloc(span.unwrap_or_default());
+      let span   = self.tree.alloc(span.unwrap_or_default());
       let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
-      let err = self.tree.alloc_tokens(err);
-      let ctx = self.tree.alloc(ctx);
+      let err    = self.tree.alloc_tokens(err);
+      let ctx    = self.tree.alloc(ctx);
 
       let node = node!(
         self,
@@ -899,10 +899,10 @@ impl ParseStream {
 
     self.parse_redir(&mut redirs, &mut span)?;
 
-    let catch = Some(catch_body);
-    let span = self.tree.alloc(span.unwrap_or_default());
-    let err = self.tree.alloc_tokens(err);
-    let ctx = self.tree.alloc(ctx);
+    let catch  = Some(catch_body);
+    let span   = self.tree.alloc(span.unwrap_or_default());
+    let err    = self.tree.alloc_tokens(err);
+    let ctx    = self.tree.alloc(ctx);
     let redirs = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
     let node = node!(
@@ -925,8 +925,8 @@ impl ParseStream {
     }
     let mut span: Option<Span> = None;
 
-    let defer_tk = self.next_tk().unwrap();
-    let defer_tk_span = defer_tk.span;
+    let     defer_tk           = self.next_tk().unwrap();
+    let     defer_tk_span      = defer_tk.span;
 
     extend_span!(span, defer_tk.span);
 
@@ -953,7 +953,7 @@ impl ParseStream {
     self.catch_separator(&mut span);
 
     let span = self.tree.alloc(span.unwrap_or_default());
-    let ctx = self.tree.alloc(ctx);
+    let ctx  = self.tree.alloc(ctx);
 
     let node = node!(self, span, NdRule::DeferNode { body, ctx });
 
@@ -1035,8 +1035,8 @@ mod parse_for_arith_tests {
 
   #[test]
   fn arith_for_loop_with_redirect_on_done() {
-    let _g = TestGuard::new();
-    let dir = tempfile::TempDir::new().unwrap();
+    let _g   = TestGuard::new();
+    let dir  = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("out.txt");
     test_input(format!(
       "for (( i=0; i<2; i=i+1 )); do echo $i; done > {}",

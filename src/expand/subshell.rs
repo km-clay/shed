@@ -26,8 +26,8 @@ use nix::{errno::Errno, libc::STDOUT_FILENO};
 
 pub(crate) fn expand_proc_sub(span: Option<Span>, raw: &str, is_input: bool) -> ShResult<String> {
   let (rpipe, wpipe) = procio::pipes_high_no_cloexec()?;
-  let rpipe_raw = rpipe.as_raw_fd();
-  let wpipe_raw = wpipe.as_raw_fd();
+  let rpipe_raw      = rpipe.as_raw_fd();
+  let wpipe_raw      = wpipe.as_raw_fd();
 
   let (proc_fd, register_fd, redir_type, path) = if is_input {
     (
@@ -46,7 +46,7 @@ pub(crate) fn expand_proc_sub(span: Option<Span>, raw: &str, is_input: bool) -> 
   };
 
   let target_fd = match redir_type {
-    RedirType::Input => 0,
+    RedirType::Input  => 0,
     RedirType::Output => 1,
     _ => unreachable!(),
   };
@@ -96,8 +96,8 @@ pub(crate) fn is_internal(raw: &[u8]) -> bool {
     return false;
   }
 
-  let ast = parser.into_ast();
-  let roots = ast.roots();
+  let     ast   = parser.into_ast();
+  let     roots = ast.roots();
 
   let mut forks = false;
   for root in roots.iter().copied() {
@@ -108,7 +108,7 @@ pub(crate) fn is_internal(raw: &[u8]) -> bool {
   }
 
   let has_forking_sub = readline::nested_subs(raw).into_iter().any(|sub| match sub {
-    NestedSub::Proc(_) => true,
+    NestedSub::Proc(_)      => true,
     NestedSub::Cmd(_, body) => !is_internal(body.as_bytes()),
   });
   if has_forking_sub {
@@ -124,7 +124,7 @@ pub(crate) fn internal_cmd_sub(raw: &[u8]) -> ShResult<VarStr> {
 
   {
     // apply write in here
-    let _guard = Sinks::apply_sink(write, STDOUT_FILENO)?;
+    let _guard   = Sinks::apply_sink(write, STDOUT_FILENO)?;
     let _ceiling = guards::isolation_guard(None);
 
     if let Err(e) = execute::exec_nonint(raw.into(), Some("command_sub".into())) {
@@ -134,7 +134,7 @@ pub(crate) fn internal_cmd_sub(raw: &[u8]) -> ShResult<VarStr> {
   }
 
   let truncated = read.was_truncated();
-  let bytes = procio::drain_sink(&*read)?;
+  let bytes     = procio::drain_sink(&*read)?;
 
   if truncated {
     Shed::set_status(procio::SINK_TRUNCATED_STATUS);
@@ -192,17 +192,17 @@ pub(crate) fn expand_cmd_sub(span: Option<Span>, raw: &[u8]) -> ShResult<VarStr>
 
       // Read output first (before waiting) to avoid deadlock if
       // child fills pipe buffer
-      let sink = procio::read_capped(rpipe.as_fd())?;
+      let sink      = procio::read_capped(rpipe.as_fd())?;
       let truncated = sink.was_truncated();
-      let size = sink.limit();
-      let output = VarStr::from(sink.trim_end_with(|c| c == '\n'));
+      let size      = sink.limit();
+      let output    = VarStr::from(sink.trim_end_with(|c| c == '\n'));
 
       // Wait for child with EINTR retry
       let status = loop {
         match waitpid(child, Some(WtFlag::WUNTRACED)) {
-          Ok(status) => break status,
+          Ok(status)        => break status,
           Err(Errno::EINTR) => (),
-          Err(e) => return Err(e.into()),
+          Err(e)            => return Err(e.into()),
         }
       };
 
@@ -327,14 +327,14 @@ mod tests {
   #[test]
   fn cmd_sub_only_final_newline_is_stripped() {
     // Internal newlines must survive; just the trailing run is removed.
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = expand_cmd_sub(None, b"printf 'a\\nb\\nc\\n'").unwrap();
     assert_eq!(result, "a\nb\nc");
   }
 
   #[test]
   fn cmd_sub_empty_output() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = expand_cmd_sub(None, b"true").unwrap();
     assert_eq!(result, "");
   }
@@ -344,7 +344,7 @@ mod tests {
     use crate::state::{Shed, vars::VarFlags, vars::VarKind};
     use crate::tests::testutil::canon;
 
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let start = std::env::current_dir().unwrap();
     // cwd_guard keys off `$PWD`; give it a baseline to save/compare against.
     Shed::vars_mut(|v| {
@@ -365,7 +365,7 @@ mod tests {
 
     let after = std::env::current_dir().unwrap();
     // Restore before asserting so a regression can't leak into sibling tests.
-    let _ = std::env::set_current_dir(&start);
+    let _     = std::env::set_current_dir(&start);
     assert_eq!(
       canon(&after),
       canon(&start),
@@ -378,7 +378,7 @@ mod tests {
     // `trap` forces a fork; the forked child must run its own EXIT trap on the
     // way out (via exit_shed) and the output must land in the captured sub — not
     // leak to the parent. Exercises trap-forces-fork + setup_child + exit_shed.
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = expand_cmd_sub(None, b"trap 'echo trapped' EXIT; true").unwrap();
     assert_eq!(result, "trapped");
   }
@@ -432,7 +432,7 @@ mod tests {
     // is_input=true: path points at the writer fd we hold open in the
     // parent (so we could write through it); the format is the
     // /dev/fd/N path.
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let path = expand_proc_sub(None, "echo hello", true).unwrap();
     assert!(
       path.starts_with("/dev/fd/"),
@@ -447,7 +447,7 @@ mod tests {
     // child alive forever otherwise, and the orphan deadlocks
     // TestGuard teardown on macOS (master close blocks waiting for
     // the slave fds the orphan inherited).
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let path = expand_proc_sub(None, "true", false).unwrap();
     assert!(
       path.starts_with("/dev/fd/"),
@@ -460,8 +460,8 @@ mod tests {
     // <(cmd) — reading from the returned path should yield the
     // command's stdout. This exercises the full plumbing: dup target
     // fd 1 in the child, parent reads via /dev/fd.
-    let _g = TestGuard::new();
-    let path = expand_proc_sub(None, "echo proc_sub_marker_xyz", false).unwrap();
+    let _g      = TestGuard::new();
+    let path    = expand_proc_sub(None, "echo proc_sub_marker_xyz", false).unwrap();
     // Open the path and read; the child writes 'proc_sub_marker_xyz\n'.
     let content = std::fs::read_to_string(&path).unwrap();
     assert!(content.contains("proc_sub_marker_xyz"), "got: {content:?}");

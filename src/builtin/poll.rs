@@ -158,7 +158,7 @@ impl Poll {
       .filter(|s| !s.is_empty())
     {
       flags |= match tok {
-        b"in" => libc::POLLIN,
+        b"in"  => libc::POLLIN,
         b"out" => libc::POLLOUT,
         b"pri" => libc::POLLPRI,
         #[cfg(linux_like)]
@@ -189,15 +189,15 @@ impl Poll {
     for (arg, span) in args.arguments() {
       let (fd, flags) = match arg.split_once_str(":") {
         Some((fd, flags)) => (fd, flags),
-        None => (arg.as_bytes(), b"in".as_slice()),
+        None              => (arg.as_bytes(), b"in".as_slice()),
       };
 
       let Ok(fd) = fd.to_str_lossy().parse::<RawFd>() else {
         let span = span.sub_span(|s, _| (s, s + fd.len()));
-        let fd = fd.to_str_lossy();
+        let fd   = fd.to_str_lossy();
         return Err(sherr!(ExecFail @ span, "invalid fd `{fd}` in argument `{arg}`"));
       };
-      let flags = Self::parse_flags(flags, span, arg)?;
+      let flags    = Self::parse_flags(flags, span, arg)?;
 
       let (pfd, m) = Self::resolve(fd, flags, span)?;
       pfds.push(pfd);
@@ -209,7 +209,7 @@ impl Poll {
   fn parse_events(events: VarStr, args: &super::BuiltinArgs) -> ShResult<PollEntries> {
     let mut pfds = vec![];
     let mut meta = vec![];
-    let span = args.opt_span("events").unwrap();
+    let     span = args.opt_span("events").unwrap();
 
     let Some(arr) = Shed::vars(|m| m.try_get_var_meta(&events.to_str_lossy())) else {
       return Err(sherr!(ExecFail @ span, "events array `{events}` not found"));
@@ -225,7 +225,7 @@ impl Poll {
         return Err(sherr!(ExecFail @ span, "invalid fd `{fd}` in events array `{events}`"));
       };
 
-      let flags = Self::parse_flags(flags.as_bytes(), span, &events)?;
+      let flags    = Self::parse_flags(flags.as_bytes(), span, &events)?;
       let (pfd, m) = Self::resolve(fd, flags, span)?;
       pfds.push(pfd);
       meta.push(m);
@@ -265,7 +265,7 @@ mod tests {
 
   #[test]
   fn poll_readable_and_timeout() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let (r, w) = procio::pipes_high().unwrap();
     install(7, r);
 
@@ -284,7 +284,7 @@ mod tests {
 
   #[test]
   fn poll_reports_hup_when_writer_closes() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let (r, w) = procio::pipes_high().unwrap();
     install(8, r);
     drop(w); // close the write end -> read end hangs up
@@ -297,7 +297,7 @@ mod tests {
 
   #[test]
   fn poll_writable_nonblocking() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let (r, w) = procio::pipes_high().unwrap();
     install(9, w); // the write end of an empty pipe is writable
 
@@ -310,7 +310,7 @@ mod tests {
 
   #[test]
   fn poll_array_form_with_custom_output() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let (r, w) = procio::pipes_high().unwrap();
     install(5, r);
     write_byte(&w);
@@ -335,7 +335,7 @@ mod tests {
 
   #[test]
   fn poll_invalid_flag_errors() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let (r, w) = procio::pipes_high().unwrap();
     install(6, r);
 

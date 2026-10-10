@@ -17,7 +17,6 @@ use super::{
 };
 
 pub(super) struct Format;
-#[rustfmt::skip]
 impl Builtin for Format {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
@@ -28,13 +27,13 @@ impl Builtin for Format {
     ]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let arguments = args.arguments();
+    let arguments      = args.arguments();
     let parse_duration = args.has_opt("duration");
-    let utc = args.has_opt("utc");
+    let utc            = args.has_opt("utc");
 
     if parse_duration && args.has_opt("timezone") {
       let dur_flag = args.opt_span("duration").unwrap().slice();
-      let tz_flag = args.opt_span("timezone").unwrap().slice();
+      let tz_flag  = args.opt_span("timezone").unwrap().slice();
       return Err(
         sherr!(ExecFail @ args.cmd_span(), "cannot use {dur_flag} and {tz_flag} together")
           .with_code(2),
@@ -47,7 +46,7 @@ impl Builtin for Format {
     let fmt_string = args
       .opt_value("format")
       .unwrap_or_else(|| match parse_duration {
-        true => VarStr::from("%[%y years %]%[%O months %]%[%D days, %]%[%H:%]%M:%S.%03L"),
+        true  => VarStr::from("%[%y years %]%[%O months %]%[%D days, %]%[%H:%]%M:%S.%03L"),
         false => VarStr::from("%a %b %e %I:%M:%S %p %Z %Y"),
       });
 

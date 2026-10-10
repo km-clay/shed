@@ -10,9 +10,9 @@ use super::opt::{Opt, Word};
 /// `span` of the entire command for error reporting, and `stdin` piped in
 /// from a previous builtin in an in-process pipeline.
 pub(crate) struct BuiltinArgs {
-  argv: Vec<Word>,
+  argv    : Vec<Word>,
   /// The span of the entire builtin call
-  span: Span,
+  span    : Span,
   /// The span of just the command
   cmd_span: Span,
 }
@@ -54,7 +54,7 @@ impl BuiltinArgs {
   pub(crate) fn options(&self) -> impl Iterator<Item = &Opt> {
     self.argv.iter().filter_map(|word| match word {
       Word::Opt(opt) => Some(opt),
-      _ => None,
+      _              => None,
     })
   }
   /// Check if the builtin has an option with the given key.
@@ -91,8 +91,8 @@ impl BuiltinArgs {
       .filter(|word| !matches!(word, Word::Sep(_)))
       .partition_map(|word| match word {
         Word::Arg(var_str, span) => itertools::Either::Left((var_str, span)),
-        Word::Opt(opt) => itertools::Either::Right(opt),
-        Word::Sep(_) => unreachable!(),
+        Word::Opt(opt)           => itertools::Either::Right(opt),
+        Word::Sep(_)             => unreachable!(),
       })
   }
 }

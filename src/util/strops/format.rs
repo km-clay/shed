@@ -39,8 +39,8 @@ pub(crate) enum Count {
 /// The parsed `%[flags][width][.prec]` prefix, handed to `render`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FieldParams {
-  flags: FmtFlags,
-  width: Option<Count>,
+  flags    : FmtFlags,
+  width    : Option<Count>,
   precision: Option<Count>,
 }
 
@@ -70,12 +70,12 @@ impl NumPrefix {
   }
   pub(crate) fn marker(self) -> &'static [u8] {
     match self {
-      NumPrefix::Sign(Sign::Plus) => b"+",
-      NumPrefix::Sign(Sign::Minus) => b"-",
-      NumPrefix::Sign(Sign::Space) => b" ",
+      NumPrefix::Sign(Sign::Plus)             => b"+",
+      NumPrefix::Sign(Sign::Minus)            => b"-",
+      NumPrefix::Sign(Sign::Space)            => b" ",
       NumPrefix::Base(Base::Hex(Case::Upper)) => b"0X",
       NumPrefix::Base(Base::Hex(Case::Lower)) => b"0x",
-      NumPrefix::Base(Base::Octal) => b"0",
+      NumPrefix::Base(Base::Octal)            => b"0",
     }
   }
 }
@@ -102,7 +102,7 @@ pub(crate) enum Sign {
 impl From<Sign> for u8 {
   fn from(value: Sign) -> Self {
     match value {
-      Sign::Plus => b'+',
+      Sign::Plus  => b'+',
       Sign::Minus => b'-',
       Sign::Space => b' ',
     }
@@ -111,7 +111,7 @@ impl From<Sign> for u8 {
 
 pub(crate) enum FieldKind {
   Numeric {
-    prefix: Option<NumPrefix>,
+    prefix  : Option<NumPrefix>,
     zero_pad: bool,
   },
   String,
@@ -259,25 +259,24 @@ enum Segment<C> {
 /// Requires an implementor of [`StrFmt`] and a format string.
 /// [`StrFormatter::render()`] requires a source of values to format, which is also defined by the [`StrFmt`] implementor.
 pub(crate) struct StrFormatter<'s, S: StrFmt> {
-  set: &'s S,
+  set     : &'s S,
   segments: Box<[Segment<S::Conv>]>,
 }
 
 impl<'s, S: StrFmt> StrFormatter<'s, S> {
   pub(crate) fn parse(set: &'s S, fmt: &[u8]) -> ShResult<Self> {
-    let mut cursor = SliceCursor::new(fmt);
-    let segments = Self::parse_segments(set, &mut cursor, None)?;
+    let mut cursor   = SliceCursor::new(fmt);
+    let     segments = Self::parse_segments(set, &mut cursor, None)?;
     Ok(Self {
       set,
       segments: segments.into_boxed_slice(),
     })
   }
 
-  #[rustfmt::skip]
   fn parse_segments(
     set: &'s S,
     cur: &mut SliceCursor,
-    closer: Option<char>
+    closer: Option<char>,
   ) -> ShResult<Vec<Segment<S::Conv>>> {
     let mut segments: Vec<Segment<S::Conv>> = Vec::new();
     let mut literal = vec![];
@@ -344,7 +343,7 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
       let (opener, closer) = match exp {
         ']' => ("%[", "%]"),
         '}' => ("%{", "%}"),
-        _ => unreachable!()
+        _   => unreachable!(),
       };
       return Err(sherr!(ParseErr, "unmatched '{opener}' in format string, expected '{closer}'"));
     }
@@ -356,8 +355,8 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
 
   fn parse_fields(cur: &mut SliceCursor) -> ShResult<FieldParams> {
     Ok(FieldParams {
-      flags: Self::parse_flags(cur)?,
-      width: Self::parse_width(cur)?,
+      flags    : Self::parse_flags(cur)?,
+      width    : Self::parse_width(cur)?,
       precision: Self::parse_prec(cur)?,
     })
   }
@@ -428,7 +427,6 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
     Ok(())
   }
 
-  #[rustfmt::skip]
   fn render_segments(
     &self,
     segments: &[Segment<S::Conv>],
@@ -437,24 +435,22 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
   ) -> ShResult<Option<RenderResult>> {
     let mut seg_result = None;
 
-    let mut update_result = |present: bool| {
-      match seg_result {
-        None if present  => seg_result = Some(RenderResult::All     ),
-        None if !present => seg_result = Some(RenderResult::NoRender),
+    let mut update_result = |present: bool| match seg_result {
+      None if present  => seg_result = Some(RenderResult::All),
+      None if !present => seg_result = Some(RenderResult::NoRender),
 
-        Some(RenderResult::NoRender) if present  => seg_result = Some(RenderResult::Any),
-        Some(RenderResult::All     ) if !present => seg_result = Some(RenderResult::Any),
-        _ => ()
-      }
+      Some(RenderResult::NoRender) if present => seg_result = Some(RenderResult::Any),
+      Some(RenderResult::All) if !present     => seg_result = Some(RenderResult::Any),
+      _ => (),
     };
 
     for seg in segments {
       match seg {
         Segment::Literal(b) => {
           out.extend_from_slice(b);
-        },
+        }
         Segment::Spec(field, conv) => {
-          let field = self.resolve_counts(field, src)?;
+          let field    = self.resolve_counts(field, src)?;
           let rendered = self.set.render(conv, &field, src)?;
           pad_and_render(&rendered, &field, out);
 
@@ -464,9 +460,13 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
           let mut buf = vec![];
 
           let should_render = match seg {
-            Segment::AnyGroup(_, _) => self.render_segments(inner, src, &mut buf)?.is_none_or(|r| r.any_rendered()),
-            Segment::AllGroup(_, _) => self.render_segments(inner, src, &mut buf)?.is_none_or(|r| r.all_rendered()),
-            _ => unreachable!()
+            Segment::AnyGroup(_, _) => self
+              .render_segments(inner, src, &mut buf)?
+              .is_none_or(|r| r.any_rendered()),
+            Segment::AllGroup(_, _) => self
+              .render_segments(inner, src, &mut buf)?
+              .is_none_or(|r| r.all_rendered()),
+            _ => unreachable!(),
           };
 
           if should_render {
@@ -552,7 +552,7 @@ fn pad_and_render(field: &Field, params: &FieldParams, out: &mut Vec<u8>) {
     out.extend_from_slice(body);
     return;
   }
-  let pad = width - total;
+  let pad   = width - total;
   let flags = params.flags();
 
   if flags.contains(FmtFlags::LEFT) {

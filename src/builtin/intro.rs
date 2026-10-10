@@ -23,8 +23,8 @@ impl super::Builtin for Type {
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut status = 0;
-    let short = args.options().any(|o| o.key() == "short");
-    let terse = args.options().any(|o| o.key() == "terse");
+    let     short  = args.options().any(|o| o.key() == "short");
+    let     terse  = args.options().any(|o| o.key() == "terse");
 
     if terse {
       return Self::terse_mode(&args);
@@ -33,9 +33,9 @@ impl super::Builtin for Type {
     for (arg, span) in args.arguments() {
       if let Some(util) = cmd::which_util(&arg.to_str_lossy()) {
         match util.kind() {
-          UtilKind::Alias => Self::display_alias(arg, short),
+          UtilKind::Alias    => Self::display_alias(arg, short),
           UtilKind::Function => Self::display_func(arg, short),
-          UtilKind::Builtin => Self::display_builtin(arg, short),
+          UtilKind::Builtin  => Self::display_builtin(arg, short),
           UtilKind::Command(path_buf) | UtilKind::File(path_buf) => {
             Self::display_external(arg, path_buf, short);
           }
@@ -65,9 +65,9 @@ impl Type {
     for (arg, _) in args.arguments() {
       if let Some(util) = cmd::which_util(&arg.to_str_lossy()) {
         match util.kind() {
-          UtilKind::Alias => outln!("alias"),
+          UtilKind::Alias    => outln!("alias"),
           UtilKind::Function => outln!("function"),
-          UtilKind::Builtin => outln!("builtin"),
+          UtilKind::Builtin  => outln!("builtin"),
           UtilKind::Command(_) | UtilKind::File(_) => outln!("file"),
         }
       } else if KEYWORDS.contains(&arg.as_bytes()) {
@@ -79,9 +79,9 @@ impl Type {
     util::with_status(status)
   }
   fn display_alias(arg: &VarStr, short: bool) {
-    let alias = Shed::logic(|v| v.get_alias(&arg.to_str_lossy())).unwrap();
+    let alias       = Shed::logic(|v| v.get_alias(&arg.to_str_lossy())).unwrap();
     let (line, col) = alias.source().line_and_col().unwrap_or((0, 0));
-    let name = alias.source().name();
+    let name        = alias.source().name();
     if short {
       outln!("alias");
     } else {
@@ -98,7 +98,7 @@ impl Type {
     match func {
       ShFunc::Autoload(src) => {
         let (origin, location) = match &src {
-          AutoloadSrc::Path(p) => ("external", p.display().to_string()),
+          AutoloadSrc::Path(p)               => ("external", p.display().to_string()),
           AutoloadSrc::Embedded { name, .. } => ("embedded", name.to_str_lossy().to_string()),
         };
         if short {
@@ -109,7 +109,7 @@ impl Type {
       }
       ShFunc::Defined { source, .. } => {
         let (line, col) = source.line_and_col().unwrap_or((0, 0));
-        let name = source.name();
+        let name        = source.name();
         if short {
           outln!("function");
         } else {
@@ -147,21 +147,21 @@ impl Type {
   fn display_variable(arg: &VarStr, var: &Var, short: bool) {
     if short {
       match var.kind() {
-        VarKind::Str(_) => outln!("string"),
-        VarKind::Int(_) => outln!("integer"),
-        VarKind::Arr(_) => outln!("array"),
+        VarKind::Str(_)      => outln!("string"),
+        VarKind::Int(_)      => outln!("integer"),
+        VarKind::Arr(_)      => outln!("array"),
         VarKind::AssocArr(_) => outln!("assoc_array"),
-        VarKind::Magic(_) => outln!("magic"),
-        VarKind::Unset => outln!("unset"),
+        VarKind::Magic(_)    => outln!("magic"),
+        VarKind::Unset       => outln!("unset"),
       }
     } else {
       match var.kind() {
-        VarKind::Str(_) => outln!("{arg} is a string variable"),
-        VarKind::Int(_) => outln!("{arg} is an integer variable"),
-        VarKind::Arr(_) => outln!("{arg} is an array variable"),
+        VarKind::Str(_)      => outln!("{arg} is a string variable"),
+        VarKind::Int(_)      => outln!("{arg} is an integer variable"),
+        VarKind::Arr(_)      => outln!("{arg} is an array variable"),
         VarKind::AssocArr(_) => outln!("{arg} is an associative array"),
-        VarKind::Magic(_) => outln!("{arg} is a magic variable"),
-        VarKind::Unset => outln!("{arg} is a declared, unset variable"),
+        VarKind::Magic(_)    => outln!("{arg} is a magic variable"),
+        VarKind::Unset       => outln!("{arg} is a declared, unset variable"),
       }
     }
   }
@@ -285,7 +285,7 @@ mod tests {
 
   #[test]
   fn type_not_found() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = test_input("type __hopefully____not_______a____command__");
     assert!(result.is_ok());
     assert_eq!(state::Shed::get_status(), 1);

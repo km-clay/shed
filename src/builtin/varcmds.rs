@@ -25,13 +25,13 @@ trait VarCmd: super::Builtin {
   fn parse_args(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
     // Options are parsed normally, but operands stay raw so `prepare_assignment_argv`
     // can see the source (array literals, quoted RHS whitespace).
-    let (opts, operand_tks) = opt::parse_opts_raw(argv, &self.opts());
-    let operand_argv = prepare_assignment_argv(&operand_tks).promote_err(cmd_span)?;
+    let     (opts, operand_tks) = opt::parse_opts_raw(argv, &self.opts());
+    let     operand_argv        = prepare_assignment_argv(&operand_tks).promote_err(cmd_span)?;
 
     // The command word (always the first operand) stays at `words[0]` so
     // `run_builtin` strips it; options then follow, then the rest of the operands.
-    let mut operands = operand_argv.into_iter();
-    let mut words: Vec<Word> = vec![];
+    let mut operands            = operand_argv.into_iter();
+    let mut words: Vec<Word>    = vec![];
     if let Some((word, span)) = operands.next() {
       words.push(Word::Arg(word, span));
     }
@@ -42,8 +42,8 @@ trait VarCmd: super::Builtin {
       .iter()
       .map(|w| match w {
         Word::Arg(value, _) => value.clone(),
-        Word::Opt(opt) => opt.span().slice(),
-        Word::Sep(span) => span.slice(),
+        Word::Opt(opt)      => opt.span().slice(),
+        Word::Sep(span)     => span.slice(),
       })
       .collect();
 
@@ -65,8 +65,8 @@ pub(super) fn is_array_literal_assignment(raw: &[u8]) -> bool {
 pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
   let mut out = vec![];
   for tk in argv {
-    let slice = tk.span.slice();
-    let raw = slice.as_bytes();
+    let slice  = tk.span.slice();
+    let raw    = slice.as_bytes();
     let eq_pos = strops::split_at_unescaped(raw, b"=").map(|(pos, _)| pos);
 
     if is_array_literal_assignment(raw) {
@@ -134,24 +134,24 @@ enum IntrospectMode {
 /// before delegating here.
 fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags) -> ShResult<()> {
   let mut flags = base_flags;
-  let mut kind = DeclareKind::Str;
+  let mut kind  = DeclareKind::Str;
   for opt in opts {
     match opt.key() {
       "readonly" => flags |= VarFlags::READONLY,
-      "export" => flags |= VarFlags::EXPORT,
+      "export"   => flags |= VarFlags::EXPORT,
       "integer" => {
         kind = DeclareKind::Int;
         flags |= VarFlags::INTEGER;
       }
       "array" => kind = DeclareKind::Arr,
       "assoc" => kind = DeclareKind::Assoc,
-      _ => {}
+      _       => {}
     }
   }
 
   for (arg, span) in argv {
     let (name, raw_val) = strops::split_assignment_raw(&arg);
-    let name = &name.to_str_lossy();
+    let name            = &name.to_str_lossy();
 
     if matches!(kind, DeclareKind::Str | DeclareKind::Int) && raw_val.is_none() {
       Shed::vars_mut(|v| v.declare_var_novalue(name, flags)).promote_err(span)?;
@@ -161,15 +161,15 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
       (DeclareKind::Str, Some(v)) => assignment_value(v, span.slice().as_bytes()),
       (DeclareKind::Int, Some(v)) => {
         let evaluated = arithmetic::expand_arithmetic(Some(span), v).promote_err(span)?;
-        let n = evaluated.to_str_lossy().parse::<i32>().map_err(
-          |_| sherr!(ExecFail @ span, "declare -i: invalid arithmetic '{}'", v.to_str_lossy()),
-        )?;
+        let n = evaluated.to_str_lossy().parse::<i32>().map_err(|_| {
+          sherr!(ExecFail @ span, "declare -i: invalid arithmetic '{}'", v.to_str_lossy())
+        })?;
         VarKind::Int(n)
       }
-      (DeclareKind::Arr, Some(v)) => VarKind::arr_from_raw(v).promote_err(span)?,
-      (DeclareKind::Arr, None) => VarKind::Arr(VecDeque::new()),
+      (DeclareKind::Arr, Some(v))   => VarKind::arr_from_raw(v).promote_err(span)?,
+      (DeclareKind::Arr, None)      => VarKind::Arr(VecDeque::new()),
       (DeclareKind::Assoc, Some(v)) => VarKind::assoc_arr_from_raw(v).promote_err(span)?,
-      (DeclareKind::Assoc, None) => VarKind::AssocArr(Vec::new()),
+      (DeclareKind::Assoc, None)    => VarKind::AssocArr(Vec::new()),
 
       (DeclareKind::Str | DeclareKind::Int, None) => unreachable!("handled above"),
     };
@@ -203,8 +203,8 @@ impl super::Builtin for Declare {
     let mut introspect: Option<IntrospectMode> = None;
     for opt in &opts {
       match opt.key() {
-        "print" => introspect = Some(IntrospectMode::Vars),
-        "functions" => introspect = Some(IntrospectMode::FunctionsFull),
+        "print"          => introspect = Some(IntrospectMode::Vars),
+        "functions"      => introspect = Some(IntrospectMode::FunctionsFull),
         "function-names" => introspect = Some(IntrospectMode::FunctionNames),
         _ => {}
       }
@@ -335,7 +335,7 @@ impl super::Builtin for Readonly {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
 
-    let list = opts.iter().any(|o| o.key() == "print");
+    let list            = opts.iter().any(|o| o.key() == "print");
     if list || arg_vec.is_empty() {
       // List the readonly variables (bare `readonly` and `readonly -p`).
       let vars = Shed::vars(vars::display_readonly);
@@ -346,10 +346,10 @@ impl super::Builtin for Readonly {
 
     for (arg, span) in arg_vec {
       let (var, val) = split_assignment(&arg, span.slice().as_bytes());
-      let var = &var.to_str_lossy();
+      let var        = &var.to_str_lossy();
       Shed::vars_mut(|v| match val {
         Some(val) => v.set_var(var, val, VarFlags::READONLY),
-        None => v.declare_var_novalue(var, VarFlags::READONLY),
+        None      => v.declare_var_novalue(var, VarFlags::READONLY),
       })
       .promote_err(span)?;
     }
@@ -370,7 +370,7 @@ impl super::Builtin for Unset {
 
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
-    let is_func = opts.iter().any(|o| o.key() == "functions");
+    let is_func         = opts.iter().any(|o| o.key() == "functions");
 
     for (arg, _) in arg_vec {
       if is_func {
@@ -424,8 +424,8 @@ impl super::Builtin for Export {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
 
-    let unexport = opts.iter().any(|o| o.key() == "unexport");
-    let list = opts.iter().any(|o| o.key() == "print");
+    let unexport        = opts.iter().any(|o| o.key() == "unexport");
+    let list            = opts.iter().any(|o| o.key() == "print");
 
     if list || (arg_vec.is_empty() && !unexport) {
       // List the exported variables (bare `export` and `export -p` are the same).
@@ -436,7 +436,7 @@ impl super::Builtin for Export {
 
     for (arg, span) in arg_vec {
       let (var, val) = split_assignment(&arg, span.slice().as_bytes());
-      let var = &var.to_str_lossy();
+      let var        = &var.to_str_lossy();
       if unexport {
         if let Some(val) = val {
           Shed::vars_mut(|v| v.set_var(var, val, VarFlags::empty())).promote_err(span)?;
@@ -755,7 +755,7 @@ mod tests {
 
   #[test]
   fn local_sets_variable() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     test_input("local mylocal=hello").unwrap();
     assert_eq!(var!("mylocal"), "hello");
@@ -763,7 +763,7 @@ mod tests {
 
   #[test]
   fn local_sets_flag() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     test_input("local mylocal=val").unwrap();
     let flags = Shed::vars(|v| v.get_var_flags("mylocal"));
@@ -772,7 +772,7 @@ mod tests {
 
   #[test]
   fn local_empty_value() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     test_input("local mylocal").unwrap();
     assert_eq!(var!("mylocal"), "");
@@ -786,7 +786,7 @@ mod tests {
   #[test]
   fn local_display() {
     let guard = TestGuard::new();
-    let _fn = FuncScope::new();
+    let _fn   = FuncScope::new();
     test_input("local lv_test=display_val").unwrap();
     test_input("local").unwrap();
     let out = guard.read_output();
@@ -795,7 +795,7 @@ mod tests {
 
   #[test]
   fn local_multiple() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     test_input("local x=10 y=20").unwrap();
     assert_eq!(var!("x"), "10");
@@ -804,7 +804,7 @@ mod tests {
 
   #[test]
   fn local_cmd_sub_preserves_whitespace() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     // Regression: assignment RHS was going through word-splitting expand
     // which collapsed runs of whitespace into single spaces. Now uses
@@ -815,7 +815,7 @@ mod tests {
 
   #[test]
   fn local_cmd_sub_preserves_newlines() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     test_input(r"local ml=$(printf 'a\nb\nc')").unwrap();
     assert_eq!(var!("ml"), "a\nb\nc");
@@ -823,7 +823,7 @@ mod tests {
 
   #[test]
   fn local_bare_names_still_split() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     // Make sure the no-split path didn't break bare-name declarations:
     // `local a b c` should still declare three separate variables.
@@ -908,7 +908,7 @@ mod tests {
 
   #[test]
   fn local_status_zero() {
-    let _g = TestGuard::new();
+    let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     test_input("local z=1").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
@@ -939,7 +939,7 @@ mod tests {
 
   #[test]
   fn local_array_multiline() {
-    let _g = TestGuard::new();
+    let _g   = TestGuard::new();
     let func = "foo() { local arr=(\n  one\n  two\n  three\n); echo \"${arr[0]}\"; echo \"${arr[1]}\"; echo \"${arr[2]}\"; }";
     test_input(func).unwrap();
     let guard = TestGuard::new();
@@ -957,7 +957,7 @@ mod tests {
     test_input("foo() { local arr=(x y z); for e in \"${arr[@]}\"; do echo $e; done; }").unwrap();
     let guard = TestGuard::new();
     test_input("foo").unwrap();
-    let out = guard.read_output();
+    let out              = guard.read_output();
     let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
     assert_eq!(lines, vec!["x", "y", "z"]);
   }
@@ -982,7 +982,7 @@ mod tests {
     test_input("foo() { local x=$HOME; echo \"x=$x\"; }").unwrap();
     let guard = TestGuard::new();
     test_input("foo").unwrap();
-    let out = guard.read_output();
+    let out  = guard.read_output();
     let home = var!("HOME");
     assert!(out.contains(&format!("x={home}")), "got {out:?}");
   }
@@ -1006,7 +1006,7 @@ mod tests {
     test_input("foo() { local arr=(red green blue); for c in $arr; do echo $c; done; }").unwrap();
     let guard = TestGuard::new();
     test_input("foo").unwrap();
-    let out = guard.read_output();
+    let out              = guard.read_output();
     let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
     assert_eq!(lines, vec!["red", "green", "blue"]);
   }
@@ -1237,7 +1237,7 @@ mod tests {
   #[test]
   fn declare_p_unknown_var_errors() {
     let _g = TestGuard::new();
-    let _ = test_input("declare -p nonexistent_var");
+    let _  = test_input("declare -p nonexistent_var");
     // exec_nonint catches the error and propagates via exit status
     // rather than returning Err, so check the status.
     assert_ne!(state::Shed::get_status(), 0);
@@ -1615,7 +1615,7 @@ mod tests {
     let guard = TestGuard::new();
     test_input("foo").unwrap();
     test_input("echo \"${m[outer]}\"").unwrap();
-    let out = guard.read_output();
+    let out              = guard.read_output();
     let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
     assert_eq!(lines, vec!["2", "1"], "got {out:?}");
   }
@@ -1701,7 +1701,7 @@ mod tests {
   #[test]
   fn declare_unquoted_parens_still_makes_array() {
     // The fix must not break genuine array-literal syntax (unquoted parens).
-    let _g = TestGuard::new();
+    let _g    = TestGuard::new();
     let guard = TestGuard::new();
     test_input("declare t=(a b c); printf '<%s>' \"${t[@]}\"; echo").unwrap();
     assert!(guard.read_output().contains("<a><b><c>"));

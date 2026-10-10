@@ -56,6 +56,8 @@ The following builtins are available:
   `pwd`         print the working directory                 |builtin-pwd|
   `quote`       shell-quote arguments for round-tripping    |builtin-quote|
   `read`        read a line of input into a variable        |builtin-read|
+  `readfloat`   read a binary float as its parts            |builtin-readfloat|
+  `readint`     read a binary integer as decimal            |builtin-readint|
   `readkey`     read a single keypress                      |builtin-readkey|
   `readonly`    mark variables as read-only                 |builtin-readonly|
   `return`      return from a function                      |builtin-return|
@@ -86,6 +88,8 @@ The following builtins are available:
   `unset`       remove variables or functions               |builtin-unset|
   `vice`        slice and edit text with vim motions        |builtin-vice|
   `wait`        wait for background jobs to finish          |builtin-wait|
+  `writefloat`  encode a float from its parts               |builtin-writefloat|
+  `writeint`    encode an integer as binary                 |builtin-writeint|
   `yes`         print lines of 'y' or a string endlessly    |builtin-yes|
   `zd`          jump to a directory from history            |builtin-zd|
 
@@ -3700,6 +3704,219 @@ WRITEINT                                         *builtin-writeint* *writeint*
 
   See also: |builtin-readint|, |builtin-thru|.
 
+==============================================================================
+READFLOAT                                  *builtin-readfloat* *readfloat*
+  `readfloat --type {type} [--big-endian] [{count}] [-a {name}] [-d]`
+  `readfloat --width {bits} [--big-endian] [{count}] [-a {name}] [-d]`
+
+  where {count} is `-n {values}` or `-N {values}`
+
+  Read a binary floating-point value from standard input and print its
+  parts as integers. A float is not a number `shed` arithmetic can hold,
+  so `readfloat` hands back the three fields it is built from instead,
+  which arithmetic can: a sign, an exponent, and a mantissa.
+
+  One float is read per call unless a {count} asks for more. Unlike
+  |readint|(builtin-readint) there is no width inference -- a float's
+  width is never implied by the stream, so `--width` or `--type` is
+  required and is checked before any input is read.
+
+  Flags ~
+
+    `-T {type}`, `--type {type}`    the format by name: `f32`, `f64`, `f16`
+                                    or `bf16`. `bf16` is the Google Brain
+                                    format, not IEEE `binary16`.
+    `-w {bits}`, `--width {bits}`   the format by width: `32` or `64`. Two
+                                    formats share a width of 16, so those
+                                    are reachable only through `-T`.
+    `-E`, `--big-endian`            most-significant byte first. The
+                                    default is little-endian.
+    `-n {count}`, `--at-most {count}`
+                                    read up to {count} floats, stopping at
+                                    end of input.
+    `-N {count}`, `--exactly {count}`
+                                    read exactly {count} floats, failing if
+                                    the input runs short.
+    `-a {name}`, `--array {name}`   assign one record per float as the
+                                    elements of array {name}.
+    `-d`, `--decimal`               print the value in decimal instead of
+                                    its parts. `f32` and `f64` only.
+
+  The parts ~                                             *readfloat-parts*
+
+  Each float prints as three integers separated by the first character of
+  `$IFS`: the sign (`0` or `1`), the exponent, and the mantissa. The
+  value is exactly
+
+      mantissa x 2^exponent
+
+  with the sign applied separately. The mantissa already carries the
+  leading bit that the format leaves implicit, and the exponent already
+  has the bias removed, so nothing needs to be reconstructed:
+
+      ```printf '\x00\x00\x40\x3f' | readfloat -T f32```   `0 -24 12582912`
+
+  which reads back as `12582912 x 2^-24`, or `0.75`.
+
+  Subnormal values need no special handling. They share the smallest
+  exponent with the smallest normal values and are told apart by whether
+  the mantissa carries the leading bit, which the caller never has to
+  check.
+
+  Infinity and `NaN` sit one step past the largest finite exponent, so
+  they are recognised without a reserved value of their own -- `105` for
+  `f32` and `972` for `f64`, where the finite ranges end at `104` and
+  `971`. A zero mantissa means infinity and a non-zero one means `NaN`.
+
+  The parts lose nothing: the stored fields can be recovered from them
+  exactly, which is why |writefloat|(builtin-writefloat) can rebuild the
+  original bytes without being handed anything else.
+
+  Reading several floats ~                                *readfloat-batch*
+
+  With `-n` or `-N`, several floats are decoded in one call. `-n` is a
+  ceiling and `-N` is a requirement: given a stream that ends early, `-n`
+  yields the floats that were there and `-N` fails. Bytes left over that
+  cannot fill one more float are an error either way.
+
+  Without `-a` the records go to stdout one per line. With `-a {name}`
+  each record becomes one element of {name}, so the array holds one entry
+  per float rather than one per field:
+
+      ```readfloat -T f32 -n 1200 -a samples```
+
+  A record splits into its fields with ordinary word splitting, and a
+  record stream feeds |read|(builtin-read) directly:
+
+      ```parts=( ${samples[0]} )```
+      ```readfloat -T f32 -n 1200 | while read -r s e m; do ... done```
+
+  A batch that finds no floats exits `1`, so a frame loop ends on its own
+  at end of input the way |thru|(builtin-thru)'s does.
+
+  Decimal ~                                             *readfloat-decimal*
+
+  `-d` prints one decimal number per float instead of three integers, in
+  the shortest form that reads back as the same value. It is for looking
+  at data rather than computing with it, since `shed` arithmetic cannot
+  hold the result:
+
+      ```printf '\x00\x00\x40\x3f' | readfloat -T f32 -d```   `0.75`
+
+  Infinity and `NaN` print as `inf`, `-inf` and `NaN`. Only `f32` and
+  `f64` are supported, because the 16-bit formats have no corresponding
+  machine type to reinterpret the bits into.
+
+  Exit status ~
+
+  `0`     the floats were read, and printed or assigned
+  `1`     there was nothing to read: empty input, or a `-n` batch that
+          found no floats at all
+  nonzero on a usage error (no width or type, both at once, an invalid
+  width or type, `-n` together with `-N`, a {count} of `0`, or `-d` with
+  a 16-bit format); on `-N` short of its count; or on bytes left over
+  that cannot fill one more float
+
+  Examples ~
+
+      ```printf '\x00\x00\x80\x3f' | readfloat -T f32```
+                                `0 -23 8388608`, i.e. 1.0
+      ```readfloat -T f64 -E```         one big-endian double
+      ```readfloat -T f32 -n 3```       up to three floats, one per line
+      ```readfloat -T f32 -N 4 -a hdr```
+                                exactly four floats into array `hdr`
+      ```readfloat -T f32 -d```         `0.75` instead of its parts
+
+  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+
+  See also: |builtin-writefloat|, |builtin-readint|, |builtin-thru|.
+==============================================================================
+WRITEFLOAT                               *builtin-writefloat* *writefloat*
+  `writefloat --type {type} [--big-endian] [{sign} {exp} {mant} ...]`
+  `writefloat --width {bits} [--big-endian] [{sign} {exp} {mant} ...]`
+  `writefloat --type {type} --decimal [{value} ...]`
+
+  Encode floating-point values and write the raw bytes to stdout (no
+  trailing newline). This is the inverse of
+  |readfloat|(builtin-readfloat); the width and byte-order flags mean the
+  same thing and take the same values.
+
+  By default a float is given as the three integers `readfloat` prints --
+  sign, exponent, mantissa, in that order -- so the two round-trip with
+  no flags on either side:
+
+      ```readfloat -T f32 -n 1200 -a samples```
+      ```writefloat -T f32 "${samples[@]}"```
+
+  Flags ~
+
+    `-T {type}`, `--type {type}`    the format by name: `f32`, `f64`, `f16`
+                                    or `bf16`.
+    `-w {bits}`, `--width {bits}`   the format by width: `32` or `64`.
+    `-E`, `--big-endian`            most-significant byte first.
+    `-d`, `--decimal`               read one decimal number per float
+                                    instead of three integers. `f32` and
+                                    `f64` only.
+
+  Fields ~                                               *writefloat-fields*
+
+  Every operand is split on `$IFS` and the fields are then taken three at
+  a time, so it makes no difference how a record arrives. These are all
+  the same two floats:
+
+      ```writefloat -T f32 '0 -24 12582912' '1 -24 8388608'```
+      ```writefloat -T f32 0 -24 12582912 1 -24 8388608```
+      ```writefloat -T f32 "${parts[@]}"```
+
+  With no operands the fields are read from standard input the same way,
+  so a record stream from `readfloat` feeds straight back in:
+
+      ```readfloat -T f32 -n 3 | writefloat -T f32```
+
+  A field count that is not a whole number of records is an error, as is
+  a sign other than `0` or `1`, a non-numeric field, an exponent outside
+  the format's range, or a mantissa too large for its field. An exponent
+  that does not agree with its mantissa is also refused rather than
+  quietly rewritten -- a mantissa without the leading bit only belongs to
+  a subnormal, which pins the exponent.
+
+  Because a float's exponent is usually negative, a bare record starts
+  with fields like `-24` that look like options. `writefloat` does not
+  reject unknown options for that reason, so a mistyped flag is read as a
+  field and reported as one.
+
+  Decimal ~                                             *writefloat-decimal*
+
+  `-d` takes one decimal number per float instead of three integers:
+
+      ```writefloat -T f32 -d 0.75 -1.5 3.14159```
+      ```writefloat -T f64 -d 0.1```
+
+  `inf`, `-inf` and `NaN` are accepted. Only `f32` and `f64` are
+  supported, matching |readfloat|(readfloat-decimal).
+
+  Exit status ~
+
+  `0`     the bytes were written
+  `1`     there was nothing to write: an empty input stream, or no
+          operands and no input to fall back on
+  nonzero on a usage error: no width or type, both at once, an invalid
+  width or type, `-d` with a 16-bit format, a field count that is not a
+  whole number of records, or a field that cannot be part of a float
+
+  Examples ~
+
+      ```writefloat -T f32 0 -23 8388608```
+                                1.0 -> 00 00 80 3f
+      ```writefloat -T f32 -E 0 -23 8388608```
+                                big-endian -> 3f 80 00 00
+      ```writefloat -T f32 -d 0.75```     `0.75` -> 00 00 40 3f
+      ```writefloat -T f32 "${parts[@]}"```
+                                a whole array in one call
+
+  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+
+  See also: |builtin-readfloat|, |builtin-writeint|, |builtin-thru|.
 ==============================================================================
 READONLY                                         *builtin-readonly* *readonly*
 

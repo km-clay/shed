@@ -80,10 +80,10 @@ impl Palette {
           self.control_flow_keyword
         } else {
           match kind {
-            CmdKind::External => self.external_command,
-            CmdKind::Function => self.function,
-            CmdKind::Builtin => self.builtin,
-            CmdKind::Alias => self.alias,
+            CmdKind::External  => self.external_command,
+            CmdKind::Function  => self.function,
+            CmdKind::Builtin   => self.builtin,
+            CmdKind::Alias     => self.alias,
             CmdKind::Directory => self.directory,
           }
         }
@@ -155,7 +155,7 @@ pub(super) fn highlight_ex<W: fmt::Write>(
 
 pub(crate) fn highlight_source(src: &str) -> String {
   let mut out = String::new();
-  let tks = crate::readline::context::pure_context_tokens(src);
+  let     tks = crate::readline::context::pure_context_tokens(src);
   highlight(&mut out, src, &tks, &Palette::new(), usize::MAX, &[]).ok();
   out
 }
@@ -216,7 +216,7 @@ impl<'a, W: fmt::Write> Painter<'a, W> {
     }
 
     let mut style = self.palette.style_for(node, self.editor_cursor_pos);
-    let decor = style.decor().union(parent.decor()); // decorations accumulate as we descend
+    let     decor = style.decor().union(parent.decor()); // decorations accumulate as we descend
     style.set_decor(decor);
 
     if node.sub_tokens().is_empty() {
@@ -267,11 +267,11 @@ impl<'a, W: fmt::Write> Painter<'a, W> {
 
     // Sweep through `range`, alternating between un-selected (normal style)
     // and selected (inverted style) segments.
-    let sel_style = style.inverted();
-    let mut pos = range.start;
+    let     sel_style = style.inverted();
+    let mut pos       = range.start;
     for sel in &merged {
       let sel_start = sel.start.max(range.start);
-      let sel_end = sel.end.min(range.end);
+      let sel_end   = sel.end.min(range.end);
 
       if pos < sel_start {
         self.paint_with(pos..sel_start, style);
@@ -309,8 +309,8 @@ impl<'a, W: fmt::Write> Painter<'a, W> {
       paint!(text, style.style());
       return;
     }
-    let ctrl_style = style.dim().italic();
-    let mut run_start = 0;
+    let     ctrl_style = style.dim().italic();
+    let mut run_start  = 0;
     for (i, ch) in text.char_indices() {
       let b = ch as u32;
       if b < 0x80 && is_visualized_control(b as u8) {
@@ -319,7 +319,7 @@ impl<'a, W: fmt::Write> Painter<'a, W> {
         }
         let viz = match b as u8 {
           0x7f => "^?".to_string(),
-          b => format!("^{}", (b ^ 0x40) as char),
+          b    => format!("^{}", (b ^ 0x40) as char),
         };
         paint!(&viz, ctrl_style.style());
         run_start = i + ch.len_utf8();
@@ -391,7 +391,7 @@ mod tests {
 
   /// Strip CSI escape sequences (`ESC [ ... m`) so we can compare to plain input.
   fn strip_ansi(s: &str) -> String {
-    let mut out = String::new();
+    let mut out   = String::new();
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
       if c == '\x1b' {
@@ -425,7 +425,7 @@ mod tests {
       "ls αβγ",
     ];
     for input in cases {
-      let tks = get_context_tokens(input);
+      let     tks = get_context_tokens(input);
       let mut out = String::new();
       highlight(&mut out, input, &tks, &p, 0, &[]).unwrap();
       assert_eq!(
@@ -443,8 +443,8 @@ mod tests {
 
   #[test]
   fn paints_var_sub_with_variable_style() {
-    let p = test_palette();
-    let tks = get_context_tokens("ls $foo");
+    let     p   = test_palette();
+    let     tks = get_context_tokens("ls $foo");
     let mut out = String::new();
     highlight(&mut out, "ls $foo", &tks, &p, 0, &[]).unwrap();
     // Cyan = ANSI 36 - the variable style for $foo should appear in output.
@@ -462,8 +462,8 @@ mod tests {
 
   #[test]
   fn paints_double_string_with_string_style() {
-    let p = test_palette();
-    let tks = get_context_tokens(r#""hello""#);
+    let     p   = test_palette();
+    let     tks = get_context_tokens(r#""hello""#);
     let mut out = String::new();
     highlight(&mut out, r#""hello""#, &tks, &p, 0, &[]).unwrap();
     // Yellow = ANSI 33.
@@ -475,8 +475,8 @@ mod tests {
 
   #[test]
   fn nested_var_in_string_paints_both() {
-    let p = test_palette();
-    let tks = get_context_tokens(r#""hi $foo""#);
+    let     p   = test_palette();
+    let     tks = get_context_tokens(r#""hi $foo""#);
     let mut out = String::new();
     highlight(&mut out, r#""hi $foo""#, &tks, &p, 0, &[]).unwrap();
     // Both yellow (string) and cyan (var) should appear.
@@ -492,10 +492,10 @@ mod tests {
 
   #[test]
   fn cmd_sub_round_trips() {
-    let p = test_palette();
-    let input = "echo $(date)";
-    let tks = get_context_tokens(input);
-    let mut out = String::new();
+    let     p     = test_palette();
+    let     input = "echo $(date)";
+    let     tks   = get_context_tokens(input);
+    let mut out   = String::new();
     highlight(&mut out, input, &tks, &p, 0, &[]).unwrap();
     assert_eq!(strip_ansi(&out), input, "cmd sub round-trip: {out:?}");
   }
@@ -504,8 +504,8 @@ mod tests {
   fn empty_input_produces_no_visible_text() {
     // yansi may emit empty SGR pairs around zero-width spans; that's fine
     // visually. We just want no actual characters to come through.
-    let p = test_palette();
-    let tks = &get_context_tokens("");
+    let     p   = test_palette();
+    let     tks = &get_context_tokens("");
     let mut out = String::new();
     highlight(&mut out, "", tks, &p, 0, &[]).unwrap();
     assert_eq!(strip_ansi(&out), "");
@@ -513,8 +513,8 @@ mod tests {
 
   #[test]
   fn trailing_whitespace_preserved() {
-    let p = test_palette();
-    let tks = get_context_tokens("ls   ");
+    let     p   = test_palette();
+    let     tks = get_context_tokens("ls   ");
     let mut out = String::new();
     highlight(&mut out, "ls   ", &tks, &p, 0, &[]).unwrap();
     assert_eq!(strip_ansi(&out), "ls   ");
@@ -524,8 +524,8 @@ mod tests {
 
   #[test]
   fn esc_renders_as_caret_bracket() {
-    let p = test_palette();
-    let tks = get_context_tokens("a\x1bb");
+    let     p   = test_palette();
+    let     tks = get_context_tokens("a\x1bb");
     let mut out = String::new();
     highlight(&mut out, "a\x1bb", &tks, &p, 0, &[]).unwrap();
     let visible = strip_ansi(&out);
@@ -534,8 +534,8 @@ mod tests {
 
   #[test]
   fn cr_renders_as_caret_m() {
-    let p = test_palette();
-    let tks = get_context_tokens("before\rafter");
+    let     p   = test_palette();
+    let     tks = get_context_tokens("before\rafter");
     let mut out = String::new();
     highlight(&mut out, "before\rafter", &tks, &p, 0, &[]).unwrap();
     let visible = strip_ansi(&out);
@@ -544,8 +544,8 @@ mod tests {
 
   #[test]
   fn del_renders_as_caret_question() {
-    let p = test_palette();
-    let tks = get_context_tokens("x\x7fy");
+    let     p   = test_palette();
+    let     tks = get_context_tokens("x\x7fy");
     let mut out = String::new();
     highlight(&mut out, "x\x7fy", &tks, &p, 0, &[]).unwrap();
     let visible = strip_ansi(&out);
@@ -556,8 +556,8 @@ mod tests {
   fn newline_and_tab_pass_through_unchanged() {
     // \n and \t are structural for multi-line buffers and indented commands;
     // visualizing them would break layout.
-    let p = test_palette();
-    let tks = get_context_tokens("a\nb\tc");
+    let     p   = test_palette();
+    let     tks = get_context_tokens("a\nb\tc");
     let mut out = String::new();
     highlight(&mut out, "a\nb\tc", &tks, &p, 0, &[]).unwrap();
     let visible = strip_ansi(&out);
@@ -570,8 +570,8 @@ mod tests {
   fn raw_control_bytes_do_not_reach_terminal_stream() {
     // The whole point: raw \x1b should never appear in the rendered output
     // (or it would let the terminal interpret embedded escape sequences).
-    let p = test_palette();
-    let tks = get_context_tokens("\x1b]0;PWNED\x07");
+    let     p   = test_palette();
+    let     tks = get_context_tokens("\x1b]0;PWNED\x07");
     let mut out = String::new();
     highlight(&mut out, "\x1b]0;PWNED\x07", &tks, &p, 0, &[]).unwrap();
     assert!(
@@ -589,8 +589,8 @@ mod tests {
   fn no_control_bytes_takes_hot_path() {
     // Smoke test: input without control bytes should still round-trip
     // identically (we have a fast path that skips visualization).
-    let p = test_palette();
-    let tks = get_context_tokens("echo hello world");
+    let     p   = test_palette();
+    let     tks = get_context_tokens("echo hello world");
     let mut out = String::new();
     highlight(&mut out, "echo hello world", &tks, &p, 0, &[]).unwrap();
     assert_eq!(strip_ansi(&out), "echo hello world");
@@ -602,11 +602,11 @@ mod tests {
     // distinct from the surrounding text. We check that the raw output
     // contains at least one extra SGR sequence introduced around the
     // visualized char.
-    let p = test_palette();
-    let tks = get_context_tokens("ab");
+    let     p     = test_palette();
+    let     tks   = get_context_tokens("ab");
     let mut plain = String::new();
     highlight(&mut plain, "ab", &tks, &p, 0, &[]).unwrap();
-    let tks = get_context_tokens("a\x1bb");
+    let     tks       = get_context_tokens("a\x1bb");
     let mut with_ctrl = String::new();
     highlight(&mut with_ctrl, "a\x1bb", &tks, &p, 0, &[]).unwrap();
     // The control variant should contain "^[" (visualization) and have

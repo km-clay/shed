@@ -22,11 +22,11 @@ impl AliasExpander {
   }
 
   fn expand(mut self) -> (String, Option<usize>) {
-    let mut cursor = 0;
+    let mut cursor                  = 0;
     let mut active: HashSet<String> = HashSet::default();
 
-    let mut input_handle = state::register_source(self.input.as_str());
-    let mut tokens = Self::lex_tokens(&input_handle);
+    let mut input_handle            = state::register_source(self.input.as_str());
+    let mut tokens                  = Self::lex_tokens(&input_handle);
     let mut ti = 0;
 
     loop {
@@ -42,7 +42,7 @@ impl AliasExpander {
       }
       let Some(tk) = tokens.get(ti) else { break };
       let (start, end) = (tk.start(), tk.end());
-      let word = tk.slice().to_str_lossy().to_string();
+      let word         = tk.slice().to_str_lossy().to_string();
 
       let alias = if active.contains(&word) {
         None // guarded: re-expanding would recurse
@@ -105,7 +105,7 @@ pub(crate) fn expand_keymap(s: &str) -> Vec<KeyEvent> {
 }
 
 pub(crate) fn expand_keymap_raw(s: &str) -> Vec<KeyEvent> {
-  let mut keys = Vec::new();
+  let mut keys  = Vec::new();
   let mut chars = s.chars().collect::<VecDeque<char>>();
   while let Some(ch) = chars.pop_front() {
     match ch {
@@ -176,11 +176,10 @@ fn get_fn_key(s: &str) -> Option<KeyCode> {
     .map(KeyCode::F)
 }
 
-#[rustfmt::skip]
 pub(crate) fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
-  let parts: Vec<&str> = alias.split('-').collect();
-  let (mods_parts, key_name) = parts.split_at(parts.len() - 1);
-  let mut mods = ModKeys::NONE;
+  let     parts: Vec<&str>       = alias.split('-').collect();
+  let     (mods_parts, key_name) = parts.split_at(parts.len() - 1);
+  let mut mods                   = ModKeys::NONE;
   for m in mods_parts {
     match m.to_uppercase().as_str() {
       "C"       => mods |= ModKeys::CTRL,
@@ -194,21 +193,21 @@ pub(crate) fn parse_key_alias(alias: &str) -> Option<KeyEvent> {
   let key = match raw_key.to_uppercase().as_str() {
     "CR" | "ENTER" | "RETURN" => KeyCode::Enter,
     "ESC" | "ESCAPE"          => KeyCode::Esc,
-    "TAB"                     => KeyCode::Tab,
-    "BS" | "BACKSPACE"        => KeyCode::Backspace,
-    "DEL" | "DELETE"          => KeyCode::Delete,
-    "INS" | "INSERT"          => KeyCode::Insert,
-    "SPACE"                   => KeyCode::Char(' '),
-    "UP"                      => KeyCode::Up,
-    "DOWN"                    => KeyCode::Down,
-    "LEFT"                    => KeyCode::Left,
-    "RIGHT"                   => KeyCode::Right,
-    "HOME"                    => KeyCode::Home,
-    "END"                     => KeyCode::End,
-    "CMD"                     => KeyCode::ExMode,
-    "PGUP" | "PAGEUP"         => KeyCode::PageUp,
-    "LEADER"                  => KeyCode::Leader,
-    "PGDN" | "PAGEDOWN"       => KeyCode::PageDown,
+    "TAB"              => KeyCode::Tab,
+    "BS" | "BACKSPACE" => KeyCode::Backspace,
+    "DEL" | "DELETE"   => KeyCode::Delete,
+    "INS" | "INSERT"   => KeyCode::Insert,
+    "SPACE"            => KeyCode::Char(' '),
+    "UP"               => KeyCode::Up,
+    "DOWN"             => KeyCode::Down,
+    "LEFT"             => KeyCode::Left,
+    "RIGHT"            => KeyCode::Right,
+    "HOME"             => KeyCode::Home,
+    "END"              => KeyCode::End,
+    "CMD"              => KeyCode::ExMode,
+    "PGUP" | "PAGEUP"  => KeyCode::PageUp,
+    "LEADER"           => KeyCode::Leader,
+    "PGDN" | "PAGEDOWN" => KeyCode::PageDown,
 
     k => {
       if let Some(fn_key) = get_fn_key(k) {
@@ -365,7 +364,7 @@ mod tests {
 
   #[test]
   fn alias_simple() {
-    let _guard = TestGuard::new();
+    let _guard     = TestGuard::new();
     let dummy_span = Span::default();
     Shed::logic_mut(|l| l.insert_alias("ll", &"ls -la".into(), dummy_span));
 
@@ -375,7 +374,7 @@ mod tests {
 
   #[test]
   fn alias_circular_prevention() {
-    let _guard = TestGuard::new();
+    let _guard     = TestGuard::new();
     let dummy_span = Span::default();
     Shed::logic_mut(|l| l.insert_alias("foo", &"foo --verbose".into(), dummy_span));
 
@@ -391,7 +390,7 @@ mod tests {
     // fires in each command position (after `;`, `&&`, `|`) but never in an
     // argument position (the trailing `g`).
     let _guard = TestGuard::new();
-    let sp = Span::default();
+    let sp     = Span::default();
     Shed::logic_mut(|l| l.insert_alias("g", &"git".into(), sp));
 
     let result = expand_aliases("g status; g log && g diff | g show g");
@@ -403,7 +402,7 @@ mod tests {
     // a -> b -> c: each replacement mutates the input and must be re-lexed and
     // re-examined at the same cursor, so the chain resolves fully.
     let _guard = TestGuard::new();
-    let sp = Span::default();
+    let sp     = Span::default();
     Shed::logic_mut(|l| {
       l.insert_alias("a", &"b".into(), sp);
       l.insert_alias("b", &"c".into(), sp);
@@ -415,7 +414,7 @@ mod tests {
   #[test]
   fn alias_not_expanded_in_argument_position() {
     let _guard = TestGuard::new();
-    let sp = Span::default();
+    let sp     = Span::default();
     Shed::logic_mut(|l| l.insert_alias("ls", &"ls --color".into(), sp));
 
     // `ls` as an argument to `echo` must stay literal.

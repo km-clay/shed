@@ -51,7 +51,7 @@ pub(crate) fn is_binary_file(path: &CStr) -> bool {
     return false;
   };
   let mut buf = [0u8; 128];
-  let n = f.read(&mut buf).unwrap_or(0);
+  let     n   = f.read(&mut buf).unwrap_or(0);
   buf[..n].contains(&0)
 }
 
@@ -75,7 +75,7 @@ pub(crate) fn is_in_path(name: &Tk) -> bool {
     let Some(path) = try_var!("PATH") else {
       return false;
     };
-    let path = path.to_str_lossy();
+    let path  = path.to_str_lossy();
     let paths = path.split(':');
     for path in paths {
       let full_path = Path::new(path).join(&name);
@@ -130,7 +130,7 @@ pub(super) fn runs_inline(cmd: &Node, tree: &Ast) -> bool {
         // assignment-only command, will never fork
         return true;
       }
-      let cmd_id = cmd.get_command().unwrap();
+      let cmd_id   = cmd.get_command().unwrap();
       let cmd_word = &tree[cmd_id];
       is_func(&cmd_word.slice().to_str_lossy()) || cmd_word.flags.contains(TkFlags::BUILTIN)
     }
@@ -156,7 +156,7 @@ pub(super) fn will_fork(cmd: &Node, tree: &Ast) -> bool {
   match &cmd.class {
     NdRule::Subshell { .. } => true,
     NdRule::Command { argv, .. } if !argv.is_empty() => {
-      let cmd_id = cmd.get_command().unwrap();
+      let cmd_id   = cmd.get_command().unwrap();
       let cmd_word = &tree[cmd_id];
       !(is_func(&cmd_word.slice().to_str_lossy()) || cmd_word.flags.contains(TkFlags::BUILTIN))
     }
