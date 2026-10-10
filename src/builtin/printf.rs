@@ -3,19 +3,14 @@ use std::iter::Peekable;
 use bstr::ByteSlice;
 
 use crate::{
-  errln,
-  expand::escape,
-  procio, sherr,
-  state::vars::VarStr,
-  util::{
+  errln, expand::escape, procio, sherr, shopt, state::vars::VarStr, util::{
     self,
     error::ShResult,
     strops::{
       self, Base, ByteCursor, Case, Count, Field, FieldParams, FmtFlags, ParseRadix, Sign,
       SliceCursor, StrFmt, StrFormatter,
     },
-  },
-  varstr,
+  }, varstr,
 };
 
 enum Conversion {
@@ -51,6 +46,16 @@ impl StrFmt for PrintfFmt {
 
   fn expand_literal(&self, literal: Vec<u8>) -> Vec<u8> {
     escape::expand_ansi_c(&literal)
+  }
+
+  fn width_limit(&self, conv: &Self::Conv) -> usize {
+    if let Conversion::RepeatStr = conv {
+      // printf '%*r' can be used for filling large buffers
+      // so we respect the shell's max_read_limit for this conversion
+      *shopt!(core.max_read_limit) as usize
+    } else {
+      u16::MAX as usize // 65536
+    }
   }
 
   fn take_count(&self, src: &mut Self::Source) -> ShResult<isize> {
@@ -106,6 +111,7 @@ impl StrFmt for PrintfFmt {
       Conversion::Scientific(case)    => render_scientific(src, flags, prec, *case),
       Conversion::ShortestFloat(case) => render_shortest(src, flags, prec, *case),
       Conversion::HumanSize           => render_human(src),
+
       Conversion::Char          => render_char(src),
       Conversion::Str           => render_str(src, prec),
       Conversion::RepeatStr     => render_repeat(src, field),
@@ -388,8 +394,19 @@ fn render_repeat(src: &mut PrintfArgs, field: &FieldParams) -> Field {
     Some(Count::Static(n)) => *n,
     _ => 1,
   };
-  let s = src.args.next().unwrap_or_default();
-  Field::raw(s.repeat(count))
+  let s     = src.args.next().unwrap_or_default();
+  let limit = *shopt!(core.max_read_limit) as usize;
+  let fits  = if s.is_empty() { count } else { limit / s.len() };
+
+  if count > fits {
+    let size = strops::human_size(limit as u64);
+    errln!(
+      "shed: warning: repeat of {count} x {} bytes exceeds {size}, truncating to {fits}",
+      s.len()
+    );
+  }
+
+  Field::raw(s.repeat(count.min(fits)))
 }
 
 fn render_ansi_c(src: &mut PrintfArgs, prec: Option<usize>) -> Field {

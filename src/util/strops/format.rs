@@ -7,9 +7,7 @@ use bitflags::bitflags;
 use bstr::ByteSlice;
 
 use crate::{
-  match_loop, sherr,
-  state::vars::VarStr,
-  util::{self, error::ShResult, strops::ByteCursor, ui},
+  errln, match_loop, sherr, state::vars::VarStr, util::{self, error::ShResult, strops::ByteCursor, ui},
 };
 
 use super::SliceCursor;
@@ -193,6 +191,10 @@ pub(crate) trait StrFmt {
   ///
   /// Owns this step so multi-char specifiers work (`%Hd` for stat, `%(fmt)T` for `printf`).
   fn parse_conv(&self, cur: &mut SliceCursor) -> ShResult<Self::Conv>;
+
+  fn width_limit(&self, _conv: &Self::Conv) -> usize {
+    u16::MAX as usize
+  }
 
   /// Render one directive against the source.
   ///
@@ -450,7 +452,7 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
           out.extend_from_slice(b);
         }
         Segment::Spec(field, conv) => {
-          let field    = self.resolve_counts(field, src)?;
+          let field    = self.resolve_counts(field, src, Some(conv))?;
           let rendered = self.set.render(conv, &field, src)?;
           pad_and_render(&rendered, &field, out);
 
@@ -470,7 +472,7 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
           };
 
           if should_render {
-            let params = self.resolve_counts(field, src)?;
+            let params = self.resolve_counts(field, src, None)?;
             if params.flags().contains(FmtFlags::TRIM) {
               buf = buf.trim().to_vec();
             };
@@ -486,31 +488,35 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
     Ok(seg_result)
   }
 
-  fn resolve_counts(&self, field: &FieldParams, src: &mut S::Source) -> ShResult<FieldParams> {
+  fn resolve_counts(&self, field: &FieldParams, src: &mut S::Source, conv: Option<&S::Conv>) -> ShResult<FieldParams> {
     const MAX_FIELD: usize = u16::MAX as usize;
+    let max = conv.map_or(MAX_FIELD, |c| self.set.width_limit(c));
 
     let mut flags = field.flags();
 
-    let width = match field.width() {
-      Some(Count::Static(w)) => Some(Count::Static((*w).min(MAX_FIELD))),
+    let w_count: Option<usize> = match field.width() {
+      Some(Count::Static(w)) => Some(*w),
       Some(Count::Dynamic) => {
         let n = self.set.take_count(src)?;
         if n < 0 {
           flags |= FmtFlags::LEFT;
         }
-        Some(Count::Static(n.unsigned_abs().min(MAX_FIELD)))
+        Some(n.unsigned_abs())
       }
       None => None,
     };
 
-    let prec = match field.precision() {
-      Some(Count::Static(p)) => Some(Count::Static((*p).min(MAX_FIELD))),
+    let p_count: Option<usize> = match field.precision() {
+      Some(Count::Static(p)) => Some(*p),
       Some(Count::Dynamic) => {
         let n = self.set.take_count(src)?;
-        (n >= 0).then_some(Count::Static((n as usize).min(MAX_FIELD)))
+        (n >= 0).then_some(n as usize)
       }
       None => None,
     };
+
+    let width = w_count.map(|w| clamp_count("width", w, max));
+    let prec  = p_count.map(|p| clamp_count("precision", p, MAX_FIELD));
 
     Ok(FieldParams {
       flags,
@@ -521,6 +527,13 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
 }
 
 /// Pad a rendered [`Field`] to `params`' width and append it to `out`.
+fn clamp_count(kind: &str, n: usize, max: usize) -> Count {
+  if n > max {
+    errln!("shed: warning: field {kind} {n} exceeds maximum of {max}, truncating");
+  }
+  Count::Static(n.min(max))
+}
+
 fn pad_and_render(field: &Field, params: &FieldParams, out: &mut Vec<u8>) {
   let body = field.body();
   if let FieldKind::Raw = field.kind() {
