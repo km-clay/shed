@@ -8,9 +8,12 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # my custom fork of rustfmt
+    rustfmt-align.url = "github:km-clay/rustfmt-align";
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay, rustfmt-align }:
   flake-utils.lib.eachDefaultSystem (system:
   let
     pkgs = import nixpkgs {
@@ -118,6 +121,9 @@
         pkgs.nixfmt
         pkgs.nil
       ];
+
+      # wire the rustfmt fork into the toolchain
+      RUSTFMT = "${rustfmt-align.packages.${system}.default}/bin/rustfmt";
 
       # Tell cargo which linker to use for the musl target.
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER =

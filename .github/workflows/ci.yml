@@ -20,9 +20,6 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Formatting check
-        run: cargo fmt --check
-
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
@@ -34,11 +31,30 @@ jobs:
         with:
           file: lcov.info
 
-  nix-build:
+  fmt:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: "write"
+      contents: "read"
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v27
+      - uses: DeterminateSystems/nix-installer-action@main
+      # Caches the pinned nightly and the rustfmt build between runs; without
+      # it every run rebuilds a toolchain carrying rustc-dev.
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      # The formatter is a fork pinned in flake.nix, so the check has to run
+      # through the devShell; a stock rustfmt would disagree with it.
+      - run: nix develop -c cargo fmt --check
+
+  nix-build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: "write"
+      contents: "read"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
       - run: nix build --no-link
 
   termux-build:
