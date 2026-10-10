@@ -4,17 +4,17 @@ use std::collections::{HashMap, HashSet};
 use syn::{Expr, LitStr, Token, parse::Parse, parse::ParseStream, parse_macro_input};
 
 struct StyledFormatInput {
-  fmt: LitStr,
+  fmt       : LitStr,
   positional: Vec<Expr>,
-  named: Vec<(syn::Ident, Expr)>,
+  named     : Vec<(syn::Ident, Expr)>,
 }
 
 impl Parse for StyledFormatInput {
   fn parse(input: ParseStream) -> syn::Result<Self> {
-    let fmt: LitStr = input.parse()?;
-    let mut positional = Vec::new();
-    let mut named = Vec::new();
-    let mut saw_named = false;
+    let     fmt: LitStr = input.parse()?;
+    let mut positional  = Vec::new();
+    let mut named       = Vec::new();
+    let mut saw_named   = false;
 
     while !input.is_empty() {
       input.parse::<Token![,]>()?;
@@ -46,14 +46,14 @@ impl Parse for StyledFormatInput {
 }
 
 pub fn styled_format(input: TokenStream) -> TokenStream {
-  let parsed = parse_macro_input!(input as StyledFormatInput);
-  let fmt_lit = parsed.fmt.clone();
-  let fmt_str = parsed.fmt.value();
+  let parsed        = parse_macro_input!(input as StyledFormatInput);
+  let fmt_lit       = parsed.fmt.clone();
+  let fmt_str       = parsed.fmt.value();
 
-  let scan_result = scan_refs(&fmt_str);
+  let scan_result   = scan_refs(&fmt_str);
   let ordered_names = scan_result.named;
-  let positional_display: Vec<bool> = scan_result.positional_display;
-  let seen: HashSet<&str> = ordered_names.iter().map(String::as_str).collect();
+  let positional_display: Vec<bool>     = scan_result.positional_display;
+  let seen              : HashSet<&str> = ordered_names.iter().map(String::as_str).collect();
 
   // Map user-provided named args by name for value lookup.
   let user_named: HashMap<String, Expr> = parsed
@@ -62,7 +62,7 @@ pub fn styled_format(input: TokenStream) -> TokenStream {
     .map(|(i, e)| (i.to_string(), e.clone()))
     .collect();
 
-  let span = parsed.fmt.span();
+  let     span               = parsed.fmt.span();
   let mut paint_count: usize = 0;
   let color_call = |i: usize| -> proc_macro2::TokenStream {
     if i == 0 {
@@ -89,7 +89,7 @@ pub fn styled_format(input: TokenStream) -> TokenStream {
   let mut named_tokens: Vec<proc_macro2::TokenStream> = Vec::new();
   for name in &ordered_names {
     let ident = syn::Ident::new(name, span);
-    let cc = color_call(paint_count);
+    let cc    = color_call(paint_count);
     paint_count += 1;
     let value: proc_macro2::TokenStream = if let Some(expr) = user_named.get(name) {
       quote! { (#expr) }
@@ -119,9 +119,9 @@ struct ScanResult {
   positional_display: Vec<bool>,
 }
 fn scan_refs(fmt_str: &str) -> ScanResult {
-  let mut named: Vec<String> = Vec::new();
-  let mut seen: HashSet<String> = HashSet::new();
-  let mut positional_display: Vec<bool> = Vec::new();
+  let mut named             : Vec<String>     = Vec::new();
+  let mut seen              : HashSet<String> = HashSet::new();
+  let mut positional_display: Vec<bool>       = Vec::new();
   let mut chars = fmt_str.chars().peekable();
 
   while let Some(c) = chars.next() {

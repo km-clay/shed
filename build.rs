@@ -8,10 +8,10 @@ fn main() {
     println!("cargo:rustc-cfg=linux_like");
   }
 
-  let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-  let out_dir = std::env::var("OUT_DIR").unwrap();
+  let     manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+  let     out_dir      = std::env::var("OUT_DIR").unwrap();
 
-  let mut generated = String::new();
+  let mut generated    = String::new();
   generated.push_str(&emit_include_group(&manifest_dir, "functions"));
   generated.push_str(&emit_include_group(&manifest_dir, "completions"));
   generated.push_str(&emit_include_group(&manifest_dir, "help"));
@@ -21,7 +21,7 @@ fn main() {
 }
 
 fn emit_include_group(manifest_dir: &str, group: &str) -> String {
-  let dir = Path::new(manifest_dir).join("include").join(group);
+  let dir        = Path::new(manifest_dir).join("include").join(group);
   let const_name = group.to_uppercase();
 
   let mut entries: Vec<(String, String)> = std::fs::read_dir(&dir)
@@ -30,9 +30,9 @@ fn emit_include_group(manifest_dir: &str, group: &str) -> String {
     .filter(|e| e.path().is_file())
     .map(|e| {
       let fname = e.file_name();
-      let stem = fname.to_string_lossy();
-      let name = format!("{group}/{stem}");
-      let path = e.path().to_string_lossy().to_string();
+      let stem  = fname.to_string_lossy();
+      let name  = format!("{group}/{stem}");
+      let path  = e.path().to_string_lossy().to_string();
       (name, path)
     })
     .collect();

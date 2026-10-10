@@ -10,10 +10,10 @@ pub(super) fn derive_shopt_group(input: TokenStream) -> TokenStream {
 }
 
 struct DeriveParts {
-  names: Vec<Ident>,
-  types: Vec<Type>,
-  defaults: Vec<Expr>,
-  docs: Vec<String>,
+  names     : Vec<Ident>,
+  types     : Vec<Type>,
+  defaults  : Vec<Expr>,
+  docs      : Vec<String>,
   validators: Vec<Option<Expr>>,
 }
 
@@ -32,7 +32,7 @@ struct ShOptDerive {
 impl ShOptDerive {
   pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let name = input.ident.clone();
+    let name  = input.ident.clone();
     let group = Self::extract_group_name(&input.attrs);
     let DeriveParts {
       names,
@@ -76,11 +76,11 @@ impl ShOptDerive {
       .map(|f| f.ty.clone())
       .collect::<Vec<_>>();
     // #[default(...)] attributes
-    let defaults = Self::extract_defaults(&named_fields);
+    let defaults   = Self::extract_defaults(&named_fields);
     // #[validate(...)] attributes
     let validators = Self::extract_validators(&named_fields);
     // doc comments
-    let docs = Self::extract_docs(&named_fields);
+    let docs       = Self::extract_docs(&named_fields);
 
     DeriveParts {
       names,

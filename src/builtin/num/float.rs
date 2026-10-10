@@ -395,19 +395,34 @@ mod tests {
 
   #[test]
   fn decodes_a_normal_value() {
-    assert_eq!(out_of(r"printf '\x00\x00\x80\x3f' | readfloat -T f32"), "0 -23 8388608");
-    assert_eq!(out_of(r"printf '\x00\x00\x40\x3f' | readfloat -T f32"), "0 -24 12582912");
+    assert_eq!(
+      out_of(r"printf '\x00\x00\x80\x3f' | readfloat -T f32"),
+      "0 -23 8388608"
+    );
+    assert_eq!(
+      out_of(r"printf '\x00\x00\x40\x3f' | readfloat -T f32"),
+      "0 -24 12582912"
+    );
   }
 
   #[test]
   fn the_sign_bit_is_a_separate_field() {
-    assert_eq!(out_of(r"printf '\x00\x00\x00\xbf' | readfloat -T f32"), "1 -24 8388608");
+    assert_eq!(
+      out_of(r"printf '\x00\x00\x00\xbf' | readfloat -T f32"),
+      "1 -24 8388608"
+    );
   }
 
   #[test]
   fn both_zeros_decode_distinctly() {
-    assert_eq!(out_of(r"printf '\x00\x00\x00\x00' | readfloat -T f32"), "0 -149 0");
-    assert_eq!(out_of(r"printf '\x00\x00\x00\x80' | readfloat -T f32"), "1 -149 0");
+    assert_eq!(
+      out_of(r"printf '\x00\x00\x00\x00' | readfloat -T f32"),
+      "0 -149 0"
+    );
+    assert_eq!(
+      out_of(r"printf '\x00\x00\x00\x80' | readfloat -T f32"),
+      "1 -149 0"
+    );
   }
 
   /// A subnormal has no implicit bit and takes its exponent from `1 - bias -
@@ -415,26 +430,44 @@ mod tests {
   /// exponent, so the implicit bit is what tells them apart.
   #[test]
   fn subnormals_share_the_smallest_exponent_and_differ_by_the_implicit_bit() {
-    assert_eq!(out_of(r"printf '\x00\x00\x80\x00' | readfloat -T f32"), "0 -149 8388608");
-    assert_eq!(out_of(r"printf '\x01\x00\x00\x00' | readfloat -T f32"), "0 -149 1");
+    assert_eq!(
+      out_of(r"printf '\x00\x00\x80\x00' | readfloat -T f32"),
+      "0 -149 8388608"
+    );
+    assert_eq!(
+      out_of(r"printf '\x01\x00\x00\x00' | readfloat -T f32"),
+      "0 -149 1"
+    );
   }
 
   #[test]
   fn the_largest_finite_value_decodes() {
-    assert_eq!(out_of(r"printf '\xff\xff\x7f\x7f' | readfloat -T f32"), "0 104 16777215");
+    assert_eq!(
+      out_of(r"printf '\xff\xff\x7f\x7f' | readfloat -T f32"),
+      "0 104 16777215"
+    );
   }
 
   /// Infinity and NaN land one past the finite maximum, so they need no
   /// sentinel of their own; a zero mantissa separates infinity from NaN.
   #[test]
   fn infinity_and_nan_sit_past_the_finite_exponent_range() {
-    assert_eq!(out_of(r"printf '\x00\x00\x80\x7f' | readfloat -T f32"), "0 105 0");
-    assert_eq!(out_of(r"printf '\x00\x00\xc0\x7f' | readfloat -T f32"), "0 105 4194304");
+    assert_eq!(
+      out_of(r"printf '\x00\x00\x80\x7f' | readfloat -T f32"),
+      "0 105 0"
+    );
+    assert_eq!(
+      out_of(r"printf '\x00\x00\xc0\x7f' | readfloat -T f32"),
+      "0 105 4194304"
+    );
   }
 
   #[test]
   fn big_endian_reverses_the_byte_order() {
-    assert_eq!(out_of(r"printf '\x3f\x80\x00\x00' | readfloat -T f32 -E"), "0 -23 8388608");
+    assert_eq!(
+      out_of(r"printf '\x3f\x80\x00\x00' | readfloat -T f32 -E"),
+      "0 -23 8388608"
+    );
   }
 
   #[test]
@@ -449,7 +482,10 @@ mod tests {
   /// alone cannot identify the format.
   #[test]
   fn f16_and_bf16_decode_the_same_bytes_differently() {
-    assert_eq!(out_of(r"printf '\x80\x3f' | readfloat -T f16"),  "0 -10 1920");
+    assert_eq!(
+      out_of(r"printf '\x80\x3f' | readfloat -T f16"),
+      "0 -10 1920"
+    );
     assert_eq!(out_of(r"printf '\x80\x3f' | readfloat -T bf16"), "0 -7 128");
   }
 
@@ -497,7 +533,9 @@ mod tests {
     assert!(fails(r"printf '\x00\x00\x80\x3f' | readfloat -T f32 -w 32"));
     assert!(fails(r"printf '\x00\x00\x80\x3f' | readfloat -T f17"));
     assert!(fails(r"printf '\x00\x00\x80\x3f' | readfloat -w 16"));
-    assert!(fails(r"printf '\x00\x00\x80\x3f' | readfloat -T f32 -n 1 -N 1"));
+    assert!(fails(
+      r"printf '\x00\x00\x80\x3f' | readfloat -T f32 -n 1 -N 1"
+    ));
     assert!(fails(r"printf '\x00\x00\x80\x3f' | readfloat -T f32 -n 0"));
     assert!(fails(r"printf '\x01\x02\x03' | readfloat -T f32"));
     assert!(fails(r"printf '\x00\x00\x80\x3f' | readfloat -T f32 -N 2"));
@@ -505,9 +543,18 @@ mod tests {
 
   #[test]
   fn decimal_mode_prints_one_field_per_float() {
-    assert_eq!(out_of(r"printf '\x00\x00\x40\x3f' | readfloat -T f32 -d"), "0.75");
-    assert_eq!(out_of(r"printf '\x00\x00\x00\x80' | readfloat -T f32 -d"), "-0");
-    assert_eq!(out_of(r"printf '\x00\x00\x80\x7f' | readfloat -T f32 -d"), "inf");
+    assert_eq!(
+      out_of(r"printf '\x00\x00\x40\x3f' | readfloat -T f32 -d"),
+      "0.75"
+    );
+    assert_eq!(
+      out_of(r"printf '\x00\x00\x00\x80' | readfloat -T f32 -d"),
+      "-0"
+    );
+    assert_eq!(
+      out_of(r"printf '\x00\x00\x80\x7f' | readfloat -T f32 -d"),
+      "inf"
+    );
   }
 
   /// `--decimal` needs a Rust float type to reinterpret the bits into, so it is
@@ -523,7 +570,9 @@ mod tests {
   #[test]
   fn writefloat_encodes_a_triple() {
     assert_eq!(
-      out_of(r"writefloat -T f32 0 -24 12582912 >@v; printf '\x00\x00\x40\x3f' >@w; [[ $v == $w ]] && printf same"),
+      out_of(
+        r"writefloat -T f32 0 -24 12582912 >@v; printf '\x00\x00\x40\x3f' >@w; [[ $v == $w ]] && printf same"
+      ),
       "same"
     );
   }
@@ -531,11 +580,32 @@ mod tests {
   #[test]
   fn writefloat_groups_fields_the_same_way_however_they_arrive() {
     let want = "len=8";
-    assert_eq!(out_of(r"writefloat -T f32 '0 -24 12582912' '1 -24 8388608' >@v; printf 'len=%s' ${#v}"), want);
-    assert_eq!(out_of(r"writefloat -T f32 0 -24 12582912 1 -24 8388608 >@v; printf 'len=%s' ${#v}"), want);
-    assert_eq!(out_of(r"f=('0 -24 12582912' '1 -24 8388608'); writefloat -T f32 ${f[@]} >@v; printf 'len=%s' ${#v}"), want);
-    assert_eq!(out_of(r#"f=('0 -24 12582912' '1 -24 8388608'); writefloat -T f32 "${f[@]}" >@v; printf 'len=%s' ${#v}"#), want);
-    assert_eq!(out_of(r"printf '0 -24 12582912 1 -24 8388608' | writefloat -T f32 >@v; printf 'len=%s' ${#v}"), want);
+    assert_eq!(
+      out_of(r"writefloat -T f32 '0 -24 12582912' '1 -24 8388608' >@v; printf 'len=%s' ${#v}"),
+      want
+    );
+    assert_eq!(
+      out_of(r"writefloat -T f32 0 -24 12582912 1 -24 8388608 >@v; printf 'len=%s' ${#v}"),
+      want
+    );
+    assert_eq!(
+      out_of(
+        r"f=('0 -24 12582912' '1 -24 8388608'); writefloat -T f32 ${f[@]} >@v; printf 'len=%s' ${#v}"
+      ),
+      want
+    );
+    assert_eq!(
+      out_of(
+        r#"f=('0 -24 12582912' '1 -24 8388608'); writefloat -T f32 "${f[@]}" >@v; printf 'len=%s' ${#v}"#
+      ),
+      want
+    );
+    assert_eq!(
+      out_of(
+        r"printf '0 -24 12582912 1 -24 8388608' | writefloat -T f32 >@v; printf 'len=%s' ${#v}"
+      ),
+      want
+    );
   }
 
   #[test]
@@ -576,8 +646,14 @@ mod tests {
 
   #[test]
   fn writefloat_encodes_decimals() {
-    assert_eq!(out_of(r"writefloat -T f32 -d 0.75 | readfloat -T f32"), "0 -24 12582912");
-    assert_eq!(out_of(r"writefloat -T f32 -d 1.5 2.5 3.5 >@v; printf 'len=%s' ${#v}"), "len=12");
+    assert_eq!(
+      out_of(r"writefloat -T f32 -d 0.75 | readfloat -T f32"),
+      "0 -24 12582912"
+    );
+    assert_eq!(
+      out_of(r"writefloat -T f32 -d 1.5 2.5 3.5 >@v; printf 'len=%s' ${#v}"),
+      "len=12"
+    );
     assert!(fails(r"writefloat -T f32 -d notanumber"));
   }
 
