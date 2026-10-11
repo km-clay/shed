@@ -10,7 +10,7 @@
 //! Also handles assignment arithmetic operations like `+=`, `-=`, `*=`, and `/=` for integer and string variables,
 //! as well as array appending for indexed arrays.
 
-use crate::{set_var, varstr};
+use crate::set_var;
 use std::collections::VecDeque;
 
 use itertools::Itertools;
@@ -23,7 +23,7 @@ use crate::{
     Shed,
     meta::MetaTab,
     params, shopt,
-    vars::{Var, VarFlags, VarKind, VarKindTag, VarStr},
+    vars::{ValueBytes, Var, VarFlags, VarKind, VarKindTag, VarStr},
   },
   util::error::ShResult,
 };
@@ -127,7 +127,29 @@ impl super::Dispatcher {
         AssignKind::Eq => {
           if let Some((name, idx)) = indexed {
             Shed::vars_mut(|v| {
-              v.set_var_indexed(&name.to_str_lossy(), idx, varstr!("{val}"), flags)
+              match &val {
+                VarKind::Str(_) | VarKind::Int(_) | VarKind::Magic(_) => (),
+
+                VarKind::Arr(_) => {
+                  return Err(sherr!(
+                      InvalidAssignment @ span,
+                      "cannot assign array to indexed array element"
+                  ));
+                }
+                VarKind::AssocArr(_) => {
+                  return Err(sherr!(
+                      InvalidAssignment @ span,
+                      "cannot assign associative array to indexed array element"
+                  ));
+                }
+                VarKind::Unset => {
+                  return Err(sherr!(
+                      InvalidAssignment @ span,
+                      "cannot assign unset value to indexed array element"
+                  ));
+                }
+              }
+              v.set_var_indexed(&name.to_str_lossy(), idx, val.value_bytes().into(), flags)
             })?;
           } else {
             Shed::vars_mut(|v| v.set_var(var_name, val.clone(), flags))?;
@@ -233,8 +255,9 @@ impl super::Dispatcher {
           match var.kind_mut() {
             VarKind::Str(s) => {
               if matches!(op, AssignKind::PlusEq) {
-                let other = val.to_string();
-                *s = format!("{}{other}", s.to_str_lossy()).into();
+                let mut bytes = s.value_bytes();
+                bytes.extend_from_slice(&val.value_bytes());
+                *s = bytes.into();
               } else {
                 let n = s.to_str_lossy().parse::<i32>().map_err(|_| {
                   sherr!(InvalidAssignment @ span, "cannot {op_name} string variable")
