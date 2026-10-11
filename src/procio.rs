@@ -636,9 +636,9 @@ impl RedirBldr {
         let name = VarStr::from(&bytes[cur.pos()..]);
         if name.is_empty() {
           return Err(sherr!(
-                            ParseErr,
-                            "expected a variable name after '@' in redirection"
-                          ));
+                                            ParseErr,
+                                            "expected a variable name after '@' in redirection"
+                                          ));
         }
         redir = redir.with_target(RedirTarget::Var(name)).with_class($ty);
       };

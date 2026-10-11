@@ -508,7 +508,7 @@ pub(crate) trait Builtin: Sync {
     let mut argv = parsed.words;
     let cmd_name = match argv.first() {
       Some(Word::Arg(name, _)) => name.clone(),
-      _                        => cmd_span.slice(),
+      _ => cmd_span.slice(),
     };
     if !argv.is_empty() {
       argv.remove(0);

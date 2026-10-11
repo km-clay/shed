@@ -6,11 +6,20 @@ use std::{
 };
 
 use nix::{
-  errno::Errno, libc, sys::stat::{self, Mode}, unistd,
+  errno::Errno,
+  libc,
+  sys::stat::{self, Mode},
+  unistd,
 };
 
 use crate::{
-  opt, sherr, state::vars::VarStr, util::{self, error::{ShErr, ShResultExt}, strops},
+  opt, sherr,
+  state::vars::VarStr,
+  util::{
+    self,
+    error::{ShErr, ShResultExt},
+    strops,
+  },
 };
 
 use super::{
@@ -23,9 +32,9 @@ use super::{
 /// stays an error so the caller can describe what is in the way.
 fn make_dir(path: &Path, mode: stat::mode_t, tolerate_existing: bool) -> Result<bool, Errno> {
   match unistd::mkdir(path, Mode::from_bits_truncate(mode)) {
-    Ok(())                                                   => Ok(true),
+    Ok(()) => Ok(true),
     Err(Errno::EEXIST) if tolerate_existing && path.is_dir() => Ok(false),
-    Err(e)                                                   => Err(e),
+    Err(e) => Err(e),
   }
 }
 
@@ -83,7 +92,7 @@ impl Builtin for MkDir {
 
     // Parent components are created at the default mode
     // with `u+wx` guaranteed, so each one can be descended into to create the next.
-    let umask         = stat::umask(Mode::empty());
+    let umask = stat::umask(Mode::empty());
     stat::umask(umask);
     let default_mode  = 0o777 & !u32::from(umask.bits());
     let ancestor_mode = default_mode | 0o300;
@@ -174,18 +183,26 @@ fn handle_mkdir_err(io_err: io::Error, dir: &VarStr) -> ShErr {
         sherr!(ExecFail, "cannot make directory `{dir}`: name already exists")
       }
     }
-    EK::PermissionDenied   => sherr!(ExecFail, "cannot make directory `{dir}`: permission denied"),
-    EK::InvalidFilename    => sherr!(ExecFail, "cannot make directory `{dir}`: name too long"),
-    EK::ReadOnlyFilesystem => sherr!(ExecFail, "cannot make directory `{dir}`: read-only filesystem"),
-    EK::StorageFull        => sherr!(ExecFail, "cannot make directory `{dir}`: no space left on device"),
-    EK::NotADirectory      => sherr!(ExecFail, "cannot make directory `{dir}`: path component is not a directory"),
-    EK::NotFound           => sherr!(ExecFail, "cannot make directory `{dir}`: parent directory does not exist")
-      .with_note("the `-p` flag makes `fs mkdir` create parents as well: `fs mkdir -p`".into()),
+    EK::PermissionDenied => sherr!(ExecFail, "cannot make directory `{dir}`: permission denied"),
+    EK::InvalidFilename  => sherr!(ExecFail, "cannot make directory `{dir}`: name too long"),
+    EK::ReadOnlyFilesystem => {
+      sherr!(ExecFail, "cannot make directory `{dir}`: read-only filesystem")
+    }
+    EK::StorageFull => sherr!(ExecFail, "cannot make directory `{dir}`: no space left on device"),
+    EK::NotADirectory => {
+      sherr!(ExecFail, "cannot make directory `{dir}`: path component is not a directory")
+    }
+    EK::NotFound => {
+      sherr!(ExecFail, "cannot make directory `{dir}`: parent directory does not exist")
+        .with_note("the `-p` flag makes `fs mkdir` create parents as well: `fs mkdir -p`".into())
+    }
 
-    _ => if io_err.raw_os_error() == Some(libc::ELOOP) {
-      sherr!(ExecFail, "cannot make directory `{dir}`: too many levels of symbolic links")
-    } else {
-      sherr!(ExecFail, "cannot make directory `{dir}`: {io_err}")
+    _ => {
+      if io_err.raw_os_error() == Some(libc::ELOOP) {
+        sherr!(ExecFail, "cannot make directory `{dir}`: too many levels of symbolic links")
+      } else {
+        sherr!(ExecFail, "cannot make directory `{dir}`: {io_err}")
+      }
     }
   }
 }
@@ -207,6 +224,7 @@ mod tests {
 
   /// `mkdir(2)` filters through the umask, so the expected default is not a
   /// constant.
+  #[expect(clippy::useless_conversion)]
   fn default_mode() -> u32 {
     let umask = stat::umask(Mode::empty());
     stat::umask(umask);
@@ -215,8 +233,8 @@ mod tests {
 
   #[test]
   fn fs_mkdir_parents_creates_the_whole_chain() {
-    let _g  = TestGuard::new();
-    let dir = TempDir::new().unwrap();
+    let _g   = TestGuard::new();
+    let dir  = TempDir::new().unwrap();
     let leaf = dir.path().join("a/b/c");
     test_input(format!("fs mkdir -p {}", leaf.display())).unwrap();
     assert_eq!(state::Shed::get_status(), 0);
