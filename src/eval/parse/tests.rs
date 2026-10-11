@@ -2015,3 +2015,27 @@ fn defer_registration_returns_zero_status() {
     "defer registration should return 0; got: {out:?}"
   );
 }
+
+// ===================== Arithmetic vs Heredoc (#96) =====================
+
+#[test]
+fn arithmetic_shift_does_not_duplicate_the_rest_of_the_script() {
+  // Both ingredients are needed: a continuation anywhere is what makes
+  // `clean_input` run at all, and the `<<` is then read as a heredoc
+  // operator whose delimiter never matches, so the tail ran twice.
+  let guard = TestGuard::new();
+  test_input("echo arm \\\n  trigger\n(( 1 << 2 ))\necho tick".to_string()).unwrap();
+  assert_eq!(guard.read_output(), "arm trigger\ntick\n");
+}
+
+#[test]
+fn continuation_inside_arithmetic_still_joins() {
+  // Suppressing heredoc detection inside `(( ))` must not also suppress
+  // continuation removal there.
+  let guard = TestGuard::new();
+  test_input(
+    "echo arm \\\n  trigger\ndeclare -i a=0\n(( a = 1 + \\\n   2 ))\necho \"$a\"".to_string(),
+  )
+  .unwrap();
+  assert_eq!(guard.read_output(), "arm trigger\n3\n");
+}

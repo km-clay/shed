@@ -330,7 +330,8 @@ pub(crate) trait ByteCursor {
 }
 
 /// A [`ByteCursor`] over a borrowed byte slice, tracking its own position.
-/// For callers that need to scan an in-memory buffer rather than the lexer.
+///
+/// This struct provides a broad interface for performing lexical analysis
 pub(crate) struct SliceCursor<'a> {
   bytes: &'a [u8],
   pos  : usize,

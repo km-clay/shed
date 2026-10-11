@@ -480,8 +480,11 @@ pub(crate) fn clean_input(input: &[u8]) -> VarStr {
   let mut output     = vec![];
   let mut quotes     = QuoteState::default();
   let mut in_comment = false;
+  let mut arith_end  = 0;
+
   // FIFO queue: heredocs on the same line are consumed in order
   let mut heredoc_queue: VecDeque<VarStr> = VecDeque::new();
+
   match_loop!(bytes.next_byte() => b, {
     _ if in_comment && b != b'\n' && b != b'\r' => output.push(b),
     b'\'' => {
@@ -509,6 +512,21 @@ pub(crate) fn clean_input(input: &[u8]) -> VarStr {
       in_comment = false;
       bytes.bump_if(|b| b == b'\n');
       output.push(b'\n');
+    }
+    b'(' if quotes.outside() && bytes.peek_byte() == Some(b'(') => {
+      output.push(b);
+      output.push(bytes.next_byte().unwrap());
+
+      // we are in an arithmetic statement. let's find the end of it,
+      // if we hit a heredoc before we reach that position, it's not a
+      // heredoc. it's a bit shift like (( 1 << 2 ))
+
+      // we can't just advance the cursor to that position here
+      // because we have to still scan for line continuations
+      let mut probe = SliceCursor::new(&input[bytes.pos()..]);
+      if strops::scan_parens(&mut probe, 2) {
+        arith_end = arith_end.max(bytes.pos() + probe.pos());
+      }
     }
     b'\n' if let Some(delim) = heredoc_queue.pop_front() => {
       in_comment = false;
@@ -541,52 +559,53 @@ pub(crate) fn clean_input(input: &[u8]) -> VarStr {
       in_comment = false;
       output.push(b'\n');
     }
-    b'<' if quotes.outside() && bytes.peek_byte() == Some(b'<') => {
+    b'<' if quotes.outside() && bytes.pos() > arith_end && bytes.peek_byte() == Some(b'<') => {
       output.push(b); // first '<'
       output.push(bytes.next_byte().unwrap()); // second '<'
 
-      // <<< is a here-string — no multi-line body, don't push to queue
+      // <<< is a here-string
       if let Some(third) = bytes.next_byte_if(|b| b == b'<') {
         output.push(third);
-      } else {
-        // Skip optional '-' for <<-
-        let tab_strip = bytes.peek_byte() == Some(b'-');
+        continue
+      }
 
-        // Skip horizontal whitespace between << and delimiter
-        while let Some(wc) = bytes.next_byte_if(|b| b == b' ' || b == b'\t') {
-          output.push(wc);
-        }
+      // Skip optional '-' for <<-
+      let tab_strip = bytes.peek_byte() == Some(b'-');
 
-        // Collect delimiter word, stripping quotes for the match key
-        let mut delim = util::scratch_buf();
-        if tab_strip {
-          delim.push(b'-');
-        }
-        let mut in_dquote = false;
-        let mut in_squote_inner = false;
-        while let Some(c) = bytes.peek_byte() {
-          match c {
-            b'\'' if !in_dquote => in_squote_inner = !in_squote_inner,
-            b'"' if !in_squote_inner => in_dquote = !in_dquote,
-            c if (c.is_ascii_whitespace()
-              || matches!(c, b';' | b'&' | b'|' | b'(' | b')' | b'<' | b'>'))
-              && !in_dquote
-              && !in_squote_inner =>
-            {
-              break
-            }
-            _ => {}
+      // Skip horizontal whitespace between << and delimiter
+      while let Some(wc) = bytes.next_byte_if(|b| b == b' ' || b == b'\t') {
+        output.push(wc);
+      }
+
+      // Collect delimiter word, stripping quotes for the match key
+      let mut delim = util::scratch_buf();
+      if tab_strip {
+        delim.push(b'-');
+      }
+      let mut in_dquote = false;
+      let mut in_squote_inner = false;
+      while let Some(c) = bytes.peek_byte() {
+        match c {
+          b'\'' if !in_dquote => in_squote_inner = !in_squote_inner,
+          b'"' if !in_squote_inner => in_dquote = !in_dquote,
+          c if (c.is_ascii_whitespace()
+            || matches!(c, b';' | b'&' | b'|' | b'(' | b')' | b'<' | b'>'))
+            && !in_dquote
+            && !in_squote_inner =>
+          {
+            break
           }
-          // Add to match key only if it's not a quote character
-          if c != b'\'' && c != b'"' {
-            delim.push(c);
-          }
-          output.push(c);
-          bytes.next_byte();
+          _ => {}
         }
-        if !delim.trim_start_with(|b| b == '-').is_empty() {
-          heredoc_queue.push_back(delim.as_slice().into());
+        // Add to match key only if it's not a quote character
+        if c != b'\'' && c != b'"' {
+          delim.push(c);
         }
+        output.push(c);
+        bytes.next_byte();
+      }
+      if !delim.trim_start_with(|b| b == '-').is_empty() {
+        heredoc_queue.push_back(delim.as_slice().into());
       }
     }
     _ => output.push(b),
@@ -2098,5 +2117,55 @@ mod tests {
   fn hash_mid_word_is_not_a_comment() {
     // `#` not at a word boundary stays literal, so the continuation still fires.
     assert_eq!(clean_input(b"a#b\\\nc").as_bytes(), b"a#bc");
+  }
+
+  // ================= arithmetic vs heredoc (issue #96) =================
+
+  #[test]
+  fn arithmetic_shift_is_not_a_heredoc() {
+    // Reading the `<<` as a heredoc operator leaves a delimiter that never
+    // matches, which copies everything after it a second time.
+    let src = b"(( a = a << 1 ))\necho done";
+    assert_eq!(clean_input(src).as_bytes(), src);
+  }
+
+  #[test]
+  fn arithmetic_substitution_shift_is_not_a_heredoc() {
+    let src = b"v=$(( 1 << 3 ))\necho done";
+    assert_eq!(clean_input(src).as_bytes(), src);
+  }
+
+  #[test]
+  fn continuation_inside_arithmetic_is_joined() {
+    // The arithmetic body is not exempt from continuation removal.
+    assert_eq!(
+      clean_input(b"(( a = 1 + \\\n   2 ))").as_bytes(),
+      b"(( a = 1 +    2 ))"
+    );
+  }
+
+  #[test]
+  fn nested_arithmetic_keeps_the_outer_shift_suppressed() {
+    // The inner `$(( ))` must not shrink the boundary, or the `<<` after its
+    // closer is read as a heredoc again.
+    let src = b"(( a = $(( 1 + 1 )) << 2 ))\necho done";
+    assert_eq!(clean_input(src).as_bytes(), src);
+  }
+
+  #[test]
+  fn heredoc_after_arithmetic_is_still_tracked() {
+    // Suppression ends with the arithmetic, so a real heredoc still queues.
+    let src = b"(( a = 1 << 2 ))\ncat <<EOT\nbody\nEOT\necho after";
+    assert_eq!(clean_input(src).as_bytes(), src);
+  }
+
+  #[test]
+  fn arithmetic_opener_in_quotes_is_not_scanned() {
+    // `((` inside quotes is literal; scanning from it reaches no closer and
+    // swallows the rest of the input, leaving later continuations unjoined.
+    assert_eq!(
+      clean_input(b"echo \"(( x\"\necho a\\\nb").as_bytes(),
+      b"echo \"(( x\"\necho ab"
+    );
   }
 }

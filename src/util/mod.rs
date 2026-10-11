@@ -97,6 +97,7 @@ impl Index<usize> for StateSet {
 /// Returns a smallvec that can be used as a scratch buffer for temporary data.
 ///
 /// Trivially convertible to [`crate::state::vars::VarStr`] since it implements `AsRef<[u8]>`.
+/// Use this instead of [`crate::procio::take_scratch()`] for operations on small strings.
 pub(super) fn scratch_buf() -> SmallVec<[u8; 24]> {
   SmallVec::new()
 }

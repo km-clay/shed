@@ -93,12 +93,15 @@ pub(crate) enum ScratchSlot {
 
 /// Take a scratch buffer for temporary use.
 ///
-/// Returns a guard that releases the buffer when dropped.
+/// Returns a guard that releases the buffer when dropped, and also shrinks it back to its original size.
 ///
 /// If the global scratch buffer is available, that will be used
 /// instead of allocating a new buffer.
 ///
 /// If it is taken, a new temporary buffer will be allocated.
+///
+/// Note: this is meant for potentially large allocations. The global buffer is like 256kb or something.
+/// And the temporary buffer is 64kb. Use [`crate::util::scratch_buf()`] for small stuff.
 pub(crate) fn take_scratch() -> ScratchGuard {
   ScratchGuard::take_scratch()
 }
@@ -115,8 +118,9 @@ pub(crate) enum Scratch {
 }
 
 impl Scratch {
-  const LOCAL_SCRATCH_BUF_SIZE: usize = 64 * 1024;
-  const GLOBAL_SCRATCH_BUF_SIZE: usize = 256 * 1024;
+  const LOCAL_SCRATCH_BUF_SIZE: usize = 64 * 1024; // 64kb
+  const GLOBAL_SCRATCH_BUF_SIZE: usize = 256 * 1024; // 256kb
+
   fn new_global() -> Self {
     Scratch::Global(vec![0; Self::GLOBAL_SCRATCH_BUF_SIZE])
   }
