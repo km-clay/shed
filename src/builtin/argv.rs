@@ -15,14 +15,17 @@ pub(crate) struct BuiltinArgs {
   span    : Span,
   /// The span of just the command
   cmd_span: Span,
+  /// The command word after expansion.
+  cmd_name: VarStr,
 }
 
 impl BuiltinArgs {
-  pub(crate) fn new(argv: Vec<Word>, span: Span, cmd_span: Span) -> Self {
+  pub(crate) fn new(argv: Vec<Word>, span: Span, cmd_span: Span, cmd_name: VarStr) -> Self {
     Self {
       argv,
       span,
       cmd_span,
+      cmd_name,
     }
   }
   pub(crate) fn span(&self) -> Span {
@@ -30,6 +33,9 @@ impl BuiltinArgs {
   }
   pub(crate) fn cmd_span(&self) -> Span {
     self.cmd_span
+  }
+  pub(crate) fn cmd_name(&self) -> &VarStr {
+    &self.cmd_name
   }
 
   /// The arg vector of the builtin, including *BOTH* options and arguments.
@@ -39,8 +45,8 @@ impl BuiltinArgs {
     &self.argv
   }
 
-  pub(crate) fn unpack(self) -> (Vec<Word>, Span, Span) {
-    (self.argv, self.span, self.cmd_span)
+  pub(crate) fn unpack(self) -> (Vec<Word>, Span, Span, VarStr) {
+    (self.argv, self.span, self.cmd_span, self.cmd_name)
   }
 
   /// Get an iterator over the arguments (non-option words) of the builtin.

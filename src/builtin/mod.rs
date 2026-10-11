@@ -506,11 +506,15 @@ pub(crate) trait Builtin: Sync {
     }
 
     let mut argv = parsed.words;
+    let cmd_name = match argv.first() {
+      Some(Word::Arg(name, _)) => name.clone(),
+      _                        => cmd_span.slice(),
+    };
     if !argv.is_empty() {
       argv.remove(0);
     }
 
-    let builtin_args = BuiltinArgs::new(argv, span, cmd_span);
+    let builtin_args = BuiltinArgs::new(argv, span, cmd_span, cmd_name);
 
     self.execute(builtin_args)
   }
@@ -634,7 +638,7 @@ pub(super) trait BuiltinRouter {
   }
   fn dispatch_sub(&self, args: BuiltinArgs) -> ShResult<()> {
     let sub = self.sub_from_args(&args);
-    let (mut words, span, mut cmd_span) = args.unpack();
+    let (mut words, span, mut cmd_span, cmd_name) = args.unpack();
 
     // strip subcommand, adjust cmd_span
     if sub.is_some()
@@ -645,10 +649,10 @@ pub(super) trait BuiltinRouter {
     }
 
     let Some(sub) = sub.or_else(|| self.default_sub()) else {
-      return self.sub_not_found(BuiltinArgs::new(words, span, cmd_span));
+      return self.sub_not_found(BuiltinArgs::new(words, span, cmd_span, cmd_name));
     };
 
-    sub.execute(BuiltinArgs::new(words, span, cmd_span))
+    sub.execute(BuiltinArgs::new(words, span, cmd_span, cmd_name))
   }
   /// The default subcommand to run if no subcommand is specified.
   fn default_sub(&self) -> Option<&'static dyn Builtin> {

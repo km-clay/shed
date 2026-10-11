@@ -449,11 +449,11 @@ impl super::Builtin for Test {
 
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let span             = args.span();
-    let cmd_span         = args.cmd_span();
-    let cmd              = cmd_span.slice();
-    let extended         = *cmd == *b"[[";
+    let cmd              = args.cmd_name().clone();
+    let cmd              = cmd.as_bytes();
+    let extended         = cmd == b"[[";
     let (mut arg_vec, _) = args.take_argv();
-    if (*cmd == *b"[" || *cmd == *b"[[") && !arg_vec.is_empty() {
+    if (cmd == b"[" || cmd == b"[[") && !arg_vec.is_empty() {
       arg_vec.pop();
     }
 
@@ -887,6 +887,45 @@ mod tests {
   fn test_ef_missing_is_false() {
     let _g = TestGuard::new();
     test_input("[[ /tmp/__ef_missing_a__ -ef /tmp/__ef_missing_b__ ]]").unwrap();
+    assert_ne!(state::Shed::get_status(), 0);
+  }
+
+  // ===================== Opener spelling =====================
+
+  #[test]
+  fn test_quoted_opener_still_pairs_its_closer() {
+    let _g = TestGuard::new();
+    test_input(r#""[" a = a ]"#).unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_escaped_opener_still_pairs_its_closer() {
+    let _g = TestGuard::new();
+    test_input(r"\[ a = a ]").unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_opener_from_variable_still_pairs_its_closer() {
+    let _g = TestGuard::new();
+    test_input(r#"cmd=[; "$cmd" a = a ]"#).unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_quoted_dbracket_opener_keeps_extended_semantics() {
+    let _g = TestGuard::new();
+    test_input(r#""[[" abc == a* ]]"#).unwrap();
+    assert_eq!(state::Shed::get_status(), 0);
+  }
+
+  #[test]
+  fn test_bare_closer_is_an_operand_for_test() {
+    // `test a = ]` compares against a literal `]`; nothing is stripped, so it
+    // stays a three-operand comparison that is simply false.
+    let _g = TestGuard::new();
+    test_input("test a = ]").unwrap();
     assert_ne!(state::Shed::get_status(), 0);
   }
 
