@@ -226,7 +226,7 @@ impl super::Builtin for Thru {
     }
 
     if count {
-      errln!("thru: {byte_count} bytes");
+      errln!("{byte_count}");
     }
 
     // thru exit statuses:
