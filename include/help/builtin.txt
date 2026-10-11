@@ -2844,7 +2844,7 @@ POLL                                             *builtin-poll* *poll*
   Wait until one or more file descriptors are ready for I/O, then report
   which fds fired and why. `poll` is a single, one-shot wait: it blocks
   once, records the result, and returns. The loop belongs to the script;
-  `poll` is meant to be used as a loop condition, not to loop internally.
+  `poll` is meant to be used as a loop condition.
 
   This is the multiplexing primitive for the socket builtins: with it, a
   single-threaded script can service many connections at once instead of
@@ -2995,7 +2995,7 @@ PIPE                                             *builtin-pipe* *pipe*
   close-on-exec by default, so they are not inherited across an `exec`
   of an external command unless you dup them onto a lower number first.
   Redirect through them with the `{name[i]}` fd-variable syntax:
-  `>&${name[1]}` to write, `<&${name[0]}` to read, and
+  `>&{name[1]}` to write, `<&{name[0]}` to read, and
   `exec {name[i]}>&-` to close an end.
 
   Flags ~
@@ -3034,9 +3034,9 @@ PIPE                                             *builtin-pipe* *pipe*
   Examples ~
 
       ```pipe -a p```           create a pipe; `p=(rfd wfd)`
-      ```echo hi >&${p[1]}; exec {p[1]}>&-; thru <&${p[0]}```
+      ```echo hi >&{p[1]}; exec {p[1]}>&-; thru <&{p[0]}```
                                 write, close the writer, then drain
-      ```pipe -a p; producer >&${p[1]} & exec {p[1]}>&-```
+      ```pipe -a p; producer >&{p[1]} & exec {p[1]}>&-```
                                 hand the write end to a background
                                 producer and close the parent's copy
       ```pipe -n -a p```        non-blocking ends for an event loop
@@ -5482,6 +5482,30 @@ THRU                                             *builtin-thru* *thru*
                   After draining the input, write the total number of bytes
                   that passed through to standard error. Does not affect
                   the pass-through output.
+
+    `--once`
+                  Perform exactly one read and pass through whatever that
+                  read delivered, instead of looping until the input is
+                  drained.
+
+                  This is the primitive for record-oriented input, where one
+                  read corresponds to one write and the boundary carries
+                  meaning: a packet-mode pipe (|pipe|(builtin-pipe) `-p`). Every
+                  other mode fills its buffer across as many reads as it
+                  takes, which merges those records; `--once` is the only
+                  way to observe them.
+
+                  The limits apply to that single read rather than to a
+                  running total. `-T` sizes the read, so a result shorter
+                  than `-T` is normal rather than a short take. `-S` drops
+                  bytes from the front of whatever came back, so
+                  ```thru --once -S 2 -T 3``` carves `[2, 5)` out of one read.
+
+                  `-F` and `-U` scan for their delimiter a byte at a time,
+                  which is irreconcilable with a single read, so they cannot
+                  be combined with `--once`. If you need this behavior, you
+                  can chain two `thru` calls together, like this:
+                  ```thru --once -T 1024 | thru -F $'\n'```
 
     `-S {bytes}`, `--skip {bytes}`
                   Discard the first `{bytes}` bytes of input before passing

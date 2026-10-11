@@ -183,7 +183,7 @@ impl ReadInt {
     args: &BuiltinArgs,
   ) -> ShResult<()> {
     let mut buf = vec![0u8; 17];
-    let     got = reader.read_up_to(&mut buf).promote_err(args.cmd_span())?;
+    let     got = reader.read_all(&mut buf).promote_err(args.cmd_span())?;
 
     if got == 0 {
       return util::with_status(1);
@@ -210,7 +210,7 @@ impl ReadInt {
     let     want  = limit.wanted();
 
     let mut buf   = vec![0u8; width * want];
-    let     got   = reader.read_up_to(&mut buf).promote_err(args.cmd_span())?;
+    let     got   = reader.read_all(&mut buf).promote_err(args.cmd_span())?;
 
     let     whole = got / width;
     let     rem   = got % width;

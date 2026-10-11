@@ -82,8 +82,6 @@ impl Pack {
         None       => (arg.clone(), false),
       };
 
-      // allows for `field=5` notation, just ignores the names
-      // nice for readability
       let (name, arg): (Option<VarStr>, VarStr) = match strops::split_assignment_raw(&arg) {
         (rhs, Some(lhs)) => {
           let name: VarStr = rhs.into();
@@ -222,6 +220,7 @@ impl Unpack {
     let     limit  : usize         = *shopt!(core.max_read_limit) as usize;
 
     let mut fields: Vec<(Option<VarStr>, VarStr, Span)> = vec![];
+    let mut consumed: usize = 0;
 
     while let Some((arg, span)) = arguments.next() {
       let (arg, skip) = match arg.strip_prefix(b"+") {
@@ -229,8 +228,6 @@ impl Unpack {
         None       => (arg.clone(), false),
       };
 
-      // allows for `field=5` notation, just ignores the names
-      // nice for readability
       let (name, arg): (Option<VarStr>, VarStr) = match strops::split_assignment_raw(&arg) {
         (rhs, Some(lhs)) => {
           let rhs = rhs.into();
@@ -263,11 +260,31 @@ impl Unpack {
         ));
       }
 
+      if count == 0 {
+        if !skip {
+          fields.push((name, buffer[..count].into(), span));
+        }
+        continue;
+      }
+
       if buffer.len() < count {
         buffer.resize(count, 0);
       }
 
-      reader.read_exact(&mut buffer[..count]).promote_err(span)?;
+      let got = match reader.read_all(&mut buffer[..count]) {
+        Ok(0) if consumed == 0 => return util::with_status(1),
+        Ok(n) if n < count => {
+          return Err(sherr!(
+              ParseErr @ span,
+              "expected {count} bytes, got {n}"
+          ));
+        }
+        Ok(got) => got,
+
+        Err(e) => return Err(e).promote_err(span),
+      };
+
+      consumed += got;
 
       if !skip {
         fields.push((name, buffer[..count].into(), span));
@@ -414,6 +431,33 @@ mod tests {
     assert_eq!(
       out_of(r"{ printf 'ab'; printf 'cd'; } | unpack -a f 4; printf '%s' ${f[0]}"),
       "abcd"
+    );
+  }
+
+  #[test]
+  fn records_can_be_read_in_a_loop_until_exhausted() {
+    assert_eq!(
+      out_of(
+        r"printf 'aabbccdd' | { while unpack -a f 2 2; do printf '%s%s,' ${f[0]} ${f[1]}; done; }"
+      ),
+      "aabb,ccdd,"
+    );
+  }
+
+  #[test]
+  fn a_leading_skip_still_reports_a_truncated_record() {
+    assert!(fails(r"printf '12345678' | unpack -a f +8 x=4"));
+  }
+
+  #[test]
+  fn a_zero_width_field_lands_wherever_it_sits() {
+    assert_eq!(
+      out_of(r"printf 'abcd' | unpack -a f x=0 y=4; printf '%s;%s' ${#f[@]} ${f[1]}"),
+      "2;abcd"
+    );
+    assert_eq!(
+      out_of(r"printf 'abcd' | unpack -a f y=4 x=0; printf '%s;%s' ${#f[@]} ${f[0]}"),
+      "2;abcd"
     );
   }
 

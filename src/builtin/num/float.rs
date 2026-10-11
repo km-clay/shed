@@ -298,7 +298,7 @@ impl super::Builtin for ReadFloat {
     let     want  : usize         = limit.wanted();
 
     let mut buf   : Vec<u8>       = vec![0u8; want * width];
-    let     got   : usize         = reader.read_up_to(&mut buf).promote_err(args.cmd_span())?;
+    let     got   : usize         = reader.read_all(&mut buf).promote_err(args.cmd_span())?;
     let     whole : usize         = got / width;
     let     rem   : usize         = got % width;
 

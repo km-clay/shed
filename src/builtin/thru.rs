@@ -16,6 +16,7 @@ use crate::{
 
 struct ThruOpts {
   count : bool,
+  once  : bool,
   append: bool,
   tee   : Option<VarStr>,
   take  : Option<usize>,
@@ -36,6 +37,7 @@ impl super::Builtin for Thru {
   fn opts(&self) -> Vec<OptSpec> {
     vec![
       opt!("count" | b'c'),
+      opt!("once"),
       opt!("append" | b'a'),
       opt!("tee" | b't', 1),
       opt!("limit" | b'L', 1),
@@ -57,6 +59,7 @@ impl super::Builtin for Thru {
     };
     let ThruOpts {
       count,
+      once,
       append,
       tee,
       skip,
@@ -116,11 +119,18 @@ impl super::Builtin for Thru {
         },
       };
       let span = src.map(|(_, s)| s);
+
       let can_seek =
         (from.is_some() || until.is_some()) && reader.seek(io::SeekFrom::Current(0)).is_ok();
 
-      let mut buf = procio::take_scratch();
+      let mut buf  = procio::take_scratch();
+      let mut pass = 0;
       loop {
+        if once && pass > 0 {
+          break 'sources;
+        }
+        pass += 1;
+
         let window = match take {
           Some(l) => skip.saturating_add(l),
           None    => buf.len(),
@@ -222,6 +232,10 @@ impl super::Builtin for Thru {
         if let Some(l) = take.as_mut() {
           *l -= emit.len();
         }
+
+        if once {
+          break;
+        }
       }
     }
 
@@ -241,7 +255,7 @@ impl super::Builtin for Thru {
       set_status(1);
     }
 
-    if byte_count > 0 && take.is_some_and(|t| t > 0) {
+    if !once && byte_count > 0 && take.is_some_and(|t| t > 0) {
       // 2 is reserved for usage errors
       set_status(3);
     }
@@ -261,8 +275,20 @@ impl super::Builtin for Thru {
 impl Thru {
   fn parse_opts(args: &BuiltinArgs) -> ShResult<ThruOpts> {
     let count  = args.has_opt("count");
+    let once   = args.has_opt("once");
     let append = args.has_opt("append");
-    let tee    = args.opt_value("tee");
+
+    if once {
+      for (opt, flags) in [("from", "`-F`/`--from`"), ("until", "`-U`/`--until`")] {
+        if let Some(span) = args.opt_span(opt) {
+          return Err(
+            sherr!(InvalidOpt @ span, "{flags} scans for a delimiter one byte at a time, so it cannot be combined with `--once`")
+              .with_code(2),
+          );
+        }
+      }
+    }
+    let tee = args.opt_value("tee");
     let take = args
       .opt_value("take")
       .or_else(|| args.opt_value("limit"))
@@ -306,6 +332,7 @@ impl Thru {
 
     Ok(ThruOpts {
       count,
+      once,
       append,
       tee,
       take,
@@ -341,6 +368,57 @@ mod tests {
     let _g = TestGuard::new();
     test_input(cmd).unwrap();
     Shed::get_status()
+  }
+
+  #[test]
+  fn once_with_data_is_zero() {
+    assert_eq!(status_of(r"printf 'abc' | thru --once >/dev/null"), 0);
+  }
+
+  #[test]
+  fn once_at_eof_is_one() {
+    // Quiet 1 at a clean boundary is what lets `while thru --once` terminate.
+    assert_eq!(status_of(r"printf '' | thru --once >/dev/null"), 1);
+  }
+
+  #[test]
+  fn once_short_read_is_not_a_short_take() {
+    // A single read delivering fewer bytes than -T is normal, not truncation (3).
+    assert_eq!(status_of(r"printf '01' | thru --once -T 4 >/dev/null"), 0);
+  }
+
+  #[test]
+  fn once_take_caps_the_read() {
+    let g = TestGuard::new();
+    test_input(r"printf 'ABCDEFGH' | thru --once -T 3").unwrap();
+    assert_eq!(g.read_output(), "ABC");
+  }
+
+  #[test]
+  fn once_skip_drops_from_the_front_of_the_single_read() {
+    let g = TestGuard::new();
+    test_input(r"printf 'ABCDEFGH' | thru --once -S 3").unwrap();
+    assert_eq!(g.read_output(), "DEFGH");
+  }
+
+  #[test]
+  fn once_skip_and_take_carve_a_slice_in_one_read() {
+    let g = TestGuard::new();
+    test_input(r"printf 'ABCDEFGH' | thru --once -S 2 -T 3").unwrap();
+    assert_eq!(g.read_output(), "CDE");
+  }
+
+  #[test]
+  fn once_rejects_until() {
+    assert_eq!(
+      status_of("printf 'ab\\000cd' | thru --once --until $'\\0' >/dev/null"),
+      2
+    );
+  }
+
+  #[test]
+  fn once_rejects_from() {
+    assert_eq!(status_of(r"printf 'abc' | thru --once -F a >/dev/null"), 2);
   }
 
   #[test]

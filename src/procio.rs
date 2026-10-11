@@ -636,9 +636,9 @@ impl RedirBldr {
         let name = VarStr::from(&bytes[cur.pos()..]);
         if name.is_empty() {
           return Err(sherr!(
-                    ParseErr,
-                    "expected a variable name after '@' in redirection"
-                  ));
+                            ParseErr,
+                            "expected a variable name after '@' in redirection"
+                          ));
         }
         redir = redir.with_target(RedirTarget::Var(name)).with_class($ty);
       };
@@ -1196,7 +1196,7 @@ impl PipeFrames {
 /// descriptors with this, we can also create entire new types of files if we want to.
 pub(crate) trait Sink: Send + Sync {
   fn read(&self, buf: &mut [u8]) -> io::Result<usize>;
-  fn read_up_to(&self, buf: &mut [u8]) -> ShResult<usize> {
+  fn read_all(&self, buf: &mut [u8]) -> ShResult<usize> {
     let     len = buf.len();
     let mut got = 0;
 
@@ -1210,16 +1210,6 @@ pub(crate) trait Sink: Send + Sync {
     }
 
     Ok(got)
-  }
-  fn read_exact(&self, buf: &mut [u8]) -> ShResult<()> {
-    let len = buf.len();
-    let got = self.read_up_to(buf)?;
-
-    if got < len {
-      Err(sherr!(ExecFail, "expected {len} bytes, got {got}"))
-    } else {
-      Ok(())
-    }
   }
 
   fn write(&self, buf: &[u8]) -> io::Result<usize>;
