@@ -403,7 +403,7 @@ impl ScopeStack {
     Err(sherr!(ExecFail, "Variable '{var_name}' not found"))
   }
   pub(crate) fn get_arr_mut(&mut self, var_name: &str) -> ShResult<&mut VecDeque<VarStr>> {
-    if self.try_get_arr_mut(var_name).is_err() {
+    if !self.var_exists(var_name) {
       self
         .set_var(var_name, VarKind::arr(vec![]), VarFlags::empty())
         .ok();
