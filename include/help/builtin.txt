@@ -2749,7 +2749,7 @@ LOCK                                               *builtin-lock* *lock*
 ==============================================================================
 LOCAL                                            *builtin-local* *local*
 
-  `local [name[=value] ...]`
+  `local [-aAirx] [name[=value] ...]`
 
   Declare variables scoped to the enclosing function. Local variables
   shadow any outer variable of the same name and are discarded when the
@@ -2758,8 +2758,10 @@ LOCAL                                            *builtin-local* *local*
   error, as in `bash`.
 
   With `name=value`, declares and sets in one step. With just {name},
-  declares with an empty value. Multiple declarations per call are
-  allowed.
+  declares the variable without a value: it is unset rather than null,
+  so `${name-fallback}` still takes the fallback and `${name+SET}`
+  stays empty. Write `local name=` for a variable that is set but
+  null. Multiple declarations per call are allowed.
 
   With no arguments, lists all variables in the current scope.
 
@@ -2768,11 +2770,48 @@ LOCAL                                            *builtin-local* *local*
   Combine the two for save-and-restore patterns: `local` captures the
   value and `defer` registers the restore.
 
+  Type flags ~
+
+  `local` accepts the same type and attribute flags as
+  |builtin-declare|, applying them to the variable it declares in the
+  current scope.
+
+    `-a`    indexed array. RHS may be `(elem1 elem2 ...)`. With no RHS,
+            the array starts out empty rather than unset
+    `-A`    associative array. RHS may be `([key1]=v1 [key2]=v2 ...)`.
+            With no RHS, the array starts out empty rather than unset
+    `-i`    integer. RHS is arithmetic-evaluated, so `local -i x=5+3`
+            stores `8`. Subsequent assignments are evaluated too, and
+            an integer declared with no value counts as `0` under
+            compound assignment, so `local -i n; n+=5` leaves `5`
+
+  Only one type flag may be given per call. Without a type flag, the
+  variable is a string.
+
+  Attribute flags ~
+
+    `-r`    read-only. The local cannot be reassigned or unset for the
+            lifetime of the scope. See |builtin-readonly|
+    `-x`    export. The local is passed to child processes for as long
+            as the scope is live, and stops being exported when the
+            scope exits. See |builtin-export|
+
+  Type and attribute flags can be combined, and can be bundled into a
+  single argument: `local -ri N=9` declares a read-only local integer.
+
+  There are no introspection flags. Bare `local` is the scope listing;
+  for `-p`, `-f`, and `-F`, see |builtin-declare|.
+
   Examples:
 
       ```local x=10```
       ```local a b c```
-      ```local```           list scope variables
+      ```local -i n=5+3```          integer, evaluates to 8
+      ```local -a arr=(a b c)```    indexed array
+      ```local -A m=([k]=v)```      associative array
+      ```local -r limit=10```       read-only for the rest of the scope
+      ```local -x TMPDIR=/tmp```    exported to children while in scope
+      ```local```                   list scope variables
 
 ==============================================================================
 MSG                                              *builtin-msg* *msg*
