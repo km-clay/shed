@@ -28,9 +28,6 @@ _cargo_comp() {
 	if [[ -z "$sub_cmd" ]]; then
 		compadd -A subcommands
 	else
-		for ((n=0; n<idx; n++)); do
-			fpop COMP_WORDS > /dev/null
-		done
 		case "$sub_cmd" in
 			r|run) _cargo_run_comp ;;
 			b|build) _cargo_build_comp ;;
