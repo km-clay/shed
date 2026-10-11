@@ -766,6 +766,12 @@ impl From<PathBuf> for VarStr {
   }
 }
 
+impl From<&Path> for VarStr {
+  fn from(value: &Path) -> Self {
+    Self(HipByt::from(value.as_os_str().as_bytes()))
+  }
+}
+
 impl From<Vec<u8>> for VarStr {
   fn from(value: Vec<u8>) -> Self {
     Self::from(value.as_slice())

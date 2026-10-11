@@ -2206,18 +2206,31 @@ FS TOUCH                                     *fs-touch* *builtin-fs-touch*
 ==============================================================================
 FS MKDIR                                     *fs-mkdir* *builtin-fs-mkdir*
 
-  `fs mkdir [-m {mode}] {dir} ...`
+  `fs mkdir [-p] [-m {mode}] {dir} ...`
 
   Create each {dir}, using `mkdir(2)`.
 
-  Only the named directory is created. A {dir} whose parent does not
-  exist is an error, not an invitation to create the parent: building a
-  chain of directories is a loop rather than a system call, so there is
-  no `-p`. Name the parents in order, or use `mkdir -p` when that is
-  what is wanted.
+  Without `-p`, only the named directory is created: a {dir} whose parent
+  does not exist is an error, and a {dir} that already exists is one too.
 
   Each {dir} is attempted independently, so one that fails reports the
-  reason and the rest are still created.
+  reason and the rest are still created. Under `-p` a failure abandons
+  that {dir} and moves to the next, rather than reporting every
+  component below the one that went wrong.
+
+  Creating parents ~
+
+  `-p` creates each missing component of {dir} in turn, and stops
+  treating an existing {dir} as a failure, which together make the call
+  idempotent: `fs mkdir -p "$d"` is the whole of "make sure `$d`
+  exists". Something other than a directory in the way is still an
+  error, named for the component that is blocking.
+
+  Parent components never take `-m`. They are created at the default
+  mode with `u+wx` guaranteed, so that each one can be descended into to
+  create the next; only the final component takes the requested {mode}.
+  A {dir} that already existed keeps the mode it had -- `-p` creates,
+  and does not reach back to adjust what was already there.
 
   Mode ~
 
@@ -2250,14 +2263,18 @@ FS MKDIR                                     *fs-mkdir* *builtin-fs-mkdir*
       ```fs mkdir -m 700 ~/.secrets```     exactly 0700, umask or not
       ```fs mkdir -m go-rwx private```     the same, said symbolically
 
-    Building a chain, which `-p` would otherwise hide:
+      ```fs mkdir -p a/b/c```              and both parents
+      ```fs mkdir -p -m 700 a/b/c```       `a` and `a/b` default, `a/b/c` 0700
+
+    Naming the chain by hand is still available, and is what `-p` does
+    for you:
 
       ```fs mkdir a a/b a/b/c```
 
-    A directory that already exists is an error, so a script that wants
-    "make sure it exists" should test first:
+    `-p` is the idempotent form, so a script that wants "make sure it
+    exists" no longer needs to test first:
 
-      ```[[ -d "$d" ]] || fs mkdir "$d"```
+      ```fs mkdir -p "$d"```
 
 ==============================================================================
 GENRC                                            *builtin-genrc* *genrc*
