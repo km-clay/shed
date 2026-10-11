@@ -1423,6 +1423,20 @@ mod tests {
   }
 
   #[test]
+  fn never_declared_append_creates_a_scalar() {
+    let g = TestGuard::new();
+    test_input("x+=foo; declare -p x").unwrap();
+    assert_eq!(g.read_output().trim(), "declare -- x=foo");
+  }
+
+  #[test]
+  fn never_declared_array_append_creates_an_array() {
+    let g = TestGuard::new();
+    test_input("a+=(x); declare -p a").unwrap();
+    assert_eq!(g.read_output().trim(), "declare -a a=(x)");
+  }
+
+  #[test]
   fn declare_p_on_unset_var_shows_it_valueless() {
     // A declared-but-unset variable exists, so `declare -p` lists it rather
     // than erroring "not found".

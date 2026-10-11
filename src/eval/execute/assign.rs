@@ -140,7 +140,7 @@ impl super::Dispatcher {
             && matches!(behavior, AssignBehavior::Set)
           {
             let took_fast = Shed::vars_mut(|v| -> ShResult<bool> {
-              let Ok(items) = v.get_arr_mut(var_name) else {
+              let Ok(items) = v.try_get_arr_mut(var_name) else {
                 return Ok(false);
               };
               match &val {
