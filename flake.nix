@@ -14,7 +14,14 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, rust-overlay, rustfmt-align }:
-  flake-utils.lib.eachDefaultSystem (system:
+  let
+    systems = [
+      "x86_64-linux"
+      "aarch64-linux"
+      "aarch64-darwin"
+    ];
+  in
+  flake-utils.lib.eachSystem systems (system:
   let
     pkgs = import nixpkgs {
       inherit system;
@@ -37,7 +44,6 @@
         "x86_64-unknown-linux-musl"
         "aarch64-unknown-linux-gnu"
         "aarch64-linux-android"
-        "x86_64-apple-darwin"
         "aarch64-apple-darwin"
       ];
     };
@@ -51,7 +57,6 @@
       "x86_64-unknown-linux-gnu"
       "aarch64-unknown-linux-gnu"
       "x86_64-unknown-linux-musl"
-      "x86_64-apple-darwin"
       "aarch64-apple-darwin"
     ];
 
