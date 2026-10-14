@@ -1,271 +1,85 @@
-use crate::set_var;
-use std::{collections::VecDeque, fs, os::unix::fs::MetadataExt, path::PathBuf, str::FromStr};
-
 use crate::{
   eval::{
     execute,
     lex::{Span, Tk, TkVecUtils},
+    parse::dbracket::{BinaryOp, UnaryOp, eval_binary, eval_unary},
   },
-  expand::glob,
   sherr,
-  state::{
-    Shed,
-    vars::{VarKind, VarStr},
-  },
+  state::vars::VarStr,
   util::{
     self,
-    error::{ShErr, ShResult, ShResultExt},
+    error::{ShResult, ShResultExt},
   },
 };
 
-use nix::{
-  sys::stat::{self, SFlag},
-  unistd::AccessFlags,
-};
-
-#[derive(Debug, Clone)]
-pub(crate) enum UnaryOp {
-  Exists,                    // -e
-  Directory,                 // -d
-  File,                      // -f
-  Symlink,                   // -h or -L
-  Readable,                  // -r
-  Writable,                  // -w
-  Executable,                // -x
-  NonEmpty,                  // -s
-  NamedPipe,                 // -p
-  Socket,                    // -S
-  BlockSpecial,              // -b
-  CharSpecial,               // -c
-  Sticky,                    // -k
-  UIDOwner,                  // -O
-  GIDOwner,                  // -G
-  ModifiedSinceStatusChange, // -N
-  SetUID,                    // -u
-  SetGID,                    // -g
-  Terminal,                  // -t
-  NonNull,                   // -n
-  Null,                      // -z
-
-  // shed extensions
-  IsInteger, // -i
-  IsFloat,   // -F
-}
-
-impl FromStr for UnaryOp {
-  type Err = ShErr;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s {
-      "-e"        => Ok(Self::Exists),
-      "-d"        => Ok(Self::Directory),
-      "-f"        => Ok(Self::File),
-      "-h" | "-L" => Ok(Self::Symlink),
-      "-r"        => Ok(Self::Readable),
-      "-w"        => Ok(Self::Writable),
-      "-x"        => Ok(Self::Executable),
-      "-s"        => Ok(Self::NonEmpty),
-      "-p"        => Ok(Self::NamedPipe),
-      "-S"        => Ok(Self::Socket),
-      "-b"        => Ok(Self::BlockSpecial),
-      "-c"        => Ok(Self::CharSpecial),
-      "-k"        => Ok(Self::Sticky),
-      "-O"        => Ok(Self::UIDOwner),
-      "-G"        => Ok(Self::GIDOwner),
-      "-N"        => Ok(Self::ModifiedSinceStatusChange),
-      "-u"        => Ok(Self::SetUID),
-      "-g"        => Ok(Self::SetGID),
-      "-t"        => Ok(Self::Terminal),
-      "-n"        => Ok(Self::NonNull),
-      "-z"        => Ok(Self::Null),
-      "-i"        => Ok(Self::IsInteger),
-      "-F"        => Ok(Self::IsFloat),
-      _           => Err(sherr!(SyntaxErr, "Invalid unary test operator '{s}'")),
-    }
-  }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum FileOp {
-  OlderThan, // -ot
-  NewerThan, // -nt
-  FileEq,    // -ef
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum IntOp {
-  Eq,  // -eq
-  Neq, // -ne
-  Gt,  // -gt
-  Lt,  // -lt
-  Ge,  // -ge
-  Le,  // -le
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum StringOp {
-  Equal,    // =/==
-  NotEqual, // !=
-  Match,    // =~
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum BinaryOp {
-  String(StringOp),
-  Int(IntOp),
-  File(FileOp),
-}
-
-impl FromStr for BinaryOp {
-  type Err = ShErr;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s {
-      "==" | "=" => Ok(Self::String(StringOp::Equal)),
-      "!="       => Ok(Self::String(StringOp::NotEqual)),
-      "=~"       => Ok(Self::String(StringOp::Match)),
-      "-eq"      => Ok(Self::Int(IntOp::Eq)),
-      "-ne"      => Ok(Self::Int(IntOp::Neq)),
-      "-gt"      => Ok(Self::Int(IntOp::Gt)),
-      "-lt"      => Ok(Self::Int(IntOp::Lt)),
-      "-ge"      => Ok(Self::Int(IntOp::Ge)),
-      "-le"      => Ok(Self::Int(IntOp::Le)),
-      "-ot"      => Ok(Self::File(FileOp::OlderThan)),
-      "-nt"      => Ok(Self::File(FileOp::NewerThan)),
-      "-ef"      => Ok(Self::File(FileOp::FileEq)),
-      _          => Err(sherr!(SyntaxErr, "Invalid binary test operator '{s}'")),
-    }
-  }
-}
-
-/// Evaluate a single unary test (`-OP OPERAND`).
-fn eval_unary(op: &UnaryOp, operand: &str) -> bool {
-  match op {
-    UnaryOp::Exists    => PathBuf::from(operand).exists(),
-    UnaryOp::Directory => PathBuf::from(operand).metadata().is_ok_and(|m| m.is_dir()),
-    UnaryOp::File      => PathBuf::from(operand).metadata().is_ok_and(|m| m.is_file()),
-    UnaryOp::Symlink => {
-      std::fs::symlink_metadata(operand).is_ok_and(|m| m.file_type().is_symlink())
-    }
-    UnaryOp::Readable   => nix::unistd::access(operand, AccessFlags::R_OK).is_ok(),
-    UnaryOp::Writable   => nix::unistd::access(operand, AccessFlags::W_OK).is_ok(),
-    UnaryOp::Executable => nix::unistd::access(operand, AccessFlags::X_OK).is_ok(),
-    UnaryOp::NonEmpty   => fs::metadata(operand).is_ok_and(|m| m.len() > 0),
-    UnaryOp::NamedPipe => stat::stat(operand)
-      .is_ok_and(|s| SFlag::from_bits_truncate(s.st_mode).contains(SFlag::S_IFIFO)),
-    UnaryOp::Socket => stat::stat(operand)
-      .is_ok_and(|s| SFlag::from_bits_truncate(s.st_mode).contains(SFlag::S_IFSOCK)),
-    UnaryOp::BlockSpecial => stat::stat(operand)
-      .is_ok_and(|s| SFlag::from_bits_truncate(s.st_mode).contains(SFlag::S_IFBLK)),
-    UnaryOp::CharSpecial => stat::stat(operand)
-      .is_ok_and(|s| SFlag::from_bits_truncate(s.st_mode).contains(SFlag::S_IFCHR)),
-    UnaryOp::Sticky => stat::stat(operand).is_ok_and(|s| s.st_mode & nix::libc::S_ISVTX != 0),
-    UnaryOp::UIDOwner => {
-      stat::stat(operand).is_ok_and(|s| s.st_uid == nix::unistd::geteuid().as_raw())
-    }
-    UnaryOp::GIDOwner => {
-      stat::stat(operand).is_ok_and(|s| s.st_gid == nix::unistd::getegid().as_raw())
-    }
-    UnaryOp::ModifiedSinceStatusChange => {
-      stat::stat(operand).is_ok_and(|s| s.st_mtime > s.st_ctime)
-    }
-    UnaryOp::SetUID => stat::stat(operand).is_ok_and(|s| s.st_mode & nix::libc::S_ISUID != 0),
-    UnaryOp::SetGID => stat::stat(operand).is_ok_and(|s| s.st_mode & nix::libc::S_ISGID != 0),
-    UnaryOp::Terminal => match operand.parse::<i32>() {
-      Ok(fd) => Shed::sinks(|s| s.get(fd).is_some_and(|s| s.isatty())),
-      Err(_) => false,
-    },
-    UnaryOp::NonNull   => !operand.is_empty(),
-    UnaryOp::Null      => operand.is_empty(),
-    UnaryOp::IsInteger => operand.parse::<i64>().is_ok(),
-    UnaryOp::IsFloat => operand
-      .parse::<f64>()
-      .ok()
-      .as_ref()
-      .is_some_and(|n| n.is_finite()),
-  }
-}
-
-/// Evaluate a single binary test (`LHS OP RHS`).
-fn eval_binary(
-  op: &BinaryOp,
-  lhs: &(VarStr, Span),
-  rhs: &(VarStr, Span),
-  extended: bool,
-) -> ShResult<bool> {
-  match op {
-    BinaryOp::String(str_op) => match str_op {
-      StringOp::Equal | StringOp::NotEqual => {
-        let polarity = matches!(str_op, StringOp::Equal);
-        let is_eq = if extended {
-          let pat = Shed::meta_mut(|m| m.get_glob(rhs.0.as_bytes()));
-          pat.is_match(lhs.0.as_bytes())
-        } else {
-          lhs.0 == rhs.0
-        };
-
-        Ok(is_eq == polarity)
-      }
-      StringOp::Match => {
-        let cleaned = glob::replace_posix_classes(&rhs.0.to_str_lossy());
-        let re = Shed::meta_mut(|m| m.get_regex(&cleaned))
-          .map_err(|e| sherr!(SyntaxErr @ rhs.1, "Invalid regex: {e}"))?;
-        if let Some(caps) = re.captures(&lhs.0.to_str_lossy()) {
-          let groups: VecDeque<VarStr> = caps
-            .iter()
-            .map(|m| m.map(|mat| VarStr::from(mat.as_str())).unwrap_or_default())
-            .collect();
-          set_var!("SHED_REMATCH", VarKind::arr(groups); LOCAL)?;
-          Ok(true)
-        } else {
-          Shed::vars_mut(|v| v.unset_var("SHED_REMATCH")).ok();
-          Ok(false)
+pub(super) struct Test;
+impl super::Builtin for Test {
+  /// Custom override so we can pair the opener (`[`/`[[`/`test`) against its
+  /// required closer (`]`/`]]`/none) while `argv[0]` is still present, then
+  /// hand the operands-only argv to `execute`.
+  fn get_argv_and_opts(
+    &self,
+    cmd_span: Span,
+    argv: &[Tk],
+    no_split: bool,
+  ) -> ShResult<super::opt::Parsed> {
+    let span = argv.get_span().unwrap();
+    let argv = execute::prepare_argv_with(argv, no_split)
+      .promote_err(cmd_span)?
+      .into_iter()
+      .collect::<Vec<_>>();
+    let opener = argv
+      .first()
+      .map(|(s, _)| s.to_str_lossy())
+      .unwrap_or_default()
+      .to_string();
+    let want_close: Option<&str> = match opener.as_str() {
+      "["  => Some("]"),
+      "[[" => Some("]]"),
+      _    => None,
+    };
+    if let Some(close) = want_close {
+      match argv.last() {
+        Some((last, _)) if last == close => {}
+        _ => {
+          return Err(sherr!(
+            SyntaxErr @ span,
+            "{opener}: missing matching `{close}` to close the expression"
+          ));
         }
       }
-    },
-    BinaryOp::Int(int_op) => {
-      let lhs_i = lhs
-        .0
-        .to_str_lossy()
-        .trim()
-        .parse::<i64>()
-        .map_err(|_| sherr!(SyntaxErr @ lhs.1, "test: integer expected, got '{}'", &lhs.0))?;
-      let rhs_i = rhs
-        .0
-        .to_str_lossy()
-        .trim()
-        .parse::<i64>()
-        .map_err(|_| sherr!(SyntaxErr @ rhs.1, "test: integer expected, got '{}'", &rhs.0))?;
-      Ok(match int_op {
-        IntOp::Eq  => lhs_i == rhs_i,
-        IntOp::Neq => lhs_i != rhs_i,
-        IntOp::Gt  => lhs_i > rhs_i,
-        IntOp::Lt  => lhs_i < rhs_i,
-        IntOp::Ge  => lhs_i >= rhs_i,
-        IntOp::Le  => lhs_i <= rhs_i,
-      })
     }
-    BinaryOp::File(file_op) => {
-      let mtime = |v: &VarStr| {
-        PathBuf::from(v.clone())
-          .metadata()
-          .and_then(|m| m.modified())
-          .ok()
+    Ok(argv.into())
+  }
+
+  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+    let span             = args.span();
+    let cmd              = args.cmd_name().clone();
+    let cmd              = cmd.as_bytes();
+    let extended         = cmd == b"[[";
+    let (mut arg_vec, _) = args.take_argv();
+    if (cmd == b"[" || cmd == b"[[") && !arg_vec.is_empty() {
+      arg_vec.pop();
+    }
+
+    // POSIX arity-3 rule: exactly three operands with a binary operator in the
+    // middle is a binary test, whatever the operands look like (`[ -a = -a ]`,
+    // `[ b = -a ]`). The general `-a`/`-o` grammar would otherwise misread an
+    // operand as the conjunction operator.
+    if arg_vec.len() == 3 && arg_vec[1].0.to_str_lossy().parse::<BinaryOp>().is_ok() {
+      return match eval_leaf(&arg_vec, extended).map_err(|e| e.try_blame(span)) {
+        Err(e)  => Err(e.with_code(2)),
+        Ok(res) => util::with_status(i32::from(!res)),
       };
+    }
 
-      Ok(match file_op {
-        FileOp::NewerThan => mtime(&lhs.0) > mtime(&rhs.0),
-        FileOp::OlderThan => mtime(&lhs.0) < mtime(&rhs.0),
-        FileOp::FileEq => {
-          let left_file  = PathBuf::from(lhs.0.clone());
-          let left_data  = left_file.metadata();
-          let right_file = PathBuf::from(rhs.0.clone());
-          let right_data = right_file.metadata();
+    let result = ArgvParser::new(&arg_vec, extended)
+      .parse_or(true)
+      .map_err(|e| e.try_blame(span));
 
-          match (left_data, right_data) {
-            (Ok(l), Ok(r)) => l.ino() == r.ino() && l.dev() == r.dev(),
-            _              => false,
-          }
-        }
-      })
+    match result {
+      Err(e)  => Err(e.with_code(2)),
+      Ok(res) => util::with_status(i32::from(!res)),
     }
   }
 }
@@ -392,7 +206,7 @@ fn eval_leaf(leaf: &[(VarStr, Span)], extended: bool) -> ShResult<bool> {
     2 => {
       // Arity-2: `-OP OPERAND`.
       let op: UnaryOp = leaf[0].0.to_str_lossy().parse()?;
-      Ok(eval_unary(&op, &leaf[1].0.to_str_lossy()))
+      Ok(eval_unary(&op, leaf[1].0.clone()))
     }
     3 => {
       // Arity-3: `LHS OP RHS`.
@@ -404,78 +218,6 @@ fn eval_leaf(leaf: &[(VarStr, Span)], extended: bool) -> ShResult<bool> {
       "test: too many arguments for a single expression ({})",
       leaf.len()
     )),
-  }
-}
-
-pub(super) struct Test;
-impl super::Builtin for Test {
-  /// Custom override so we can pair the opener (`[`/`[[`/`test`) against its
-  /// required closer (`]`/`]]`/none) while `argv[0]` is still present, then
-  /// hand the operands-only argv to `execute`.
-  fn get_argv_and_opts(
-    &self,
-    cmd_span: Span,
-    argv: &[Tk],
-    no_split: bool,
-  ) -> ShResult<super::opt::Parsed> {
-    let span = argv.get_span().unwrap();
-    let argv = execute::prepare_argv_with(argv, no_split)
-      .promote_err(cmd_span)?
-      .into_iter()
-      .collect::<Vec<_>>();
-    let opener = argv
-      .first()
-      .map(|(s, _)| s.to_str_lossy())
-      .unwrap_or_default()
-      .to_string();
-    let want_close: Option<&str> = match opener.as_str() {
-      "["  => Some("]"),
-      "[[" => Some("]]"),
-      _    => None,
-    };
-    if let Some(close) = want_close {
-      match argv.last() {
-        Some((last, _)) if last == close => {}
-        _ => {
-          return Err(sherr!(
-            SyntaxErr @ span,
-            "{opener}: missing matching `{close}` to close the expression"
-          ));
-        }
-      }
-    }
-    Ok(argv.into())
-  }
-
-  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let span             = args.span();
-    let cmd              = args.cmd_name().clone();
-    let cmd              = cmd.as_bytes();
-    let extended         = cmd == b"[[";
-    let (mut arg_vec, _) = args.take_argv();
-    if (cmd == b"[" || cmd == b"[[") && !arg_vec.is_empty() {
-      arg_vec.pop();
-    }
-
-    // POSIX arity-3 rule: exactly three operands with a binary operator in the
-    // middle is a binary test, whatever the operands look like (`[ -a = -a ]`,
-    // `[ b = -a ]`). The general `-a`/`-o` grammar would otherwise misread an
-    // operand as the conjunction operator.
-    if arg_vec.len() == 3 && arg_vec[1].0.to_str_lossy().parse::<BinaryOp>().is_ok() {
-      return match eval_leaf(&arg_vec, extended).map_err(|e| e.try_blame(span)) {
-        Err(e)  => Err(e.with_code(2)),
-        Ok(res) => util::with_status(i32::from(!res)),
-      };
-    }
-
-    let result = ArgvParser::new(&arg_vec, extended)
-      .parse_or(true)
-      .map_err(|e| e.try_blame(span));
-
-    match result {
-      Err(e)  => Err(e.with_code(2)),
-      Ok(res) => util::with_status(i32::from(!res)),
-    }
   }
 }
 

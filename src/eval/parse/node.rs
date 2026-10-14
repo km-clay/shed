@@ -13,8 +13,8 @@ use std::{collections::VecDeque, rc::Rc};
 use super::{
   super::execute::classify,
   ast::{
-    Ast, CaseNodeRange, ChildRange, CondNodeId, CondNodeRange, ConjunctRange, LabelId, LabelRange,
-    RedirRange, SpanId, TkId, TkRange,
+    Ast, CaseNodeRange, ChildRange, CondNodeId, CondNodeRange, ConjunctRange, ExprId, LabelId,
+    LabelRange, RedirRange, SpanId, TkId, TkRange,
   },
 };
 
@@ -170,6 +170,7 @@ pub(crate) enum NdKind {
   List,
   IfNode,
   LoopNode,
+  TestNode,
   ForNode,
   ForArith,
   Arithmetic,
@@ -208,6 +209,7 @@ impl NdRule {
       Self::BraceGrp { .. }    => NdKind::BraceGrp,
       Self::FuncDef { .. }     => NdKind::FuncDef,
       Self::Subshell { .. }    => NdKind::Subsh,
+      Self::TestNode { .. }    => NdKind::TestNode,
     }
   }
 }
@@ -228,6 +230,9 @@ pub(crate) enum NdRule {
   LoopNode {
     kind     : LoopKind,
     cond_node: CondNodeId,
+  },
+  TestNode {
+    expr: ExprId,
   },
   ForNode {
     vars      : TkRange,

@@ -374,10 +374,11 @@ impl Dispatcher {
         NdRule::Timed { .. }       => self.exec_timed(tree, node),
         NdRule::Command { .. }     => self.dispatch_cmd(tree, node),
         NdRule::TryNode { .. }     => self.exec_try(tree, node),
+        NdRule::TestNode { .. }    => self.exec_test(tree, node),
         NdRule::DeferNode { .. }   => Self::exec_defer(tree, node),
+        NdRule::FuncDef { .. }     => Self::exec_func_def(tree, node),
+        NdRule::Arithmetic { .. }  => Self::exec_arith(tree, node),
 
-        NdRule::FuncDef { .. }    => Self::exec_func_def(tree, node),
-        NdRule::Arithmetic { .. } => Self::exec_arith(tree, node),
         NdRule::Assignment { .. } => unreachable!(),
       }
     })
@@ -461,7 +462,7 @@ impl Dispatcher {
     let body     = tree[*body].slice();
     let result   = arithmetic::expand_arithmetic_wrapped(Some(span), body.as_bytes())?;
     let val: f64 = result.to_str_lossy().parse().unwrap_or(0.0);
-    Shed::set_status_from_bool(val != 0.0);
+    Shed::set_status(val != 0.0);
     Ok(())
   }
   fn exec_builtin(&mut self, tree: &Ast, cmd_id: NodeId, cmd_name: &[u8]) -> ShResult<()> {

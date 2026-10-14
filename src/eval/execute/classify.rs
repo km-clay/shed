@@ -147,7 +147,8 @@ pub(super) fn runs_inline(cmd: &Node, tree: &Ast) -> bool {
     | NdRule::Negate { .. }
     | NdRule::Timed { .. }
     | NdRule::Arithmetic { .. }
-    | NdRule::FuncDef { .. } => true,
+    | NdRule::FuncDef { .. }
+    | NdRule::TestNode { .. } => true,
     NdRule::Subshell { .. } | NdRule::Pipeline { .. } | NdRule::Assignment { .. } => false,
   }
 }

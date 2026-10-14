@@ -30,6 +30,26 @@ impl ParseStream {
     self.cursor += 1;
     Some(tk)
   }
+  pub(super) fn next_tk_with(&mut self, span: &mut Option<Span>) -> Option<Tk> {
+    let tk = self.next_tk()?;
+    extend_span!(*span, tk.span);
+    Some(tk)
+  }
+  pub(super) fn expect_tk(&mut self) -> Tk {
+    self
+      .next_tk()
+      .unwrap_or_else(|| panic!("Expected a token, but none were found"))
+  }
+  pub(super) fn expect_tk_with(&mut self, span: &mut Option<Span>) -> Tk {
+    let tk = self.expect_tk();
+    extend_span!(*span, tk.span);
+    tk
+  }
+  pub(super) fn peek_is(&self, pat: &[u8]) -> bool {
+    self
+      .peek_tk()
+      .is_some_and(|tk| tk.slice().as_bytes() == pat)
+  }
   pub(super) fn tokens(&self) -> &[Tk] {
     &self.tokens[self.cursor..]
   }
@@ -50,7 +70,7 @@ impl ParseStream {
   /// are valid syntax
   pub(super) fn catch_separator(&mut self, span: &mut Option<Span>) {
     while *self.next_tk_class() == TkRule::Sep {
-      let next = self.next_tk().unwrap();
+      let next = self.expect_tk();
       if let Some(span) = span {
         span.merge_inplace(next.span);
       } else {
@@ -69,8 +89,7 @@ impl ParseStream {
       .peek_tk()
       .is_some_and(|tk| tk.class == TkRule::Sep && !tk.slice().as_bytes().contains(&b';'))
     {
-      let next = self.next_tk().unwrap();
-      extend_span!(*span, next.span);
+      self.expect_tk_with(span);
     }
   }
   pub(super) fn assert_separator(&mut self, node_tks: &mut Option<Span>) -> ShResult<()> {
@@ -87,9 +106,7 @@ impl ParseStream {
       | TkRule::Pipe => Ok(()),
 
       TkRule::Sep => {
-        if let Some(tk) = self.next_tk() {
-          extend_span!(*node_tks, tk.span);
-        }
+        self.next_tk_with(node_tks);
         Ok(())
       }
       _ => Err(sherr!(ParseErr, "Expected a semicolon or newline here",)),

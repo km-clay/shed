@@ -21,6 +21,7 @@ pub(crate) use node::NdKind;
 mod macros;
 mod command;
 mod compound;
+pub(crate) mod dbracket;
 mod stream;
 
 #[cfg(test)]
@@ -229,9 +230,10 @@ impl ParseStream {
       elements.push(conjunction);
 
       if conjunct_op != ConjunctOp::Null {
-        let Some(tk) = self.next_tk() else { break };
+        let Some(tk) = self.next_tk_with(&mut span) else {
+          break;
+        };
         dangling_op = Some(tk.span);
-        extend_span!(span, tk.span);
         // Only a newline (not `;`) may follow the operator.
         self.catch_linebreak(&mut span);
       }
@@ -258,10 +260,13 @@ impl ParseStream {
       Ok(Some(self.tree.alloc(node)))
     }
   }
-  /// This tries to match on different stuff that can appear in a command
-  /// position Matches shell commands like if-then-fi, pipelines, etc.
+  /// This tries to match on different stuff that can appear in a command position
+  ///
+  /// Matches shell commands like if-then-fi, pipelines, etc.
   /// Ordered from specialized to general, with more generally matchable stuff
-  /// appearing at the bottom The `check_pipelines` parameter is used to prevent
+  /// appearing at the bottom
+  ///
+  /// The `check_pipelines` parameter is used to prevent
   /// left-recursion issues in `self.parse_pipeln()`
   fn parse_block(&mut self, check_pipelines: bool) -> ShResult<Option<NodeId>> {
     stacker::maybe_grow(64 * 1024, 1024 * 1024, || {
@@ -281,6 +286,7 @@ impl ParseStream {
       try_match!(self.parse_time()?);
       try_match!(self.parse_defer()?);
       try_match!(self.parse_try()?);
+      try_match!(self.parse_dbracket()?);
       try_match!(self.parse_func_keyword()?);
       try_match!(self.parse_arith()?);
       try_match!(self.parse_cmd()?);
@@ -299,6 +305,7 @@ impl ParseStream {
       try_match!(self.parse_try()?);
       try_match!(self.parse_defer()?);
       try_match!(self.parse_if()?);
+      try_match!(self.parse_dbracket()?);
 
       Ok(None)
     }()?;

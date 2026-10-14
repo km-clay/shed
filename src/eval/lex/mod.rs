@@ -30,8 +30,10 @@ use crate::{
   },
 };
 
-pub(crate) const KEYWORDS: [&[u8]; 21] = [
+pub(crate) const KEYWORDS: [&[u8]; 23] = [
   b"!",
+  b"[[",
+  b"]]",
   b"case",
   b"catch",
   b"defer",
@@ -684,6 +686,7 @@ pub(crate) struct LexStream<'a> {
   subsh_depth: usize,
   subsh_start: Option<usize>,
   case_depth: usize,
+  dbracket_depth: usize,
   heredoc_skip: Option<usize>,
   flags: LexFlags,
 }
@@ -710,6 +713,7 @@ impl<'a> LexStream<'a> {
       subsh_start: None,
       heredoc_skip: None,
       case_depth: 0,
+      dbracket_depth: 0,
     }
   }
   /// Returns a slice of the source input using the given range
@@ -721,7 +725,7 @@ impl<'a> LexStream<'a> {
   /// `LexStream.slice(1..=10)`
   /// `LexStream.slice(..10)`
   /// `LexStream.slice(1..)`
-  pub(crate) fn slice<R: RangeBounds<usize>>(&self, range: R) -> Option<&[u8]> {
+  fn slice<R: RangeBounds<usize>>(&self, range: R) -> Option<&[u8]> {
     let start = match range.start_bound() {
       Bound::Included(&start) => start,
       Bound::Excluded(&start) => start + 1,
@@ -744,7 +748,7 @@ impl<'a> LexStream<'a> {
   ///
   /// If the closure returns `Some`, the parse is committed and the result is returned.
   /// If the closure returns `None`, the parse is rolled back and `None` is returned.
-  pub(crate) fn attempt<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+  fn attempt<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
     let saved = self.save_state();
     if let Some(thing) = f(self) {
       Some(thing)
@@ -760,14 +764,24 @@ impl<'a> LexStream<'a> {
     }
     self.source.get(idx).copied()
   }
-  pub(crate) fn in_brc_grp(&self) -> bool {
+  fn in_brc_grp(&self) -> bool {
     self.brc_grp_depth > 0
   }
-  pub(crate) fn in_subsh(&self) -> bool {
+  fn in_subsh(&self) -> bool {
     self.subsh_depth > 0
   }
+  fn in_dbracket(&self) -> bool {
+    self.dbracket_depth > 0
+  }
+  fn enter_dbracket(&mut self) {
+    self.dbracket_depth += 1;
+  }
+  fn exit_dbracket(&mut self) {
+    self.dbracket_depth = self.dbracket_depth.saturating_sub(1);
+  }
+
   /// Update the internal `Pos` that tracks the current line and column of the cursor.
-  pub(crate) fn update_pos(&mut self) {
+  fn update_pos(&mut self) {
     if self.cursor < self.pos_offset {
       // cursor moved backwards? recompute I guess?
       // I think this only happens in heredocs but idk
@@ -785,43 +799,43 @@ impl<'a> LexStream<'a> {
     }
     self.pos_offset = self.cursor;
   }
-  pub(crate) fn update_cursor(&mut self, new_cursor: usize) {
+  fn update_cursor(&mut self, new_cursor: usize) {
     assert!(new_cursor <= self.end);
     self.cursor = new_cursor;
     self.update_pos();
   }
-  pub(crate) fn inc_cursor(&mut self, amt: usize) {
+  fn inc_cursor(&mut self, amt: usize) {
     self.update_cursor(self.cursor + amt);
   }
-  pub(crate) fn enter_subsh(&mut self) {
+  fn enter_subsh(&mut self) {
     if self.subsh_depth == 0 {
       self.subsh_start = Some(self.cursor);
     }
     self.subsh_depth += 1;
   }
-  pub(crate) fn leave_subsh(&mut self) {
+  fn leave_subsh(&mut self) {
     self.subsh_depth -= 1;
     if self.subsh_depth == 0 {
       self.subsh_start = None;
     }
   }
-  pub(crate) fn enter_brc_grp(&mut self) {
+  fn enter_brc_grp(&mut self) {
     if self.brc_grp_depth == 0 {
       self.brc_grp_start = Some(self.cursor);
     }
     self.brc_grp_depth += 1;
   }
-  pub(crate) fn leave_brc_grp(&mut self) {
+  fn leave_brc_grp(&mut self) {
     self.brc_grp_depth -= 1;
     if self.brc_grp_depth == 0 {
       self.brc_grp_start = None;
     }
   }
-  pub(crate) fn next_is_cmd(&self) -> bool {
+  fn next_is_cmd(&self) -> bool {
     self.flags.contains(LexFlags::NEXT_IS_CMD)
   }
   /// Set whether the next string token is a command name
-  pub(crate) fn set_next_is_cmd(&mut self, is: bool) {
+  fn set_next_is_cmd(&mut self, is: bool) {
     if is {
       self.flags |= LexFlags::NEXT_IS_CMD;
       self.flags &= !LexFlags::NEXT_IS_REDIR;
@@ -1271,10 +1285,24 @@ impl<'a> LexStream<'a> {
       }
       // if we are in double quotes, nothing under this branch can match
       _ if self.quote_state.in_double() => { self.bump(); }
+
+      // dbracket test expression group
+      b'(' | b')' if self.in_dbracket() => {
+        if self.cursor == start {
+          self.bump();
+        }
+        break
+      }
+
       b'<' | b'>' => {
-        // maybe process substitution?
+        // maybe process substitution? '[[' binary operator?
         if self.peek_nth(1) != Some(b'(') {
-          // not a process sub; leave the operator for read_redir
+          if self.in_dbracket() && self.cursor == start {
+            // binary operator, and it is the current word
+            self.bump();
+            self.bump_if_eq(b'='); // <= and >=
+          }
+          // not a process sub or binary op; leave the operator for read_redir
           break
         }
         // it's a process sub
@@ -1288,6 +1316,7 @@ impl<'a> LexStream<'a> {
           ));
         }
       }
+
       b'(' if self.next_is_cmd() && self.peek_nth(1) == Some(b')') && self.cursor != start => {
         // standalone "()", function definition marker thing
         // this will be handled below by self.func_paren_lookahead();
@@ -1412,11 +1441,13 @@ impl<'a> LexStream<'a> {
       ));
     }
 
-    let slice = new_tk.slice();
-    let text  = slice.as_bytes();
-    let is_cmd = self.flags.contains(LexFlags::NEXT_IS_CMD)
-      && !self.flags.contains(LexFlags::NEXT_IS_REDIR)
-      && !self.flags.contains(LexFlags::CASE_PAT_EXPECTED);
+    let slice             = new_tk.slice();
+    let text              = slice.as_bytes();
+    let next_is_cmd       = self.flags.contains(LexFlags::NEXT_IS_CMD);
+    let next_is_redir     = self.flags.contains(LexFlags::NEXT_IS_REDIR);
+    let case_pat_expected = self.flags.contains(LexFlags::CASE_PAT_EXPECTED);
+    let is_cmd            = next_is_cmd && !next_is_redir && !case_pat_expected;
+
     if is_cmd {
       match text {
         // keyword handling
@@ -1429,6 +1460,16 @@ impl<'a> LexStream<'a> {
         _ if self.attempt(Self::func_paren_lookahead).is_some() => {
           // found it
           new_tk.mark(TkFlags::FUNCNAME);
+          self.set_next_is_cmd(true);
+        }
+        b"[[" => {
+          new_tk.mark(TkFlags::KEYWORD);
+          self.enter_dbracket();
+          self.set_next_is_cmd(false);
+        }
+        b"]]" if self.in_dbracket() => {
+          new_tk.mark(TkFlags::KEYWORD);
+          self.exit_dbracket();
           self.set_next_is_cmd(true);
         }
         b"case" => {
@@ -1481,6 +1522,10 @@ impl<'a> LexStream<'a> {
           self.set_next_is_cmd(false);
         }
       }
+    } else if self.in_dbracket() && text == b"]]" {
+      new_tk.mark(TkFlags::KEYWORD);
+      self.exit_dbracket();
+      self.set_next_is_cmd(true);
     } else if self.flags.contains(LexFlags::EXPECTING_IN) && text == b"in" {
       self.consume_in_keyword(&mut new_tk);
     } else if self.flags.contains(LexFlags::EXPECTING_IN)
@@ -1559,7 +1604,7 @@ impl<'a> LexStream<'a> {
     None
   }
 
-  pub(crate) fn func_paren_lookahead(&mut self) -> Option<()> {
+  fn func_paren_lookahead(&mut self) -> Option<()> {
     // this returns Some(()) if it finds the parens.
     // kind of weird but it makes the function
     // directly usable as an argument to Self::attempt()
@@ -1581,12 +1626,12 @@ impl<'a> LexStream<'a> {
     });
     None
   }
-  pub(crate) fn get_span(&mut self, range: Range<usize>) -> Span {
+  fn get_span(&mut self, range: Range<usize>) -> Span {
     self.update_pos();
     Span::new(range.start, range.end, self.source.get_id()).at(self.pos)
   }
   /// Slice a token out of the original source input, based on the given range.
-  pub(crate) fn get_token(&mut self, range: Range<usize>, class: TkRule) -> Tk {
+  fn get_token(&mut self, range: Range<usize>, class: TkRule) -> Tk {
     let span = self.get_span(range);
     Tk::new(class, span)
   }
@@ -1792,7 +1837,9 @@ impl Iterator for LexStream<'_> {
       }
       _ => {
         // ok nothing else matched, so it's probably a word
-        if let Some(tk_result) = self.read_redir() {
+        if !self.in_dbracket()
+          && let Some(tk_result) = self.read_redir()
+        {
           let tk = match tk_result {
             Ok(t)  => t,
             Err(e) => return Some(Err(e)),

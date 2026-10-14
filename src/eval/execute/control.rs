@@ -26,6 +26,7 @@ use super::{
   lex::Tk,
   parse::{
     ast::{Ast, NodeId},
+    dbracket,
     node::{CaseNode, CondNode, ConjunctNode, ConjunctOp, LoopKind, NdRule},
   },
 };
@@ -136,6 +137,30 @@ impl super::Dispatcher {
     Shed::vars_mut(|v| v.cur_scope_mut().defer_cmd(body, tree[*ctx].clone()));
     Ok(())
   }
+  pub(super) fn exec_test(&mut self, tree: &Ast, test_id: NodeId) -> ShResult<()> {
+    let NdRule::TestNode { expr } = &tree[test_id].class else {
+      unreachable!()
+    };
+    let expr = *expr;
+
+    let test_logic = move |_this: &mut Self, tree: &Ast| -> ShResult<()> {
+      match dbracket::eval_test_expr(tree, expr) {
+        Ok(res) => Shed::set_status(res),
+        Err(e) => {
+          if e.is_flow_control() {
+            return Err(e);
+          }
+
+          e.print_error();
+          Shed::set_status(2);
+        }
+      }
+
+      Ok(())
+    };
+
+    self.run_compound("[[", test_id, tree, test_logic)
+  }
   pub(super) fn exec_try(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
     let try_blame = tree.span_for(node);
     let NdRule::TryNode {
@@ -151,12 +176,13 @@ impl super::Dispatcher {
     trace.push(tree[*ctx].clone());
 
     // enable set -e -o pipefail temporarily
-    let errexit  = shopt!(set.errexit);
+    let errexit = shopt!(set.errexit);
+    defer!(shopt_mut!(set.errexit = errexit));
     let pipefail = shopt!(set.pipefail);
+    defer!(shopt_mut!(set.pipefail = pipefail));
+
     shopt_mut!(set.errexit = true);
     shopt_mut!(set.pipefail = true);
-    defer!(shopt_mut!(set.errexit = errexit));
-    defer!(shopt_mut!(set.pipefail = pipefail));
 
     let outcome = {
       let _frame = Shed::push_call_frame(vec![tree[*ctx].clone()]);
@@ -204,7 +230,7 @@ impl super::Dispatcher {
     };
     self.dispatch_node(tree, *cmd)?;
     let status = Shed::get_status();
-    Shed::set_status_from_bool(status != 0);
+    Shed::set_status(status != 0);
 
     Ok(())
   }

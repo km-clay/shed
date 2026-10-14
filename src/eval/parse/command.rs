@@ -102,8 +102,7 @@ impl ParseStream {
     span: &mut Option<Span>,
   ) -> ShResult<()> {
     while self.check_redir() {
-      let tk = self.next_tk().unwrap();
-      extend_span!(*span, tk.span);
+      let tk  = self.expect_tk_with(span);
       let ctx = self.context.clone();
       if let Err(e) = Self::push_redir(&tk, || self.next_tk(), span, &ctx, redirs) {
         self.panic_mode(span);
@@ -138,15 +137,13 @@ impl ParseStream {
 
       cmds.push(cmd);
       if next_class == TkRule::Bg {
-        let tk = self.next_tk().unwrap();
-        extend_span!(span, tk.span);
+        self.expect_tk_with(&mut span);
         flags |= NdFlags::BACKGROUND;
         break;
       } else if (!matches!(next_class, TkRule::Pipe | TkRule::ErrPipe)) || is_punctuated {
         break;
-      } else if let Some(pipe) = self.next_tk() {
+      } else if let Some(pipe) = self.next_tk_with(&mut span) {
         dangling_pipe = Some(pipe.span);
-        extend_span!(span, pipe.span);
         self.catch_linebreak(&mut span);
       } else {
         break;

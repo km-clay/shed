@@ -24,6 +24,8 @@ use bitflags::bitflags;
 use bstr::ByteSlice;
 use hipstr::HipByt;
 use nix::{
+  NixPath,
+  errno::Errno,
   sys::stat,
   unistd::{self, Pid, User},
 };
@@ -744,6 +746,26 @@ impl FromSql for VarStr {
         Ok(Self(HipByt::from(s)))
       }
       _ => Err(rusqlite::types::FromSqlError::InvalidType),
+    }
+  }
+}
+
+impl NixPath for VarStr {
+  fn is_empty(&self) -> bool {
+    self.0.is_empty()
+  }
+
+  fn len(&self) -> usize {
+    self.0.len()
+  }
+
+  fn with_nix_path<T, F>(&self, f: F) -> nix::Result<T>
+  where
+    F: FnOnce(&std::ffi::CStr) -> T,
+  {
+    match self.to_cstring() {
+      Some(cstr) => Ok(f(&cstr)),
+      None       => Err(Errno::EINVAL),
     }
   }
 }

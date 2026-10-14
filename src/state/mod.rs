@@ -9,7 +9,7 @@ use std::{
   cell::RefCell,
   collections::VecDeque,
   fmt::Display,
-  ops::BitOrAssign,
+  ops::{BitOrAssign, Deref, DerefMut},
   os::{fd::AsFd, unix::net::UnixStream},
   sync::{
     Arc,
@@ -270,6 +270,36 @@ bitflags! {
     const AUTOCMDS = 1<<6;
     const DEFERRED = 1<<7;
     const TRAPS = 1<<8;
+  }
+}
+
+pub(crate) struct Status(i32);
+
+impl Deref for Status {
+  type Target = i32;
+
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl DerefMut for Status {
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    &mut self.0
+  }
+}
+
+impl From<bool> for Status {
+  fn from(value: bool) -> Self {
+    // true -> 0
+    // false -> 1
+    Self(i32::from(!value))
+  }
+}
+
+impl From<i32> for Status {
+  fn from(value: i32) -> Self {
+    Self(value)
   }
 }
 
@@ -1004,13 +1034,11 @@ impl Shed {
     SHED.with(|shed| shed.status_code.load(Ordering::Relaxed)) & 255
   }
   /// Set the last exit status code, used by `$?`.
-  pub(crate) fn set_status(code: i32) {
-    SHED.with(|shed| shed.status_code.store(code, Ordering::Relaxed));
+  pub(crate) fn set_status(code: impl Into<Status>) {
+    let status = code.into();
+    SHED.with(|shed| shed.status_code.store(*status, Ordering::Relaxed));
   }
-  /// Set the last exit status code from a boolean value, where `true` is success (0) and `false` is failure (1).
-  pub(crate) fn set_status_from_bool(code: bool) {
-    Self::set_status(i32::from(!code));
-  }
+
   pub(crate) fn set_pipe_status(stats: &[Outcome]) -> ShResult<()> {
     if let Some(pipe_status) = jobs::Job::pipe_status(stats) {
       let pipe_status = pipe_status

@@ -6,6 +6,7 @@ use shed_macros::styled_format;
 
 use crate::{
   eval::parse::ast::NodeId,
+  procio::RedirSpec,
   state::vars::VarStr,
   util::{self, error},
 };
@@ -21,7 +22,7 @@ impl ParseStream {
     let     has_func_kw        = self.check_keyword(b"function");
 
     if has_func_kw {
-      extend_span!(span, self.next_tk().unwrap().span);
+      self.expect_tk_with(&mut span);
     }
 
     if !self.check_flags(TkFlags::FUNCNAME) {
@@ -35,10 +36,9 @@ impl ParseStream {
 
       return Ok(None);
     }
-    let name_tk = self.next_tk().unwrap();
-    extend_span!(span, name_tk.span);
+    let name_tk = self.expect_tk_with(&mut span);
 
-    let name = name_tk.clone();
+    let name    = name_tk.clone();
 
     self.catch_separator(&mut span);
 
@@ -86,12 +86,12 @@ impl ParseStream {
     let mut body   = vec![];
     let mut redirs = vec![];
 
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
     self.catch_separator(&mut span);
 
     loop {
       if *self.next_tk_class() == TkRule::SubshEnd {
-        extend_span!(span, self.next_tk().unwrap().span);
+        self.expect_tk_with(&mut span);
         break;
       }
       if let Some(node) = self.parse_conjunction()? {
@@ -153,13 +153,13 @@ impl ParseStream {
     let mut body   = vec![];
     let mut redirs = vec![];
 
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
 
     self.catch_separator(&mut span);
 
     loop {
       if *self.next_tk_class() == TkRule::BraceGrpEnd {
-        extend_span!(span, self.next_tk().unwrap().span);
+        self.expect_tk_with(&mut span);
         break;
       }
       if let Some(node) = self.parse_conjunction()? {
@@ -217,13 +217,13 @@ impl ParseStream {
     let mut case_blocks: Vec<CaseNode> = vec![];
     let mut redirs = vec![];
 
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
 
     let pat_err = parse_err!(self, span, "Expected a pattern after 'case' keyword").with_note(
       "Patterns can be raw text, or anything that gets substituted with raw text".into(),
     );
 
-    let Some(pat_tk) = self.next_tk() else {
+    let Some(pat_tk) = self.next_tk_with(&mut span) else {
       self.panic_mode(&mut span);
       return Err(pat_err);
     };
@@ -232,20 +232,16 @@ impl ParseStream {
       return Err(pat_err);
     }
 
-    let pattern: Tk = pat_tk;
-
-    extend_span!(span, pattern.clone().span);
-
     if !self.check_keyword(b"in") {
       bail!(self, span, "Expected 'in' after case variable name");
     }
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
 
     self.catch_separator(&mut span);
 
     loop {
       if self.check_keyword(b"esac") {
-        extend_span!(span, self.next_tk().unwrap().span);
+        self.expect_tk_with(&mut span);
         self.parse_redir(&mut redirs, &mut span)?;
         self.assert_separator(&mut span)?;
         break;
@@ -254,14 +250,15 @@ impl ParseStream {
       let leading_paren = matches!(self.next_tk_class(), TkRule::SubshStart);
       if leading_paren {
         // optional leading paren, push and continue
-        extend_span!(span, self.next_tk().unwrap().span);
+        self.expect_tk_with(&mut span);
       }
 
       let mut patterns: Vec<Tk> = vec![];
       loop {
-        let Some(word) = self.next_tk() else {
+        let Some(word) = self.next_tk_with(&mut span) else {
           bail!(self, span, "Expected a case pattern here");
         };
+
         if matches!(word.class, TkRule::SubshEnd | TkRule::Sep)
           || word.flags.contains(TkFlags::KEYWORD)
         {
@@ -272,12 +269,12 @@ impl ParseStream {
             "Expected a case pattern here"
           ));
         }
-        extend_span!(span, word.clone().span);
+
         patterns.push(word);
 
         match self.next_tk_class() {
           TkRule::Pipe => {
-            extend_span!(span, self.next_tk().unwrap().span); // consume '|'
+            self.expect_tk_with(&mut span);
             // loop back for next alternative
           }
           TkRule::SubshEnd => break,
@@ -288,17 +285,17 @@ impl ParseStream {
       }
 
       // Consume the closing ')'.
-      extend_span!(span, self.next_tk().unwrap().span);
+      self.expect_tk_with(&mut span);
 
       let mut found_end = false;
       while *self.next_tk_class() == TkRule::Sep {
         let sep = self.peek_tk().unwrap();
         if sep.has_double_semi() {
-          extend_span!(span, self.next_tk().unwrap().span);
+          self.expect_tk_with(&mut span);
           found_end = true;
           break;
         }
-        extend_span!(span, self.next_tk().unwrap().span);
+        self.expect_tk_with(&mut span);
       }
       let mut arm_commands           = vec![];
       let mut arm_span: Option<Span> = None;
@@ -340,7 +337,8 @@ impl ParseStream {
       self.catch_separator(&mut span);
 
       if self.check_keyword(b"esac") {
-        extend_span!(span, self.next_tk().unwrap().span);
+        self.expect_tk_with(&mut span);
+
         self.parse_redir(&mut redirs, &mut span)?;
         self.assert_separator(&mut span)?;
         break;
@@ -352,7 +350,7 @@ impl ParseStream {
     }
 
     let span        = self.tree.alloc(span.unwrap_or_default());
-    let pattern     = self.tree.alloc(pattern);
+    let pattern     = self.tree.alloc(pat_tk);
     let case_blocks = self.tree.alloc_cases(case_blocks);
     let redirs      = (!redirs.is_empty()).then(|| self.tree.alloc_redirs(redirs));
 
@@ -375,7 +373,7 @@ impl ParseStream {
 
     let mut span: Option<Span> = None;
 
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
 
     let Some(cmd) = self.parse_block(true)? else {
       bail!(self, span, "Expected a command after 'time'");
@@ -406,9 +404,7 @@ impl ParseStream {
 
     let mut span: Option<Span> = None;
     let mut redirs             = vec![];
-
-    let     arith_tk           = self.next_tk().unwrap();
-    extend_span!(span, arith_tk.clone().span);
+    let     arith_tk           = self.expect_tk_with(&mut span);
 
     self.parse_redir(&mut redirs, &mut span)?;
 
@@ -428,11 +424,11 @@ impl ParseStream {
     if (!self.check_keyword(b"not") && !self.check_keyword(b"!")) || !self.next_tk_is_some() {
       return Ok(None);
     }
-    let     display            = if self.check_keyword(b"!") { "!" } else { "not" };
+    let     display: &str         = if self.check_keyword(b"!") { "!" } else { "not" };
 
-    let mut span: Option<Span> = None;
+    let mut span   : Option<Span> = None;
 
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
 
     let Some(cmd) = self.parse_block(true)? else {
       bail!(self, span, "Expected a command after '{display}'");
@@ -457,9 +453,9 @@ impl ParseStream {
     let mut span      : Option<Span>   = None;
     let mut cond_nodes: Vec<CondNode>  = vec![];
     let mut else_block: Option<NodeId> = None;
-    let mut redirs = vec![];
+    let mut redirs    : Vec<RedirSpec> = vec![];
 
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
 
     loop {
       let prefix_keywrd = if cond_nodes.is_empty() { "if" } else { "elif" };
@@ -478,7 +474,7 @@ impl ParseStream {
           "Expected 'then' after '{prefix_keywrd}' condition"
         );
       }
-      extend_span!(span, self.next_tk().unwrap().span);
+      self.expect_tk_with(&mut span);
       self.catch_separator(&mut span);
 
       let Some(body) = self.parse_cmd_list()? else {
@@ -491,7 +487,7 @@ impl ParseStream {
 
       self.catch_separator(&mut span);
       if self.check_keyword(b"elif") {
-        extend_span!(span, self.next_tk().unwrap().span);
+        self.expect_tk_with(&mut span);
         self.catch_separator(&mut span);
       } else {
         break;
@@ -500,7 +496,7 @@ impl ParseStream {
 
     self.catch_separator(&mut span);
     if self.check_keyword(b"else") {
-      extend_span!(span, self.next_tk().unwrap().span);
+      self.expect_tk_with(&mut span);
       self.catch_separator(&mut span);
 
       let Some(body) = self.parse_cmd_list()? else {
@@ -513,7 +509,7 @@ impl ParseStream {
     if !self.check_keyword(b"fi") {
       bail!(self, span, "Expected 'fi' after if statement");
     }
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
 
     self.parse_redir(&mut redirs, &mut span)?;
 
@@ -538,8 +534,7 @@ impl ParseStream {
   pub(super) fn parse_for_arith(&mut self, span: &mut Option<Span>) -> ShResult<Option<NodeId>> {
     let mut redirs   = vec![];
 
-    let     arith_tk = self.next_tk().unwrap(); // we checked already
-    extend_span!(*span, arith_tk.clone().span);
+    let     arith_tk = self.expect_tk_with(span); // we checked already
     let (init, cond, step) = match stream::split_for_arith_tk(&mut self.tree, &arith_tk)? {
       None => (None, None, None),
       Some((init, cond, step)) => (Some(init), Some(cond), Some(step)),
@@ -553,7 +548,7 @@ impl ParseStream {
         "Expected 'do' after for loop arithmetic expression"
       );
     }
-    extend_span!(*span, self.next_tk().unwrap().span);
+    self.expect_tk_with(span);
     self.catch_separator(span);
 
     let Some(body) = self.parse_cmd_list()? else {
@@ -564,7 +559,7 @@ impl ParseStream {
     if !self.check_keyword(b"done") {
       bail!(self, *span, "Expected 'done' after for loop body");
     }
-    extend_span!(*span, self.next_tk().unwrap().span);
+    self.expect_tk_with(span);
 
     self.parse_redir(&mut redirs, span)?;
     let span   = self.tree.alloc(span.unwrap_or_default());
@@ -606,7 +601,7 @@ impl ParseStream {
     while let Some((is_in, is_sep, is_do)) = array_checks(self) {
       if is_in {
         // we have been given an explicit array
-        extend_span!(*span, self.next_tk().unwrap().span);
+        self.expect_tk_with(span);
         positional = false;
         break;
       }
@@ -614,16 +609,14 @@ impl ParseStream {
         // we are done here
         break;
       }
-      let tk = self.next_tk().unwrap();
-      extend_span!(*span, tk.span);
+      let tk = self.expect_tk_with(span);
       vars.push(tk);
     }
 
     // Read the explicit word list only when an `in` clause was given.
     if !positional {
       while self.peek_tk().is_some_and(|tk| tk.class != TkRule::Sep) {
-        let tk = self.next_tk().unwrap();
-        extend_span!(*span, tk.span);
+        let tk = self.expect_tk_with(span);
         arr.push(tk);
       }
     }
@@ -641,7 +634,7 @@ impl ParseStream {
         "Expected 'do' after for loop variable and array"
       );
     }
-    extend_span!(*span, self.next_tk().unwrap().span);
+    self.expect_tk_with(span); // consume 'do'
     self.catch_separator(span);
 
     let Some(body) = self.parse_cmd_list()? else {
@@ -652,7 +645,7 @@ impl ParseStream {
     if !self.check_keyword(b"done") {
       bail!(self, *span, "Expected 'done' after for loop body");
     }
-    extend_span!(*span, self.next_tk().unwrap().span);
+    self.expect_tk_with(span); // consume 'done'
 
     self.parse_redir(&mut redirs, span)?;
 
@@ -682,7 +675,7 @@ impl ParseStream {
     }
 
     let mut span: Option<Span> = None;
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
 
     if self.check_flags(TkFlags::IS_ARITH) {
       self.parse_for_arith(&mut span)
@@ -698,11 +691,10 @@ impl ParseStream {
     let mut span: Option<Span> = None;
     let mut redirs             = vec![];
 
-    let     loop_tk            = self.next_tk().unwrap();
+    let     loop_tk            = self.expect_tk_with(&mut span);
     let loop_kind: LoopKind = util::parse_bytes(loop_tk.slice().as_bytes()) // LoopKind implements FromStr
       .unwrap();
 
-    extend_span!(span, loop_tk.span);
     self.catch_separator(&mut span);
 
     let Some(cond) = self.parse_cmd_list()? else {
@@ -716,7 +708,7 @@ impl ParseStream {
     if !self.check_keyword(b"do") {
       bail!(self, span, "Expected 'do' after '{loop_kind}' condition");
     }
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
     self.catch_separator(&mut span);
 
     let Some(body) = self.parse_cmd_list()? else {
@@ -727,7 +719,7 @@ impl ParseStream {
     if !self.check_keyword(b"done") {
       bail!(self, span, "Expected 'done' after loop body");
     }
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
 
     self.parse_redir(&mut redirs, &mut span)?;
 
@@ -757,10 +749,9 @@ impl ParseStream {
     let mut span: Option<Span> = None;
     let mut redirs             = vec![];
 
-    let     try_tk             = self.next_tk().unwrap();
+    let     try_tk             = self.expect_tk_with(&mut span);
     let     try_tk_span        = try_tk.span;
 
-    extend_span!(span, try_tk.span);
     self.catch_separator(&mut span);
 
     let mut body = vec![];
@@ -825,7 +816,7 @@ impl ParseStream {
       try_span,
     );
 
-    extend_span!(span, self.next_tk().unwrap().span); // consume 'catch'
+    self.expect_tk_with(&mut span);
 
     let mut err = vec![];
 
@@ -836,8 +827,7 @@ impl ParseStream {
       if is_sep || is_done || is_terminator {
         break;
       }
-      let tk = self.next_tk().unwrap();
-      extend_span!(span, tk.clone().span);
+      let tk = self.expect_tk_with(&mut span);
       err.push(tk);
     }
 
@@ -866,7 +856,7 @@ impl ParseStream {
       return Ok(Some(self.tree.alloc(node)));
     }
 
-    extend_span!(span, self.next_tk().unwrap().span); // consume 'do'
+    self.expect_tk_with(&mut span);
 
     self.catch_separator(&mut span);
 
@@ -895,7 +885,7 @@ impl ParseStream {
         "try"
       );
     }
-    extend_span!(span, self.next_tk().unwrap().span);
+    self.expect_tk_with(&mut span);
 
     self.parse_redir(&mut redirs, &mut span)?;
 
@@ -925,10 +915,8 @@ impl ParseStream {
     }
     let mut span: Option<Span> = None;
 
-    let     defer_tk           = self.next_tk().unwrap();
+    let     defer_tk           = self.expect_tk_with(&mut span);
     let     defer_tk_span      = defer_tk.span;
-
-    extend_span!(span, defer_tk.span);
 
     self.catch_separator(&mut span);
 

@@ -12,6 +12,7 @@ use smallvec::SmallVec;
 
 use super::{
   CaseNode, CondNode, ConjunctNode, NdRule, Node,
+  dbracket::TestExpr,
   lex::{Span, Tk},
 };
 use crate::{
@@ -51,6 +52,7 @@ pub(crate) struct Ast {
   case_nodes : Vec<CaseNode>,     // every case node in the tree, used by `case`
   cond_nodes : Vec<CondNode>,     // every conditional node in the tree, used by `if`/`while`
   conjuncts  : Vec<ConjunctNode>, // every conjunction node in the tree, used by `&&`/`||`
+  test_exprs : Vec<TestExpr>,
 
   spans : Vec<Span>,
   labels: Vec<LabelBuilder>,
@@ -75,19 +77,28 @@ impl Ast {
     // the upper bound of AST memory usage.
     // 'n' is equal to the number of input tokens.
 
+    // exact count; we know how many tokens we have
     self.tokens.reserve(n);
+
+    // we can expect to have more nodes than tokens
     self.nodes.reserve(2 * n);
     self.spans.reserve(2 * n);
     self.child_nodes.reserve(3 * n / 2);
+
+    // we can expect to have fewer of these than tokens
     self.conjuncts.reserve(n / 2);
     self.labels.reserve(n / 2);
     self.redirs.reserve(n / 2);
+
+    // these are pretty uncommon, so we don't expect to have many of them
     self.case_nodes.reserve(n / 4);
     self.cond_nodes.reserve(n / 4);
+    self.test_exprs.reserve(n / 4);
   }
+
   /// Create a new [`Ast`] that sizes its arenas to hold `size` tokens.
   /// This is actually an important step for performance, juggling resize
-  /// for 9 different arenas is expensive, so we try to size them all up front.
+  /// for 10 different arenas is expensive, so we try to size them all up front.
   pub(crate) fn with_capacity(size: usize) -> Self {
     let mut new = Self::new();
     new.reserve(size);
@@ -250,6 +261,43 @@ impl Ast {
         body: self.copy_into(body, dst),
         ctx : dst.alloc(self[ctx].clone()),
       },
+      NdRule::TestNode { expr } => NdRule::TestNode {
+        expr: self.copy_test_expr(expr, dst),
+      },
+    }
+  }
+  fn copy_test_expr(&self, id: ExprId, dst: &mut Self) -> ExprId {
+    match self[id] {
+      // recursive cases
+      TestExpr::Or { lhs, rhs } => {
+        let lhs = self.copy_test_expr(lhs, dst);
+        let rhs = self.copy_test_expr(rhs, dst);
+        dst.alloc(TestExpr::Or { lhs, rhs })
+      }
+      TestExpr::And { lhs, rhs } => {
+        let lhs = self.copy_test_expr(lhs, dst);
+        let rhs = self.copy_test_expr(rhs, dst);
+        dst.alloc(TestExpr::And { lhs, rhs })
+      }
+      TestExpr::Not { expr } => {
+        let expr = self.copy_test_expr(expr, dst);
+        dst.alloc(TestExpr::Not { expr })
+      }
+
+      // base cases
+      TestExpr::Unary { op, operand } => {
+        let operand = dst.alloc(self[operand].clone());
+        dst.alloc(TestExpr::Unary { op, operand })
+      }
+      TestExpr::Binary { lhs, op, rhs } => {
+        let lhs = dst.alloc(self[lhs].clone());
+        let rhs = dst.alloc(self[rhs].clone());
+        dst.alloc(TestExpr::Binary { lhs, op, rhs })
+      }
+      TestExpr::Truthy { operand } => {
+        let operand = dst.alloc(self[operand].clone());
+        dst.alloc(TestExpr::Truthy { operand })
+      }
     }
   }
   fn copy_node_range(&self, r: ChildRange, dst: &mut Self) -> ChildRange {
@@ -344,7 +392,7 @@ impl Ast {
         out.extend([*init, *cond, *step].into_iter().flatten());
         out.push(*body);
       }
-      NdRule::Arithmetic { .. } | NdRule::Assignment { .. } => {}
+      NdRule::Arithmetic { .. } | NdRule::Assignment { .. } | NdRule::TestNode { .. } => {}
     }
     out
   }
@@ -389,6 +437,7 @@ impl Clone for Ast {
       child_nodes: self.child_nodes.clone(),
       case_nodes: self.case_nodes.clone(),
       cond_nodes: self.cond_nodes.clone(),
+      test_exprs: self.test_exprs.clone(),
       conjuncts: self.conjuncts.clone(),
       spans: self.spans.clone(),
       labels: self.labels.clone(),
@@ -539,6 +588,7 @@ arena_ranges!(
   ConjunctRange, alloc_conjuncts, ConjunctId => conjuncts  : ConjunctNode,
   CaseNodeRange, alloc_cases,     CaseNodeId => case_nodes : CaseNode,
   SpanRange,     alloc_spans,     SpanId     => spans      : Span,
+  ExprRange,     alloc_exprs,     ExprId     => test_exprs : TestExpr,
 );
 
 arenas!(
@@ -550,6 +600,7 @@ arenas!(
   ConjunctId => conjuncts : ConjunctNode,
   CaseNodeId => case_nodes: CaseNode,
   SpanId     => spans     : Span,
+  ExprId     => test_exprs: TestExpr,
 );
 
 impl From<NodeRange> for ChildRange {

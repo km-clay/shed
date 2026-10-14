@@ -329,6 +329,12 @@ impl ShOpts {
       _           => Err(sherr!(SyntaxErr, "shopt: Unknown shopt set '{}'", key,)),
     }
   }
+
+  pub(crate) fn get_raw(&self, query: &str) -> ShResult<Option<String>> {
+    self
+      .get(query)
+      .map(|res| res.and_then(|res| Some(res.rsplit('\n').next()?.to_string())))
+  }
 }
 
 #[expect(clippy::ptr_arg)]

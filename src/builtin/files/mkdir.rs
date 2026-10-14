@@ -178,28 +178,47 @@ fn handle_mkdir_err(io_err: io::Error, dir: &VarStr) -> ShErr {
     EK::AlreadyExists => {
       let path: &Path = dir.as_ref();
       if path.exists() && !path.is_dir() {
-        sherr!(ExecFail, "cannot make directory `{dir}`: exists but is not a directory")
+        sherr!(
+          ExecFail,
+          "cannot make directory `{dir}`: exists but is not a directory"
+        )
       } else {
-        sherr!(ExecFail, "cannot make directory `{dir}`: name already exists")
+        sherr!(
+          ExecFail,
+          "cannot make directory `{dir}`: name already exists"
+        )
       }
     }
     EK::PermissionDenied => sherr!(ExecFail, "cannot make directory `{dir}`: permission denied"),
     EK::InvalidFilename  => sherr!(ExecFail, "cannot make directory `{dir}`: name too long"),
     EK::ReadOnlyFilesystem => {
-      sherr!(ExecFail, "cannot make directory `{dir}`: read-only filesystem")
+      sherr!(
+        ExecFail,
+        "cannot make directory `{dir}`: read-only filesystem"
+      )
     }
-    EK::StorageFull => sherr!(ExecFail, "cannot make directory `{dir}`: no space left on device"),
+    EK::StorageFull => sherr!(
+      ExecFail,
+      "cannot make directory `{dir}`: no space left on device"
+    ),
     EK::NotADirectory => {
-      sherr!(ExecFail, "cannot make directory `{dir}`: path component is not a directory")
+      sherr!(
+        ExecFail,
+        "cannot make directory `{dir}`: path component is not a directory"
+      )
     }
-    EK::NotFound => {
-      sherr!(ExecFail, "cannot make directory `{dir}`: parent directory does not exist")
-        .with_note("the `-p` flag makes `fs mkdir` create parents as well: `fs mkdir -p`".into())
-    }
+    EK::NotFound => sherr!(
+      ExecFail,
+      "cannot make directory `{dir}`: parent directory does not exist"
+    )
+    .with_note("the `-p` flag makes `fs mkdir` create parents as well: `fs mkdir -p`".into()),
 
     _ => {
       if io_err.raw_os_error() == Some(libc::ELOOP) {
-        sherr!(ExecFail, "cannot make directory `{dir}`: too many levels of symbolic links")
+        sherr!(
+          ExecFail,
+          "cannot make directory `{dir}`: too many levels of symbolic links"
+        )
       } else {
         sherr!(ExecFail, "cannot make directory `{dir}`: {io_err}")
       }
