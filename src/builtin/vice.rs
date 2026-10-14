@@ -274,9 +274,7 @@ impl Vice {
     let mut lines        = SinkLines::new(stream);
 
     while let Some(line) = lines.next_line()? {
-      if signal::sigint_pending() {
-        return Err(sherr!(Interrupt, "interrupted"));
-      }
+      signal::check_signals()?;
 
       let line = line.to_str_lossy();
       core.set_buffer(&line);

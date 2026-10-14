@@ -2061,7 +2061,7 @@ impl SinkLines {
       eof: false,
     }
   }
-  pub(crate) fn next_line(&mut self) -> io::Result<Option<Vec<u8>>> {
+  pub(crate) fn next_line(&mut self) -> ShResult<Option<Vec<u8>>> {
     loop {
       if let Some(nl) = self.overflow.find_byte(b'\n') {
         let mut line: Vec<u8> = self.overflow.drain(..=nl).collect();
@@ -2080,11 +2080,9 @@ impl SinkLines {
         Ok(0) => self.eof = true,
         Ok(n) => self.overflow.extend_from_slice(&chunk[..n]),
         Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-          if signal::sigint_pending() {
-            return Err(e); // got Ctrl+C or something
-          }
+          signal::check_signals()?;
         }
-        Err(e) => return Err(e),
+        Err(e) => return Err(e.into()),
       }
     }
   }
