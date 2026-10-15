@@ -399,7 +399,7 @@ impl BuiltinRouter for Chrono {
       ),
       sub_command!(
         &timezone::Timezone,
-        "tz",
+        "zone",
         "[timezone]",
         "print portable timezone names"
       ),
