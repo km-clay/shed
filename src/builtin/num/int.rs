@@ -8,19 +8,11 @@ use crate::{
   util::{
     self,
     error::{ShResult, ShResultExt},
-    strops::{self, ParseRadix},
+    strops::{self, Endian, IntSpec, ParseRadix},
   },
-  varstr,
 };
 
 use super::{BuiltinArgs, ReadLimit, opt::OptSpec};
-
-#[derive(Debug, Clone, Copy)]
-struct IntSpec {
-  width        : Option<u8>,
-  signed       : bool,
-  little_endian: bool,
-}
 
 impl IntSpec {
   fn from_args(args: &super::BuiltinArgs) -> ShResult<Self> {
@@ -31,97 +23,25 @@ impl IntSpec {
       ));
     }
 
-    let little_endian = !args.has_opt("big-endian");
-
-    let (signed, width) = if let Some(t) = args.opt_value("type") {
-      Self::parse_type(&t.to_str_lossy())?
+    let endian = if args.has_opt("big-endian") {
+      Endian::Big
     } else {
-      let width = args
-        .opt_value("width")
-        .map(|w| Self::parse_width(&w.to_str_lossy()))
-        .transpose()?;
-      let signed = args.has_opt("signed");
-      (signed, width)
-    };
-    Ok(IntSpec {
-      width,
-      signed,
-      little_endian,
-    })
-  }
-  fn parse_width(s: &str) -> ShResult<u8> {
-    match s {
-      "8"   => Ok(1),
-      "16"  => Ok(2),
-      "32"  => Ok(4),
-      "64"  => Ok(8),
-      "128" => Ok(16),
-      _     => Err(sherr!(ParseErr, "invalid integer width: {s}")),
-    }
-  }
-  fn parse_type(s: &str) -> ShResult<(bool, Option<u8>)> {
-    if s.len() <= 1 {
-      return Err(sherr!(ParseErr, "invalid integer type: {s}"));
-    }
-
-    let signed = match s.chars().next().unwrap() {
-      'i' => true,
-      'u' => false,
-      _   => return Err(sherr!(ParseErr, "invalid integer type: {s}")),
-    };
-    let width = Self::parse_width(&s[1..])?;
-
-    Ok((signed, Some(width)))
-  }
-
-  fn decode(self, bytes: &[u8]) -> VarStr {
-    debug_assert!(self.width.is_some());
-    let     width     = u32::from(self.width.unwrap());
-
-    let mut val: u128 = 0;
-    if self.little_endian {
-      for (i, &b) in bytes.iter().enumerate() {
-        val |= u128::from(b) << (8 * i as u32);
-      }
-    } else {
-      for &b in bytes {
-        val = (val << 8) | u128::from(b);
-      }
-    }
-
-    if !self.signed {
-      return varstr!("{val}");
-    }
-
-    let bits = width * 8;
-    let signed_val = if bits == 128 {
-      val as i128
-    } else if val & (1u128 << (bits - 1)) != 0 {
-      val as i128 - (1i128 << bits)
-    } else {
-      val as i128
+      Endian::Little
     };
 
-    varstr!("{signed_val}")
-  }
-
-  fn encode(self, val: i128) -> Vec<u8> {
-    debug_assert!(self.width.is_some());
-    let     width = self.width.unwrap();
-
-    let     u     = val as u128;
-    let mut out   = Vec::with_capacity(width as usize);
-    let bits = if self.little_endian {
-      itertools::Either::Left(0..width)
-    } else {
-      itertools::Either::Right((0..width).rev())
-    };
-
-    for i in bits {
-      out.push((u >> (8 * u32::from(i))) as u8);
+    if let Some(t) = args.opt_value("type") {
+      let mut new = Self::parse_int(&t)?;
+      new.try_set_endian(endian);
+      return Ok(new);
     }
 
-    out
+    let signed = args.has_opt("signed");
+    let width = args
+      .opt_value("width")
+      .map(|w| Self::parse_width(&w.to_str_lossy()))
+      .transpose()?;
+
+    Ok(IntSpec::new(signed, endian, width))
   }
 }
 
@@ -148,7 +68,7 @@ impl super::Builtin for ReadInt {
 
     let spec = IntSpec::from_args(&args).promote_err(args.cmd_span())?;
 
-    if spec.width.is_none() && (args.has_opt("at-most") || args.has_opt("exactly")) {
+    if spec.width().is_none() && (args.has_opt("at-most") || args.has_opt("exactly")) {
       return Err(
         sherr!(ParseErr @ args.cmd_span(), "cannot specify -n or -N without --width or --type"),
       )
@@ -166,7 +86,7 @@ impl super::Builtin for ReadInt {
       .promote_err(args.cmd_span())?
       .unwrap_or_default();
 
-    match spec.width {
+    match spec.width() {
       Some(w) => Self::sized_read(usize::from(w), limit, &reader, &mut writer, spec, &args)
         .promote_err(args.cmd_span()),
 
@@ -194,7 +114,7 @@ impl ReadInt {
       );
     }
 
-    spec.width = Some(got as u8);
+    spec.set_width(got as u8);
     let val = std::iter::once(spec.decode(&buf[..got]));
 
     super::emit(val, writer, args).promote_err(args.cmd_span())

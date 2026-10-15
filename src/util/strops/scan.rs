@@ -108,7 +108,10 @@ where
 }
 
 /// Splits a byte slice at the first occurrence of a pattern, but only if the pattern is not escaped by a backslash
-/// and not in quotes. Returns None if the pattern is not found or only found escaped.
+/// and not in quotes.
+///
+/// Returns a tuple of the index of the start of the pattern and the length of the pattern if found
+/// Returns None if the pattern is not found or only found escaped.
 pub(crate) fn split_at_unescaped(slice: &[u8], pat: &[u8]) -> Option<(usize, usize)> {
   split_at_any_unescaped(slice, &[pat])
 }
@@ -350,6 +353,9 @@ impl<'a> SliceCursor<'a> {
     &self.bytes[self.pos..]
   }
 
+  /// Consume bytes at the current position while they satisfy the predicate `f`
+  ///
+  /// Returns the start and end positions of the consumed range.
   pub(crate) fn bump_while_span<F: Fn(u8) -> bool>(&mut self, f: F) -> (usize, usize) {
     let start = self.pos;
     self.bump_while(f);
@@ -367,7 +373,7 @@ impl<'a> SliceCursor<'a> {
     res
   }
 
-  /// Attempt to run `f` on this cursor, rolling back the position if `f` returns `false`.
+  /// Attempt to run `f` on this cursor, rolling back the position if `f` returns `None`.
   pub(crate) fn attempt_get<T, F: FnOnce(&mut Self) -> Option<T>>(&mut self, f: F) -> Option<T> {
     let start = self.pos;
     let res   = f(self);

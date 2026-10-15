@@ -1303,6 +1303,29 @@ pub(crate) fn drain_sink(sink: &dyn Sink) -> io::Result<Vec<u8>> {
   Ok(buf)
 }
 
+/// The seeking fast path for delim scanning.
+///
+/// Works on stuff like files, but not pipes since those cannot be lseek'd.
+///
+/// Locate `delim` in `chunk` and rewind the sink to just past it.
+///
+/// `chunk` must be exactly the bytes the preceding read returned, so the
+/// leftover after the delimiter is what gets seeked back over. Returns the
+/// delimiter's index within `chunk`, or `None` if it is not there.
+pub(crate) fn rewind_past(sink: &dyn Sink, chunk: &[u8], delim: u8) -> io::Result<Option<usize>> {
+  match chunk.find_byte(delim) {
+    Some(pos) => {
+      let leftover = chunk.len() - (pos + 1);
+      if leftover > 0 {
+        sink.seek(io::SeekFrom::Current(-(leftover as i64)))?;
+      }
+      Ok(Some(pos))
+    }
+    None => Ok(None),
+  }
+}
+
+
 pub(crate) struct BufSink {
   cursor: Mutex<Cursor<Vec<u8>>>,
   os_fd : OnceLock<OwnedFd>,

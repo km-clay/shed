@@ -1,8 +1,6 @@
 //! The [`thru`](`Thru`) builtin
 use std::{fs, io, sync::Arc};
 
-use bstr::ByteSlice;
-
 use crate::{
   builtin::{BuiltinArgs, opt::OptSpec},
   errln,
@@ -184,7 +182,7 @@ impl super::Builtin for Thru {
         }
 
         if let Some(delim) = from {
-          if (can_seek && Self::rewind_past(&*reader, emit, delim)?.is_some())
+          if (can_seek && procio::rewind_past(&*reader, emit, delim)?.is_some())
             || emit.first() == Some(&delim)
           {
             from = None;
@@ -194,7 +192,7 @@ impl super::Builtin for Thru {
 
         if let Some(delim) = until {
           if can_seek {
-            if let Some(pos) = Self::rewind_past(&*reader, emit, delim)? {
+            if let Some(pos) = procio::rewind_past(&*reader, emit, delim)? {
               emit = &emit[..pos];
               procio::out_bytes(emit);
               if let Some(t) = tee_file.as_mut() {
@@ -340,22 +338,6 @@ impl Thru {
       from,
       until,
     })
-  }
-
-  /// The seeking fast path for delim scanning
-  ///
-  /// Works on stuff like files, but not pipes since those cannot be lseek'd
-  fn rewind_past(sink: &dyn Sink, chunk: &[u8], delim: u8) -> io::Result<Option<usize>> {
-    match chunk.find_byte(delim) {
-      Some(pos) => {
-        let leftover = chunk.len() - (pos + 1);
-        if leftover > 0 {
-          sink.seek(io::SeekFrom::Current(-(leftover as i64)))?;
-        }
-        Ok(Some(pos))
-      }
-      None => Ok(None),
-    }
   }
 }
 
