@@ -69,7 +69,7 @@ impl super::Builtin for Test {
     if arg_vec.len() == 3 && arg_vec[1].0.to_str_lossy().parse::<BinaryOp>().is_ok() {
       return match eval_leaf(&arg_vec, extended).map_err(|e| e.try_blame(span)) {
         Err(e)  => Err(e.with_code(2)),
-        Ok(res) => util::with_status(i32::from(!res)),
+        Ok(res) => util::with_status(res),
       };
     }
 
@@ -79,7 +79,7 @@ impl super::Builtin for Test {
 
     match result {
       Err(e)  => Err(e.with_code(2)),
-      Ok(res) => util::with_status(i32::from(!res)),
+      Ok(res) => util::with_status(res),
     }
   }
 }

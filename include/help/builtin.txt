@@ -15,6 +15,7 @@ The following builtins are available:
   `bg`          resume a stopped job in the background      |builtin-bg|
   `cd`          change the working directory                |builtin-cd|
   `chrono`      timers, sleeps, time formatting, intervals  |builtin-chrono|
+  `clone`       copy a variable's value to other names      |builtin-clone|
   `compadd`     register completion candidates              |builtin-compadd|
   `compgen`     emit completion candidates                  |builtin-compgen|
   `complete`    define custom tab completion rules          |builtin-complete|
@@ -76,6 +77,7 @@ The following builtins are available:
   `source`      execute a file in the current shell         |builtin-source|
   `stat`        display file or filesystem status           |builtin-stat|
   `str`         string operations                           |builtin-str|
+  `take`        move a variable's value to another name     |builtin-take|
   `[[`          evaluate conditional expressions            |builtin-test|
   `thru`        pass stdin to stdout, optionally tee/limit  |builtin-thru|
   `times`       print shell and child CPU times             |builtin-times|
@@ -4689,7 +4691,7 @@ SEEK                                             *builtin-seek* *seek*
 ==============================================================================
 SET                                              *builtin-set* *set*
 
-  `set [-+abCefhmnuvx] [-+o option] [-- arg ...]`
+  `set [-+abCefhlmnuvx] [-+o option] [-- arg ...]`
 
   Set or unset shell options, or replace positional parameters.
   `-` turns an option on; `+` turns it off.
@@ -4702,6 +4704,7 @@ SET                                              *builtin-set* *set*
     `-e`  errexit     exit on non-zero command status
     `-f`  noglob      disable filename expansion (globbing)
     `-h`  hashall     cache command paths on lookup
+    `-l`  localvars   variables created in functions default to local
     `-m`  monitor     job control (on by default)
     `-n`  noexec      parse but do not execute
     `-u`  nounset     treat unset variable expansion as an error
@@ -4710,8 +4713,33 @@ SET                                              *builtin-set* *set*
 
   Long options (`-o`/`+o`) ~
 
-    allexport, emacs, errexit, hashall, ignoreeof, monitor, noclobber,
-    noexec, noglob, nolog, notify, nounset, pipefail, verbose, vi, xtrace
+    allexport, emacs, errexit, hashall, ignoreeof, localvars, monitor,
+    noclobber, noexec, noglob, nolog, notify, nounset, pipefail,
+    verbose, vi, xtrace
+
+  Function-local variables ~                               *set-localvars*
+
+  With `-l`, a variable that is newly created inside a function is
+  created in that function's scope rather than the global one, as
+  though `local` had been written for it.
+
+  Assigning to a name that already exists is unaffected: the nearest
+  existing binding is updated, so a counter or flag owned by the caller
+  still works from inside a function.
+
+      ```set -l
+      f() { tmp=scratch; }
+      f
+      printf '%s' "$tmp"```        empty -- `tmp` did not escape
+
+  The rule covers every way a variable comes into being, not just plain
+  assignment. `for` loop variables, `declare` without a value, indexed
+  writes like `arr[0]=x`, |read|(builtin-read), |getopts|(builtin-getopts)
+  and the `-a`/`-A` targets of builtins such as |unpack|(builtin-unpack)
+  all become function-local as well.
+
+  The |global|(builtin-global) builtin moves a single name back out to the global scope.
+  This can be used to effectively return things like shell arrays from functions.
 
   Reset ~
 
@@ -4719,7 +4747,7 @@ SET                                              *builtin-set* *set*
 
   Positional parameters ~
 
-    `set -- arg ...`   set $1, $2, ... to {arg}s
+    `set -- arg ...`   set $1, $2, ... to `{arg}`s
     `set --`           clear all positional parameters
 
   With no arguments, prints all shell variables and their values.

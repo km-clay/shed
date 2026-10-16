@@ -49,6 +49,6 @@ impl Builtin for ZdRemove {
           .unwrap_or(0)
       };
     }
-    util::with_status(i32::from(removed == 0))
+    util::with_status(removed != 0)
   }
 }

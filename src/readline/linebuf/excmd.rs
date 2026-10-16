@@ -733,12 +733,12 @@ impl super::LineBuf {
     let mut new_anchor = None;
 
     let keys = Shed::vars_mut(|v| {
-      buf = v.take_var("BUFFER");
-      cursor = v.take_var("CURSOR");
+      buf = v.take_var("BUFFER").unwrap_or_default();
+      cursor = v.take_var("CURSOR").unwrap_or_default();
       if anchor.is_some() {
-        new_anchor = Some(v.take_var("ANCHOR"));
+        new_anchor = Some(v.take_var("ANCHOR").unwrap_or_default());
       }
-      v.take_var("KEYS")
+      v.take_var("KEYS").unwrap_or_default()
     });
 
     self.set_buffer(&buf.to_str_lossy());

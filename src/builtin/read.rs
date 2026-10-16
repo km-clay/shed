@@ -119,7 +119,7 @@ impl super::Builtin for Read {
     // available on stdin right now, non-zero otherwise (matches bash).
     if timeout == Some(0) {
       let has_data = Shed::sinks(Sinks::input_available);
-      return util::with_status(i32::from(!has_data));
+      return util::with_status(has_data);
     }
 
     if let Some(p) = prompt {

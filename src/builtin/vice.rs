@@ -383,7 +383,7 @@ impl super::Builtin for Vice {
     if arg_vec.is_empty() {
       let stream = procio::stdin_sink()?;
       let ok     = Self::run_stream(stream, &prog, span)?;
-      return util::with_status(i32::from(!ok));
+      return util::with_status(ok);
     }
 
     let mut ok = true;
@@ -402,7 +402,7 @@ impl super::Builtin for Vice {
       ok = ok && file_ok;
     }
 
-    util::with_status(i32::from(!ok))
+    util::with_status(ok)
   }
 }
 

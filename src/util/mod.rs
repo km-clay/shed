@@ -23,7 +23,7 @@ pub(crate) enum Direction {
 
 use smallvec::SmallVec;
 
-use crate::{state::Shed, util::error::ShResult};
+use crate::{state::{Shed, Status}, util::error::ShResult};
 pub(super) struct FdWriter<'a>(pub BorrowedFd<'a>);
 
 impl std::io::Write for FdWriter<'_> {
@@ -162,7 +162,7 @@ pub(super) fn parse_bytes<T: FromStr>(bytes: &[u8]) -> Option<T> {
 ///
 /// It's easy to forget to set the status code, this helps with that
 #[expect(clippy::unnecessary_wraps)]
-pub(super) fn with_status(code: i32) -> ShResult<()> {
+pub(super) fn with_status(code: impl Into<Status>) -> ShResult<()> {
   Shed::set_status(code);
   Ok(())
 }

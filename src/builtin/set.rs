@@ -1,5 +1,6 @@
 use std::{fmt::Write, str::FromStr};
 
+use itertools::Itertools;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
@@ -43,6 +44,7 @@ bitflags! {
     const HASHALL = 1 << 13;
     const EMACS_MODE = 1 << 14;
     const PIPEFAIL = 1 << 15;
+    const ALL_LOCAL = 1 << 16;
   }
 }
 
@@ -67,6 +69,7 @@ impl SetFlags {
         _ if flag == SetFlags::XTRACE     => "xtrace",
         _ if flag == SetFlags::HASHALL    => "hashall",
         _ if flag == SetFlags::PIPEFAIL   => "pipefail",
+        _ if flag == SetFlags::ALL_LOCAL  => "localvars",
         _ => continue,
       };
       fields.push(opt.to_string());
@@ -82,6 +85,7 @@ impl SetFlags {
       _ if self == Self::ERREXIT    => Some('e'),
       _ if self == Self::NO_GLOB    => Some('f'),
       _ if self == Self::HASHALL    => Some('h'),
+      _ if self == Self::ALL_LOCAL  => Some('l'),
       _ if self == Self::MONITOR    => Some('m'),
       _ if self == Self::NO_EXEC    => Some('n'),
       _ if self == Self::NO_UNSET   => Some('u'),
@@ -104,12 +108,13 @@ impl TryFrom<char> for SetFlags {
       'e' => Ok(Self::ERREXIT),
       'f' => Ok(Self::NO_GLOB),
       'h' => Ok(Self::HASHALL),
+      'l' => Ok(Self::ALL_LOCAL),
       'm' => Ok(Self::MONITOR),
       'n' => Ok(Self::NO_EXEC),
       'u' => Ok(Self::NO_UNSET),
       'v' => Ok(Self::VERBOSE),
       'x' => Ok(Self::XTRACE),
-      _   => Err(sherr!(ParseErr, "invalid option: {}", value,).with_code(2)),
+      _   => Err(sherr!(ParseErr, "invalid option: {value}").with_code(2)),
     }
   }
 }
@@ -128,6 +133,7 @@ impl FromStr for SetFlags {
       "noglob"    => Ok(Self::NO_GLOB),
       "hashall"   => Ok(Self::HASHALL),
       "pipefail"  => Ok(Self::PIPEFAIL),
+      "localvars" => Ok(Self::ALL_LOCAL),
       "monitor"   => Ok(Self::MONITOR),
       "noexec"    => Ok(Self::NO_EXEC),
       "nounset"   => Ok(Self::NO_UNSET),
@@ -161,7 +167,7 @@ pub(crate) fn build_set_call(readable: bool) -> String {
           })
           .unwrap()
       })
-      .collect::<Vec<_>>();
+      .collect_vec();
 
     for (opt, _) in &lines {
       if opt.width() > longest_width {
@@ -172,7 +178,7 @@ pub(crate) fn build_set_call(readable: bool) -> String {
     lines
       .into_iter()
       .map(|(l, r)| format!("{l:<longest_width$} {r}"))
-      .collect::<Vec<_>>()
+      .collect_vec()
       .join("\n")
   } else {
     let mut call = String::from("set ");
@@ -483,6 +489,79 @@ mod tests {
       let _g = TestGuard::new();
       test_input("set -a").unwrap();
       assert!(Shed::shopts(|o| o.set.allexport));
+    }
+
+    // ─── localvars (-l) ────────────────────────────────────────────
+
+    #[test]
+    fn dash_l_enables_localvars() {
+      let _g = TestGuard::new();
+      assert!(!Shed::shopts(|o| o.set.localvars));
+      test_input("set -l").unwrap();
+      assert!(Shed::shopts(|o| o.set.localvars));
+    }
+
+    #[test]
+    fn plus_l_disables_localvars() {
+      let _g = TestGuard::new();
+      test_input("set -l").unwrap();
+      test_input("set +l").unwrap();
+      assert!(!Shed::shopts(|o| o.set.localvars));
+    }
+
+    #[test]
+    fn localvars_keeps_a_function_assignment_local() {
+      let g = TestGuard::new();
+      test_input(r#"set -l; f() { leaked=inner; }; f; printf '<%s>' "$leaked""#).unwrap();
+      assert_eq!(g.read_output(), "<>");
+    }
+
+    #[test]
+    fn localvars_keeps_a_builtin_created_variable_local() {
+      // The option is honoured in `set_var`, not in the assignment path, so
+      // builtins that create variables are covered too.
+      let g = TestGuard::new();
+      test_input(r#"set -l; f() { printf 'x' | unpack -A rec n=1; }; f; printf '<%s>' "${#rec[@]}""#)
+        .unwrap();
+      assert_eq!(g.read_output(), "<0>");
+    }
+
+    #[test]
+    fn localvars_keeps_a_bare_declare_local() {
+      let g = TestGuard::new();
+      test_input(r#"set -l; f() { declare bare; bare=inner; }; f; printf '<%s>' "$bare""#).unwrap();
+      assert_eq!(g.read_output(), "<>");
+    }
+
+    #[test]
+    fn localvars_keeps_an_indexed_assignment_local() {
+      let g = TestGuard::new();
+      test_input(r#"set -l; f() { arr[0]=made; }; f; printf '<%s>' "${arr[0]}""#).unwrap();
+      assert_eq!(g.read_output(), "<>");
+    }
+
+    #[test]
+    fn localvars_still_updates_an_existing_global() {
+      // Only *creation* is redirected; assigning to a name that already
+      // exists must still write through, or accumulators break.
+      let g = TestGuard::new();
+      test_input(r#"set -l; outer=original; f() { outer=modified; }; f; printf '<%s>' "$outer""#)
+        .unwrap();
+      assert_eq!(g.read_output(), "<modified>");
+    }
+
+    #[test]
+    fn global_opts_out_of_localvars() {
+      let g = TestGuard::new();
+      test_input(r#"set -l; f() { local v=x; global v; }; f; printf '<%s>' "$v""#).unwrap();
+      assert_eq!(g.read_output(), "<x>");
+    }
+
+    #[test]
+    fn localvars_does_not_affect_the_top_level() {
+      let g = TestGuard::new();
+      test_input(r#"set -l; toplevel=yes; printf '<%s>' "$toplevel""#).unwrap();
+      assert_eq!(g.read_output(), "<yes>");
     }
 
     #[test]

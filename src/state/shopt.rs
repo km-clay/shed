@@ -446,6 +446,10 @@ pub(crate) struct ShOptSet {
   #[default(false)]
   pub verbose: bool,
 
+  /// Shell variables created in functions are local by default
+  #[default(false)]
+  pub localvars: bool,
+
   /// The shell will write a trace for each command after it is expanded but before it is executed.
   #[default(false)]
   pub xtrace: bool,

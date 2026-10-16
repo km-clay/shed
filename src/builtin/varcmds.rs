@@ -531,7 +531,7 @@ impl super::Builtin for Local {
 
   fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
     if !Shed::meta(MetaTab::in_func) {
-      return Err(sherr!(ExecFail, "local: can only be used in a function"));
+      return Err(sherr!(ExecFail @ args.cmd_span(), "local can only be used in a function"));
     }
 
     let (arg_vec, opts) = args.take_argv();
@@ -543,6 +543,74 @@ impl super::Builtin for Local {
     }
 
     apply_var_decl(&opts, arg_vec, VarFlags::LOCAL)
+  }
+}
+
+pub(super) struct Clone;
+impl super::Builtin for Clone {
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    let mut arguments = args.arguments().peekable();
+    let     nounset   = shopt!(set.nounset);
+
+    let Some((name, n_span)) = arguments.next() else {
+      return Err(sherr!(ExecFail @ args.cmd_span(), "missing variable name"));
+    };
+
+    let src = VarName::parse(&name.to_str_lossy(), true).promote_err(n_span)?;
+
+    if arguments.peek().is_none() {
+      return Err(sherr!(ExecFail @ args.cmd_span(), "missing target variable name"));
+    }
+
+    if nounset && try_var!(&name.to_str_lossy()).is_none() {
+      return Err(sherr!(ExecFail @ n_span, "variable '{name}' not set"));
+    }
+
+    let value = Shed::vars(|v| v.read_name(&src))?.unwrap_or_default();
+
+    while let Some((name, span)) = arguments.next() {
+      let dst = VarName::parse(&name.to_str_lossy(), true).promote_err(span)?;
+
+      if arguments.peek().is_none() {
+        // let's not clone it again for the last one
+        Shed::vars_mut(|v| v.put_name(&dst, value)).promote_err(span)?;
+        break;
+      }
+
+      Shed::vars_mut(|v| v.put_name(&dst, value.clone())).promote_err(span)?;
+    }
+
+    util::with_status(0)
+  }
+}
+
+pub(super) struct Take;
+impl super::Builtin for Take {
+  fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
+    let mut arguments = args.arguments();
+    let     nounset   = shopt!(set.nounset);
+
+    let Some((src, s_span)) = arguments.next() else {
+      return Err(sherr!(ExecFail @ args.cmd_span(), "missing variable name"));
+    };
+
+    let Some((dst, d_span)) = arguments.next() else {
+      return Err(sherr!(ExecFail @ args.cmd_span(), "missing target variable name"));
+    };
+
+    if src == dst {
+      return util::with_status(0);
+    }
+
+    let src   = VarName::parse(&src.to_str_lossy(), true).promote_err(s_span)?;
+    let dst   = VarName::parse(&dst.to_str_lossy(), true).promote_err(d_span)?;
+    let found = Shed::vars_mut(|v| v.move_var(&src, &dst)).promote_err(d_span)?;
+
+    if !found && nounset {
+      return Err(sherr!(ExecFail @ s_span, "variable '{}' not set", src.name()));
+    }
+
+    util::with_status(found)
   }
 }
 
@@ -1777,5 +1845,151 @@ mod tests {
     let guard = TestGuard::new();
     test_input("declare t=(a b c); printf '<%s>' \"${t[@]}\"; echo").unwrap();
     assert!(guard.read_output().contains("<a><b><c>"));
+  }
+
+  // ===================== clone / take =====================
+
+  fn out_of(cmd: &str) -> String {
+    let g = TestGuard::new();
+    test_input(cmd).unwrap();
+    g.read_output()
+  }
+
+  fn fails(cmd: &str) -> bool {
+    let _g = TestGuard::new();
+    test_input(cmd).is_err() || state::Shed::get_status() != 0
+  }
+
+  #[test]
+  fn clone_copies_an_assoc_with_its_keys() {
+    assert_eq!(
+      out_of(r"declare -A h; h[a]=1; h[b]=2; clone h g; printf '%s%s%s' ${g[a]} ${g[b]} ${#g[@]}"),
+      "122"
+    );
+  }
+
+  #[test]
+  fn clone_leaves_the_source_intact() {
+    assert_eq!(
+      out_of(r"declare -A h; h[a]=1; clone h g; printf '%s%s' ${h[a]} ${#h[@]}"),
+      "11"
+    );
+  }
+
+  #[test]
+  fn clone_fills_every_receiver() {
+    assert_eq!(
+      out_of(r"v=val; clone v p q r; printf '%s%s%s' $p $q $r"),
+      "valvalval"
+    );
+  }
+
+  #[test]
+  fn clone_copies_an_array_element() {
+    assert_eq!(
+      out_of(r#"a=(p q r); clone 'a[1]' x; printf '%s;%s' $x "${a[*]}""#),
+      "q;p q r"
+    );
+  }
+
+  #[test]
+  fn clone_copies_an_assoc_value_by_key() {
+    assert_eq!(
+      out_of(r"declare -A h; h[k]=v; clone 'h[k]' z; printf '%s;%s' $z ${#h[@]}"),
+      "v;1"
+    );
+  }
+
+  #[test]
+  fn clone_can_target_an_element() {
+    assert_eq!(
+      out_of(r#"a=(p q r); w=new; clone w 'a[0]'; printf '%s' "${a[*]}""#),
+      "new q r"
+    );
+  }
+
+  #[test]
+  fn clone_rejects_an_array_into_a_single_element() {
+    assert!(fails(r"declare -A g; g[a]=1; a=(p q r); clone g 'a[2]'"));
+  }
+
+  #[test]
+  fn clone_rejects_a_slice_target() {
+    assert!(fails(r"a=(p q r); w=new; clone w 'a[0:2]'"));
+  }
+
+  #[test]
+  fn clone_requires_a_receiver() {
+    assert!(fails(r"v=val; clone v"));
+  }
+
+  #[test]
+  fn take_moves_an_assoc_and_empties_the_source() {
+    assert_eq!(
+      out_of(r"declare -A h; h[a]=1; h[b]=2; take h g; printf '%s%s;%s' ${g[a]} ${#g[@]} ${#h[@]}"),
+      "12;0"
+    );
+  }
+
+  #[test]
+  fn take_moves_an_array_element_and_shifts_the_rest() {
+    assert_eq!(
+      out_of(r#"b=(p q r); take 'b[1]' mid; printf '%s;%s' $mid "${b[*]}""#),
+      "q;p r"
+    );
+  }
+
+  #[test]
+  fn take_moves_an_assoc_value_by_key() {
+    assert_eq!(
+      out_of(
+        r"declare -A h; h[k]=v; h[j]=w; take 'h[k]' out; printf '%s;%s;%s' $out ${#h[@]} ${h[j]}"
+      ),
+      "v;1;w"
+    );
+  }
+
+  #[test]
+  fn take_into_the_same_name_keeps_its_attributes() {
+    let _g = TestGuard::new();
+    test_input("s=hello; export s; take s s").unwrap();
+    assert_eq!(var!("s"), "hello");
+    let flags = Shed::vars(|v| v.get_var_flags("s"));
+    assert!(flags.unwrap().contains(VarFlags::EXPORT));
+  }
+
+  #[test]
+  fn take_into_the_same_element_preserves_its_neighbours() {
+    // A self-move must not remove-then-reinsert: that shifts the array and
+    // overwrites the following element.
+    assert_eq!(
+      out_of(r#"a=(a b c); take 'a[0]' 'a[0]'; printf '%s;%s' ${#a[@]} "${a[*]}""#),
+      "3;a b c"
+    );
+  }
+
+  #[test]
+  fn take_rejects_a_readonly_target_without_consuming_the_source() {
+    assert_eq!(
+      out_of(
+        r"src=precious; declare -r dst=locked; { take src dst; } 2>/dev/null; printf '%s;%s' $src $dst"
+      ),
+      "precious;locked"
+    );
+  }
+
+  #[test]
+  fn take_rejects_a_readonly_element_source() {
+    assert_eq!(
+      out_of(
+        r#"declare -r ro=(x y z); { take 'ro[0]' got; } 2>/dev/null; printf '%s;%s' "${ro[*]}" ${#got}"#
+      ),
+      "x y z;0"
+    );
+  }
+
+  #[test]
+  fn take_requires_a_target() {
+    assert!(fails(r"v=val; take v"));
   }
 }

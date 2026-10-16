@@ -20,6 +20,7 @@ use crate::{
   expand::markers,
   state::vars::{VarStr, VarStrSliceExt},
 };
+use crate::{shopt, varstr};
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ScopeStack {
@@ -229,6 +230,76 @@ impl ScopeStack {
   pub(crate) fn has_deferred_cmds(&self) -> bool {
     self.cur_scope().has_deferred_cmds()
   }
+
+  fn element_of(target: &VarName) -> ShResult<Option<&ArrIndex>> {
+    if target.slice_start().is_some() || target.slice_len().is_some() {
+      return Err(sherr!(
+        ExecFail,
+        "'{}' is a slice; use a whole variable or a single index",
+        target.name()
+      ));
+    }
+
+    Ok(target.index())
+  }
+  pub(crate) fn read_name(&self, src: &VarName) -> ShResult<Option<VarKind>> {
+    let Some(idx) = Self::element_of(src)? else {
+      return Ok(self.try_get_var_meta(src.name()).map(Var::into_kind));
+    };
+    if !self.index_is_set(src.name(), idx) {
+      return Ok(None);
+    }
+    Ok(Some(VarKind::Str(self.index_var(src.name(), idx)?)))
+  }
+  pub(crate) fn take_name(&mut self, src: &VarName) -> ShResult<Option<VarKind>> {
+    let Some(idx) = Self::element_of(src)? else {
+      return Ok(self.try_take_var(src.name())?.map(Var::into_kind));
+    };
+
+    if !self.index_is_set(src.name(), idx) {
+      return Ok(None);
+    }
+
+    self
+      .take_index_var(src.name(), idx)
+      .map(|v| v.map(VarKind::Str))
+  }
+  pub(crate) fn put_name(&mut self, dst: &VarName, val: VarKind) -> ShResult<()> {
+    let Some(idx) = Self::element_of(dst)? else {
+      return self.set_var(dst.name(), val, VarFlags::empty());
+    };
+
+    let scalar = match val {
+      VarKind::Str(s) => s,
+      VarKind::Int(i) => varstr!("{i}"),
+      _ => {
+        return Err(sherr!(
+          ExecFail,
+          "Cannot assign array/assoc value to single element '{}'",
+          dst.name()
+        ));
+      }
+    };
+
+    self.set_var_indexed(dst.name(), idx.clone(), scalar, VarFlags::empty())
+  }
+  pub(crate) fn move_var(&mut self, src: &VarName, dst: &VarName) -> ShResult<bool> {
+    if self
+      .get_local_var_flags(dst.name())
+      .is_some_and(|flags| flags.contains(VarFlags::READONLY))
+    {
+      return Err(sherr!(
+        ExecFail,
+        "Variable '{}' is readonly", dst.name()
+      ));
+    }
+
+    let Some(var) = self.take_name(src)? else {
+      return Ok(false);
+    };
+
+    self.put_name(dst, var).map(|()| true)
+  }
   pub(crate) fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     if flags.contains(VarFlags::LOCAL) {
       return self.set_var_local(var_name, val, flags);
@@ -241,7 +312,7 @@ impl ScopeStack {
       }
     }
     // Not found in any scope - create in global scope
-    self.set_var_global(var_name, val, flags)
+    self.create_var(var_name, val, flags)
   }
   /// Declare a name with no assigned value (`declare x` / `local x`).
   ///
@@ -270,11 +341,56 @@ impl ScopeStack {
         return Ok(());
       }
     }
+
     // Not found anywhere - create in the global scope as declared-but-unset.
-    let Some(scope) = self.ceiling_mut() else {
+    self.create_var(var_name, VarKind::Unset, flags)
+  }
+
+  pub(crate) fn promote_var_global(&mut self, var_name: &str) -> ShResult<()> {
+    {
+      let Some(ceiling) = self.ceiling_mut() else {
+        return Ok(());
+      };
+
+      if ceiling
+        .get_var_flags(var_name)
+        .is_some_and(|flags| flags.contains(VarFlags::READONLY))
+      {
+        return Err(sherr!(
+            ExecFail,
+            "Cannot overwrite readonly global '{var_name}'"
+        ));
+      }
+    }
+
+    let var = 'walk: {
+      let mut scopes = self.bounded_scopes_rev_mut().peekable();
+      while let Some(scope) = scopes.next() {
+        if scope.var_exists(var_name) {
+          if scopes.peek().is_none() {
+            // this is the global scope, and we haven't
+            // found any shadowing variable on the way up.
+            // nothing to do
+            return Ok(());
+          }
+          // we are inspecting a non-global scope
+          break 'walk scope.try_take_var(var_name)?;
+        }
+      }
+      None
+    };
+
+    let Some(ceiling) = self.ceiling_mut() else {
       return Ok(());
     };
-    scope.set_var(var_name, VarKind::Unset, flags)
+
+    let mut var = var.unwrap_or_default();
+    *var.flags_mut() &= !VarFlags::LOCAL;
+
+    // clobbers any existing same-named variable
+    ceiling.put_var(var_name, var);
+
+    Ok(())
   }
 
   pub(crate) fn set_var_indexed(
@@ -297,7 +413,7 @@ impl ScopeStack {
       }
     }
     // Not found - create in global scope
-    let Some(scope) = self.ceiling_mut() else {
+    let Some(scope) = self.var_creation_scope_mut() else {
       return Ok(());
     };
     scope.set_index(var_name, idx, val)
@@ -313,8 +429,19 @@ impl ScopeStack {
       .unwrap_or(0);
     self.scopes.get_mut(pos)
   }
-  fn set_var_global(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
-    let Some(scope) = self.ceiling_mut() else {
+  /// The scope that is targeted by bare var assignments
+  ///
+  fn var_creation_scope_mut(&mut self) -> Option<&mut VarTab> {
+    if shopt!(set.localvars)
+      && Shed::meta(MetaTab::in_func)
+      && let Some(idx) = self.local_scope_idx()
+    {
+      return self.scopes.get_mut(idx);
+    }
+    self.ceiling_mut()
+  }
+  fn create_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
+    let Some(scope) = self.var_creation_scope_mut() else {
       return Ok(());
     };
     scope.set_var(var_name, val, flags)
@@ -430,6 +557,75 @@ impl ScopeStack {
   }
   pub(crate) fn index_var(&self, var_name: &str, idx: &ArrIndex) -> ShResult<VarStr> {
     self.index_var_sliced(var_name, idx, None, None)
+  }
+  pub(crate) fn take_index_var(
+    &mut self,
+    var_name: &str,
+    idx: &ArrIndex,
+  ) -> ShResult<Option<VarStr>> {
+    for scope in self.bounded_scopes_rev_mut() {
+      if scope.var_exists(var_name)
+        && let Some(var) = scope.vars_mut().get_mut(var_name)
+      {
+        if var.flags().contains(VarFlags::READONLY) {
+          return Err(sherr!(ExecFail, "Variable '{var_name}' is readonly"));
+        }
+
+        let idx = idx.clone().resolve_for(var.kind().tag())?;
+        match var.kind_mut() {
+          VarKind::AssocArr(items) => {
+            let ArrIndex::Key(key) = idx else {
+              return Err(sherr!(
+                ExecFail,
+                "Cannot take all elements of associative array '{}'",
+                var_name,
+              ));
+            };
+
+            let Some(pos) = items.iter().position(|(k, _)| k == &key) else {
+              return Ok(None);
+            };
+            return Ok(Some(items.remove(pos).1));
+          }
+          VarKind::Arr(items) => match idx {
+            ArrIndex::Literal(n) => {
+              if n < items.len() {
+                return Ok(items.remove(n));
+              }
+              return Err(sherr!(
+                  ExecFail,
+                  "Index {} out of bounds for array '{}'",
+                  n,
+                  var_name,
+                ));
+            }
+            ArrIndex::FromBack(n) => {
+              if n >= 1 && n <= items.len() {
+                let idx = items.len() - n;
+                return Ok(items.remove(idx));
+              }
+              return Err(sherr!(
+                  ExecFail,
+                  "Index {} out of bounds for array '{}'",
+                  n,
+                  var_name,
+                ));
+            }
+            _ => {
+              return Err(sherr!(
+                  ExecFail,
+                  "Cannot take all elements of array '{}'",
+                  var_name,
+                ));
+            }
+          },
+          _ => {
+            return Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name,));
+          }
+        }
+      }
+    }
+    Ok(None)
   }
 
   pub(crate) fn index_var_sliced(
@@ -621,6 +817,14 @@ impl ScopeStack {
     Ok(VarStr::default())
   }
 
+  pub(crate) fn bounded_scopes_rev(&self) -> impl Iterator<Item = &VarTab> {
+    let skip = self
+      .scopes
+      .iter()
+      .rposition(VarTab::is_ceiling)
+      .unwrap_or(0);
+    self.scopes.iter().skip(skip).rev()
+  }
   pub(crate) fn bounded_scopes_rev_mut(&mut self) -> impl Iterator<Item = &mut VarTab> {
     let skip = self
       .scopes
@@ -660,6 +864,18 @@ impl ScopeStack {
       }
     }
     None
+  }
+  pub(crate) fn try_take_var(&mut self, var_name: &str) -> ShResult<Option<Var>> {
+    if let Ok(param) = var_name.parse::<ShellParam>() {
+      return Ok(self.try_take_param(param)?.map(Var::from));
+    }
+    for scope in self.bounded_scopes_rev_mut() {
+      if scope.var_exists(var_name) {
+        return scope.try_take_local(var_name);
+      }
+    }
+
+    Ok(None)
   }
   /// Resolve a pre-parsed `VarName`, handling array indexes and slicing if present.
   /// Whether an array/assoc element actually exists. Mirrors the
@@ -729,20 +945,16 @@ impl ScopeStack {
     }
     None
   }
-  pub(crate) fn try_take_var_meta(&mut self, var_name: &str) -> Option<Var> {
-    let var = self.try_get_var_meta(var_name)?;
-    self.unset_var(var_name).ok();
-    Some(var)
+  pub(crate) fn try_take_var_kind(&mut self, var_name: &str) -> ShResult<Option<VarKind>> {
+    Ok(self.try_take_var(var_name)?.map(Var::into_kind))
   }
-  pub(crate) fn try_take_var_kind(&mut self, var_name: &str) -> Option<VarKind> {
-    let var = self.try_take_var_meta(var_name)?;
-    self.unset_var(var_name).ok();
-    Some(var.into_kind())
-  }
-  pub(crate) fn take_var(&mut self, var_name: &str) -> VarStr {
-    let var = self.get_var(var_name);
-    self.unset_var(var_name).ok();
-    var
+  pub(crate) fn take_var(&mut self, var_name: &str) -> ShResult<VarStr> {
+    Ok(
+      self
+        .try_take_var(var_name)?
+        .map(VarStr::from)
+        .unwrap_or_default(),
+    )
   }
   pub(crate) fn get_var(&self, var_name: &str) -> VarStr {
     self.try_get_var(var_name).unwrap_or_default()
@@ -788,6 +1000,14 @@ impl ScopeStack {
     }
     vars
   }
+  pub(crate) fn get_local_var_flags(&self, var_name: &str) -> Option<VarFlags> {
+    for scope in self.bounded_scopes_rev() {
+      if scope.var_exists(var_name) {
+        return scope.get_var_flags(var_name);
+      }
+    }
+    None
+  }
   pub(crate) fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name) {
@@ -817,6 +1037,29 @@ impl ScopeStack {
     }
 
     None
+  }
+  pub(crate) fn try_take_param(&mut self, param: ShellParam) -> ShResult<Option<VarStr>> {
+    if param.is_global() && self.global_params.contains_key(&param) {
+      return Err(sherr!(
+        ExecFail,
+        "Cannot take global shell parameter '{param}'"
+      ));
+    }
+    // Positional params are scope-local; only check the current scope
+    if matches!(
+      param,
+      ShellParam::Pos(_) | ShellParam::AllArgs | ShellParam::AllArgsStr | ShellParam::ArgCount
+    ) {
+      let scope = self.sh_argv_scope_mut();
+      return Ok(scope.try_take_param(param));
+    }
+    for scope in self.scopes_rev_mut() {
+      if let Some(val) = scope.try_take_param(param) {
+        return Ok(Some(val));
+      }
+    }
+
+    Ok(None)
   }
   pub(crate) fn get_param(&self, param: ShellParam) -> VarStr {
     self.try_get_param(param).unwrap_or_default()

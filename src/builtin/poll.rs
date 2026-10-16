@@ -99,7 +99,7 @@ impl super::Builtin for Poll {
 
     set_var!(&revents.to_str_lossy(), VarKind::AssocArr(revents_arr)).with_code(2)?;
 
-    util::with_status(i32::from(n == 0))
+    util::with_status(n != 0)
   }
 }
 

@@ -228,11 +228,11 @@ pub(crate) fn display_as_var(name: impl AsRef<[u8]>, value: impl ValueBytes) -> 
   out
 }
 
-fn display_vars_internal(vars: &ScopeStack, filter: Option<VarFlags>) -> Vec<u8> {
+fn display_vars_internal(vars: &ScopeStack, filter: Option<VarFlags>, polarity: bool) -> Vec<u8> {
   let vars = vars.flatten_vars().into_iter();
 
   if let Some(flags) = filter {
-    display_as_vars(vars.filter(|(_, v)| v.flags().contains(flags)))
+    display_as_vars(vars.filter(|(_, v)| v.flags().contains(flags) && polarity))
   } else {
     display_as_vars(vars)
   }
@@ -273,7 +273,11 @@ pub(crate) fn display_exported(vars: &ScopeStack) -> Vec<u8> {
 }
 
 pub(crate) fn display_local(vars: &ScopeStack) -> Vec<u8> {
-  display_vars_internal(vars, None)
+  display_vars_internal(vars, None, true)
+}
+
+pub(crate) fn display_global(vars: &ScopeStack) -> Vec<u8> {
+  display_vars_internal(vars, Some(VarFlags::LOCAL), false)
 }
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
@@ -818,7 +822,11 @@ impl FromIterator<char> for VarStr {
 
 impl From<Var> for VarStr {
   fn from(value: Var) -> Self {
-    Self::from(&value)
+    match value.into_kind() {
+      VarKind::Str(vstr) => vstr,
+      VarKind::Int(n)    => varstr!("{n}"),
+      other => VarStr::from(other.to_string())
+    }
   }
 }
 
@@ -1214,6 +1222,9 @@ impl Var {
   pub(crate) fn flags(&self) -> VarFlags {
     self.flags
   }
+  pub(crate) fn flags_mut(&mut self) -> &mut VarFlags {
+    &mut self.flags
+  }
 }
 
 impl Display for Var {
@@ -1577,10 +1588,23 @@ impl VarTab {
   pub(crate) fn try_get_local(&self, var_name: &str) -> Option<VarStr> {
     // A declared-but-unset variable is present in the scope (so it shadows
     // outer scopes and keeps later assignments local) but has no value: it
-    // reads as unset for `${x-}`/`${x+}` and friends.
+    // reads as unset for `${x-}`/`${x+}` etc
     match self.vars.get(var_name) {
       Some(var) if matches!(var.kind(), VarKind::Unset) => None,
       other => other.map(VarStr::from),
+    }
+  }
+  pub(crate) fn try_take_local(&mut self, var_name: &str) -> ShResult<Option<Var>> {
+    let Some(var) = self.try_take_var(var_name)? else {
+      return Ok(None);
+    };
+
+    match var.kind() {
+      VarKind::Unset => {
+        self.vars.insert(var_name.to_string(), var);
+        Ok(None)
+      }
+      _ => Ok(Some(var)),
     }
   }
   pub(crate) fn try_get_var_meta(&self, var: &str) -> Option<Var> {
@@ -1592,7 +1616,10 @@ impl VarTab {
   pub(crate) fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
     self.vars.get(var_name).map(|var| var.flags)
   }
-  pub(crate) fn unset_var(&mut self, var_name: &str) -> ShResult<()> {
+  pub(crate) fn try_take_param(&mut self, param: ShellParam) -> Option<VarStr> {
+    self.params.get_mut(&param).map(std::mem::take)
+  }
+  pub(crate) fn try_take_var(&mut self, var_name: &str) -> ShResult<Option<Var>> {
     if let Some(var) = self.vars.get(var_name) {
       if var.flags.contains(VarFlags::READONLY) {
         return Err(sherr!(
@@ -1604,8 +1631,10 @@ impl VarTab {
         Shed::meta_mut(MetaTab::clear_envp);
       }
     }
-    self.vars.remove(var_name);
-    Ok(())
+    Ok(self.vars.remove(var_name))
+  }
+  pub(crate) fn unset_var(&mut self, var_name: &str) -> ShResult<()> {
+    self.try_take_var(var_name).map(|_| ())
   }
   pub(crate) fn set_index(&mut self, var_name: &str, idx: ArrIndex, val: VarStr) -> ShResult<()> {
     // 'idx' must already be resolved at this point
@@ -1873,6 +1902,9 @@ fn get_set_flags() -> Option<VarStr> {
     }
     if o.set.monitor {
       set_opts.push(b'm');
+    }
+    if o.set.localvars {
+      set_opts.push(b'l');
     }
     if o.set.noexec {
       set_opts.push(b'n');
