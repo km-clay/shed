@@ -19,6 +19,7 @@ _set_comp() {
     [errexit]='exit immediately if a command exits with a non-zero status'
     [hashall]='remember the location of commands as they are looked up'
     [ignoreeof]='ignore EOF (Ctrl+D) as a signal to exit the shell'
+    [localvars]='create variables inside functions as locals by default'
     [monitor]='monitor background jobs'
     [noclobber]='prevent overwriting of files by redirection'
     [noexec]='read commands but do not execute them'

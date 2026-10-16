@@ -153,6 +153,7 @@ _shopt_comp() {
       nounset
       pipefail
       verbose
+      localvars
       xtrace
     )
     local set_desc=(
@@ -169,6 +170,7 @@ _shopt_comp() {
       "expanding an unset variable (other than \$* or \$@) is an error"
       "a pipeline's exit status is the last non-zero status from any stage"
       "the shell writes its input to stderr as it is read"
+      "variables created inside a function are local to that function by default"
       "the shell prints a trace of each command before executing it"
     )
     local statline=(
