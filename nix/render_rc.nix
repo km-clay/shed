@@ -91,6 +91,7 @@ lib: cfg: let
     "shopt set.notify=${boolToString cfg.shopts.set.notify}"
     "shopt set.nounset=${boolToString cfg.shopts.set.nounset}"
     "shopt set.verbose=${boolToString cfg.shopts.set.verbose}"
+    "shopt set.localvars=${boolToString cfg.shopts.set.localvars}"
     "shopt set.xtrace=${boolToString cfg.shopts.set.xtrace}"
     "shopt set.pipefail=${boolToString cfg.shopts.set.pipefail}"
 

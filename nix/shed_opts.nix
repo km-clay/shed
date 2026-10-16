@@ -388,6 +388,11 @@
                   default = false;
                   description = "Write shell input to stderr as it is read (equivalent to set -v)";
                 };
+                localvars = lib.mkOption {
+                  type = lib.types.bool;
+                  default = false;
+                  description = "Variables created inside a function are local to that function unless declared otherwise (equivalent to set -o localvars)";
+                };
                 xtrace = lib.mkOption {
                   type = lib.types.bool;
                   default = false;
