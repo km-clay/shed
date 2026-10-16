@@ -18,7 +18,7 @@ pub(crate) use distance::{EDIT_WEIGHT, levenshtein};
 pub(crate) use format::{
   Base, Case, Count, Field, FieldParams, FmtFlags, Sign, StrFmt, StrFormatter,
 };
-pub(crate) use num::{FloatSpec, IntSpec, Endian, ParseRadix, VarStrDisplay};
+pub(crate) use num::{Endian, FloatSpec, IntSpec, ParseRadix, VarStrDisplay};
 pub(crate) use quote::QuoteState;
 pub(crate) use scan::{
   ByteCursor, ByteSet, QuotePolicy, SliceCursor, assignment_value, ends_with_unescaped,

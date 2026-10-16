@@ -7,7 +7,11 @@ use std::{
 };
 
 use crate::{
-  expand::arithmetic::{Num, uNum}, sherr, state::{params, vars::VarStr}, util::error::{ShResult, ShResultExt}, varstr,
+  expand::arithmetic::{Num, uNum},
+  sherr,
+  state::{params, vars::VarStr},
+  util::error::{ShResult, ShResultExt},
+  varstr,
 };
 
 use super::{ByteCursor, SliceCursor};
@@ -84,7 +88,7 @@ impl IntSpec {
 
   pub(crate) fn check_range(self, val: Num) -> ShResult<()> {
     let width = self.width_bytes();
-    let bits = width * 8;
+    let bits  = width * 8;
     if bits >= 128 {
       if !self.signed() && val < 0 {
         return Err(sherr!(ParseErr, "value {val} is negative but type is unsigned")).with_code(2);
@@ -93,7 +97,7 @@ impl IntSpec {
     }
 
     let (lo, hi): (Num, Num) = if self.signed() {
-      (-(1 << (bits -1)), (1 << (bits - 1)) - 1)
+      (-(1 << (bits - 1)), (1 << (bits - 1)) - 1)
     } else {
       (0, (1 << bits) - 1)
     };
@@ -232,7 +236,9 @@ impl IntSpec {
   }
 
   pub(crate) fn try_set_endian(&mut self, endian: Endian) {
-    if self.endian.is_some() { return }
+    if self.endian.is_some() {
+      return;
+    }
     self.endian = Some(endian);
   }
 
@@ -290,9 +296,21 @@ impl FloatSpec {
     }
   }
 
-  pub(crate) fn from_width(width: VarStr, endian: Endian, decimal: bool, sep: char) -> ShResult<Self> {
+  pub(crate) fn from_width(
+    width: VarStr,
+    endian: Endian,
+    decimal: bool,
+    sep: char,
+  ) -> ShResult<Self> {
     let (width, exp_bits, mant_bits) = Self::parse_width(&width)?;
-    Ok(Self::new(width, exp_bits, mant_bits, Some(endian), decimal, sep))
+    Ok(Self::new(
+      width,
+      exp_bits,
+      mant_bits,
+      Some(endian),
+      decimal,
+      sep,
+    ))
   }
 
   pub(crate) fn parse_float(mut ty: VarStr) -> ShResult<Self> {
@@ -324,7 +342,7 @@ impl FloatSpec {
     match s.as_bytes() {
       b"32" => Ok((4, 8, 23)),
       b"64" => Ok((8, 11, 52)),
-      _    => Err(sherr!(ParseErr, "invalid float width: {s}")).with_code(2),
+      _     => Err(sherr!(ParseErr, "invalid float width: {s}")).with_code(2),
     }
   }
   pub(crate) fn parse_type(s: &VarStr) -> ShResult<(usize, u32, u32)> {
@@ -333,7 +351,7 @@ impl FloatSpec {
       b"f16"  => Ok((2, 5, 10)),
       b"f32"  => Ok((4, 8, 23)),
       b"f64"  => Ok((8, 11, 52)),
-      _      => Err(sherr!(ParseErr, "invalid float type: {s}")).with_code(2),
+      _       => Err(sherr!(ParseErr, "invalid float type: {s}")).with_code(2),
     }
   }
 
@@ -494,7 +512,9 @@ impl FloatSpec {
   }
 
   pub(crate) fn try_set_endian(&mut self, endian: Endian) {
-    if self.endian.is_some() { return }
+    if self.endian.is_some() {
+      return;
+    }
     self.endian = Some(endian);
   }
 

@@ -521,8 +521,10 @@ mod tests {
       // The option is honoured in `set_var`, not in the assignment path, so
       // builtins that create variables are covered too.
       let g = TestGuard::new();
-      test_input(r#"set -l; f() { printf 'x' | unpack -A rec n=1; }; f; printf '<%s>' "${#rec[@]}""#)
-        .unwrap();
+      test_input(
+        r#"set -l; f() { printf 'x' | unpack -A rec n=1; }; f; printf '<%s>' "${#rec[@]}""#,
+      )
+      .unwrap();
       assert_eq!(g.read_output(), "<0>");
     }
 

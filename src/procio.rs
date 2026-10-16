@@ -640,9 +640,9 @@ impl RedirBldr {
         let name = VarStr::from(&bytes[cur.pos()..]);
         if name.is_empty() {
           return Err(sherr!(
-                    ParseErr,
-                    "expected a variable name after '@' in redirection"
-                  ));
+                            ParseErr,
+                            "expected a variable name after '@' in redirection"
+                          ));
         }
         redir = redir.with_target(RedirTarget::Var(name)).with_class($ty);
       };
@@ -1324,7 +1324,6 @@ pub(crate) fn rewind_past(sink: &dyn Sink, chunk: &[u8], delim: u8) -> io::Resul
     None => Ok(None),
   }
 }
-
 
 pub(crate) struct BufSink {
   cursor: Mutex<Cursor<Vec<u8>>>,

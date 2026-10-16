@@ -825,7 +825,7 @@ impl From<Var> for VarStr {
     match value.into_kind() {
       VarKind::Str(vstr) => vstr,
       VarKind::Int(n)    => varstr!("{n}"),
-      other => VarStr::from(other.to_string())
+      other              => VarStr::from(other.to_string()),
     }
   }
 }

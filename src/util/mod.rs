@@ -23,7 +23,10 @@ pub(crate) enum Direction {
 
 use smallvec::SmallVec;
 
-use crate::{state::{Shed, Status}, util::error::ShResult};
+use crate::{
+  state::{Shed, Status},
+  util::error::ShResult,
+};
 pub(super) struct FdWriter<'a>(pub BorrowedFd<'a>);
 
 impl std::io::Write for FdWriter<'_> {

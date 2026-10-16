@@ -1345,7 +1345,8 @@ impl ShedLine {
         if cancelled {
           autocmd!(OnCompletionCancel);
         } else if comp.is_active() {
-          let Ok(Some(VarKind::AssocArr(filtered))) = Shed::vars_mut(|v| v.try_take_var_kind("MATCHES"))
+          let Ok(Some(VarKind::AssocArr(filtered))) =
+            Shed::vars_mut(|v| v.try_take_var_kind("MATCHES"))
           else {
             system_msg!("completion error: MATCHES variable must be an associative array");
 

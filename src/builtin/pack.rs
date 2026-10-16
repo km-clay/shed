@@ -1332,10 +1332,19 @@ mod tests {
 
   #[test]
   fn pack_accepts_integers_at_the_width_boundary() {
-    assert_eq!(out_of(r"a=(255); pack -a a x=u8 >@v; printf '%s' ${#v}"), "1");
+    assert_eq!(
+      out_of(r"a=(255); pack -a a x=u8 >@v; printf '%s' ${#v}"),
+      "1"
+    );
     assert_eq!(out_of(r"a=(0); pack -a a x=u8 >@v; printf '%s' ${#v}"), "1");
-    assert_eq!(out_of(r"a=(127); pack -a a x=i8 >@v; printf '%s' ${#v}"), "1");
-    assert_eq!(out_of(r"a=(-128); pack -a a x=i8 >@v; printf '%s' ${#v}"), "1");
+    assert_eq!(
+      out_of(r"a=(127); pack -a a x=i8 >@v; printf '%s' ${#v}"),
+      "1"
+    );
+    assert_eq!(
+      out_of(r"a=(-128); pack -a a x=i8 >@v; printf '%s' ${#v}"),
+      "1"
+    );
   }
 
   #[test]
@@ -1400,5 +1409,4 @@ mod tests {
     assert!(fails(r"printf 'abcd' | unpack -a f x=u7"));
     assert!(fails(r"printf 'abcd' | unpack -a f x=zz"));
   }
-
 }

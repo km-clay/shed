@@ -147,7 +147,7 @@ fn declare_var(
   kind: DeclareKind,
   raw_val: Option<&[u8]>,
   flags: VarFlags,
-  token: &[u8]
+  token: &[u8],
 ) -> ShResult<()> {
   if matches!(kind, DeclareKind::Str | DeclareKind::Int) && raw_val.is_none() {
     return Shed::vars_mut(|v| v.declare_var_novalue(name, flags));
@@ -156,9 +156,10 @@ fn declare_var(
     (DeclareKind::Str, Some(v)) => strops::assignment_value(v, token),
     (DeclareKind::Int, Some(v)) => {
       let evaluated = arithmetic::expand_arithmetic(None, v)?;
-      let n = evaluated.to_str_lossy().parse::<i32>().map_err(|_| {
-        sherr!(ExecFail, "declare -i: invalid arithmetic '{}'", v.to_str_lossy())
-      })?;
+      let n = evaluated
+        .to_str_lossy()
+        .parse::<i32>()
+        .map_err(|_| sherr!(ExecFail, "declare -i: invalid arithmetic '{}'", v.to_str_lossy()))?;
       VarKind::Int(n)
     }
     (DeclareKind::Arr, Some(v))   => VarKind::arr_from_raw(v)?,
