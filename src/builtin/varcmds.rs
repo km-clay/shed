@@ -5,13 +5,14 @@ use bstr::ByteSlice;
 use crate::{
   eval::lex::{Span, Tk},
   expand::arithmetic,
-  outln, procio, sherr,
+  outln, procio, sherr, shopt,
   state::{
     Shed,
     logic::ShFunc,
     meta::MetaTab,
     vars::{self, VarFlags, VarKind, VarName, VarStr},
   },
+  try_var,
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -19,7 +20,10 @@ use crate::{
   },
 };
 
-use super::opt::{self, Opt, OptSpec, Parsed, Word};
+use super::{
+  BuiltinArgs,
+  opt::{self, Opt, OptSpec, Parsed, Word},
+};
 
 trait VarCmd: super::Builtin {
   fn parse_args(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
@@ -132,30 +136,40 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
     let (name, raw_val) = strops::split_assignment_raw(&arg);
     let name            = &name.to_str_lossy();
 
-    if matches!(kind, DeclareKind::Str | DeclareKind::Int) && raw_val.is_none() {
-      Shed::vars_mut(|v| v.declare_var_novalue(name, flags)).promote_err(span)?;
-      continue;
-    }
-    let val = match (kind, raw_val) {
-      (DeclareKind::Str, Some(v)) => strops::assignment_value(v, span.slice().as_bytes()),
-      (DeclareKind::Int, Some(v)) => {
-        let evaluated = arithmetic::expand_arithmetic(Some(span), v).promote_err(span)?;
-        let n = evaluated.to_str_lossy().parse::<i32>().map_err(|_| {
-          sherr!(ExecFail @ span, "declare -i: invalid arithmetic '{}'", v.to_str_lossy())
-        })?;
-        VarKind::Int(n)
-      }
-      (DeclareKind::Arr, Some(v))   => VarKind::arr_from_raw(v).promote_err(span)?,
-      (DeclareKind::Arr, None)      => VarKind::Arr(VecDeque::new()),
-      (DeclareKind::Assoc, Some(v)) => VarKind::assoc_arr_from_raw(v).promote_err(span)?,
-      (DeclareKind::Assoc, None)    => VarKind::AssocArr(Vec::new()),
-
-      (DeclareKind::Str | DeclareKind::Int, None) => unreachable!("handled above"),
-    };
-    Shed::vars_mut(|v| v.set_var(name, val, flags)).promote_err(span)?;
+    declare_var(name, kind, raw_val, flags, &span.slice()).promote_err(span)?
   }
 
   util::with_status(0)
+}
+
+fn declare_var(
+  name: &str,
+  kind: DeclareKind,
+  raw_val: Option<&[u8]>,
+  flags: VarFlags,
+  token: &[u8]
+) -> ShResult<()> {
+  if matches!(kind, DeclareKind::Str | DeclareKind::Int) && raw_val.is_none() {
+    return Shed::vars_mut(|v| v.declare_var_novalue(name, flags));
+  }
+  let val = match (kind, raw_val) {
+    (DeclareKind::Str, Some(v)) => strops::assignment_value(v, token),
+    (DeclareKind::Int, Some(v)) => {
+      let evaluated = arithmetic::expand_arithmetic(None, v)?;
+      let n = evaluated.to_str_lossy().parse::<i32>().map_err(|_| {
+        sherr!(ExecFail, "declare -i: invalid arithmetic '{}'", v.to_str_lossy())
+      })?;
+      VarKind::Int(n)
+    }
+    (DeclareKind::Arr, Some(v))   => VarKind::arr_from_raw(v)?,
+    (DeclareKind::Arr, None)      => VarKind::Arr(VecDeque::new()),
+    (DeclareKind::Assoc, Some(v)) => VarKind::assoc_arr_from_raw(v)?,
+    (DeclareKind::Assoc, None)    => VarKind::AssocArr(Vec::new()),
+
+    (DeclareKind::Str | DeclareKind::Int, None) => unreachable!("handled above"),
+  };
+
+  Shed::vars_mut(|v| v.set_var(name, val, flags))
 }
 
 pub(super) struct Declare;
@@ -176,7 +190,7 @@ impl super::Builtin for Declare {
   fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.parse_args(cmd_span, argv, no_split)
   }
-  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
 
     let mut introspect: Option<IntrospectMode> = None;
@@ -215,7 +229,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
           let Some(var) = Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy())) else {
             return Err(sherr!(
               NotFound @ *span,
-              "declare: '{name}' not found",
+              "'{name}' not found",
             ));
           };
           if let Some(line) = vars::serialize_var(&name.to_str_lossy(), &var) {
@@ -311,7 +325,7 @@ impl super::Builtin for Readonly {
   fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.parse_args(cmd_span, argv, no_split)
   }
-  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
 
     let list            = opts.iter().any(|o| o.key() == "print");
@@ -347,7 +361,7 @@ impl super::Builtin for Unset {
     vec![OptSpec::new_short("functions", b'f')]
   }
 
-  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
     let is_func         = opts.iter().any(|o| o.key() == "functions");
 
@@ -400,7 +414,7 @@ impl super::Builtin for Export {
     self.parse_args(cmd_span, argv, no_split)
   }
 
-  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
     let (arg_vec, opts) = args.take_argv();
 
     let unexport        = opts.iter().any(|o| o.key() == "unexport");
@@ -433,6 +447,71 @@ impl super::Builtin for Export {
   }
 }
 
+pub(super) struct Global;
+impl VarCmd for Global {}
+impl super::Builtin for Global {
+  fn opts(&self) -> Vec<OptSpec> {
+    vec![
+      OptSpec::new_short("integer", b'i'),
+      OptSpec::new_short("readonly", b'r'),
+      OptSpec::new_short("export", b'x'),
+      OptSpec::new_short("array", b'a'),
+      OptSpec::new_short("assoc", b'A'),
+    ]
+  }
+
+  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+    self.parse_args(cmd_span, argv, no_split)
+  }
+
+  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
+    if !Shed::meta(MetaTab::in_func) {
+      return Err(sherr!(ExecFail @ args.cmd_span(), "global can only be used in a function"));
+    }
+
+    let (arg_vec, opts) = args.take_argv();
+
+    if arg_vec.is_empty() {
+      let vars = Shed::vars(vars::display_global);
+      procio::outln_bytes(&vars);
+      return util::with_status(0);
+    }
+
+    let mut flags = VarFlags::empty();
+    let mut kind  = DeclareKind::Str;
+    for opt in opts {
+      match opt.key() {
+        "readonly" => flags |= VarFlags::READONLY,
+        "export"   => flags |= VarFlags::EXPORT,
+        "integer" => {
+          kind = DeclareKind::Int;
+          flags |= VarFlags::INTEGER;
+        }
+        "array" => kind = DeclareKind::Arr,
+        "assoc" => kind = DeclareKind::Assoc,
+        _       => {}
+      }
+    }
+
+    for (arg, span) in arg_vec {
+      let (name, raw_val) = strops::split_assignment_raw(&arg);
+      let name            = &name.to_str_lossy();
+
+      if raw_val.is_some() {
+        declare_var(name, kind, raw_val, VarFlags::empty(), &span.slice()).promote_err(span)?;
+      }
+
+      Shed::vars_mut(|v| v.promote_var_global(name)).promote_err(span)?;
+
+      if !flags.is_empty() {
+        Shed::vars_mut(|v| v.declare_var_novalue(name, flags)).promote_err(span)?;
+      }
+    }
+
+    util::with_status(0)
+  }
+}
+
 pub(super) struct Local;
 impl VarCmd for Local {}
 impl super::Builtin for Local {
@@ -450,7 +529,7 @@ impl super::Builtin for Local {
     self.parse_args(cmd_span, argv, no_split)
   }
 
-  fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
+  fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
     if !Shed::meta(MetaTab::in_func) {
       return Err(sherr!(ExecFail, "local: can only be used in a function"));
     }

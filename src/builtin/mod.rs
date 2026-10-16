@@ -161,6 +161,7 @@ register_builtins! {
   b"fs"         => files   ::Fs,
   b"genrc"      => genrc   ::GenRc,
   b"getopts"    => getopts ::GetOpts,
+  b"global"     => varcmds ::Global,
   b"hash"       => hash    ::Hash,
   b"help"       => help    ::Help,
   b"hist"       => hist    ::Hist,

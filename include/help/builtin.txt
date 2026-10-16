@@ -36,6 +36,7 @@ The following builtins are available:
   `fs`          filesystem operations (rename)              |builtin-fs|
   `genrc`       (re)generate the rc file from live state    |builtin-genrc|
   `getopts`     parse option flags in scripts               |builtin-getopts|
+  `global`      move a local variable to the global scope   |builtin-global|
   `hash`        manage the command location cache           |builtin-hash|
   `help`        display help pages                          |builtin-help|
   `hist`        query and manage shell history              |builtin-hist|
@@ -2830,6 +2831,166 @@ LOCAL                                            *builtin-local* *local*
       ```local -x TMPDIR=/tmp```    exported to children while in scope
       ```local```                   list scope variables
 
+==============================================================================
+GLOBAL                                           *builtin-global* *global*
+
+  `global [-irxaA] {name}[={value}] ...`
+
+  Move a variable out of the current function's scope into the global
+  one, so that it outlives the call. This is the counterpart to
+  |local|(builtin-local), and under |set-localvars| it is the only way
+  for a function to alter the global variable namespace.
+
+  `global` may only be used inside a function.
+
+  A variable name that shadows an existing outer variable will clobber
+  the outer variable with the new value as it is moved upward. The only
+  exception to this is when the outer variable is |readonly|(builtin-readonly). Promoting a name
+  that shadows a readonly variable is an error.
+
+  A name that is already global is left alone; a name that exists nowhere
+  is created, the same way `local {name}` declares without assigning.
+
+  Flags ~
+
+  The same type and attribute flags |local|(builtin-local) takes: `-i`
+  integer, `-a` array, `-A` associative array, `-r` read-only and `-x`
+  export. They are applied after the move, so `global -r x=5` assigns,
+  promotes, and only then marks the result read-only.
+
+  Read-only globals ~                                   *global-readonly*
+
+  Promoting onto a name that is already a read-only global is refused,
+  and the local keeps its value rather than being consumed:
+
+      ```readonly cfg=/etc/shed
+      g() { local cfg=/tmp/x; global cfg; }
+      g```                          fails; the local is still `/tmp/x`
+
+  Exit status ~
+
+  `0`     the name was promoted, created, or already global
+  nonzero outside a function, or when the target is a read-only global
+
+  Examples ~
+
+      ```global count```            promote an existing local
+      ```global -i total=0```       create a global integer
+      ```global -A record```        promote an associative array
+      ```global```                  list the global variables
+
+  With no arguments, prints the global variables in `declare` form.
+
+  This is a `shed` extension. The nearest `bash` equivalent is
+  `declare -g`, which declares at global scope rather than moving a
+  local that already exists.
+
+  See also: |builtin-local|, |builtin-clone|, |builtin-take|,
+  |set-localvars|.
+==============================================================================
+CLONE                                            *builtin-clone* *clone*
+
+  `clone {source} {target} ...`
+
+  Copy the value of `{source}` into each `{target}`. The source keeps its
+  value; every target is overwritten.
+
+  This is the only way to copy an array or associative array by name.
+  `b=${a[@]}` does not work: an expansion produces words, and words
+  carry neither the keys nor the type, so the copy arrives flattened
+  into a single string.
+
+      ```declare -A conf; conf[host]=localhost
+      clone conf backup
+      printf '%s' "${backup[host]}"```        `localhost`
+
+  Elements ~                                           *clone-subscripts*
+
+  Either side may name a single element rather than a whole variable:
+
+      ```clone arr[0] first```        an element, to a name
+      ```clone h[user] name```        an assoc key, to a name
+      ```clone greeting arr[2]```     a name, to an element
+
+  Subscripts are potential glob targets if they are unquoted. For instance,
+  `arr[0]` will expand to `arr0` if there is a file called `arr0` in the current
+  directory. Quoting the subscript like `'arr[0]'` will prevent this globbing from
+  happening.
+
+  An entire array or associative array cannot be copied into a single element of
+  another array, and a slice such as `arr[0:2]` is not a valid target.
+
+  Attributes are not copied. The target is a plain variable even when
+  the source was read-only, exported or an integer.
+
+  Exit status ~
+
+  `0`     every target was written
+  nonzero when `{source}` is unset under `nounset`, no target was given,
+          a target is read-only or a slice, or an array was copied into
+          a single element
+
+  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+
+  See also: |builtin-take|, |builtin-local|, |builtin-unset|.
+==============================================================================
+TAKE                                             *builtin-take* *take*
+
+  `take {source} {target}`
+
+  Move the value of `{source}` into `{target}`, leaving `{source}` unset.
+  Unlike |clone|(builtin-clone) this takes exactly one target, because
+  the ownership of the underlying value is handed over rather than duplicated.
+
+      ```declare -A rec; rec[id]=7
+      take rec out
+      printf '%s %s' "${out[id]}" "${#rec[@]}"```      `7 0`
+
+  Resource management ~                                      *take-resource*
+
+  `take` can ensure that a value has only a single owner at a time. This can
+  be used to manage resources in some interesting ways:
+
+  Large values can be moved without copying. ```var="$some_huge_var"``` will
+  copy the entirety of the variable into a new variable, but ```take some_huge_var var```
+  will move the underlying value from one owner to another.
+
+  `take` returns 1 when the `{source}` variable is not set, which allows for
+  patterns like ```while take array[0] var; do ... done```, which lets you
+  drain an array operating on items one at a time while also unsetting them.
+
+  Elements ~
+
+  Either side may name a single element, with the quoting requirement
+  described in |clone-subscripts|. Taking an element removes it and
+  closes the gap:
+
+      ```arr=(a b c)
+      take 'arr[1]' middle
+      printf '%s' "${arr[*]}"```              `a c`
+
+  Taking a name into itself is a no-op, and keeps the attributes the
+  variable already had.
+
+  Safety ~
+
+  Nothing is removed until the move is known to succeed, so a refused
+  `take` leaves both names exactly as they were. A read-only source or
+  target is refused.
+
+  Attributes are not carried across: a variable that was exported is
+  not exported under its new name.
+
+  Exit status ~
+
+  `0`     the value was moved, or `{source}` did not exist
+  `1`     `{source}` was unset, so no move occurred
+  nonzero when {source} is unset under `nounset`, no target was given,
+          or either name is read-only
+
+  This is a `shed` extension; `bash` and `POSIX` do not provide it.
+
+  See also: |builtin-clone|, |builtin-global|, |builtin-unset|.
 ==============================================================================
 MSG                                              *builtin-msg* *msg*
 
