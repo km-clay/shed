@@ -10,14 +10,7 @@ use std::{
 };
 
 use crate::{
-  errln,
-  eval::execute,
-  expand::alias,
-  interactive, lifecycle, procio, sherr,
-  signal::QUIT_CODE,
-  state::{self, Shed, paths, vars::VarStr},
-  status_msg,
-  util::error::ShResult,
+  errln, eval::execute, expand::alias, interactive, lifecycle, procio, sherr, signal::QUIT_CODE, state::{Shed, paths, vars::{ShellParam, VarStr}}, status_msg, util::error::ShResult,
 };
 
 pub(crate) enum Input {
@@ -100,12 +93,9 @@ fn execute_input(mut args: lifecycle::ShedArgs) -> ShResult<()> {
 pub(crate) fn exec_stdin(commands: String, args: Vec<String>) -> ShResult<()> {
   Shed::vars_mut(|v| {
     let scope = v.cur_scope_mut();
-    let zero  = scope.sh_argv().front().cloned().unwrap_or_default();
-    scope.sh_argv_mut().clear();
-    scope.bpush_arg(zero);
-    for arg in args {
-      scope.bpush_arg(arg.into());
-    }
+
+    scope.clear_pos_args();
+    scope.extend_args(args.into_iter().map(VarStr::from));
   });
 
   let res = execute::exec_nonint(commands.into(), None);
@@ -154,16 +144,20 @@ pub(crate) fn run_script<P: AsRef<Path>>(
   path: P,
   args: Vec<String>,
 ) -> ShResult<()> {
-  let path_str: VarStr = path.as_ref().as_os_str().as_bytes().into();
+  let path_str: VarStr = path
+    .as_ref()
+    .as_os_str()
+    .as_bytes()
+    .into();
+
+  let args = std::iter::once(path_str.clone()).chain(args.into_iter().map(VarStr::from));
 
   Shed::vars_mut(|v| {
-    v.set_param(state::vars::ShellParam::ShellName, path_str.clone()); // $0
+    v.set_param(ShellParam::ShellName, path_str);
     let scope = v.cur_scope_mut();
+
     scope.sh_argv_mut().clear();
-    scope.bpush_arg(path_str);
-    for arg in args {
-      scope.bpush_arg(arg.into());
-    }
+    scope.extend_args(args);
   });
 
   let res = execute::exec_nonint(input.into(), None);

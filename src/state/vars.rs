@@ -23,6 +23,7 @@ use std::{
 use bitflags::bitflags;
 use bstr::ByteSlice;
 use hipstr::HipByt;
+use itertools::Itertools;
 use nix::{
   NixPath,
   errno::Errno,
@@ -34,23 +35,15 @@ use smallvec::SmallVec;
 use smol_str::{SmolStr, SmolStrBuilder};
 
 use crate::{
-  HashMap,
-  eval::{
+  HashMap, eval::{
     lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
     parse::ast::Ast,
-  },
-  expand::{Expander, arithmetic, escape, markers, stream::SegStream, var},
-  match_loop, procio,
-  readline::Candidate,
-  sherr,
-  state::{self, Shed, params, paths},
-  util::{
+  }, expand::{Expander, Word, arithmetic, escape, markers, stream::SegStream, var}, match_loop, procio, readline::Candidate, sherr, state::{self, Shed, params, paths}, util::{
     self,
     error::{LabelBuilder, ShResult},
     random,
     strops::{ByteCursor, QuoteState, SliceCursor},
-  },
-  varstr,
+  }, varstr,
 };
 
 use super::{meta::MetaTab, scopes::ScopeStack, terminal::Terminal};
@@ -1515,9 +1508,7 @@ impl VarTab {
     }
   }
   pub(crate) fn init_sh_argv(&mut self) {
-    for arg in std::env::args_os() {
-      self.bpush_arg(VarStr::from(arg.into_vec()));
-    }
+    self.extend_args(std::env::args_os().map(|a| VarStr::from(a.into_vec())));
   }
   pub(crate) fn defer_cmd(&mut self, ast: Ast, ctx: LabelBuilder) {
     self.deferred_cmds.push(DeferredAst { ast, ctx });
@@ -1534,15 +1525,6 @@ impl VarTab {
   pub(crate) fn sh_argv_mut(&mut self) -> &mut VecDeque<VarStr> {
     &mut self.sh_argv
   }
-  pub(crate) fn clear_args(&mut self) {
-    let first = self.sh_argv.pop_front();
-    self.sh_argv.clear();
-
-    // preserve the first arg, which is conventionally the name of the shell, script, or function
-    if let Some(arg) = first {
-      self.bpush_arg(arg);
-    }
-  }
   fn update_arg_params(&mut self) {
     // sh_argv[0] is $0 (script/function name); [1..] are positionals.
     // When the deque is entirely empty, treat as zero positionals.
@@ -1557,6 +1539,14 @@ impl VarTab {
 
     self.set_param(ShellParam::AllArgs, &positional_join);
     self.set_param(ShellParam::ArgCount, &positional_count.to_string().into());
+  }
+  pub(crate) fn clear_pos_args(&mut self) {
+    self.sh_argv.truncate(1);
+    self.update_arg_params();
+  }
+  pub(crate) fn extend_args(&mut self, args: impl IntoIterator<Item = VarStr>) {
+    self.sh_argv.extend(args);
+    self.update_arg_params();
   }
   /// Push an arg to the back of the arg deque
   pub(crate) fn bpush_arg(&mut self, arg: VarStr) {
@@ -1813,19 +1803,31 @@ impl VarTab {
     }
     self.vars.contains_key(var_name)
   }
+  pub(crate) fn pos_args(&self) -> impl Iterator<Item = &VarStr> {
+    self.sh_argv.iter().skip(1)
+  }
   pub(crate) fn set_param(&mut self, param: ShellParam, val: &VarStr) {
     self.params.insert(param, val.clone());
   }
   pub(crate) fn try_get_param(&self, param: ShellParam) -> Option<VarStr> {
     match param {
       ShellParam::Pos(n) => self.sh_argv().get(n).cloned(),
+      ShellParam::ArgCount => {
+        let n = self.sh_argv.len().saturating_sub(1);
+        Some(varstr!("{n}"))
+      }
       ShellParam::AllArgsStr => {
-        // FIXME: re-entrancy???
         let ifs = params::get_separator();
-        self.params.get(&ShellParam::AllArgs).map(|s| {
-          let mut buf = [0u8; 4];
-          s.replace(markers::ARG_SEP.encode_utf8(&mut buf), ifs.as_bytes())
-            .into()
+        (!self.sh_argv.is_empty()).then(|| {
+          self.pos_args().fold(VarStr::default(), |mut acc, arg| {
+            if acc.is_empty() {
+              acc = arg.clone();
+            } else {
+              acc.push_slice(&ifs);
+              acc.push_slice(arg);
+            }
+            acc
+          })
         })
       }
 

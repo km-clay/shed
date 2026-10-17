@@ -55,9 +55,7 @@ impl ScopeStack {
   pub(crate) fn descend(&mut self, argv: Option<Vec<VarStr>>) {
     let mut new_vars = VarTab::bare();
     if let Some(argv) = argv {
-      for arg in argv {
-        new_vars.bpush_arg(arg);
-      }
+      new_vars.extend_args(argv);
     }
     self.scopes.push(new_vars);
     self.depth += 1;

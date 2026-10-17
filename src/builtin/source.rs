@@ -41,12 +41,10 @@ impl super::Builtin for Source {
       Shed::vars_mut(|v| {
         let scope   = v.cur_scope_mut();
         let saved   = scope.sh_argv().clone();
-        let dollar0 = saved.front().cloned().unwrap_or_default();
-        scope.sh_argv_mut().clear();
-        scope.bpush_arg(dollar0);
-        for arg in &extra {
-          scope.bpush_arg(arg.clone());
-        }
+
+        scope.clear_pos_args();
+        scope.extend_args(extra);
+
         saved
       })
     });

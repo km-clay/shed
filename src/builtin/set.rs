@@ -350,10 +350,9 @@ impl super::Builtin for Set {
     if !pos_args.is_empty() || outcome.terminated {
       Shed::vars_mut(|v| {
         let argv_scope = v.sh_argv_scope_mut();
-        argv_scope.clear_args();
-        for arg in pos_args {
-          argv_scope.bpush_arg(arg);
-        }
+
+        argv_scope.clear_pos_args();
+        argv_scope.extend_args(pos_args);
       });
     }
 

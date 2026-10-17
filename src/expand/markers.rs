@@ -10,8 +10,6 @@ pub(crate) const ARG_SEP: Marker = '\u{fdd6}';
 /// Used to represent an empty `$@` expansion
 pub(crate) const NULL_EXPAND: Marker = '\u{fdd5}';
 
-/// Reset to default styling for help/syntax highlighting.
-pub(crate) const RESET: Marker = '\u{fdda}';
 
 // Help command formatting markers
 pub(crate) const TAG: Marker = '\u{fddb}';
@@ -22,6 +20,9 @@ pub(crate) const CODE: Marker = '\u{fdde}';
 pub(crate) const KEYWORD_1: Marker = '\u{fddf}';
 /// square brackets
 pub(crate) const KEYWORD_2: Marker = '\u{fde0}';
+
+/// Reset to default styling for help/syntax highlighting.
+pub(crate) const RESET: Marker = '\u{fdda}';
 
 #[cfg(test)]
 pub(crate) fn strip_markers(str: &str) -> String {

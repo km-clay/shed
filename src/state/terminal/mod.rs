@@ -772,8 +772,7 @@ impl Terminal {
 
     if encoded.len() > (1024 * 75) {
       // the limit for these is 75kb
-      let mut size = String::new();
-      strops::format_size(encoded.len() as u64, &mut size)?;
+      let size = strops::human_size(encoded.len() as u64);
 
       status_msg!("clipboard copy failed: buffer too large ({size})");
       return Ok(());

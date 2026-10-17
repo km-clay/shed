@@ -221,15 +221,11 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
     v.set_param(ShellParam::ShellName, name.clone()); // $0
     let scope = v.cur_scope_mut();
     scope.sh_argv_mut().clear();
-    // bpush_arg (vs raw push_back) runs update_arg_params, keeping
-    // $#, $@, $* in sync with sh_argv.
-    scope.bpush_arg(name.clone());
-    for (i, arg) in args.into_iter().enumerate() {
-      if i == 0 {
-        continue;
-      }
-      scope.bpush_arg(arg.into());
-    }
+
+    let args = args.into_iter()
+      .map(VarStr::from);
+
+    scope.extend_args(args);
   });
 
   let expanded = alias::expand_aliases(input);

@@ -125,10 +125,9 @@ pub(crate) fn positional_guard() -> impl Drop {
     // restore positional args
     Shed::vars_mut(|v| {
       let scope = v.sh_argv_scope_mut();
-      scope.clear_args();
-      for arg in saved.into_iter().skip(1) {
-        scope.bpush_arg(arg);
-      }
+
+      scope.clear_pos_args();
+      scope.extend_args(saved.into_iter().skip(1));
     });
   })
 }
