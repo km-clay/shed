@@ -1,15 +1,10 @@
 //! The [`thru`](`Thru`) builtin
 use std::{fs, io, sync::Arc};
 
+use nix::libc::STDOUT_FILENO;
+
 use crate::{
-  builtin::{BuiltinArgs, opt::OptSpec},
-  errln,
-  eval::lex::Span,
-  opt,
-  procio::{self, OsSink, Sink},
-  sherr, signal,
-  state::vars::VarStr,
-  util::{self, error::ShResult},
+  builtin::{BuiltinArgs, opt::OptSpec}, errln, eval::lex::Span, opt, procio::{self, OsSink, RedirSpec, RedirType, Sink}, sherr, signal, state::vars::VarStr, util::{self, error::{ShErr, ShResult}},
 };
 
 struct ThruOpts {
@@ -21,6 +16,33 @@ struct ThruOpts {
   skip  : Option<usize>,
   from  : Option<u8>,
   until : Option<u8>,
+}
+
+fn open_tee_dest(dest: VarStr, append: bool) -> Result<Arc<dyn Sink>, (VarStr, ShErr)> {
+  match (dest.strip_prefix(b"@"), append) {
+    (Some(var), _) => {
+      let mode = if append {
+        RedirType::AppendVar
+      } else {
+        RedirType::WriteVar
+      };
+      let spec = RedirSpec::var(STDOUT_FILENO.into(), var.into(), mode);
+      spec.as_sink().map_err(|e| (dest, e))
+    }
+    (None, true) => {
+      let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&dest)
+        .map_err(|e| (dest, e.into()))?;
+      Ok(Arc::new(OsSink::new(file.into())))
+    }
+    (None, false) => {
+      let file = std::fs::File::create(&dest)
+        .map_err(|e| (dest, e.into()))?;
+      Ok(Arc::new(OsSink::new(file.into())))
+    }
+  }
 }
 
 /// Primitive command that simply reads bytes from stdin or files and writes to stdout or a variable.
@@ -68,21 +90,13 @@ impl super::Builtin for Thru {
 
     let mut tee_files: Vec<Arc<dyn Sink>> = tee
       .into_iter()
-      .map(|dest| {
-        if append {
-          std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&dest)
-        } else {
-          std::fs::File::create(&dest)
-        }
-        .map(|f| Arc::new(OsSink::new(f.into())) as Arc<dyn Sink>)
-        .inspect_err(|e| {
-          errln!("thru: failed to open {dest} for writing: {e}");
-        })
+      .map(|dest| open_tee_dest(dest, append))
+      .collect::<Result<Vec<_>, _>>()
+      .map_err(|(dest, e)| {
+        errln!("thru: failed to open {dest} for writing");
+        e.print_error();
       })
-    .collect::<Result<Vec<_>, _>>()?;
+      .unwrap_or_default();
 
     let mut sources: Vec<Option<(VarStr, Span)>> = args
       .arguments()
