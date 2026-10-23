@@ -16,7 +16,7 @@ struct ThruOpts {
   count : bool,
   once  : bool,
   append: bool,
-  tee   : Option<VarStr>,
+  tee   : Vec<VarStr>,
   take  : Option<usize>,
   skip  : Option<usize>,
   from  : Option<u8>,
@@ -66,7 +66,8 @@ impl super::Builtin for Thru {
       mut until,
     } = Self::parse_opts(&args)?;
 
-    let mut tee_file: Option<Arc<dyn Sink>> = tee
+    let mut tee_files: Vec<Arc<dyn Sink>> = tee
+      .into_iter()
       .map(|dest| {
         if append {
           std::fs::OpenOptions::new()
@@ -81,9 +82,7 @@ impl super::Builtin for Thru {
           errln!("thru: failed to open {dest} for writing: {e}");
         })
       })
-      .transpose()
-      .ok()
-      .flatten();
+    .collect::<Result<Vec<_>, _>>()?;
 
     let mut sources: Vec<Option<(VarStr, Span)>> = args
       .arguments()
@@ -195,8 +194,8 @@ impl super::Builtin for Thru {
             if let Some(pos) = procio::rewind_past(&*reader, emit, delim)? {
               emit = &emit[..pos];
               procio::out_bytes(emit);
-              if let Some(t) = tee_file.as_mut() {
-                t.write_all(emit).ok();
+              for file in tee_files.iter_mut() {
+                file.write_all(emit).ok();
               }
               byte_count += emit.len();
               until = None;
@@ -222,8 +221,8 @@ impl super::Builtin for Thru {
 
         procio::out_bytes(emit);
 
-        if let Some(t) = tee_file.as_mut() {
-          t.write_all(emit).ok();
+        for file in tee_files.iter_mut() {
+          file.write_all(emit).ok();
         }
 
         byte_count += emit.len();
@@ -275,6 +274,13 @@ impl Thru {
     let count  = args.has_opt("count");
     let once   = args.has_opt("once");
     let append = args.has_opt("append");
+    let mut tee = vec![];
+
+    for opt in args.options() {
+      if opt.key() == "tee" {
+        tee.push(opt.value()?)
+      }
+    }
 
     if once {
       for (opt, flags) in [("from", "`-F`/`--from`"), ("until", "`-U`/`--until`")] {
@@ -286,7 +292,6 @@ impl Thru {
         }
       }
     }
-    let tee = args.opt_value("tee");
     let take = args
       .opt_value("take")
       .or_else(|| args.opt_value("limit"))
