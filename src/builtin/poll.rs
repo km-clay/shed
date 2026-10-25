@@ -164,9 +164,7 @@ impl Poll {
         b"rdhup" => libc::POLLRDHUP,
         #[cfg(not(linux_like))]
         b"rdhup" => {
-          return Err(
-            sherr!(ExecFail, "event flag `rdhup` is not supported on this platform"),
-          );
+          return Err(sherr!(ExecFail, "event flag `rdhup` is not supported on this platform"));
         }
         _ => {
           return Err(sherr!(ExecFail,
