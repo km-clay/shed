@@ -20,7 +20,7 @@ fn has_braces(span: Option<Span>, s: &[u8]) -> bool {
     return false;
   }
   let s = var::expand_raw(span, &mut SegStream::from_bytes(s).cursor())
-    .map_or_else(|_| VarStr::from(s), |sg| VarStr::from(sg.into_bytes()));
+    .map_or_else(|_| VarStr::from(s), |sg| sg.content());
   let mut bytes           = SliceCursor::new(&s);
   let mut depth           = 0;
   let mut found_open      = false;
@@ -31,8 +31,7 @@ fn has_braces(span: Option<Span>, s: &[u8]) -> bool {
 
   match_loop!(bytes.next_byte() => b, {
     b'\\' => bytes.bump(),
-    b'\'' => qt_state.toggle_single(),
-    b'"' => qt_state.toggle_double(),
+    b'\'' | b'"' => { qt_state.toggle_from(b); },
     b'$' if qt_state.outside() => {
       last_was_dollar = true;
     }

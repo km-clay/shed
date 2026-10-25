@@ -1,10 +1,10 @@
 use nix::{
+  libc::pid_t,
   sys::signal::Signal,
   unistd::{self, Pid},
 };
 
 use crate::{
-  eval::lex::Span,
   outln, procio, sherr, signal,
   state::{
     Shed,
@@ -20,14 +20,14 @@ use crate::{
 
 use super::{BuiltinArgs, opt::OptSpec};
 
-fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
+fn parse_job_id(arg: &str) -> ShResult<usize> {
   if arg.starts_with('%') {
     let arg = arg.strip_prefix('%').unwrap();
     if arg.chars().all(|ch| ch.is_ascii_digit()) {
       let num = arg.parse::<usize>().unwrap_or_default();
       if num == 0 {
         Err(sherr!(
-          SyntaxErr @ blame,
+          SyntaxErr,
           "Invalid job id: {arg}",
         ))
       } else {
@@ -41,7 +41,7 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
       match result {
         Some(id) => Ok(id),
         None => Err(sherr!(
-          InternalErr @ blame,
+          InternalErr,
           "Found a job but no table id in parse_job_id()",
         )),
       }
@@ -64,13 +64,13 @@ fn parse_job_id(arg: &str, blame: Span) -> ShResult<usize> {
     match result {
       Some(id) => Ok(id),
       None => Err(sherr!(
-        InternalErr @ blame,
+        InternalErr,
         "Found a job but no table id in parse_job_id()",
       )),
     }
   } else {
     Err(sherr!(
-      SyntaxErr @ blame,
+      SyntaxErr,
       "Invalid arg: {arg}",
     ))
   }
@@ -110,8 +110,8 @@ pub(super) fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResu
   };
 
   let tabid = match arg_vec.next() {
-    Some((arg, blame)) => parse_job_id(&arg.to_str_lossy(), blame)?,
-    None               => curr_job_id,
+    Some(arg) => parse_job_id(&arg.to_str_lossy())?,
+    None      => curr_job_id,
   };
 
   let Some(mut job) = Shed::jobs_mut(|j| j.remove_job(JobID::TableID(tabid))) else {
@@ -190,12 +190,12 @@ impl super::Builtin for Wait {
     let arg_vec = args
       .arguments()
       .map(|arg| {
-        if arg.0.to_str_lossy().chars().all(|ch| ch.is_ascii_digit()) {
-          Ok(JobID::Pid(Pid::from_raw(
-            arg.0.to_str_lossy().parse::<i32>().unwrap(),
-          )))
+        let arg_str = arg.to_str_lossy();
+
+        if let Ok(pid) = arg_str.parse::<u32>() {
+          Ok(JobID::Pid(Pid::from_raw(pid as pid_t)))
         } else {
-          Ok(JobID::TableID(parse_job_id(&arg.0.to_str_lossy(), arg.1)?))
+          Ok(JobID::TableID(parse_job_id(&arg_str)?))
         }
       })
       .collect::<ShResult<Vec<JobID>>>()
@@ -239,8 +239,8 @@ impl super::Builtin for Disown {
     }
 
     let mut ids = vec![];
-    for (arg, span) in args.arguments() {
-      let id = parse_job_id(&arg.to_str_lossy(), span)?;
+    for arg in args.arguments() {
+      let id = parse_job_id(&arg.to_str_lossy())?;
       ids.push(id);
     }
 
@@ -328,10 +328,10 @@ fn raw_killpg(pgid: Pid, sig: i32) -> nix::Result<()> {
   }
 }
 
-fn parse_kill_target(arg: &str, blame: Span) -> ShResult<KillTarget> {
+fn parse_kill_target(arg: &str) -> ShResult<KillTarget> {
   let Ok(n) = arg.parse::<i32>() else {
-    let Ok(id) = parse_job_id(arg, blame) else {
-      return Err(sherr!(ParseErr @ blame, "Invalid kill target: {arg}"));
+    let Ok(id) = parse_job_id(arg) else {
+      return Err(sherr!(ParseErr, "Invalid kill target: {arg}"));
     };
     return Ok(KillTarget::Job(JobID::TableID(id)));
   };
@@ -355,7 +355,7 @@ pub(super) fn list_all_signals() {
   outln!("{signals}");
 }
 
-fn send_signal(target: &KillTarget, sig: KillSig, verbose: bool, blame: Span) -> ShResult<()> {
+fn send_signal(target: &KillTarget, sig: KillSig, verbose: bool) -> ShResult<()> {
   let desc = match target {
     KillTarget::Pid(pid) => {
       raw_kill(*pid, sig.as_i32())?;
@@ -385,7 +385,7 @@ fn send_signal(target: &KillTarget, sig: KillSig, verbose: bool, blame: Span) ->
             KillSig::Zero    => Ok(raw_killpg(job.pgid(), 0)?),
           }
         } else {
-          Err(sherr!(ExecFail @ blame, "Job not found"))
+          Err(sherr!(ExecFail, "Job not found"))
         }
       })?;
       format!("killing job {job_id:?} with {sig}")
@@ -425,7 +425,7 @@ impl super::Builtin for Kill {
     }
 
     if list_sig {
-      let Some((arg, span)) = args.arguments().next() else {
+      let Some(arg) = args.arguments().next() else {
         // kill -l - list all signals
         list_all_signals();
         return Ok(());
@@ -434,7 +434,8 @@ impl super::Builtin for Kill {
       // kill -l <arg> converts between names and numbers. A numeric argument
       // prints the signal name; a name prints its number. Signal 0 isn't named,
       // so we only accept real signals here.
-      let sig = signal::parse_signal(&arg.to_str_lossy()).promote_err(span)?;
+      let sig = signal::parse_signal(&arg.to_str_lossy()).option_promote(arg.span())?;
+
       if arg.to_str_lossy().trim().parse::<i32>().is_ok() {
         let name = sig.to_string();
         outln!("{}", name.strip_prefix("SIG").unwrap_or(&name));
@@ -451,19 +452,20 @@ impl super::Builtin for Kill {
 
     let sig = signal.unwrap_or(KillSig::Real(Signal::SIGTERM));
 
-    for (arg, span) in args.arguments() {
+    for arg in args.arguments() {
       // Check if the arg looks like a signal (e.g. kill -TERM pid, kill -0 pid)
       if arg.to_str_lossy().starts_with('-') && !arg.to_str_lossy().starts_with("--") {
         let stripped = arg.to_str_lossy();
         let stripped = stripped.trim_start_matches('-');
-        if let Ok(sig_override) = parse_kill_sig(stripped).promote_err(span) {
+
+        if let Ok(sig_override) = parse_kill_sig(stripped) {
           signal.replace(sig_override);
           continue;
         }
       }
 
-      let target = parse_kill_target(&arg.to_str_lossy(), span)?;
-      send_signal(&target, signal.unwrap_or(sig), verbose, span)?;
+      let target = parse_kill_target(&arg.to_str_lossy())?;
+      send_signal(&target, signal.unwrap_or(sig), verbose)?;
     }
 
     util::with_status(0)

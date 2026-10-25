@@ -3,7 +3,7 @@
 //! These functions do stuff like setting up the logger, parsing the command
 //! line arguments, hanging up child processes on exit, etc.
 
-use crate::{set_var, socket};
+use crate::{expand::Word, set_var, socket};
 use std::{
   io::Write,
   os::unix::ffi::{OsStrExt, OsStringExt},
@@ -28,7 +28,7 @@ use super::{
     opt::{Role, scan_options},
     set::{SetFlags, apply_long_set, apply_set_flags},
   },
-  eval::{execute::exec_nonint, lex::Span},
+  eval::execute::exec_nonint,
   outln,
   procio::{self, RedirType},
   sherr, signal,
@@ -120,17 +120,16 @@ fn apply_invocation_flag<I>(
   ch: char,
   attached: Option<VarStr>,
   words: &mut std::iter::Peekable<I>,
-  span: Span,
   cfg: &mut ShedArgs,
 ) -> ShResult<()>
 where
-  I: Iterator<Item = (VarStr, Span)>,
+  I: Iterator<Item = Word>,
 {
   match ch {
     'c' => {
       let val = attached
-        .or_else(|| words.next().map(|(w, _)| w))
-        .ok_or_else(|| sherr!(ParseErr @ span, "shed: -c requires an argument"))?;
+        .or_else(|| words.next().map(|w| w.content()))
+        .ok_or_else(|| sherr!(ParseErr, "shed: -c requires an argument"))?;
       cfg.command = Some(val.to_string());
     }
     's' => cfg.stdin = true,
@@ -154,9 +153,9 @@ where
 /// Returns an error if the flag is unrecognized or missing a required argument.
 fn handle_long_flag<I>(words: &mut std::iter::Peekable<I>, cfg: &mut ShedArgs) -> ShResult<()>
 where
-  I: Iterator<Item = (VarStr, Span)>,
+  I: Iterator<Item = Word>,
 {
-  let (word, span) = words.next().unwrap();
+  let word = words.next().unwrap();
   match word.to_str_lossy().as_ref() {
     "--version" => cfg.version = true,
     "--help" => {
@@ -170,8 +169,8 @@ where
     "--command" => {
       let val = words
         .next()
-        .map(|(w, _)| w.to_string())
-        .ok_or_else(|| sherr!(ParseErr @ span, "shed: --command requires an argument"))?;
+        .map(|w| w.to_string())
+        .ok_or_else(|| sherr!(ParseErr ? word.span(), "shed: --command requires an argument"))?;
       cfg.command = Some(val);
     }
     "--interactive" => cfg.interactive = true,
@@ -185,18 +184,18 @@ where
     "--rc-path" => {
       let val = words
         .next()
-        .map(|(w, _)| w.to_string())
-        .ok_or_else(|| sherr!(ParseErr @ span, "shed: --rc-path requires an argument"))?;
+        .map(|w| w.to_string())
+        .ok_or_else(|| sherr!(ParseErr ? word.span(), "shed: --rc-path requires an argument"))?;
       cfg.rc_path = Some(val);
     }
     "--edit-script" | "--script" => cfg.edit_script = true,
     "--shopt" => {
-      let val = words.next().map(|(w, _)| w.to_string()).ok_or_else(|| {
-        sherr!(ParseErr @ span, "shed: --shopt requires a group.name=value argument")
+      let val = words.next().map(|w| w.to_string()).ok_or_else(|| {
+        sherr!(ParseErr ? word.span(), "shed: --shopt requires a group.name=value argument")
       })?;
       cfg.shopts.push(val);
     }
-    other => return Err(sherr!(ParseErr @ span, "shed: unrecognized option '{other}'")),
+    other => return Err(sherr!(ParseErr ? word.span(), "shed: unrecognized option '{other}'")),
   }
   Ok(())
 }
@@ -210,10 +209,10 @@ fn parse_args() -> ShResult<ShedArgs> {
   // we use a placeholder `Span::default()` here since we re-use the `set` builtin's option parser
   let mut words = std::env::args_os()
     .skip(1)
-    .map(|a| (VarStr::from(a.into_vec()), Span::default()))
+    .map(|a| Word::new(a.into_vec()))
     .peekable();
 
-  while let Some((word, _)) = words.peek() {
+  while let Some(word) = words.peek() {
     let word = word.to_str_lossy();
     if word == "--" {
       words.next();
@@ -236,7 +235,7 @@ fn parse_args() -> ShResult<ShedArgs> {
         },
         apply_set_flags,
         apply_long_set,
-        |ch, attached, rest, span| apply_invocation_flag(ch, attached, rest, span, &mut cfg),
+        |ch, attached, rest| apply_invocation_flag(ch, attached, rest, &mut cfg),
         true,
       )?;
       if outcome.terminated {
@@ -247,7 +246,7 @@ fn parse_args() -> ShResult<ShedArgs> {
     break; // first operand
   }
 
-  cfg.script_args = words.map(|(w, _)| w.to_string()).collect();
+  cfg.script_args = words.map(|w| w.to_string()).collect();
   Ok(cfg)
 }
 

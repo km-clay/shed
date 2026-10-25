@@ -428,8 +428,7 @@ fn shed_loop_iter(
           readline.mark_dirty();
           return res;
         }
-        ShedPollTimeout::Null | ShedPollTimeout::Zero | ShedPollTimeout::PendingKeymap => {
-          /* do nothing */
+        ShedPollTimeout::Null | ShedPollTimeout::Zero | ShedPollTimeout::PendingKeymap => { /* do nothing */
         }
       }
     }

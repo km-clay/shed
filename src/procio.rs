@@ -477,8 +477,9 @@ impl FdSlot {
       FdSlot::Raw(raw) => Ok(Some(*raw)),
       FdSlot::Var(var_str) => {
         let vn = VarName::parse(&var_str.to_str_lossy(), true)?;
-        Shed::vars(|v| v.resolve_var(&vn))
+        Shed::vars(|v| v.resolve_words(&vn))
           .ok_or_else(|| sherr!(NotFound, "var not found: {var_str}"))?
+          .as_one_word()
           .to_str_lossy()
           .trim()
           .parse::<RawFd>()
@@ -639,10 +640,7 @@ impl RedirBldr {
       ($ty:path) => {
         let name = VarStr::from(&bytes[cur.pos()..]);
         if name.is_empty() {
-          return Err(sherr!(
-                            ParseErr,
-                            "expected a variable name after '@' in redirection"
-                          ));
+          return Err(sherr!(ParseErr, "expected a variable name after '@' in redirection"));
         }
         redir = redir.with_target(RedirTarget::Var(name)).with_class($ty);
       };
@@ -938,14 +936,14 @@ impl RedirSpec {
       RedirSpec::Var { name, mode, .. } => match mode {
         RedirType::ReadVar => {
           let vn  = expand_var_target(name)?;
-          let var = Shed::vars(|v| v.resolve_var(&vn).unwrap_or_default());
+          let var = Shed::vars(|v| v.resolve_words(&vn).unwrap_or_default()).as_one_word();
 
           Arc::new(BufSink::from_bytes(var.as_bytes()))
         }
         kind @ (RedirType::WriteVar | RedirType::AppendVar) => {
           let vn = expand_var_target(name)?;
           let content = if matches!(kind, RedirType::AppendVar) {
-            Shed::vars(|v| v.resolve_var(&vn).unwrap_or_default())
+            Shed::vars(|v| v.resolve_words(&vn).unwrap_or_default().as_one_word()).content()
           } else {
             VarStr::default()
           };
@@ -959,10 +957,7 @@ impl RedirSpec {
           }
         }
         _ => {
-          return Err(sherr!(
-            InternalErr,
-            "Invalid redirection mode for variable redirection"
-          ));
+          return Err(sherr!(InternalErr, "Invalid redirection mode for variable redirection"));
         }
       },
       RedirSpec::Dup { from, .. } => match from.resolve_source()? {
@@ -2291,10 +2286,7 @@ fn expand_var_target(raw: &VarStr) -> ShResult<VarName> {
       .all(|b| b.is_ascii_alphanumeric() || *b == b'_');
 
   if !valid {
-    return Err(sherr!(
-      ParseErr,
-      "'{expanded}' is not a valid variable name in a redirection"
-    ));
+    return Err(sherr!(ParseErr, "'{expanded}' is not a valid variable name in a redirection"));
   }
 
   VarName::parse(&expanded.to_str_lossy(), true)

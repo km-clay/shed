@@ -47,11 +47,7 @@ pub(super) fn open_history(span: Span, ex: bool, needs_mutable: bool) -> ShResul
   match db::get_db_conn() {
     Some(conn) => History::new(conn, table, &branch).promote_err(span),
     None if needs_mutable => Err(
-      sherr!(
-        ExecFail,
-        "hist: history can't be modified from a pipeline or subshell"
-      )
-      .promote(span),
+      sherr!(ExecFail, "hist: history can't be modified from a pipeline or subshell").promote(span),
     ),
     None => {
       let conn = db::open_db_conn_readonly().promote_err(span)?;
@@ -108,36 +104,16 @@ impl BuiltinRouter for Hist {
         "[<file>|bash|zsh|fish]",
         "import history from a file or shell"
       ),
-      sub_command!(
-        &HistExport,
-        "export",
-        "[<file>]",
-        "export history to a file"
-      ),
-      sub_command!(
-        &HistCheckout,
-        "checkout",
-        "<branch>",
-        "switch to a different history branch"
-      ),
+      sub_command!(&HistExport, "export", "[<file>]", "export history to a file"),
+      sub_command!(&HistCheckout, "checkout", "<branch>", "switch to a different history branch"),
       sub_command!(
         &HistMerge,
         "merge",
         "<branch>",
         "merge a history branch into the current branch"
       ),
-      sub_command!(
-        &HistBranch,
-        "branch",
-        "[<subcommand>]",
-        "manage history branches"
-      ),
-      sub_command!(
-        &HistPull,
-        "pull",
-        "[<options>]",
-        "pull new history entries from the shell"
-      ),
+      sub_command!(&HistBranch, "branch", "[<subcommand>]", "manage history branches"),
+      sub_command!(&HistPull, "pull", "[<options>]", "pull new history entries from the shell"),
     ];
 
     SUB_COMMANDS

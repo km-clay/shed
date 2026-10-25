@@ -14,13 +14,13 @@ use super::open_history;
 pub(super) struct HistMerge;
 impl Builtin for HistMerge {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let Some((name, span)) = args.arguments().next() else {
+    let Some(name) = args.arguments().next() else {
       return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name").with_code(2));
     };
     let hist  = open_history(args.span(), false, true)?;
     let other = name.to_str_lossy();
     if !hist.branch_exists(&other)? {
-      return Err(sherr!(ParseErr @ span, "branch does not exist: {name}"));
+      return Err(sherr!(ParseErr ? name.span(), "branch does not exist: {name}"));
     }
     match hist.merge_branch(&other)? {
       MergeResult::Merged => {

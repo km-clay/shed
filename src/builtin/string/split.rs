@@ -137,9 +137,10 @@ impl Builtin for Split {
       errln!("str split: warning: IFS splitting does not honor escapes; ignoring -E");
     }
 
-    let input = self
-      .get_input(&mut args)
-      .map_or_else(|| argv::join_raw_arg_iter(args.arguments()).0, VarStr::from);
+    let input = self.get_input(&mut args).map_or_else(
+      || argv::join_raw_arg_iter(args.arguments()).content(),
+      VarStr::from,
+    );
 
     let mut parts: Vec<VarStr> = match s_policy {
       SplitPolicy::Delimiter(pat) => strops::split_all_with(
@@ -196,7 +197,7 @@ impl Builtin for Split {
           if i > 0 {
             quoted.push(b' ');
           }
-          quoted.extend_from_slice(&escape::shell_quote_bytes(part.as_bytes()));
+          quoted.extend_from_slice(&escape::shell_quote(part));
         }
         quoted.push(b'\n');
 

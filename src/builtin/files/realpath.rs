@@ -38,7 +38,7 @@ impl Builtin for RealPath {
       })
       .transpose()?;
 
-    for (arg, span) in args.arguments() {
+    for arg in args.arguments() {
       let target = PathBuf::from(arg);
 
       let resolved = match std::fs::canonicalize(&target) {
@@ -50,27 +50,22 @@ impl Builtin for RealPath {
           paths::lex_normalize_path(&cwd.join(&target))
         }
         Err(e) => {
+          #[rustfmt::skip]
           let err = match e.kind() {
-            EK::NotFound => {
-              sherr!(ExecFail @ span, "cannot resolve `{arg}`: no such file or directory"        )
-            }
-            EK::PermissionDenied => {
-              sherr!(ExecFail @ span, "cannot resolve `{arg}`: permission denied"                )
-            }
-            EK::NotADirectory => {
-              sherr!(ExecFail @ span, "cannot resolve `{arg}`: path component is not a directory")
-            }
+            EK::NotFound         => sherr!(ExecFail, "cannot resolve `{arg}`: no such file or directory"),
+            EK::PermissionDenied => sherr!(ExecFail, "cannot resolve `{arg}`: permission denied"),
+            EK::NotADirectory    => sherr!(ExecFail, "cannot resolve `{arg}`: path component is not a directory"),
 
             _ => {
               if let Some(libc::ELOOP) = e.raw_os_error() {
-                sherr!(ExecFail @ span, "cannot resolve `{arg}`: too many levels of symbolic links")
+                sherr!(ExecFail, "cannot resolve `{arg}`: too many levels of symbolic links")
               } else {
-                sherr!(ExecFail @ span, "cannot resolve `{arg}`: {e}")
+                sherr!(ExecFail, "cannot resolve `{arg}`: {e}")
               }
             }
           };
 
-          err.print_error();
+          err.option_promote(arg.span()).print_error();
           status = 1;
           continue;
         }

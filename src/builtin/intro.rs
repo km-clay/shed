@@ -30,7 +30,7 @@ impl super::Builtin for Type {
       return Self::terse_mode(&args);
     }
 
-    for (arg, span) in args.arguments() {
+    for arg in args.arguments() {
       if let Some(util) = cmd::which_util(&arg.to_str_lossy()) {
         match util.kind() {
           UtilKind::Alias    => Self::display_alias(arg, short),
@@ -46,7 +46,7 @@ impl super::Builtin for Type {
         Self::display_variable(arg, &var, short);
       } else {
         sherr!(
-          NotFound @ span,
+          NotFound ? arg.span(),
           "'{arg}' is not a command, function, or alias",
         )
         .print_error();
@@ -62,7 +62,7 @@ impl super::Builtin for Type {
 impl Type {
   fn terse_mode(args: &super::BuiltinArgs) -> ShResult<()> {
     let mut status = 0;
-    for (arg, _) in args.arguments() {
+    for arg in args.arguments() {
       if let Some(util) = cmd::which_util(&arg.to_str_lossy()) {
         match util.kind() {
           UtilKind::Alias    => outln!("alias"),

@@ -29,15 +29,15 @@ impl Builtin for HistBranch {
     let name         = args.arguments().next();
 
     if delete {
-      let Some((name, span)) = name else {
+      let Some(name) = name else {
         return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name").with_code(2));
       };
       let hist = open_history(args.span(), false, true)?;
       hist
         .delete_branch(&name.to_str_lossy(), force_delete)
-        .promote_err(span)?;
+        .option_promote(name.span())?;
       status_msg!("hist: deleted branch {name}");
-    } else if let Some((name, _)) = name {
+    } else if let Some(name) = name {
       // create new branch
       let hist = open_history(args.span(), false, true)?;
       hist.create_branch(&name.to_str_lossy())?;

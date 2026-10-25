@@ -670,10 +670,7 @@ impl History {
       let count: i64 =
         conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?;
       if count > 0 && !force {
-        return Err(sherr!(
-          InternalErr,
-          "history is not empty; use --force to overwrite"
-        ));
+        return Err(sherr!(InternalErr, "history is not empty; use --force to overwrite"));
       }
       if force {
         conn.execute(&format!("DELETE FROM {table}"), [])?;
@@ -903,10 +900,7 @@ impl History {
   /// Refuses to delete the current branch, or an unmerged branch if `force` is false.
   pub(crate) fn delete_branch(&self, name: &str, force: bool) -> ShResult<()> {
     if self.branch.as_str() == name {
-      return Err(sherr!(
-        InternalErr,
-        "cannot delete the current branch '{name}'"
-      ));
+      return Err(sherr!(InternalErr, "cannot delete the current branch '{name}'"));
     }
     let conn = self.lock();
 
@@ -1244,8 +1238,9 @@ impl History {
       );
       "
     ))?;
-    tx.execute(&format!(
-      "
+    tx.execute(
+      &format!(
+        "
       INSERT INTO {table_tmp} (
         id,
         timestamp,
@@ -1260,7 +1255,9 @@ impl History {
       SELECT ROW_NUMBER() OVER (ORDER BY id), timestamp, runtime, command, cwd, status, token, parent, joint
       FROM {table} WHERE id NOT IN (SELECT id FROM {table} {where_clause}) ORDER BY id
       "
-		), params)?;
+      ),
+      params,
+    )?;
     tx.execute_batch(&format!(
       "DROP TABLE {table}; ALTER TABLE {table_tmp} RENAME TO {table};"
     ))?;

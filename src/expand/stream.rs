@@ -1,4 +1,3 @@
-use bstr::ByteSlice;
 #[cfg(test)]
 use smallvec::SmallVec;
 
@@ -10,62 +9,28 @@ use crate::{state::vars::VarStr, util::strops::QuoteState};
 /// parallel buffer as `(offset, marker)` pairs, where `offset` is the number of bytes
 /// that precede the marker. Offsets are non-decreasing (the build path only appends),
 /// and markers sharing an offset keep insertion order.
+///
+/// Markers are not added on creation or by `from_bytes`, so a stream created from a string is just a literal byte run.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct SegStream {
-  bytes: Vec<u8>,
-  marks: Vec<(usize, Marker)>,
+  content: VarStr,
+  marks  : Vec<(usize, Marker)>,
 }
 
 impl SegStream {
   /// Convert `Marker::ArgSep` and `Marker::NullExpand` back into markers from
   /// their byte-sentinel representation, so a serialized value round-trips.
-  pub(crate) fn from_split_value(bytes: &[u8]) -> Self {
-    let mut out  = SegStream::new();
-    let mut rest = bytes;
-
-    // The markers are \xEF\xB7\x96 (ARG_SEP) and \xEF\xB7\x95 (NULL_EXPAND), so
-    // \xEF is the only lead byte worth looking at (they both start with it).
-    while let Some(ef) = rest.find_byte(0xEF) {
-      let marker = (ef + 3 <= rest.len() && rest[ef + 1] == 0xB7)
-        .then(|| match rest[ef + 2] {
-          0x96 => Some(Marker::ArgSep),
-          0x95 => Some(Marker::NullExpand),
-          _    => None,
-        })
-        .flatten();
-
-      if let Some(marker) = marker {
-        out.push_bytes(&rest[..ef]);
-        out.push_marker(marker);
-        rest = &rest[ef + 3..];
-      } else {
-        // A \xEF that isn't a marker: emit up to and including it, keep scanning.
-        out.push_bytes(&rest[..=ef]);
-        rest = &rest[ef + 1..];
-      }
-    }
-    out.push_bytes(rest);
-    out
-  }
-
   pub(crate) fn as_plain_bytes(&self) -> Option<&[u8]> {
-    (self.marks.is_empty() && !self.bytes.is_empty()).then_some(self.bytes.as_slice())
+    (self.marks.is_empty() && !self.content.is_empty()).then_some(self.content.as_bytes())
   }
 
   pub(crate) fn has_meta(&self) -> bool {
-    self.bytes.iter().any(|&c| {
+    self.content.iter().any(|&c| {
       matches!(
         c,
         b'~' | b'\\' | b'(' | b'"' | b'\'' | b'`' | b'<' | b'>' | b'$'
       )
     })
-  }
-
-  pub(crate) fn has_sentinel(&self) -> bool {
-    self
-      .marks
-      .iter()
-      .any(|(_, m)| matches!(m, Marker::ArgSep | Marker::NullExpand))
   }
 
   /// Whether any marker in the stream equals `marker`.
@@ -75,54 +40,23 @@ impl SegStream {
 
   /// If the stream is exactly one marker and no bytes, return it.
   pub(crate) fn sole_marker(&self) -> Option<Marker> {
-    (self.bytes.is_empty() && self.marks.len() == 1).then(|| self.marks[0].1)
-  }
-
-  /// Convert any `ARG_SEP`/`NULL_EXPAND` byte sentinels embedded in the byte
-  /// runs into `Marker::ArgSep`/`NullExpand`, preserving existing markers.
-  pub(crate) fn reinterpret_sentinels(self) -> Self {
-    if self.has_sentinel() {
-      return self;
-    }
-
-    if self.bytes.find_byte(0xEF).is_none() {
-      return self;
-    }
-    let mut out          = SegStream::new();
-    let mut run: Vec<u8> = Vec::new();
-    let mut cursor       = self.cursor();
-    while let Some(unit) = cursor.next() {
-      match unit {
-        Unit::Byte(b) => run.push(b),
-        Unit::Mark(m) => {
-          if !run.is_empty() {
-            out.append(Self::from_split_value(&run));
-            run.clear();
-          }
-          out.push_marker(m);
-        }
-      }
-    }
-    if !run.is_empty() {
-      out.append(Self::from_split_value(&run));
-    }
-    out
+    (self.content.is_empty() && self.marks.len() == 1).then(|| self.marks[0].1)
   }
 }
 
 impl PartialEq<str> for SegStream {
   fn eq(&self, other: &str) -> bool {
-    self.bytes == other.as_bytes()
+    self.content.as_bytes() == other.as_bytes()
   }
 }
 impl PartialEq<&str> for SegStream {
   fn eq(&self, other: &&str) -> bool {
-    self.bytes == other.as_bytes()
+    self.content.as_bytes() == other.as_bytes()
   }
 }
 impl PartialEq<String> for SegStream {
   fn eq(&self, other: &String) -> bool {
-    self.bytes == other.as_bytes()
+    self.content.as_bytes() == other.as_bytes()
   }
 }
 
@@ -149,14 +83,14 @@ impl From<VarStr> for SegStream {
 impl SegStream {
   pub(crate) fn new() -> Self {
     Self {
-      bytes: Vec::new(),
-      marks: Vec::new(),
+      content: VarStr::default(),
+      marks  : Vec::new(),
     }
   }
   pub(crate) fn from_bytes(b: &[u8]) -> Self {
     Self {
-      bytes: b.to_vec(),
-      marks: Vec::new(),
+      content: VarStr::from(b),
+      marks  : Vec::new(),
     }
   }
   /// Reconstruct the interleaved byte/marker segments. Debug/test only.
@@ -182,41 +116,41 @@ impl SegStream {
     }
   }
   pub(crate) fn push_byte(&mut self, b: u8) {
-    self.bytes.push(b);
+    self.content.push(b);
   }
   pub(crate) fn push_bytes(&mut self, bytes: &[u8]) {
-    self.bytes.extend_from_slice(bytes);
+    self.content.push_slice(bytes);
   }
   pub(crate) fn push_marker(&mut self, marker: Marker) {
-    self.marks.push((self.bytes.len(), marker));
+    self.marks.push((self.content.len(), marker));
   }
   /// Append another stream onto this one, preserving markers and coalescing
   /// byte runs across the seam.
   pub(crate) fn append(&mut self, other: SegStream) {
-    let base = self.bytes.len();
-    self.bytes.extend_from_slice(&other.bytes);
+    let base = self.content.len();
+    self.content.push_slice(&other.content);
     self
       .marks
       .extend(other.marks.into_iter().map(|(o, m)| (o + base, m)));
   }
   pub(crate) fn is_empty(&self) -> bool {
-    self.bytes.is_empty() && self.marks.is_empty()
+    self.content.is_empty() && self.marks.is_empty()
   }
 
   /// Check if this word has glob characters
   pub(crate) fn has_glob_meta(&self) -> bool {
-    self.bytes.iter().any(|c| matches!(c, b'*' | b'?' | b'['))
+    self.content.iter().any(|c| matches!(c, b'*' | b'?' | b'['))
   }
   /// The leading run of literal bytes, up to the first marker
   pub(crate) fn leading_bytes(&self) -> &[u8] {
-    let end = self.marks.first().map_or(self.bytes.len(), |(o, _)| *o);
-    &self.bytes[..end]
+    let end = self.marks.first().map_or(self.content.len(), |(o, _)| *o);
+    &self.content[..end]
   }
   /// A copy of this stream with every occurrence of `marker` removed.
   pub(crate) fn without_marker(&self, marker: Marker) -> SegStream {
     SegStream {
-      bytes: self.bytes.clone(),
-      marks: self
+      content: self.content.clone(),
+      marks  : self
         .marks
         .iter()
         .filter(|(_, m)| *m != marker)
@@ -262,12 +196,12 @@ impl SegStream {
   /// Peel `n` leading bytes off the front (markers within that span move to the
   /// remainder), returning `(front_bytes, remainder)`. Used to strip an ASCII
   /// operator prefix off a parameter-expansion operand.
-  pub(crate) fn split_off_front(&self, n: usize) -> (Vec<u8>, SegStream) {
-    let cut   = n.min(self.bytes.len());
-    let front = self.bytes[..cut].to_vec();
+  pub(crate) fn split_off_front(&self, n: usize) -> (VarStr, SegStream) {
+    let cut   = n.min(self.content.len());
+    let front = self.content[..cut].into();
     let rest = SegStream {
-      bytes: self.bytes[cut..].to_vec(),
-      marks: self
+      content: self.content[cut..].into(),
+      marks  : self
         .marks
         .iter()
         .map(|(o, m)| (o.saturating_sub(cut), *m))
@@ -276,14 +210,14 @@ impl SegStream {
     (front, rest)
   }
   /// Collect the byte content (dropping markers) without consuming the stream.
-  pub(crate) fn to_bytes(&self) -> Vec<u8> {
-    self.bytes.clone()
+  pub(crate) fn as_bytes(&self) -> &[u8] {
+    &self.content
   }
-  pub(crate) fn into_bytes(self) -> Vec<u8> {
-    self.bytes
+  pub(crate) fn content(&self) -> VarStr {
+    self.content.clone()
   }
   pub(crate) fn cursor(&self) -> SegCursor<'_> {
-    SegCursor::new(&self.bytes, &self.marks)
+    SegCursor::new(&self.content, &self.marks)
   }
 }
 
@@ -304,6 +238,9 @@ impl<'a> SegCursor<'a> {
       mpos: 0,
     }
   }
+  pub(crate) fn bpos(&self) -> usize {
+    self.bpos
+  }
   /// A marker is pending if the next unconsumed marker sits at the current byte
   /// position; those are emitted before the byte at that position.
   fn pending_mark(&self) -> Option<Marker> {
@@ -317,6 +254,13 @@ impl<'a> SegCursor<'a> {
       return Some(Unit::Mark(m));
     }
     self.bytes.get(self.bpos).map(|b| Unit::Byte(*b))
+  }
+  pub(crate) fn peek_nth(&self, n: usize) -> Option<u8> {
+    let mut cursor = *self;
+    for _ in 0..n {
+      cursor.next()?;
+    }
+    cursor.peek_byte()
   }
   pub(crate) fn peek_byte(&self) -> Option<u8> {
     match self.peek()? {
@@ -390,6 +334,7 @@ pub(crate) enum StreamSeg {
   Bytes(SmallVec<[u8; 32]>),
   Mark(Marker),
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Marker {
   Subshell,

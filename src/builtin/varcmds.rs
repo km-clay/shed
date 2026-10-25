@@ -4,13 +4,13 @@ use bstr::ByteSlice;
 
 use crate::{
   eval::lex::{Span, Tk},
-  expand::arithmetic,
+  expand::{Word, arithmetic},
   outln, procio, sherr, shopt,
   state::{
     Shed,
     logic::ShFunc,
     meta::MetaTab,
-    vars::{self, VarFlags, VarKind, VarName, VarStr},
+    vars::{self, VarFlags, VarKind, VarName},
   },
   try_var,
   util::{
@@ -22,7 +22,7 @@ use crate::{
 
 use super::{
   BuiltinArgs,
-  opt::{self, Opt, OptSpec, Parsed, Word},
+  opt::{self, Arg, Opt, OptSpec, Parsed},
 };
 
 trait VarCmd: super::Builtin {
@@ -35,19 +35,19 @@ trait VarCmd: super::Builtin {
     // The command word (always the first operand) stays at `words[0]` so
     // `run_builtin` strips it; options then follow, then the rest of the operands.
     let mut operands            = operand_argv.into_iter();
-    let mut words: Vec<Word>    = vec![];
-    if let Some((word, span)) = operands.next() {
-      words.push(Word::Arg(word, span));
+    let mut words: Vec<Arg>     = vec![];
+    if let Some(word) = operands.next() {
+      words.push(Arg::Word(word));
     }
-    words.extend(opts.into_iter().map(Word::Opt));
-    words.extend(operands.map(|(word, span)| Word::Arg(word, span)));
+    words.extend(opts.into_iter().map(Arg::Opt));
+    words.extend(operands.map(Arg::Word));
 
     let trace = words
       .iter()
       .map(|w| match w {
-        Word::Arg(value, _) => value.clone(),
-        Word::Opt(opt)      => opt.span().slice(),
-        Word::Sep(span)     => span.slice(),
+        Arg::Word(value) => value.content(),
+        Arg::Opt(opt)    => opt.span().slice(),
+        Arg::Sep(span)   => span.slice(),
       })
       .collect();
 
@@ -60,7 +60,7 @@ trait VarCmd: super::Builtin {
 /// which treats `(` as a subshell opener and strips parens, breaking array
 /// assignment via `local`/`readonly`/`export`. Tokens that look like array
 /// literals are passed through verbatim so `arr_from_raw` can parse them.
-pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
+pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<Word>> {
   let mut out = vec![];
   for tk in argv {
     let slice  = tk.span.slice();
@@ -68,7 +68,7 @@ pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span
     let eq_pos = strops::split_at_unescaped(raw, b"=").map(|(pos, _)| pos);
 
     if strops::is_array_literal_assignment(raw) {
-      out.push((raw.into(), tk.span));
+      out.push(Word::new(raw).with_span(tk.span));
       continue;
     }
 
@@ -83,13 +83,13 @@ pub(super) fn prepare_assignment_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span
         && name.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'_');
       if is_valid_name {
         let expanded = tk.expand_no_split()?;
-        out.push((expanded, span));
+        out.push(Word::new(expanded).with_span(span));
         continue;
       }
     }
 
     for exp in tk.expand_to_words()? {
-      out.push((exp, span));
+      out.push(exp.with_span(span));
     }
   }
   Ok(out)
@@ -115,7 +115,7 @@ enum IntrospectMode {
 /// them onto `base_flags`, and applies each assignment in `argv` with the
 /// resulting kind+flags. Other opts (e.g. `-p`/`-f`/`-F`) are caller-handled
 /// before delegating here.
-fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags) -> ShResult<()> {
+fn apply_var_decl(opts: &[Opt], argv: Vec<Word>, base_flags: VarFlags) -> ShResult<()> {
   let mut flags = base_flags;
   let mut kind  = DeclareKind::Str;
   for opt in opts {
@@ -132,11 +132,12 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<(VarStr, Span)>, base_flags: VarFlags)
     }
   }
 
-  for (arg, span) in argv {
+  for arg in argv {
+    let src             = arg.span().map(|s| s.slice()).unwrap_or(arg.content());
     let (name, raw_val) = strops::split_assignment_raw(&arg);
     let name            = &name.to_str_lossy();
 
-    declare_var(name, kind, raw_val, flags, &span.slice()).promote_err(span)?
+    declare_var(name, kind, raw_val, flags, &src).option_promote(arg.span())?
   }
 
   util::with_status(0)
@@ -188,7 +189,7 @@ impl super::Builtin for Declare {
       OptSpec::new_short("function-names", b'F'),
     ]
   }
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+  fn parse_argv(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.parse_args(cmd_span, argv, no_split)
   }
   fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
@@ -219,17 +220,17 @@ impl super::Builtin for Declare {
   }
 }
 
-fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult<()> {
+fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
   match mode {
     IntrospectMode::Vars => {
       if argv.is_empty() {
         let output = Shed::vars(vars::serialize_vars);
         procio::outln_bytes(&output);
       } else {
-        for (name, span) in argv {
+        for name in argv {
           let Some(var) = Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy())) else {
             return Err(sherr!(
-              NotFound @ *span,
+              NotFound ? name.span(),
               "'{name}' not found",
             ));
           };
@@ -242,7 +243,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
     IntrospectMode::FunctionsFull => {
       let names: Vec<&str> = argv
         .iter()
-        .map(|(n, _)| n.to_str().unwrap_or_default())
+        .map(|n| n.to_str().unwrap_or_default())
         .collect();
 
       // Source any explicitly requested autoload functions so their bodies
@@ -292,8 +293,9 @@ fn declare_introspect(mode: IntrospectMode, argv: &[(VarStr, Span)]) -> ShResult
     IntrospectMode::FunctionNames => {
       let names: Vec<&str> = argv
         .iter()
-        .map(|(n, _)| n.to_str().unwrap_or_default())
+        .map(|n| n.to_str().unwrap_or_default())
         .collect();
+
       let dump = Shed::logic(|l| {
         let mut keys: Vec<_> = l.funcs().keys().cloned().collect();
         keys.sort();
@@ -323,7 +325,7 @@ impl super::Builtin for Readonly {
     vec![OptSpec::new_short("print", b'p')]
   }
 
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+  fn parse_argv(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.parse_args(cmd_span, argv, no_split)
   }
   fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
@@ -338,14 +340,16 @@ impl super::Builtin for Readonly {
       return util::with_status(0);
     }
 
-    for (arg, span) in arg_vec {
-      let (var, val) = strops::split_assignment(&arg, span.slice().as_bytes());
+    for arg in arg_vec {
+      let src        = arg.span().map(|s| s.slice()).unwrap_or(arg.content());
+      let (var, val) = strops::split_assignment(&arg, src.as_bytes());
       let var        = &var.to_str_lossy();
+
       Shed::vars_mut(|v| match val {
         Some(val) => v.set_var(var, val, VarFlags::READONLY),
         None      => v.declare_var_novalue(var, VarFlags::READONLY),
       })
-      .promote_err(span)?;
+      .option_promote(arg.span())?;
     }
 
     util::with_status(0)
@@ -366,7 +370,7 @@ impl super::Builtin for Unset {
     let (arg_vec, opts) = args.take_argv();
     let is_func         = opts.iter().any(|o| o.key() == "functions");
 
-    for (arg, _) in arg_vec {
+    for arg in arg_vec {
       if is_func {
         Shed::logic_mut(|l| l.remove_func(&arg.to_str_lossy()));
         continue;
@@ -411,7 +415,7 @@ impl super::Builtin for Export {
     ]
   }
 
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+  fn parse_argv(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.parse_args(cmd_span, argv, no_split)
   }
 
@@ -428,19 +432,22 @@ impl super::Builtin for Export {
       return util::with_status(0);
     }
 
-    for (arg, span) in arg_vec {
-      let (var, val) = strops::split_assignment(&arg, span.slice().as_bytes());
+    for arg in arg_vec {
+      let src        = arg.span().map(|s| s.slice()).unwrap_or(arg.content());
+      let (var, val) = strops::split_assignment(&arg, src.as_bytes());
       let var        = &var.to_str_lossy();
+
       if unexport {
         if let Some(val) = val {
-          Shed::vars_mut(|v| v.set_var(var, val, VarFlags::empty())).promote_err(span)?;
+          Shed::vars_mut(|v| v.set_var(var, val, VarFlags::empty())).option_promote(arg.span())?;
         }
         Shed::vars_mut(|v| v.unexport_var(var));
       } else if let Some(val) = val {
-        Shed::vars_mut(|v| v.set_var(var, val, VarFlags::EXPORT)).promote_err(span)?;
+        Shed::vars_mut(|v| v.set_var(var, val, VarFlags::EXPORT)).option_promote(arg.span())?;
       } else {
         // Upsert the variable
-        Shed::vars_mut(|v| v.declare_var_novalue(var, VarFlags::EXPORT)).promote_err(span)?;
+        Shed::vars_mut(|v| v.declare_var_novalue(var, VarFlags::EXPORT))
+          .option_promote(arg.span())?;
       }
     }
 
@@ -461,7 +468,7 @@ impl super::Builtin for Global {
     ]
   }
 
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+  fn parse_argv(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.parse_args(cmd_span, argv, no_split)
   }
 
@@ -494,18 +501,19 @@ impl super::Builtin for Global {
       }
     }
 
-    for (arg, span) in arg_vec {
+    for arg in arg_vec {
+      let src             = arg.span().map(|s| s.slice()).unwrap_or(arg.content());
       let (name, raw_val) = strops::split_assignment_raw(&arg);
       let name            = &name.to_str_lossy();
 
       if raw_val.is_some() {
-        declare_var(name, kind, raw_val, VarFlags::empty(), &span.slice()).promote_err(span)?;
+        declare_var(name, kind, raw_val, VarFlags::empty(), &src).option_promote(arg.span())?;
       }
 
-      Shed::vars_mut(|v| v.promote_var_global(name)).promote_err(span)?;
+      Shed::vars_mut(|v| v.promote_var_global(name)).option_promote(arg.span())?;
 
       if !flags.is_empty() {
-        Shed::vars_mut(|v| v.declare_var_novalue(name, flags)).promote_err(span)?;
+        Shed::vars_mut(|v| v.declare_var_novalue(name, flags)).option_promote(arg.span())?;
       }
     }
 
@@ -526,7 +534,7 @@ impl super::Builtin for Local {
     ]
   }
 
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+  fn parse_argv(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.parse_args(cmd_span, argv, no_split)
   }
 
@@ -553,32 +561,32 @@ impl super::Builtin for Clone {
     let mut arguments = args.arguments().peekable();
     let     nounset   = shopt!(set.nounset);
 
-    let Some((name, n_span)) = arguments.next() else {
+    let Some(name) = arguments.next() else {
       return Err(sherr!(ExecFail @ args.cmd_span(), "missing variable name"));
     };
 
-    let src = VarName::parse(&name.to_str_lossy(), true).promote_err(n_span)?;
+    let src = VarName::parse(&name.to_str_lossy(), true).option_promote(name.span())?;
 
     if arguments.peek().is_none() {
       return Err(sherr!(ExecFail @ args.cmd_span(), "missing target variable name"));
     }
 
     if nounset && try_var!(&name.to_str_lossy()).is_none() {
-      return Err(sherr!(ExecFail @ n_span, "variable '{name}' not set"));
+      return Err(sherr!(ExecFail ? name.span(), "variable '{name}' not set"));
     }
 
     let value = Shed::vars(|v| v.read_name(&src))?.unwrap_or_default();
 
-    while let Some((name, span)) = arguments.next() {
-      let dst = VarName::parse(&name.to_str_lossy(), true).promote_err(span)?;
+    while let Some(name) = arguments.next() {
+      let dst = VarName::parse(&name.to_str_lossy(), true).option_promote(name.span())?;
 
       if arguments.peek().is_none() {
         // let's not clone it again for the last one
-        Shed::vars_mut(|v| v.put_name(&dst, value)).promote_err(span)?;
+        Shed::vars_mut(|v| v.put_name(&dst, value)).option_promote(name.span())?;
         break;
       }
 
-      Shed::vars_mut(|v| v.put_name(&dst, value.clone())).promote_err(span)?;
+      Shed::vars_mut(|v| v.put_name(&dst, value.clone())).option_promote(name.span())?;
     }
 
     util::with_status(0)
@@ -591,11 +599,11 @@ impl super::Builtin for Take {
     let mut arguments = args.arguments();
     let     nounset   = shopt!(set.nounset);
 
-    let Some((src, s_span)) = arguments.next() else {
+    let Some(src) = arguments.next() else {
       return Err(sherr!(ExecFail @ args.cmd_span(), "missing variable name"));
     };
 
-    let Some((dst, d_span)) = arguments.next() else {
+    let Some(dst) = arguments.next() else {
       return Err(sherr!(ExecFail @ args.cmd_span(), "missing target variable name"));
     };
 
@@ -603,12 +611,12 @@ impl super::Builtin for Take {
       return util::with_status(0);
     }
 
-    let src   = VarName::parse(&src.to_str_lossy(), true).promote_err(s_span)?;
-    let dst   = VarName::parse(&dst.to_str_lossy(), true).promote_err(d_span)?;
-    let found = Shed::vars_mut(|v| v.move_var(&src, &dst)).promote_err(d_span)?;
+    let source = VarName::parse(&src.to_str_lossy(), true).option_promote(src.span())?;
+    let dest   = VarName::parse(&dst.to_str_lossy(), true).option_promote(dst.span())?;
+    let found  = Shed::vars_mut(|v| v.move_var(&source, &dest)).option_promote(dst.span())?;
 
     if !found && nounset {
-      return Err(sherr!(ExecFail @ s_span, "variable '{}' not set", src.name()));
+      return Err(sherr!(ExecFail ? src.span(), "variable '{}' not set", source.name()));
     }
 
     util::with_status(found)

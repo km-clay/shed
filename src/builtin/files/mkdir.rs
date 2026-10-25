@@ -98,7 +98,7 @@ impl Builtin for MkDir {
     let ancestor_mode = default_mode | 0o300;
     let umask_hides_u = default_mode & 0o300 != 0o300;
 
-    'args: for (dir, d_span) in arguments {
+    'args: for dir in arguments {
       let path: &Path = dir.as_ref();
 
       if mkdir_all {
@@ -117,7 +117,7 @@ impl Builtin for MkDir {
             Ok(created) => created,
             Err(e) => {
               let io_err = io::Error::from_raw_os_error(e as i32);
-              let err    = handle_mkdir_err(io_err, &VarStr::from(parent)).promote(d_span);
+              let err = handle_mkdir_err(io_err, &VarStr::from(parent)).option_promote(dir.span());
 
               err.print_error();
               status = 1;
@@ -134,7 +134,7 @@ impl Builtin for MkDir {
           {
             let err = chmod::handle_err(e, &VarStr::from(parent))
               .with_note("the parent directory needs `u+wx` to create anything inside it".into())
-              .promote(d_span);
+              .option_promote(dir.span());
 
             err.print_error();
             status = 1;
@@ -147,7 +147,7 @@ impl Builtin for MkDir {
         Ok(created) => created,
         Err(e) => {
           let io_err = io::Error::from_raw_os_error(e as i32);
-          let err    = handle_mkdir_err(io_err, dir).promote(d_span);
+          let err    = handle_mkdir_err(io_err, dir).option_promote(dir.span());
 
           err.print_error();
           status = 1;
@@ -162,7 +162,7 @@ impl Builtin for MkDir {
       {
         let err = chmod::handle_err(e, dir)
           .with_note("the directory was created; only its mode could not be set".into())
-          .promote(d_span);
+          .option_promote(dir.span());
 
         err.print_error();
         status = 1;
@@ -178,47 +178,28 @@ fn handle_mkdir_err(io_err: io::Error, dir: &VarStr) -> ShErr {
     EK::AlreadyExists => {
       let path: &Path = dir.as_ref();
       if path.exists() && !path.is_dir() {
-        sherr!(
-          ExecFail,
-          "cannot make directory `{dir}`: exists but is not a directory"
-        )
+        sherr!(ExecFail, "cannot make directory `{dir}`: exists but is not a directory")
       } else {
-        sherr!(
-          ExecFail,
-          "cannot make directory `{dir}`: name already exists"
-        )
+        sherr!(ExecFail, "cannot make directory `{dir}`: name already exists")
       }
     }
     EK::PermissionDenied => sherr!(ExecFail, "cannot make directory `{dir}`: permission denied"),
     EK::InvalidFilename  => sherr!(ExecFail, "cannot make directory `{dir}`: name too long"),
     EK::ReadOnlyFilesystem => {
-      sherr!(
-        ExecFail,
-        "cannot make directory `{dir}`: read-only filesystem"
-      )
+      sherr!(ExecFail, "cannot make directory `{dir}`: read-only filesystem")
     }
-    EK::StorageFull => sherr!(
-      ExecFail,
-      "cannot make directory `{dir}`: no space left on device"
-    ),
+    EK::StorageFull => sherr!(ExecFail, "cannot make directory `{dir}`: no space left on device"),
     EK::NotADirectory => {
-      sherr!(
-        ExecFail,
-        "cannot make directory `{dir}`: path component is not a directory"
-      )
+      sherr!(ExecFail, "cannot make directory `{dir}`: path component is not a directory")
     }
-    EK::NotFound => sherr!(
-      ExecFail,
-      "cannot make directory `{dir}`: parent directory does not exist"
-    )
-    .with_note("the `-p` flag makes `fs mkdir` create parents as well: `fs mkdir -p`".into()),
+    EK::NotFound => {
+      sherr!(ExecFail, "cannot make directory `{dir}`: parent directory does not exist")
+        .with_note("the `-p` flag makes `fs mkdir` create parents as well: `fs mkdir -p`".into())
+    }
 
     _ => {
       if io_err.raw_os_error() == Some(libc::ELOOP) {
-        sherr!(
-          ExecFail,
-          "cannot make directory `{dir}`: too many levels of symbolic links"
-        )
+        sherr!(ExecFail, "cannot make directory `{dir}`: too many levels of symbolic links")
       } else {
         sherr!(ExecFail, "cannot make directory `{dir}`: {io_err}")
       }

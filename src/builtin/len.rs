@@ -28,7 +28,7 @@ impl super::Builtin for Len {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let input = self
       .get_input_str(&mut args)
-      .unwrap_or_else(|| super::argv::join_raw_arg_iter(args.arguments()).0);
+      .unwrap_or_else(|| super::argv::join_raw_arg_iter(args.arguments()).content());
 
     let mut flags = LenFlags::empty();
 

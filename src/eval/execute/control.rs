@@ -64,11 +64,7 @@ pub(crate) fn dispatch_deferred_cmd(cmd: DeferredAst) -> bool {
     };
 
     if let Some(flowctl) = maybe_flowctl {
-      sherr!(
-        SyntaxErr,
-        "'{flowctl}' cannot be used inside a deferred command"
-      )
-      .print_error();
+      sherr!(SyntaxErr, "'{flowctl}' cannot be used inside a deferred command").print_error();
     } else {
       e.print_error();
     }
@@ -534,7 +530,7 @@ impl super::Dispatcher {
       let to_expanded_strings = |tks: &[Tk]| -> ShResult<Vec<VarStr>> {
         let mut out = vec![];
         for tk in tks {
-          out.extend(tk.expand_to_words()?);
+          out.extend(tk.expand_to_words()?.into_iter().map(|w| w.content()));
         }
 
         Ok(out)

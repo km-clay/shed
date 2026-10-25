@@ -10,7 +10,17 @@ use std::{
 };
 
 use crate::{
-  errln, eval::execute, expand::alias, interactive, lifecycle, procio, sherr, signal::QUIT_CODE, state::{Shed, paths, vars::{ShellParam, VarStr}}, status_msg, util::error::ShResult,
+  errln,
+  eval::execute,
+  expand::alias,
+  interactive, lifecycle, procio, sherr,
+  signal::QUIT_CODE,
+  state::{
+    Shed, paths,
+    vars::{ShellParam, VarStr},
+  },
+  status_msg,
+  util::error::ShResult,
 };
 
 pub(crate) enum Input {
@@ -144,11 +154,7 @@ pub(crate) fn run_script<P: AsRef<Path>>(
   path: P,
   args: Vec<String>,
 ) -> ShResult<()> {
-  let path_str: VarStr = path
-    .as_ref()
-    .as_os_str()
-    .as_bytes()
-    .into();
+  let path_str: VarStr = path.as_ref().as_os_str().as_bytes().into();
 
   let args = std::iter::once(path_str.clone()).chain(args.into_iter().map(VarStr::from));
 

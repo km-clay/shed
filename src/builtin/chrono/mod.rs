@@ -225,11 +225,7 @@ impl StrFmt for DurFmt {
       b'n' => DurConv::TotalNanos,
       b'R' => DurConv::Status,
       other => {
-        return Err(sherr!(
-          ParseErr,
-          "invalid format specifier: %{}",
-          other as char
-        ));
+        return Err(sherr!(ParseErr, "invalid format specifier: %{}", other as char));
       }
     })
   }
@@ -297,10 +293,7 @@ impl StrFmt for DurFmt {
 
       DurConv::Status => {
         let Some(running) = self.running else {
-          return Err(sherr!(
-            ExecFail,
-            "timer status can only be formatted with `chrono timer`"
-          ));
+          return Err(sherr!(ExecFail, "timer status can only be formatted with `chrono timer`"));
         };
         let status = if running { "running" } else { "stopped" };
 
@@ -318,9 +311,9 @@ impl StrFmt for DurFmt {
     };
 
     let body = if field.width().is_some() {
-      varstr!("{n}").into_bytes()
+      varstr!("{n}")
     } else {
-      varstr!("{n:0pad$}").into_bytes()
+      varstr!("{n:0pad$}")
     };
 
     // A component is part of a whole, so the sign belongs to the totals --
@@ -352,7 +345,7 @@ impl StrFmt for DurFmt {
 
 fn fmt_timer_status(status: &TimerStatus) -> VarStr {
   let mut fmt = strops::format_time(strops::dur_delta(status.elapsed()), true)
-    .unwrap_or_else(|| String::from("0s"))
+    .unwrap_or_else(|| VarStr::from("0s"))
     .to_var_str();
 
   fmt.push(b' ');
@@ -397,12 +390,7 @@ impl BuiltinRouter for Chrono {
         "<interval> <command>",
         "run a command repeatedly at a specified interval"
       ),
-      sub_command!(
-        &timezone::Timezone,
-        "zone",
-        "[timezone]",
-        "print portable timezone names"
-      ),
+      sub_command!(&timezone::Timezone, "zone", "[timezone]", "print portable timezone names"),
     ];
     SUB_COMMANDS
   }

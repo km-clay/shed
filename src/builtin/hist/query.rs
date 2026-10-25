@@ -305,7 +305,7 @@ impl HistQuery {
         if !self.no_numbers {
           write!(f, "{id} ")?;
         }
-        f.write_all(&escape::shell_quote_bytes(entry.command_bytes()))?;
+        f.write_all(&escape::shell_quote(entry.command_bytes()))?;
         f.write_all(b"\n")?;
       }
 

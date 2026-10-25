@@ -14,11 +14,16 @@ use shed_macros::ShOptGroup;
 
 use crate::{
   errln,
-  eval::lex::{Span, Tk},
-  expand::{alias, escape},
+  eval::lex::Tk,
+  expand::{Word, alias, escape},
   keys::KeyCode,
   shopt,
-  state::{Shed, meta::MetaTab, params, vars::VarStr},
+  state::{
+    Shed,
+    meta::MetaTab,
+    params,
+    vars::{VarStr, VarStrSliceExt},
+  },
   system_msg,
   util::{
     error::{ShErr, ShResult},
@@ -34,19 +39,21 @@ pub(crate) fn xtrace_print_raw(argv: &[VarStr]) {
   if shopt!(set.xtrace) {
     let words = argv
       .iter()
-      .map(|i| escape::xtrace_quote(&i.to_str_lossy()))
-      .join(" ");
+      .map(|i| escape::xtrace_quote(i))
+      .collect_vec()
+      .join_with(" ");
 
     xtrace_line(&words);
   }
 }
 
-pub(crate) fn xtrace_print(argv: &[(VarStr, Span)]) {
+pub(crate) fn xtrace_print(argv: &[Word]) {
   if shopt!(set.xtrace) {
     let words = argv
       .iter()
-      .map(|(word, _span)| escape::xtrace_quote(&word.to_str_lossy()))
-      .join(" ");
+      .map(|word| escape::xtrace_quote(word))
+      .collect_vec()
+      .join_with(" ");
 
     xtrace_line(&words);
   }
@@ -56,20 +63,22 @@ pub(crate) fn xtrace_print_tokens(argv: &[Tk]) {
   if shopt!(set.xtrace) {
     let words = argv
       .iter()
-      .map(|tk| escape::xtrace_quote(&tk.word().to_str_lossy()))
-      .join(" ");
+      .map(|tk| escape::xtrace_quote(&tk.word()))
+      .collect_vec()
+      .join_with(" ");
 
     xtrace_line(&words);
   }
 }
 
 /// Format and print a `set -x` trace line
-pub(crate) fn xtrace_line(rendered: &str) {
+pub(crate) fn xtrace_line(rendered: &[u8]) {
   if !shopt!(set.xtrace) {
     return;
   }
+  let rendered = VarStr::from(rendered);
 
-  let ps4 = params::get_ps4();
+  let ps4      = params::get_ps4();
   let prefix_char = ps4
     .chars()
     .next()
@@ -511,12 +520,7 @@ impl FromStr for PipeStyle {
         Ok(Self::Thread)
       }
       "thread" => Ok(Self::Thread),
-      _ => Err(sherr!(
-        ParseErr,
-        "Invalid {} kind: {}",
-        stringify!(PipeStyle),
-        s,
-      )),
+      _        => Err(sherr!(ParseErr, "Invalid {} kind: {}", stringify!(PipeStyle), s,)),
     }
   }
 }

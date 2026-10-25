@@ -223,8 +223,7 @@ impl super::Builtin for UMask {
     umask(old);
     let old_bits = old.bits();
 
-    if let Some((raw, span)) = arg_vec.first() {
-      let span = *span;
+    if let Some(raw) = arg_vec.first() {
       if arg_vec.len() > 1 {
         return Err(sherr!(
           ParseErr @ args.span(),
@@ -235,15 +234,16 @@ impl super::Builtin for UMask {
       if raw.to_str_lossy().chars().any(|c| c.is_ascii_digit()) {
         // Numeric mode: umask 022
         let mode_raw = stat::mode_t::from_str_radix(&raw.to_str_lossy(), 8)
-          .map_err(|_| sherr!(ParseErr @ span, "invalid numeric umask: {raw}"))?;
+          .map_err(|_| sherr!(ParseErr ? raw.span(), "invalid numeric umask: {raw}"))?;
         // need to use the mode_t type alias
         // since the int size varies between Linux/MacOS
-        let mode = Mode::from_bits(mode_raw as stat::mode_t)
-          .ok_or_else(|| sherr!(ParseErr @ span, "invalid umask value: {raw}").with_code(2))?;
+        let mode = Mode::from_bits(mode_raw as stat::mode_t).ok_or_else(|| {
+          sherr!(ParseErr ? raw.span(), "invalid umask value: {raw}").with_code(2)
+        })?;
         change_umask(mode.bits());
       } else {
         // Symbolic mode: umask u=rwx,g=rx,o=
-        let clauses = strops::parse_mode_clauses(&raw.to_str_lossy()).promote_err(span)?;
+        let clauses = strops::parse_mode_clauses(&raw.to_str_lossy()).option_promote(raw.span())?;
         let allowed = strops::apply_mode_clauses(!u32::from(old_bits) & 0o777, &clauses);
         change_umask((!allowed & 0o777) as stat::mode_t);
       }

@@ -14,7 +14,7 @@ use crate::{
     strops::{self, ByteCursor, SliceCursor},
     ui,
   },
-  var,
+  var, varstr,
 };
 
 use smol_str::format_smolstr;
@@ -241,7 +241,7 @@ pub(crate) fn expand_prompt(raw: &[u8]) -> ShResult<String> {
   if shopt!(prompt.substitute) {
     let marked   = escape::unescape_prompt(&result);
     let expanded = var::expand_raw_inner(None, &mut marked.cursor(), true, false)?;
-    result = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
+    result = String::from_utf8_lossy(expanded.as_bytes()).into_owned();
   }
 
   Ok(result)
@@ -260,10 +260,10 @@ fn runtime(formatted: bool, out: &mut String) {
   };
   if formatted {
     let runtime_fmt = strops::format_time(strops::dur_delta(runtime), false).unwrap_or_default();
-    out.push_str(&runtime_fmt);
+    out.push_str(&runtime_fmt.to_str_lossy());
   } else {
-    let runtime_millis = runtime.as_millis().to_string();
-    out.push_str(&runtime_millis);
+    let runtime_millis = varstr!("{}", runtime.as_millis());
+    out.push_str(&runtime_millis.to_str_lossy());
   }
 }
 

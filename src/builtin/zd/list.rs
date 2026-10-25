@@ -4,7 +4,9 @@ use serde_json::{Map, Value};
 use crate::{
   expand::escape,
   opt, outln, sherr,
+  state::vars::{VarStr, VarStrSliceExt},
   util::{self, error::ShResult},
+  varstr,
 };
 
 use super::super::{Builtin, BuiltinArgs, opt::OptSpec};
@@ -72,7 +74,7 @@ impl Builtin for ZdList {
 
     let query = args
       .arguments()
-      .map(|(a, _)| a.to_str_lossy())
+      .map(|a| a.to_str_lossy())
       .collect::<String>();
 
     let mut rows = load_dir_stats();
@@ -114,7 +116,7 @@ impl Builtin for ZdList {
 }
 
 impl ZdList {
-  fn fmt_entries(rows: &[DirStat]) -> String {
+  fn fmt_entries(rows: &[DirStat]) -> VarStr {
     // no format specified, use tab-separated values
     let mut entries = vec![];
 
@@ -127,23 +129,23 @@ impl ZdList {
         frecency,
       } = row;
 
-      entry.push(visits.to_string());
-      entry.push(last_visit.to_string());
-      entry.push(frecency.to_string());
-      entry.push(path.clone()); // push the path last because it can be anything
+      entry.push(varstr!("{visits}"));
+      entry.push(varstr!("{last_visit}"));
+      entry.push(varstr!("{frecency}"));
+      entry.push(path.into()); // push the path last because it can be anything
       // the previous stuff all follows a specific pattern (numbers)
       // but the path can throw off cut/awk parsers if it's in the middle
 
-      entries.push(entry.join("\t"));
+      entries.push(entry.join_with("\t"));
     }
 
     // we don't need to care about making sure the fields don't contain our separators here
     // since --json and --quoted are used for that. so let's just naively separate by tabs and newlines
     // when neither of those is passed.
-    entries.join("\n")
+    entries.join_with("\n")
   }
 
-  fn fmt_entries_json(rows: &[DirStat]) -> String {
+  fn fmt_entries_json(rows: &[DirStat]) -> VarStr {
     // JSON formatted output
     let mut entries = vec![];
 
@@ -168,10 +170,10 @@ impl ZdList {
     }
 
     let json_arr = Value::Array(entries);
-    serde_json::to_string_pretty(&json_arr).unwrap()
+    serde_json::to_string_pretty(&json_arr).unwrap().into()
   }
 
-  fn fmt_entries_quoted(rows: &[DirStat]) -> String {
+  fn fmt_entries_quoted(rows: &[DirStat]) -> VarStr {
     // SQR serialization
     let mut entries = vec![];
 
@@ -185,15 +187,15 @@ impl ZdList {
       } = row;
 
       // Same column order as the bare output (path last), just shell-quoted.
-      entry.push(escape::shell_quote(&visits.to_string()));
-      entry.push(escape::shell_quote(&last_visit.to_string()));
-      entry.push(escape::shell_quote(&frecency.to_string()));
-      entry.push(escape::shell_quote(path));
+      entry.push(escape::shell_quote(&varstr!("{visits}")));
+      entry.push(escape::shell_quote(&varstr!("{last_visit}")));
+      entry.push(escape::shell_quote(&varstr!("{frecency}")));
+      entry.push(escape::shell_quote(path.as_bytes()));
 
-      entries.push(entry.join(" ")); // SQR fields are separated by spaces
+      entries.push(entry.join_with(" ")); // SQR fields are separated by spaces
     }
 
-    let output = entries.join("\n"); // SQR rows are separated by newlines
+    let output = entries.join_with("\n"); // SQR rows are separated by newlines
 
     output
   }

@@ -88,8 +88,8 @@ impl KeyMap {
 impl Display for KeyMap {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let flags  = self.flags.to_string();
-    let keys   = escape::shell_quote(&self.keys.to_str_lossy());
-    let action = escape::shell_quote(&self.action.to_str_lossy());
+    let keys   = escape::shell_quote(&self.keys);
+    let action = escape::shell_quote(&self.action);
 
     if self.remap {
       write!(f, "keymap --recursive {flags} {keys} {action}")

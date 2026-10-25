@@ -135,7 +135,7 @@ impl Stash {
     }
     conn.execute(
       "INSERT INTO stash (name, buffer, cursor, timestamp) VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
-      (&cmd.name, &cmd.buffer, cmd.cursor_pos.to_str_lossy().trim())
+      (&cmd.name, &cmd.buffer, cmd.cursor_pos.to_str_lossy().trim()),
     )?;
     Ok(())
   }
@@ -154,9 +154,11 @@ impl Stash {
 
   pub(crate) fn pop(&self, n: usize) -> ShResult<Option<StashedCmd>> {
     let conn = self.lock();
-    let mut stmt = conn.prepare("
+    let mut stmt = conn.prepare(
+      "
       SELECT id, buffer, cursor FROM stash WHERE name IS NULL ORDER BY timestamp ASC LIMIT 1 OFFSET ?1
-    ")?;
+    ",
+    )?;
 
     let Some((id, cmd)) = stmt
       .query_row([n as i64], |row| {

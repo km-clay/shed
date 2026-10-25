@@ -210,8 +210,7 @@ fn extract_ref_targets(source: &str) -> Vec<Option<String>> {
     '\n' => {
       qt_state = QuoteState::default();
     }
-    '"' => qt_state.toggle_double(),
-    '\'' => qt_state.toggle_single(),
+    '"' | '\'' => { qt_state.toggle_from(ch); }
     '`' => {
       while let Some(inner) = chars.next() {
         if inner == '\\' {

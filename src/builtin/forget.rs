@@ -46,10 +46,10 @@ impl super::Builtin for Forget {
   }
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     if !args.no_arguments() {
-      let (_, span) = super::argv::join_raw_arg_iter(args.arguments());
+      let args = super::argv::join_raw_arg_iter(args.arguments());
       return Err(
         sherr!(
-          ParseErr @ span,
+          ParseErr ? args.span(),
           "unexpected argument(s)"
         )
         .with_note("'forget' does not take positional arguments. see 'help builtin-forget'".into()),
@@ -246,10 +246,7 @@ mod tests {
   #[test]
   fn forget_dump_round_trip() {
     let g = TestGuard::new();
-    test_input(
-      r#"a=1; b=2; dump=$(genrc --vars); forget -x dump; eval "$dump"; printf '[%s][%s]' "$a" "$b""#,
-    )
-    .unwrap();
+    test_input(r#"a=1; b=2; dump=$(genrc --vars); forget -x dump; eval "$dump"; printf '[%s][%s]' "$a" "$b""#).unwrap();
     assert_eq!(g.read_output(), "[1][2]");
   }
 

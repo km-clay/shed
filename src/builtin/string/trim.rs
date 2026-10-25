@@ -41,7 +41,7 @@ impl Builtin for Trim {
   fn execute(&self, mut args: BuiltinArgs) -> ShResult<()> {
     let string = self
       .get_input_str(&mut args)
-      .unwrap_or_else(|| argv::join_raw_arg_iter(args.arguments()).0);
+      .unwrap_or_else(|| argv::join_raw_arg_iter(args.arguments()).content());
 
     // if neither `--start` nor `--end` is specified, default to trimming both ends
     let want_end = args.has_opt("end") || args.has_opt("end-matches") || args.has_opt("matches");

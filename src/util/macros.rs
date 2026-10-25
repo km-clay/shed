@@ -325,10 +325,12 @@ macro_rules! match_loop {
 ///
 /// The macro allows you to specify the kind and a format string with arguments, and optionally a span for error location.
 /// Providing a span will automatically make the printed error point at the offending text referred to by the span.
+/// The form that uses '@' takes a span by value, while the '?' form takes an optional span.
 /// Examples:
 /// ```
 /// sherr!(ParseErr, "Unexpected token: {token}");
 /// sherr!(SyntaxErr @ span, "Expected ';' but found '{found}'");
+/// sherr!(InternalErr ? span, "Failed to execute command: {cmd}");
 /// ```
 #[macro_export]
 macro_rules! sherr {
@@ -337,6 +339,12 @@ macro_rules! sherr {
 			$crate::util::error::ShErrKind::$kind($($inner)*),
 			$span, ::shed_macros::styled_format!($($arg)*).into()
 		)
+	};
+	($kind:ident($($inner:tt)*)?$span:expr, $($arg:tt)*) => {
+		$crate::util::error::ShErr::simple(
+			$crate::util::error::ShErrKind::$kind($($inner)*),
+			::shed_macros::styled_format!($($arg)*).into()
+		).option_promote($span)
 	};
 	($kind:ident($($inner:tt)*), $($arg:tt)*) => {
 		$crate::util::error::ShErr::simple(
@@ -349,6 +357,12 @@ macro_rules! sherr {
 			$crate::util::error::ShErrKind::$kind,
 			$span, ::shed_macros::styled_format!($($arg)*).into()
 		)
+	};
+	($kind:ident?$span:expr, $($arg:tt)*) => {
+		$crate::util::error::ShErr::simple(
+			$crate::util::error::ShErrKind::$kind,
+			::shed_macros::styled_format!($($arg)*).into()
+		).option_promote($span)
 	};
 	($kind:ident, $($arg:tt)*) => {
 		$crate::util::error::ShErr::simple(

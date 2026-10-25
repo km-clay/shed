@@ -22,17 +22,19 @@ impl super::Builtin for Lock {
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let mut operands = args.arguments();
 
-    let Some((arg, span)) = operands.next() else {
+    let Some(arg) = operands.next() else {
       return Err(sherr!(ExecFail @ args.cmd_span(), "missing file descriptor").with_code(2));
     };
 
-    let (operands, rest) = super::argv::join_raw_arg_iter(operands);
+    let operands = super::argv::join_raw_arg_iter(operands);
     if !operands.is_empty() {
-      return Err(sherr!(ExecFail @ rest, "expected exactly one file descriptor").with_code(2));
+      return Err(
+        sherr!(ExecFail ? operands.span(), "expected exactly one file descriptor").with_code(2),
+      );
     }
 
     let fd = arg.parse::<i32>().map_err(|v| {
-      let mut err = sherr!(ExecFail @ span, "invalid file descriptor `{v}`").with_code(2);
+      let mut err = sherr!(ExecFail ? arg.span(), "invalid file descriptor `{v}`").with_code(2);
       if arg.contains(&b'/') {
         err = err.with_note("lock expects a file descriptor, not a path".into());
       }
@@ -40,11 +42,11 @@ impl super::Builtin for Lock {
     })?;
 
     let Some(sink) = Shed::sinks(|s| s.get(fd)) else {
-      return Err(sherr!(ExecFail @ span, "file descriptor `{fd}` not open").with_code(1));
+      return Err(sherr!(ExecFail ? arg.span(), "file descriptor `{fd}` not open").with_code(1));
     };
     let Ok(raw) = sink.as_os_fd().map(|f| f.as_raw_fd()) else {
       return Err(
-        sherr!(ExecFail @ span, "file descriptor `{fd}` is not a valid OS file descriptor")
+        sherr!(ExecFail ? arg.span(), "file descriptor `{fd}` is not a valid OS file descriptor")
           .with_code(1),
       );
     };
@@ -70,7 +72,7 @@ impl super::Builtin for Lock {
         Some(libc::EINTR)       => signal::check_signals()?,
         // contention under `-n`, not a failure
         Some(libc::EWOULDBLOCK) => return util::with_status(1),
-        _ => return Err(sherr!(ExecFail @ span, "fd {fd}: {err}").with_code(1)),
+        _ => return Err(sherr!(ExecFail ? arg.span(), "fd {fd}: {err}").with_code(1)),
       }
     }
   }

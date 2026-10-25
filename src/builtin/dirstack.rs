@@ -34,7 +34,7 @@ fn parse_dirstack_args(args: &super::BuiltinArgs, cmd: &str) -> ShResult<DirStac
   let mut index = None;
   let mut dir   = None;
 
-  for (arg, _) in args.arguments() {
+  for arg in args.arguments() {
     if is_index_arg(&arg.to_str_lossy()) {
       index = Some(parse_stack_idx(&arg.to_str_lossy(), args.span(), cmd)?);
     } else if arg.to_str_lossy().starts_with('-') {
@@ -237,7 +237,7 @@ impl super::Builtin for Dirs {
       }
     }
 
-    for (arg, _) in args.arguments() {
+    for arg in args.arguments() {
       match arg.to_str_lossy().as_ref() {
         _ if is_index_arg(&arg.to_str_lossy()) => {
           target_idx = Some(parse_stack_idx(&arg.to_str_lossy(), blame, "dirs")?);

@@ -4,7 +4,7 @@ use crate::{
   match_loop, opt, procio, sherr,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarFlags, VarKind, VarStr, VarStrSliceExt},
   },
   util::{self, error::ShResult},
   varstr,
@@ -50,7 +50,7 @@ impl super::Builtin for Quote {
         return util::with_status(0);
       }
 
-      procio::out_bytes(&escape::shell_quote_bytes(&stdin));
+      procio::out_bytes(&escape::shell_quote(&stdin));
 
       if !no_nl {
         procio::out_bytes(b"\n");
@@ -58,16 +58,16 @@ impl super::Builtin for Quote {
 
       util::with_status(0)
     } else {
-      let parts: Vec<Vec<u8>> = args
+      let parts: Vec<VarStr> = args
         .arguments()
-        .map(|(s, _)| escape::shell_quote_bytes(s.as_bytes()))
+        .map(|s| escape::shell_quote(s.as_bytes()))
         .collect();
 
       if parts.is_empty() {
         return util::with_status(0);
       }
 
-      procio::out_bytes(&join_bytes(&parts, b" "));
+      procio::out_bytes(&parts.join_with(" "));
       if !no_nl {
         procio::out_bytes(b"\n");
       }
@@ -76,36 +76,36 @@ impl super::Builtin for Quote {
   }
 }
 
-fn quote_var(name: &str) -> Option<Vec<u8>> {
+fn quote_var(name: &str) -> Option<VarStr> {
   let var = Shed::vars(|v| v.try_get_var_meta(name))?;
   match var.kind() {
-    VarKind::Str(var_str) => Some(escape::shell_quote_bytes(var_str.as_bytes())),
+    VarKind::Str(var_str) => Some(escape::shell_quote(var_str.as_bytes())),
     VarKind::Int(int) => {
       let int_str = varstr!("{int}");
-      Some(escape::shell_quote_bytes(&int_str))
+      Some(escape::shell_quote(&int_str))
     }
-    VarKind::Arr(var_strs) => Some(join_bytes(
-      &var_strs
+    VarKind::Arr(var_strs) => Some(
+      var_strs
         .iter()
-        .map(|v| escape::shell_quote_bytes(v.as_bytes()))
-        .collect::<Vec<_>>(),
-      b" ",
-    )),
-    VarKind::AssocArr(items) => Some(join_bytes(
-      &items
+        .map(|v| escape::shell_quote(v.as_bytes()))
+        .collect::<Vec<_>>()
+        .join_with(" "),
+    ),
+    VarKind::AssocArr(items) => Some(
+      items
         .iter()
         .map(|(k, v)| {
-          let mut entry = escape::shell_quote_bytes(k.as_bytes());
+          let mut entry = escape::shell_quote(k.as_bytes());
           entry.push(b' ');
-          entry.extend_from_slice(&escape::shell_quote_bytes(v.as_bytes()));
+          entry.push_slice(escape::shell_quote(v.as_bytes()));
           entry
         })
-        .collect::<Vec<_>>(),
-      b"\n",
-    )),
+        .collect::<Vec<_>>()
+        .join_with("\n"),
+    ),
     VarKind::Magic(magic_var) => {
       let resolved = magic_var()?;
-      Some(escape::shell_quote_bytes(resolved.as_bytes()))
+      Some(escape::shell_quote(resolved.as_bytes()))
     }
     VarKind::Unset => None,
   }
@@ -135,7 +135,7 @@ impl super::Builtin for Unquote {
     } else {
       None
     }
-    .map_or_else(|| super::join_raw_args(arg_vec).0, VarStr::from);
+    .map_or_else(|| super::join_raw_args(arg_vec).content(), VarStr::from);
 
     let mut target = None;
     let mut delim  = "\n".into();

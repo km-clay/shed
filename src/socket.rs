@@ -186,10 +186,7 @@ impl QueryHeader {
     match kind {
       b"get" => {
         let Some(var_name) = args.next() else {
-          return Err(sherr!(
-            ParseErr,
-            "Missing variable name in 'query var get' request",
-          ));
+          return Err(sherr!(ParseErr, "Missing variable name in 'query var get' request",));
         };
         Ok(QueryHeader::GetVar(var_name.into()))
       }
@@ -203,16 +200,10 @@ impl QueryHeader {
   }
   fn parse_var_set<'a>(args: &mut impl Iterator<Item = &'a [u8]>) -> ShResult<Self> {
     let Some(var_name) = args.next() else {
-      return Err(sherr!(
-        ParseErr,
-        "Missing variable name in 'query var set' request",
-      ));
+      return Err(sherr!(ParseErr, "Missing variable name in 'query var set' request",));
     };
     let Some(value) = args.next() else {
-      return Err(sherr!(
-        ParseErr,
-        "Missing variable value in 'query var set' request",
-      ));
+      return Err(sherr!(ParseErr, "Missing variable value in 'query var set' request",));
     };
     let mut flags = VarFlags::empty();
     while let Some(flag) = args.next() {
@@ -407,10 +398,7 @@ impl SocketRequest {
     match header {
       b"get" => {
         let Some(header2) = args.next() else {
-          return Err(sherr!(
-            ParseErr,
-            "Missing line header kind in 'line get' request",
-          ));
+          return Err(sherr!(ParseErr, "Missing line header kind in 'line get' request",));
         };
         match header2 {
           b"buffer" => Ok(Self::LineGet(LineHeader::Buffer)),
@@ -427,10 +415,7 @@ impl SocketRequest {
       }
       b"set" => {
         let Some(header2) = args.next() else {
-          return Err(sherr!(
-            ParseErr,
-            "Missing line header kind in 'line set' request",
-          ));
+          return Err(sherr!(ParseErr, "Missing line header kind in 'line set' request",));
         };
         let Some(value) = args.next() else {
           return Err(sherr!(ParseErr, "Missing value in 'line set' request",));
@@ -486,10 +471,7 @@ impl ShedSocket {
   }
   pub(crate) fn new() -> ShResult<Self> {
     let Some(runtime) = paths::runtime_dir() else {
-      return Err(sherr!(
-        ExecFail,
-        "runtime directory not found; is $XDG_RUNTIME_DIR set?"
-      ));
+      return Err(sherr!(ExecFail, "runtime directory not found; is $XDG_RUNTIME_DIR set?"));
     };
     let sock_dir = runtime.join("shed");
 

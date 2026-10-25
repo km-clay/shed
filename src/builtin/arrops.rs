@@ -72,7 +72,7 @@ trait ArrOp: Builtin {
         return util::with_status(0);
       }
 
-      let (name, span) = args.arguments().next().unwrap();
+      let name = args.arguments().next().unwrap();
 
       match args.opt_value("delim") {
         Some(d) => {
@@ -94,24 +94,24 @@ trait ArrOp: Builtin {
 
           Shed::vars_mut(|v| -> ShResult<()> {
             for part in parts {
-              push_val(v, name, &VarStr::from(part), end).promote_err(span)?;
+              push_val(v, name, &VarStr::from(part), end).option_promote(name.span())?;
             }
             Ok(())
           })?;
         }
-        None => Shed::vars_mut(|v| push_val(v, name, &input, end).promote_err(span))?,
+        None => Shed::vars_mut(|v| push_val(v, name, &input, end).option_promote(name.span()))?,
       }
 
       return util::with_status(0);
     }
 
     let mut arguments = args.arguments();
-    let     name      = arguments.next().unwrap().0;
+    let     name      = arguments.next().unwrap();
 
     // each argument is pushed to the array
     Shed::vars_mut(|v| -> ShResult<()> {
-      for (val, span) in arguments {
-        push_val(v, name, val, end).promote_err(span)?;
+      for val in arguments {
+        push_val(v, name, val, end).option_promote(val.span())?;
       }
       Ok(())
     })?;
@@ -143,7 +143,7 @@ trait ArrOp: Builtin {
       return Err(sherr!(ParseErr @ args.span(), "missing array name").with_code(2));
     }
 
-    for (arg, _) in args.arguments() {
+    for arg in args.arguments() {
       for _ in 0..count {
         let pop = |arr: &mut VecDeque<VarStr>| match end {
           End::Front => arr.pop_front(),
@@ -283,7 +283,7 @@ impl super::Builtin for Rotate {
 
     Shed::vars_mut(|v| -> ShResult<()> {
       // each arg is a variable name of an array to rotate
-      for (arg, _) in args.arguments() {
+      for arg in args.arguments() {
         let arr = v
           .get_arr_mut(&arg.to_str_lossy())
           .promote_err(args.span())?;

@@ -43,7 +43,7 @@ impl super::Builtin for Hash {
       for (name, path) in entries {
         let mut line = name.into_bytes();
         line.push(b'=');
-        line.extend_from_slice(&escape::shell_quote_bytes(
+        line.extend_from_slice(&escape::shell_quote(
           paths::path_to_varstr(&path).as_bytes(),
         ));
         procio::outln_bytes(&line);
@@ -62,9 +62,9 @@ impl super::Builtin for Hash {
     if !args.no_arguments() {
       Shed::meta_mut(MetaTab::rehash_path_cache);
       Shed::meta(|m| -> ShResult<()> {
-        for (arg, span) in args.arguments() {
+        for arg in args.arguments() {
           if m.lookup_cached_cmd(&arg.to_str_lossy()).is_none() {
-            return Err(sherr!(NotFound, "Command not found: {arg}").promote(span));
+            return Err(sherr!(NotFound, "Command not found: {arg}").option_promote(arg.span()));
           }
         }
         Ok(())

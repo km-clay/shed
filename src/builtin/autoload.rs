@@ -9,7 +9,7 @@ use crate::{
     logic::{LogTab, ShFunc},
   },
   util::{self, error::ShResult},
-  var,
+  var, varstr,
 };
 
 use super::opt::OptSpec;
@@ -49,7 +49,7 @@ impl super::Builtin for Autoload {
 
       let output = names
         .into_iter()
-        .map(|name| format!("autoload {}", escape::shell_quote(&name)))
+        .map(|name| varstr!("autoload {}", escape::shell_quote(&name)))
         .join("\n");
 
       outln!("{output}");
@@ -57,7 +57,7 @@ impl super::Builtin for Autoload {
 
     if path {
       // arguments are directories (or `:`-separated lists) to crawl
-      for (arg, _span) in args.arguments() {
+      for arg in args.arguments() {
         for (name, src) in autoload::crawl(&arg.to_str_lossy()) {
           register(&name, src, now, comp)?;
         }
@@ -77,10 +77,10 @@ impl super::Builtin for Autoload {
       };
       set.extend(autoload::crawl(&search.to_str_lossy()));
 
-      for (arg, span) in args.arguments() {
+      for arg in args.arguments() {
         let name = arg.to_str_lossy();
         let Some(src) = set.remove(name.as_ref()) else {
-          return Err(sherr!(ParseErr @ span, "no such autoload: {arg}"));
+          return Err(sherr!(ParseErr ? arg.span(), "no such autoload: {arg}"));
         };
         register(&name, src, now, comp)?;
       }

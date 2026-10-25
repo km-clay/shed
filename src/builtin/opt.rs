@@ -1,50 +1,44 @@
 use std::{fmt::Display, iter::Peekable};
 
 use bstr::ByteSlice;
+use itertools::Itertools;
 
 use crate::{
   eval::lex::{Span, Tk},
+  expand::Word,
   sherr,
   state::vars::VarStr,
   util::error::ShResult,
   varstr,
 };
 
-pub(crate) enum Word {
-  Arg(VarStr, Span),
+pub(crate) enum Arg {
+  Word(Word),
   Opt(Opt),
   Sep(Span), // the '--' separator
 }
 
-impl std::fmt::Debug for Word {
+impl std::fmt::Debug for Arg {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      Word::Arg(word, _) => write!(f, "Arg({word:?})"),
-      Word::Opt(opt)     => write!(f, "Opt({opt:?})"),
-      Word::Sep(_)       => write!(f, "Sep"),
+      Arg::Word(word) => write!(f, "Word({word:?})"),
+      Arg::Opt(opt)   => write!(f, "Opt({opt:?})"),
+      Arg::Sep(_)     => write!(f, "Sep"),
     }
   }
 }
 
 /// The result of parsing a builtin's command line.
 pub(crate) struct Parsed {
-  pub words: Vec<Word>,   // the parsed arguments and options
+  pub words: Vec<Arg>,    // the parsed arguments and options
   pub trace: Vec<VarStr>, // the flat word list used for `set -x` tracing
 }
 
-impl From<Vec<(VarStr, Span)>> for Parsed {
-  fn from(words: Vec<(VarStr, Span)>) -> Self {
-    let words = words
-      .into_iter()
-      .map(|(word, span)| Word::Arg(word, span))
-      .collect::<Vec<_>>();
-    let trace = words
-      .iter()
-      .filter_map(|w| match w {
-        Word::Arg(word, _) => Some(word.clone()),
-        _ => None,
-      })
-      .collect();
+impl From<Vec<Word>> for Parsed {
+  fn from(words: Vec<Word>) -> Self {
+    let trace = words.iter().map(Word::content).collect_vec();
+    let words = words.into_iter().map(Arg::Word).collect::<Vec<_>>();
+
     Parsed { words, trace }
   }
 }
@@ -53,11 +47,11 @@ impl From<Vec<(VarStr, Span)>> for Parsed {
 pub(crate) struct Opt {
   key : VarStr,
   span: Span,
-  args: Vec<(VarStr, Span)>,
+  args: Vec<Word>,
 }
 
 impl Opt {
-  pub(crate) fn args(&self) -> &[(VarStr, Span)] {
+  pub(crate) fn args(&self) -> &[Word] {
     &self.args
   }
   pub(crate) fn span(&self) -> Span {
@@ -68,7 +62,7 @@ impl Opt {
   }
   pub(crate) fn value(&self) -> ShResult<VarStr> {
     if self.args.len() == 1 {
-      Ok(self.args[0].0.clone())
+      Ok(self.args[0].content())
     } else {
       Err(sherr!(ParseErr @ self.span(), "option '{self}' requires an argument").with_code(2))
     }
@@ -83,7 +77,7 @@ impl Opt {
     Opt {
       key : key.into(),
       span: Span::default(),
-      args: args.iter().map(|&a| (a.into(), Span::default())).collect(),
+      args: args.iter().map(|&a| a.into()).collect(),
     }
   }
 }
@@ -91,8 +85,8 @@ impl Opt {
 impl Display for Opt {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let mut span = self.span;
-    if let Some(arg_span) = self.args.last().map(|(_, s)| s) {
-      span.merge_inplace(*arg_span);
+    if let Some(arg_span) = self.args.last().and_then(Word::span) {
+      span.merge_inplace(arg_span);
     }
 
     write!(f, "{}", span.try_slice().unwrap_or_default().to_str_lossy())
@@ -210,39 +204,36 @@ fn parse_opts_inner(
     let tk   = tk.clone();
     let span = tk.span;
     for word in tk.expand_to_words()? {
-      expanded_words.push((word, span));
+      expanded_words.push(Word::with_span(word, span));
     }
   }
 
   // Snapshot the flat expansion for tracing before classification consumes it.
-  let trace: Vec<VarStr> = expanded_words
-    .iter()
-    .map(|(word, _)| word.clone())
-    .collect();
+  let     trace      = expanded_words.iter().map(Word::content).collect_vec();
 
   let mut words_iter = expanded_words.into_iter().peekable();
   let mut words      = vec![];
 
-  while let Some((word, span)) = words_iter.next() {
+  while let Some(word) = words_iter.next() {
     // separator, denotes end of options (unless the builtin keeps `--` literal)
-    if word == "--" && !keep_double_dash {
+    if **word == *b"--" && !keep_double_dash {
       if words_iter.peek().is_none() {
         // it's the last word, push it as an arg
-        words.push(Word::Arg(word, span));
+        words.push(Arg::Word(word));
       } else {
         // push it as a separator and collect the remaining words as args
-        words.push(Word::Sep(span));
-        words.extend(words_iter.map(|(word, span)| Word::Arg(word, span)));
+        words.push(Arg::Sep(word.span().unwrap_or_default()));
+        words.extend(words_iter.map(Arg::Word));
       }
       break;
     }
 
     if !word.to_str_lossy().starts_with('-')
-      || word == "-"
+      || **word == *b"-"
       || word.to_str_lossy().starts_with("---")
     {
       // it's not an option
-      words.push(Word::Arg(word, span));
+      words.push(Arg::Word(word));
       continue;
     }
 
@@ -250,17 +241,17 @@ fn parse_opts_inner(
       // long option
       match specs.iter().find(|s| s.is_long_match(&word.to_str_lossy())) {
         Some(spec) => {
-          let args = take_args(&mut words_iter, spec.argc, span, &word.to_str_lossy())?;
-          words.push(Word::Opt(Opt {
+          let args = take_args(&mut words_iter, spec.argc, &word.to_str_lossy())?;
+          words.push(Arg::Opt(Opt {
             key: spec.key.clone(),
-            span,
+            span: word.span().unwrap_or_default(),
             args,
           }));
         }
         None if strict => {
-          return Err(sherr!(ParseErr @ span, "Unknown option '{word}'").with_code(2));
+          return Err(sherr!(ParseErr, "Unknown option '{word}'").with_code(2));
         }
-        None => words.push(Word::Arg(word, span)),
+        None => words.push(Arg::Word(word)),
       }
     } else if let Some(cluster) = word.to_str_lossy().strip_prefix('-') {
       if cluster
@@ -272,12 +263,11 @@ fn parse_opts_inner(
           let args = take_args(
             &mut words_iter,
             spec.argc,
-            span,
             &varstr!("-{}", byte as char).to_str_lossy(),
           )?;
-          words.push(Word::Opt(Opt {
+          words.push(Arg::Opt(Opt {
             key: spec.key.clone(),
-            span,
+            span: word.span().unwrap_or_default(),
             args,
           }));
         }
@@ -286,9 +276,9 @@ fn parse_opts_inner(
           .bytes()
           .find(|ch| !specs.iter().any(|s| s.is_short_match(*ch)))
           .unwrap();
-        return Err(sherr!(ParseErr @ span, "Unknown option '-{}'", unknown as char).with_code(2));
+        return Err(sherr!(ParseErr, "Unknown option '-{}'", unknown as char).with_code(2));
       } else {
-        words.push(Word::Arg(word, span));
+        words.push(Arg::Word(word));
       }
     }
   }
@@ -340,17 +330,16 @@ pub(super) fn parse_opts_raw(tokens: &[Tk], specs: &[OptSpec]) -> (Vec<Opt>, Vec
 }
 
 fn take_args(
-  iter: &mut Peekable<impl Iterator<Item = (VarStr, Span)>>,
+  iter: &mut Peekable<impl Iterator<Item = Word>>,
   count: usize,
-  span: Span,
   label: &str,
-) -> ShResult<Vec<(VarStr, Span)>> {
+) -> ShResult<Vec<Word>> {
   let mut args = vec![];
   for _ in 0..count {
     if let Some(arg) = iter.next() {
       args.push(arg);
     } else {
-      return Err(sherr!(ParseErr @ span, "Option '{label}' requires {count} argument(s)"));
+      return Err(sherr!(ParseErr, "Option '{label}' requires {count} argument(s)"));
     }
   }
   Ok(args)
@@ -397,15 +386,15 @@ pub(crate) struct ScanOutcome {
 pub(crate) fn scan_options<I, F>(
   words: &mut Peekable<I>,
   classify: impl Fn(char) -> Role<F>,
-  mut set_flag: impl FnMut(bool, F, Span) -> ShResult<()>,
-  mut long_opt: impl FnMut(bool, Option<&str>, Span) -> ShResult<()>,
-  mut invocation: impl FnMut(char, Option<VarStr>, &mut Peekable<I>, Span) -> ShResult<()>,
+  mut set_flag: impl FnMut(bool, F) -> ShResult<()>,
+  mut long_opt: impl FnMut(bool, Option<&str>) -> ShResult<()>,
+  mut invocation: impl FnMut(char, Option<VarStr>, &mut Peekable<I>) -> ShResult<()>,
   strict: bool,
 ) -> ShResult<ScanOutcome>
 where
-  I: Iterator<Item = (VarStr, Span)>,
+  I: Iterator<Item = Word>,
 {
-  while let Some((word, span)) = words.peek().cloned() {
+  while let Some(word) = words.peek().cloned() {
     let word = word.to_str_lossy();
     match word.chars().next() {
       Some('-' | '+') => {}
@@ -429,28 +418,28 @@ where
 
     while let Some(ch) = cluster.next() {
       if ch == 'o' {
-        scan_long(on, &mut cluster, words, span, &mut long_opt)?;
+        scan_long(on, &mut cluster, words, &mut long_opt)?;
         continue;
       }
       match classify(ch) {
         Role::Set(f)     => pending.push(f),
-        Role::Invocation => invocation(ch, None, words, span)?,
+        Role::Invocation => invocation(ch, None, words)?,
         Role::InvocationArg => {
           // getopt rule: leftover cluster chars are this option's argument.
           let attached: String = cluster.by_ref().collect();
           let attached         = (!attached.is_empty()).then(|| VarStr::from(attached));
-          invocation(ch, attached, words, span)?;
+          invocation(ch, attached, words)?;
           break; // an arg-taking option ends the cluster
         }
         Role::Unknown if strict => {
-          return Err(sherr!(ParseErr @ span, "invalid option: -{ch}").with_code(2));
+          return Err(sherr!(ParseErr, "invalid option: -{ch}").with_code(2));
         }
         Role::Unknown => break,
       }
     }
 
     for f in pending {
-      set_flag(on, f, span)?;
+      set_flag(on, f)?;
     }
   }
 
@@ -465,30 +454,29 @@ fn scan_long<I>(
   on: bool,
   cluster: &mut Peekable<impl Iterator<Item = char>>,
   words: &mut Peekable<I>,
-  span: Span,
-  long_opt: &mut impl FnMut(bool, Option<&str>, Span) -> ShResult<()>,
+  long_opt: &mut impl FnMut(bool, Option<&str>) -> ShResult<()>,
 ) -> ShResult<()>
 where
-  I: Iterator<Item = (VarStr, Span)>,
+  I: Iterator<Item = Word>,
 {
   let attached: String = cluster.by_ref().collect();
   if !attached.is_empty() {
-    return long_opt(on, Some(&attached), span);
+    return long_opt(on, Some(&attached));
   }
 
   let mut found = false;
-  while let Some((word, _)) = words.peek() {
+  while let Some(word) = words.peek() {
     let word = word.to_str_lossy();
     if word.starts_with('-') || word.starts_with('+') {
       break;
     }
     found = true;
-    let (name, name_span) = words.next().unwrap();
-    long_opt(on, Some(&name.to_str_lossy()), name_span)?;
+    let name = words.next().unwrap();
+    long_opt(on, Some(&name.to_str_lossy()))?;
   }
 
   if !found {
-    long_opt(on, None, span)?;
+    long_opt(on, None)?;
   }
   Ok(())
 }

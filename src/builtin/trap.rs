@@ -7,6 +7,7 @@ use crate::{
     self,
     error::{ShResult, ShResultExt},
   },
+  varstr,
 };
 
 use super::opt::OptSpec;
@@ -55,7 +56,7 @@ impl super::Builtin for Trap {
     if print || arg_vec.is_empty() {
       let filter = arg_vec
         .iter()
-        .map(|(arg, span)| TrapTarget::parse(arg).promote_err(*span))
+        .map(|arg| TrapTarget::parse(arg).option_promote(arg.span()))
         .collect::<ShResult<Vec<_>>>()?;
 
       Shed::logic(|l| -> ShResult<()> {
@@ -63,9 +64,11 @@ impl super::Builtin for Trap {
           let target = entry.0;
           if filter.is_empty() || filter.contains(target) {
             let mut line = b"trap -- ".to_vec();
-            line.extend_from_slice(&escape::shell_quote_bytes(entry.1.as_bytes()));
+
+            line.extend_from_slice(&escape::shell_quote(entry.1));
             line.push(b' ');
-            line.extend_from_slice(target.to_string().as_bytes());
+            line.extend_from_slice(&varstr!("{target}"));
+
             procio::outln_bytes(&line);
           }
         }
@@ -76,12 +79,9 @@ impl super::Builtin for Trap {
 
     // if the first operand is an unsigned integer, every operand is a trap target
     // to reset to its default action. e.g. `trap 0 2`, `trap 2 EXIT`, etc
-    if arg_vec
-      .first()
-      .is_some_and(|(a, _)| a.to_str_lossy().parse::<usize>().is_ok())
-    {
-      for (arg, span) in arg_vec {
-        let target = TrapTarget::parse(&arg).promote_err(span)?;
+    if arg_vec.first().is_some_and(|a| a.parse::<usize>().is_ok()) {
+      for arg in arg_vec {
+        let target = TrapTarget::parse(&arg).option_promote(arg.span())?;
         Shed::logic_mut(|l| l.remove_trap(target));
       }
       return util::with_status(0);
@@ -94,19 +94,19 @@ impl super::Builtin for Trap {
 
     let mut arg_iter = arg_vec.into_iter();
 
-    let     command  = arg_iter.next().unwrap().0;
+    let     command  = arg_iter.next().unwrap();
     let mut targets  = vec![];
 
-    for (arg, span) in arg_iter {
-      let target = TrapTarget::parse(&arg).promote_err(span)?;
+    for arg in arg_iter {
+      let target = TrapTarget::parse(&arg).option_promote(arg.span())?;
       targets.push(target);
     }
 
     for target in targets {
-      if &command == "-" {
+      if *command == "-" {
         Shed::logic_mut(|l| l.remove_trap(target));
       } else {
-        Shed::logic_mut(|l| l.insert_trap(target, command.clone()));
+        Shed::logic_mut(|l| l.insert_trap(target, command.content()));
       }
     }
 

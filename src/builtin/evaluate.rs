@@ -1,5 +1,6 @@
 use crate::{
   eval::execute,
+  expand::Word,
   state::{Shed, meta::MetaTab, params, vars::VarStrSliceExt},
   util::{self, error::ShResult},
 };
@@ -21,7 +22,7 @@ impl super::Builtin for Eval {
     let sep = params::get_separator();
     let command = args
       .arguments()
-      .map(|(s, _)| s)
+      .map(Word::content)
       .collect::<Vec<_>>()
       .join_with(&sep.to_str_lossy());
 

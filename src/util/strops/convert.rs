@@ -1,8 +1,9 @@
 //! Human-readable parsing and formatting of durations, sizes, and file modes,
 //! plus the natural-language [`TimeReader`].
 
-use std::time::Duration;
+use std::{ops::RangeInclusive, time::Duration};
 
+use bstr::ByteSlice;
 use chrono::{
   DateTime, Datelike, Days, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, TimeZone, Utc,
   Weekday,
@@ -10,8 +11,9 @@ use chrono::{
 
 use crate::{
   sherr,
-  state::vars::VarStr,
+  state::vars::{VarStr, VarStrSliceExt},
   util::{Direction, error::ShResult},
+  varstr,
 };
 
 use super::{ByteCursor, SliceCursor};
@@ -54,43 +56,40 @@ const CLOCK_FORMATS: [&str; 6] = [
   "%I:%M:%S %p", // 02:30:00 PM
 ];
 
+const MODIFIERS: &[u8] = b"-_0^#:.";
+const UTF8_CONTINUATION: RangeInclusive<u8> = 0x80..=0xBF;
+
 /// chrono's strftime rejects specifiers that glibc passes through untouched
 /// (`%N`, `%Q`, ...), and its `Display` impl signals that by failing, which
 /// `to_string()` turns into a panic. bash emits unknown specifiers literally,
 /// so escape anything chrono can't parse into a `%%` sequence first.
-fn escape_unknown_specs(format: &str) -> String {
+fn escape_unknown_specs(format: &[u8]) -> VarStr {
   use chrono::format::{Item, StrftimeItems};
 
-  const MODIFIERS: &[u8] = b"-_0^#:.";
+  let mut cursor = SliceCursor::new(format.as_bytes());
+  let mut out    = VarStr::with_capacity(format.len());
 
-  let     bytes = format.as_bytes();
-  let mut out   = String::with_capacity(format.len());
-  let mut i     = 0;
-
-  while i < bytes.len() {
-    if bytes[i] != b'%' {
-      let start = i;
-      while i < bytes.len() && bytes[i] != b'%' {
-        i += 1;
-      }
-      out.push_str(&format[start..i]);
+  while let Some(b) = cursor.peek_byte() {
+    if b != b'%' {
+      let (start, end) = cursor.bump_while_span(|b| b != b'%');
+      out.push_slice(&format[start..end]);
       continue;
     }
 
-    let start = i;
-    i += 1;
-    while i < bytes.len() && (MODIFIERS.contains(&bytes[i]) || bytes[i].is_ascii_digit()) {
-      i += 1;
-    }
-    if i < bytes.len() {
-      i += format[i..].chars().next().map_or(1, char::len_utf8);
+    let start = cursor.pos();
+    cursor.bump();
+    cursor.bump_while(|b| MODIFIERS.contains(&b) || b.is_ascii_digit());
+    cursor.bump();
+    cursor.bump_while(|b| UTF8_CONTINUATION.contains(&b));
+    let end  = cursor.pos();
+
+    let spec = &format[start..end];
+
+    if StrftimeItems::new(&spec.to_str_lossy()).any(|item| matches!(item, Item::Error)) {
+      out.push(b'%');
     }
 
-    let spec = &format[start..i];
-    if StrftimeItems::new(spec).any(|item| matches!(item, Item::Error)) {
-      out.push('%');
-    }
-    out.push_str(spec);
+    out.push_slice(spec);
   }
 
   out
@@ -121,10 +120,7 @@ pub(crate) fn parse_paren_strftime(cur: &mut SliceCursor) -> ShResult<VarStr> {
       "expected 'T' after strftime format, got '{}'",
       other as char
     )),
-    None => Err(sherr!(
-      ParseErr,
-      "unterminated strftime conversion: expected 'T' after ')'"
-    )),
+    None => Err(sherr!(ParseErr, "unterminated strftime conversion: expected 'T' after ')'")),
   }
 }
 
@@ -136,19 +132,14 @@ pub(crate) fn dur_delta(duration: Duration) -> TimeDelta {
 ///
 /// Tolerates specifiers chrono does not implement, and reports a genuine
 /// formatting failure instead of panicking the way `to_string()` does.
-pub(crate) fn strftime<Tz: TimeZone>(dt: &DateTime<Tz>, format: &str) -> ShResult<String>
+pub(crate) fn strftime<Tz: TimeZone>(dt: &DateTime<Tz>, format: &[u8]) -> ShResult<VarStr>
 where
   Tz::Offset: std::fmt::Display,
 {
-  use std::fmt::Write;
-
-  let mut out = String::with_capacity(format.len());
-  write!(out, "{}", dt.format(&escape_unknown_specs(format)))
-    .map_err(|_| sherr!(ParseErr, "invalid strftime format '{format}'"))?;
-  Ok(out)
+  Ok(varstr!("{}", dt.format(&escape_unknown_specs(format).to_str_lossy())))
 }
 
-pub(crate) fn format_time(delta: TimeDelta, show_subsecond: bool) -> Option<String> {
+pub(crate) fn format_time(delta: TimeDelta, show_subsecond: bool) -> Option<VarStr> {
   const ETERNITY: u128 = f32::INFINITY as u128;
   let show_subsecond = show_subsecond && delta.num_seconds().abs() < 60;
   let signed =
@@ -222,111 +213,106 @@ pub(crate) fn format_time(delta: TimeDelta, show_subsecond: bool) -> Option<Stri
   }
 
   // Format the result
-  let mut result                = Vec::new();
-  let     should_show_subsecond = |res: &[String]| show_subsecond || res.is_empty();
+  let mut result: Vec<VarStr> = Vec::new();
+  let     show_subsecond      = |res: &[VarStr]| show_subsecond || res.is_empty();
 
   if eternities > 0 {
-    let mut string = format!("{eternities} eternit");
+    let mut string = varstr!("{eternities} eternit");
     if eternities > 1 {
-      string.push_str("ies");
+      string.push_slice(b"ies");
     } else {
-      string.push('y');
+      string.push(b'y');
     }
     result.push(string);
   }
   if aeons > 0 {
-    let mut string = format!("{aeons} aeon");
+    let mut string = varstr!("{aeons} aeon");
     if aeons > 1 {
-      string.push('s');
+      string.push(b's');
     }
     result.push(string);
   }
   if epochs > 0 {
-    let mut string = format!("{epochs} epoch");
+    let mut string = varstr!("{epochs} epoch");
     if epochs > 1 {
-      string.push('s');
+      string.push(b's');
     }
     result.push(string);
   }
   if millennia > 0 {
-    let mut string = format!("{millennia} millenni");
+    let mut string = varstr!("{millennia} millenni");
     if millennia > 1 {
-      string.push('a');
+      string.push(b'a');
     } else {
-      string.push_str("um");
+      string.push_slice(b"um");
     }
     result.push(string);
   }
   if centuries > 0 {
-    let mut string = format!("{centuries} centur");
+    let mut string = varstr!("{centuries} centur");
     if centuries > 1 {
-      string.push_str("ies");
+      string.push_slice(b"ies");
     } else {
-      string.push('y');
+      string.push(b'y');
     }
     result.push(string);
   }
   if decades > 0 {
-    let mut string = format!("{decades} decade");
+    let mut string = varstr!("{decades} decade");
     if decades > 1 {
-      string.push('s');
+      string.push(b's');
     }
     result.push(string);
   }
   if years > 0 {
-    let mut string = format!("{years} year");
+    let mut string = varstr!("{years} year");
     if years > 1 {
-      string.push('s');
+      string.push(b's');
     }
     result.push(string);
   }
   if months > 0 {
-    let mut string = format!("{months} month");
+    let mut string = varstr!("{months} month");
     if months > 1 {
-      string.push('s');
+      string.push(b's');
     }
     result.push(string);
   }
   if weeks > 0 {
-    let mut string = format!("{weeks} week");
+    let mut string = varstr!("{weeks} week");
     if weeks > 1 {
-      string.push('s');
+      string.push(b's');
     }
     result.push(string);
   }
   if days > 0 {
-    let mut string = format!("{days} day");
+    let mut string = varstr!("{days} day");
     if days > 1 {
-      string.push('s');
+      string.push(b's');
     }
     result.push(string);
   }
   if hours > 0 {
-    let string = format!("{hours}h");
-    result.push(string);
+    result.push(varstr!("{hours}h"));
   }
   if minutes > 0 {
-    let string = format!("{minutes}m");
-    result.push(string);
+    result.push(varstr!("{minutes}m"));
   }
   if seconds > 0 {
-    let string = format!("{seconds}s");
-    result.push(string);
+    result.push(varstr!("{seconds}s"));
   }
-  if should_show_subsecond(&result) && millis > 0 {
-    let string = format!("{millis}ms");
-    result.push(string);
+  if show_subsecond(&result) && millis > 0 {
+    result.push(varstr!("{millis}ms"));
   }
-  if should_show_subsecond(&result) && micros > 0 {
-    let string = format!("{micros}µs");
-    result.push(string);
+  if show_subsecond(&result) && micros > 0 {
+    result.push(varstr!("{micros}µs"));
   }
 
-  let joined = result.join(" ");
+  let joined = result.join_with(" ");
   if joined.is_empty() {
     None
   } else if negative {
-    Some(format!("-{joined}"))
+    Some(varstr!("-{joined}"))
   } else {
     Some(joined)
   }
@@ -364,10 +350,7 @@ pub(crate) fn parse_size(s: &str) -> ShResult<u64> {
 
       match num_str.parse::<f64>() {
         Ok(n) if n < 0.0 => {
-          return Err(sherr!(
-            ParseErr,
-            "size number cannot be negative: {num_str}",
-          ));
+          return Err(sherr!(ParseErr, "size number cannot be negative: {num_str}",));
         }
         Ok(n) => {
           let bytes = n * multiplier;
@@ -492,10 +475,7 @@ pub(crate) fn parse_mode_clauses(spec: &str) -> ShResult<Vec<ModeClause>> {
 
   for part in spec.split(',') {
     let Some(i) = part.find(['=', '+', '-']) else {
-      return Err(sherr!(
-        ParseErr,
-        "symbolic mode `{part}` needs one of `=`, `+` or `-`"
-      ));
+      return Err(sherr!(ParseErr, "symbolic mode `{part}` needs one of `=`, `+` or `-`"));
     };
     let (who_str, rest) = part.split_at(i);
     let op = match rest.as_bytes()[0] {
@@ -514,10 +494,7 @@ pub(crate) fn parse_mode_clauses(spec: &str) -> ShResult<Vec<ModeClause>> {
         'o' => who.push(WHO_OTHER),
         'a' => who.extend_from_slice(&[WHO_USER, WHO_GROUP, WHO_OTHER]),
         _ => {
-          return Err(sherr!(
-            ParseErr,
-            "invalid `who` character `{ch}` in symbolic mode `{part}`"
-          ));
+          return Err(sherr!(ParseErr, "invalid `who` character `{ch}` in symbolic mode `{part}`"));
         }
       }
     }
@@ -1142,7 +1119,9 @@ mod format_time_tests {
 
   /// Tests read better in `Duration`; the function takes a signed delta.
   fn format_time(d: std::time::Duration) -> String {
-    super::format_time(TimeDelta::from_std(d).unwrap(), true).unwrap_or_default()
+    super::format_time(TimeDelta::from_std(d).unwrap(), true)
+      .unwrap_or_default()
+      .to_string()
   }
   use std::time::Duration;
 

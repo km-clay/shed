@@ -59,7 +59,7 @@ impl super::Builtin for Msg {
       return util::with_status(0);
     }
 
-    let msg: VarStr = input.unwrap_or_else(|| join_raw_args(arg_vec).0);
+    let msg: VarStr = input.unwrap_or_else(|| join_raw_args(arg_vec).content());
 
     if broadcast {
       // sends to all socket subscribers

@@ -21,36 +21,31 @@ impl Builtin for RmDir {
       );
     }
 
-    for (path, span) in args.arguments() {
+    for path in args.arguments() {
       let Err(e) = std::fs::remove_dir(path) else {
         continue;
       };
       let err = match e.kind() {
         EK::NotFound => {
-          sherr!(ExecFail @ span, "cannot remove directory `{path}`: no such file or directory")
+          sherr!(ExecFail, "cannot remove directory `{path}`: no such file or directory")
         }
         EK::PermissionDenied => {
-          sherr!(ExecFail @ span, "cannot remove directory `{path}`: permission denied"        )
+          sherr!(ExecFail, "cannot remove directory `{path}`: permission denied")
         }
         EK::DirectoryNotEmpty => {
-          sherr!(ExecFail @ span, "cannot remove directory `{path}`: directory not empty"      )
+          sherr!(ExecFail, "cannot remove directory `{path}`: directory not empty")
         }
-        EK::NotADirectory => {
-          sherr!(ExecFail @ span, "cannot remove directory `{path}`: not a directory"          )
-        }
-        EK::ResourceBusy => {
-          sherr!(ExecFail @ span, "cannot remove directory `{path}`: directory is busy"        )
-        }
-        EK::InvalidInput => {
-          sherr!(ExecFail @ span, "cannot remove directory `{path}`: invalid path"             )
-        }
+        EK::NotADirectory => sherr!(ExecFail, "cannot remove directory `{path}`: not a directory"),
+        EK::ResourceBusy => sherr!(ExecFail, "cannot remove directory `{path}`: directory is busy"),
+        EK::InvalidInput => sherr!(ExecFail, "cannot remove directory `{path}`: invalid path"),
         EK::ReadOnlyFilesystem => {
-          sherr!(ExecFail @ span, "cannot remove directory `{path}`: read-only filesystem"     )
+          sherr!(ExecFail, "cannot remove directory `{path}`: read-only filesystem")
         }
         EK::InvalidFilename => {
-          sherr!(ExecFail @ span, "cannot remove directory `{path}`: invalid filename"         )
+          sherr!(ExecFail, "cannot remove directory `{path}`: invalid filename")
         }
-        _ => sherr!(ExecFail @ span, "cannot remove directory `{path}`: {e}"                      ),
+
+        _ => sherr!(ExecFail, "cannot remove directory `{path}`: {e}"),
       };
 
       err.print_error();

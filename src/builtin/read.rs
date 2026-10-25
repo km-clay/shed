@@ -6,8 +6,7 @@ use nix::poll::PollTimeout;
 
 use crate::{
   builtin::quote,
-  eval::lex::Span,
-  expand::alias,
+  expand::{Word, alias},
   match_loop, out,
   procio::{self, Sink},
   sherr, signal,
@@ -411,7 +410,7 @@ fn glue_zero_width(fields: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
   out
 }
 
-fn field_split_vars(input: &[u8], vars: &[(VarStr, Span)]) -> ShResult<()> {
+fn field_split_vars(input: &[u8], vars: &[Word]) -> ShResult<()> {
   if vars.is_empty() {
     Shed::vars_mut(|v| {
       v.set_var(
@@ -426,8 +425,9 @@ fn field_split_vars(input: &[u8], vars: &[(VarStr, Span)]) -> ShResult<()> {
   let sep    = params::get_separators();
   let fields = strops::ifs_split(input, sep.as_bytes(), Some(vars.len()));
 
-  for (i, (name, _)) in vars.iter().enumerate() {
+  for (i, name) in vars.iter().enumerate() {
     let value: &[u8] = fields.get(i).map_or(&[][..], Vec::as_slice);
+
     Shed::vars_mut(|v| {
       v.set_var(
         &name.to_str_lossy(),
@@ -469,7 +469,7 @@ fn join_fields(fields: &[Vec<u8>], sep: &[u8]) -> Vec<u8> {
   out
 }
 
-fn field_split_vars_quoted(input: &[u8], vars: &[(VarStr, Span)]) -> ShResult<()> {
+fn field_split_vars_quoted(input: &[u8], vars: &[Word]) -> ShResult<()> {
   let fields = glue_zero_width(quote::unquote_raw(input)?);
 
   if vars.is_empty() {
@@ -484,7 +484,7 @@ fn field_split_vars_quoted(input: &[u8], vars: &[(VarStr, Span)]) -> ShResult<()
     return Ok(());
   }
 
-  for (i, (name, _)) in vars.iter().enumerate() {
+  for (i, name) in vars.iter().enumerate() {
     let value: Vec<u8> = if i >= fields.len() {
       Vec::new()
     } else if i + 1 == vars.len() {

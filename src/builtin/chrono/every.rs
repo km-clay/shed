@@ -194,20 +194,19 @@ impl Builtin for Every {
     } = EverySpec::from_args(&args)?;
     let mut arguments = args.arguments();
 
-    let Some((dur, dur_span)) = arguments.next() else {
+    let Some(dur) = arguments.next() else {
       return Err(sherr!(ExecFail @ args.cmd_span(), "missing interval argument").with_code(2));
     };
 
-    let (cmd, cmd_span) = argv::join_raw_arg_iter(arguments);
+    let cmd = argv::join_raw_arg_iter(arguments);
     let interval = strops::TimeReader::parse_dur(&dur.to_str_lossy())
-      .promote_err(dur_span)
+      .option_promote(dur.span())
       .with_code(2)?;
     let every = i128::from(interval) * 1_000; // micros to nanos
     let every = every.unsigned_abs() as i128; // convert negative to positive
     if every == 0 {
       return Err(
-        sherr!(ExecFail @ dur_span, "interval must be greater than 0 nanoseconds, got '{every}us'")
-          .with_code(2),
+        sherr!(ExecFail ? dur.span(), "interval must be greater than 0 nanoseconds, got '{every}us'").with_code(2),
       );
     }
 
@@ -247,8 +246,8 @@ impl Builtin for Every {
 
       let mut retry = retry.unwrap_or(Count::zero());
       loop {
-        execute::exec_nonint(cmd.clone(), Some("every".into()))
-          .promote_err(cmd_span)
+        execute::exec_nonint(cmd.content(), Some("every".into()))
+          .option_promote(cmd.span())
           .with_code(1)?; // propagate shell-level errors and interrupts
         status = Shed::get_status();
 

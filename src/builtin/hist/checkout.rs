@@ -18,7 +18,7 @@ impl Builtin for HistCheckout {
     vec![OptSpec::new_short("branch", b'b'), opt!("orphan")]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let Some((name, span)) = args.arguments().next() else {
+    let Some(name) = args.arguments().next() else {
       return Err(sherr!(ParseErr @ args.cmd_span(), "missing branch name").with_code(2));
     };
     let name_s        = name.to_string();
@@ -29,7 +29,7 @@ impl Builtin for HistCheckout {
 
     if orphan {
       if hist.branch_exists(&name_s)? {
-        return Err(sherr!(ParseErr @ span, "branch already exists: {name}"));
+        return Err(sherr!(ParseErr ? name.span(), "branch already exists: {name}"));
       }
       // don't create a branch, that connects it to HEAD
       // just switching the branch name creates an orphaned branch
@@ -41,7 +41,7 @@ impl Builtin for HistCheckout {
       if create_branch {
         hist.create_branch(&name_s)?;
       } else {
-        return Err(sherr!(ParseErr @ span, "branch does not exist: {name}"));
+        return Err(sherr!(ParseErr ? name.span(), "branch does not exist: {name}"));
       }
     }
     // readline picks up this change in interactive.rs

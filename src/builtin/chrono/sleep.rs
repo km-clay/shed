@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use bstr::ByteSlice;
 use nix::libc;
 
 use crate::{
@@ -22,12 +21,8 @@ impl BuiltinRouter for Sleep {
     "sleep"
   }
   fn sub_commands(&self) -> &'static [SubCommand] {
-    const SUB_COMMANDS: &[SubCommand] = &[sub_command!(
-      &Until,
-      "until",
-      "<instant>",
-      "sleep until the given instant"
-    )];
+    const SUB_COMMANDS: &[SubCommand] =
+      &[sub_command!(&Until, "until", "<instant>", "sleep until the given instant")];
     SUB_COMMANDS
   }
 }
@@ -35,18 +30,16 @@ impl BuiltinRouter for Sleep {
 struct SleepDuration;
 impl Builtin for SleepDuration {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let (dur, span) = argv::join_raw_arg_iter(args.arguments());
+    let dur_raw = argv::join_raw_arg_iter(args.arguments());
 
-    let dur         = dur.trim().to_str_lossy();
-
-    let dur = if dur == "inf" {
+    let dur = if **dur_raw == *b"inf" {
       Duration::MAX
-    } else if let Ok(secs) = dur.parse::<f64>() {
+    } else if let Ok(secs) = dur_raw.parse::<f64>() {
       Duration::try_from_secs_f64(secs)
-        .map_err(|e| sherr!(ParseErr @ span, "invalid duration: {e}").with_code(2))?
+        .map_err(|e| sherr!(ParseErr ? dur_raw.span(), "invalid duration: {e}").with_code(2))?
     } else {
-      let micros = strops::TimeReader::parse_dur(&dur)
-        .promote_err(span)
+      let micros = strops::TimeReader::parse_dur(&dur_raw.to_str_lossy())
+        .option_promote(dur_raw.span())
         .with_code(2)?;
       Duration::from_micros(micros.cast_unsigned())
     };
@@ -55,7 +48,7 @@ impl Builtin for SleepDuration {
     let deadline = super::deadline_after(ts, dur);
 
     super::sleep_until(libc::CLOCK_MONOTONIC, &deadline)
-      .promote_err(span)
+      .option_promote(dur_raw.span())
       .with_code(1)?;
 
     util::with_status(0)
@@ -65,15 +58,15 @@ impl Builtin for SleepDuration {
 struct Until;
 impl Builtin for Until {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let (until, span) = argv::join_raw_arg_iter(args.arguments());
+    let until = argv::join_raw_arg_iter(args.arguments());
     let inst = strops::TimeReader::interpret_upcoming(&until.to_str_lossy())
-      .promote_err(span)
+      .option_promote(until.span())
       .with_code(2)?;
 
     let deadline = super::timespec_for(inst);
 
     super::sleep_until(libc::CLOCK_REALTIME, &deadline)
-      .promote_err(span)
+      .option_promote(until.span())
       .with_code(1)?;
 
     util::with_status(0)

@@ -199,7 +199,10 @@ impl Drop for DepthGuard {
 fn resolve_var_num(name: &str) -> ShResult<Num> {
   let val = if name.contains('[') {
     let vn = VarName::parse(name, true)?;
-    Shed::vars(|v| v.resolve_var(&vn)).unwrap_or_default()
+    Shed::vars(|v| v.resolve_words(&vn))
+      .unwrap_or_default()
+      .as_one_word()
+      .content()
   } else {
     try_var!(name).unwrap_or_default()
   };
@@ -211,10 +214,7 @@ fn resolve_var_num(name: &str) -> ShResult<Num> {
     return Ok(n);
   }
   if ARITH_DEPTH.with(Cell::get) >= MAX_ARITH_DEPTH {
-    return Err(sherr!(
-      ParseErr,
-      "arithmetic recursion limit exceeded resolving '{name}'"
-    ));
+    return Err(sherr!(ParseErr, "arithmetic recursion limit exceeded resolving '{name}'"));
   }
   ARITH_DEPTH.with(|d| d.set(d.get() + 1));
   let _guard = DepthGuard;
@@ -376,10 +376,7 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
     // && and || are decomposed into JIFZ_PEEK/JIFNZ_PEEK + Pop + Nez at
     // to_rpn time (see the ArithTk::Op handler). They never reach eval.
     ArithOp::And | ArithOp::Or => {
-      return Err(sherr!(
-        ParseErr,
-        "Internal: && / || should have been decomposed before eval"
-      ));
+      return Err(sherr!(ParseErr, "Internal: && / || should have been decomposed before eval"));
     }
 
     // Bitwise
@@ -875,10 +872,7 @@ impl ArithTk {
         output[jump_idx] = ArithTk::Jump(target);
       }
       ArithTk::PendingTernaryThen(_) | ArithTk::Question => {
-        return Err(sherr!(
-          ParseErr,
-          "'?' without matching ':' in arithmetic expression"
-        ));
+        return Err(sherr!(ParseErr, "'?' without matching ':' in arithmetic expression"));
       }
       other => output.push(other),
     }
@@ -1192,7 +1186,7 @@ impl ArithTk {
 /// The caller is responsible for stripping any `((...))` or `(...)` wrappers.
 pub(crate) fn expand_arithmetic(span: Option<Span>, expr: &[u8]) -> ShResult<VarStr> {
   let unescaped = escape::unescape_math(expr)?;
-  let expanded  = var::expand_raw(span, &mut unescaped.cursor())?.into_bytes();
+  let expanded  = var::expand_raw(span, &mut unescaped.cursor())?.content();
   let tokens    = ArithTk::tokenize(&expanded)?;
   let rpn       = ArithTk::to_rpn(tokens)?;
   let result    = ArithTk::eval_rpn(&rpn)?;

@@ -61,13 +61,11 @@ impl StrFmt for LogFmt {
     src: &mut Self::Source,
   ) -> ShResult<Field> {
     Ok(match conv {
-      FlogConv::Level  => Field::styled(ui::stylize_loglevel(src.level).into_bytes()),
-      FlogConv::Source => Field::string(src.source.clone().into_bytes()),
-      FlogConv::Line   => Field::numeric(varstr!("{}", src.line).into_bytes(), None, None),
-      FlogConv::Col    => Field::numeric(varstr!("{}", src.col).into_bytes(), None, None),
-      FlogConv::Time(fmt) => {
-        Field::string(util::strops::strftime(&src.now, &fmt.to_str_lossy())?.into_bytes())
-      }
+      FlogConv::Level     => Field::styled(ui::stylize_loglevel(src.level)),
+      FlogConv::Source    => Field::string(src.source.clone()),
+      FlogConv::Line      => Field::numeric(varstr!("{}", src.line), None, None),
+      FlogConv::Col       => Field::numeric(varstr!("{}", src.col), None, None),
+      FlogConv::Time(fmt) => Field::string(util::strops::strftime(&src.now, fmt)?),
     })
   }
 }
@@ -84,12 +82,12 @@ impl super::Builtin for Flog {
 
     let (arg_vec, opts) = args.take_argv();
 
-    let Some((first, span)) = arg_vec.first() else {
+    let Some(first) = arg_vec.first() else {
       return Err(sherr!(ExecFail, "Usage: flog <LEVEL> <MESSAGE>").with_code(2));
     };
     let level = first.to_ascii_uppercase();
     let Some(level) = log::Level::from_str(&String::from_utf8_lossy(&level)).ok() else {
-      return Err(sherr!(ExecFail @ *span, "Invalid log level"));
+      return Err(sherr!(ExecFail ? first.span(), "Invalid log level"));
     };
 
     let cur_level = Self::get_log_level().unwrap_or(log::Level::Error);
@@ -105,8 +103,8 @@ impl super::Builtin for Flog {
       }
     }
 
-    let     (rest, arg_span) = argv::join_raw_args(arg_vec);
-    let mut buf              = vec![];
+    let     arg = argv::join_raw_args(arg_vec);
+    let mut buf = vec![];
     let mut ctx = FlogCtx {
       level,
       source,
@@ -116,11 +114,11 @@ impl super::Builtin for Flog {
     };
     strops::StrFormatter::parse(&LogFmt, prefix_fmt.as_bytes())
       .and_then(|r| r.render(&mut ctx, &mut buf))
-      .promote_err(arg_span)?;
+      .option_promote(arg.span())?;
 
     let mut formatted = VarStr::from(buf);
     formatted.push(b' ');
-    formatted.push_slice(rest);
+    formatted.push_slice(arg.content());
 
     Shed::post_system_msg(formatted.to_string());
 

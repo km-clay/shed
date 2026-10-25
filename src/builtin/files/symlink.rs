@@ -15,7 +15,7 @@ impl Builtin for SymLink {
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut arguments = args.arguments().peekable();
-    let Some((target, _)) = arguments.next() else {
+    let Some(target) = arguments.next() else {
       return Err(
         sherr!(ExecFail @ args.cmd_span(), "missing arguments for `fs symlink`").with_code(2),
       );
@@ -29,29 +29,24 @@ impl Builtin for SymLink {
 
     let mut status = 0;
 
-    for (link, l_span) in arguments {
+    for link in arguments {
       let Err(e) = unix::fs::symlink(target, link) else {
         continue;
       };
 
       let msg = varstr!("cannot create symlink `{link}`");
       let err = match e.kind() {
-        EK::AlreadyExists => sherr!(ExecFail @ l_span, "{msg}: file exists"                      ),
-        EK::ReadOnlyFilesystem => {
-          sherr!(ExecFail @ l_span, "{msg}: read-only filesystem"             )
-        }
-        EK::InvalidFilename => {
-          sherr!(ExecFail @ l_span, "{msg}: invalid filename"                 )
-        }
-        EK::StorageFull => sherr!(ExecFail @ l_span, "{msg}: storage full"                     ),
-        EK::PermissionDenied => {
-          sherr!(ExecFail @ l_span, "{msg}: permission denied"                )
-        }
-        EK::NotADirectory => sherr!(ExecFail @ l_span, "{msg}: path component is not a directory"),
-        _ => sherr!(ExecFail @ l_span, "{msg}: {e}"                              ),
+        EK::AlreadyExists      => sherr!(ExecFail, "{msg}: file exists"),
+        EK::ReadOnlyFilesystem => sherr!(ExecFail, "{msg}: read-only filesystem"),
+        EK::InvalidFilename    => sherr!(ExecFail, "{msg}: invalid filename"),
+        EK::StorageFull        => sherr!(ExecFail, "{msg}: storage full"),
+        EK::PermissionDenied   => sherr!(ExecFail, "{msg}: permission denied"),
+        EK::NotADirectory      => sherr!(ExecFail, "{msg}: path component is not a directory"),
+
+        _ => sherr!(ExecFail, "{msg}: {e}"),
       };
 
-      err.print_error();
+      err.option_promote(link.span()).print_error();
       status = 1;
     }
 

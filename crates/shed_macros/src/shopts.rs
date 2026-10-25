@@ -198,14 +198,19 @@ impl ShOptDerive {
       .zip(validators.iter())
       .map(|((ident, ty), validator)| {
         let s = ident.to_string();
-        let validate = validator.as_ref().map(|v| quote! {
-          let validate: fn(&#ty) -> Result<(), String> = #v;
-          // validate the parsed value, and if it fails, set the status to 2 and return an error
-          if let Err(e) = validate(&parsed).map_err(|msg| crate::sherr!(SyntaxErr, "shopt: {msg}")) {
-            crate::state::Shed::set_status(2);
-            return Err(e);
-          }
-        }).unwrap_or_default();
+        let validate = validator
+          .as_ref()
+          .map(|v| {
+            quote! {
+              let validate: fn(&#ty) -> Result<(), String> = #v;
+              // validate the parsed value, and if it fails, set the status to 2 and return an error
+              if let Err(e) = validate(&parsed).map_err(|msg| crate::sherr!(SyntaxErr, "shopt: {msg}")) {
+                crate::state::Shed::set_status(2);
+                return Err(e);
+              }
+            }
+          })
+          .unwrap_or_default();
 
         // make the match arm
         quote! {
@@ -220,7 +225,7 @@ impl ShOptDerive {
           }
         }
       })
-    .collect()
+      .collect()
   }
   fn derive_get_arms(idents: &[Ident], docs: &[String]) -> Vec<TokenStream2> {
     // this creates the match arms for the `get` method, which gets a shopt value based on its name
@@ -244,10 +249,10 @@ impl ShOptDerive {
       .map(|ident| {
         let s = ident.to_string();
         quote! {
-          format!("{}.{}={}", #group, #s, crate::expand::escape::shell_quote(&self.#ident.to_string()))
+          format!("{}.{}={}", #group, #s, crate::expand::escape::shell_quote(&crate::varstr!("{}",self.#ident)))
         }
       })
-    .collect()
+      .collect()
   }
   fn derive_rc_entries_default(
     idents: &[Ident],
@@ -264,7 +269,7 @@ impl ShOptDerive {
         let s = ident.to_string();
         quote! {
           {
-            let val = crate::expand::escape::shell_quote(&defaults.#ident.to_string());
+            let val = crate::expand::escape::shell_quote(&crate::varstr!("{}",defaults.#ident));
             let entry = format!("shopt {}.{}={}", #group, #s, val);
             let doc: Option<String> = if #doc.is_empty() {
               None
@@ -291,7 +296,7 @@ impl ShOptDerive {
         let s = ident.to_string();
         quote! {
           {
-            let val = crate::expand::escape::shell_quote(&self.#ident.to_string());
+            let val = crate::expand::escape::shell_quote(&crate::varstr!("{}",self.#ident));
             let entry = format!("shopt {}.{}={}", #group, #s, val);
             let doc: Option<String> = if #doc.is_empty() {
               None

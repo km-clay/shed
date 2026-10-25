@@ -76,10 +76,7 @@ impl PageStack {
         self.pager_idx = self.stack.len() - 1;
       }
       None => {
-        return Err(sherr!(
-          NotFound,
-          "No relevant help page found for topic '{topic}'",
-        ));
+        return Err(sherr!(NotFound, "No relevant help page found for topic '{topic}'",));
       }
     }
     Ok(())
@@ -151,19 +148,19 @@ impl super::Builtin for Help {
       }
       with_status(0)
     } else {
-      let Some((topic, span)) = topic else {
+      let Some(topic) = topic else {
         // no argument was given. open the index page
         return open_help_index();
       };
-      let topic = topic.to_str_lossy();
-      if topic.as_ref() == "-" {
+      let topic_str = topic.to_str_lossy();
+      if &topic_str == "-" {
         // `help -` resumes the most recent pager session, like `cd -`.
         return resume_help();
       }
-      match get_help_content(&topic) {
+      match get_help_content(&topic_str) {
         Some((line, content, filename)) => open_help(&content, line, filename),
         None => Err(sherr!(
-            NotFound @ span,
+            NotFound ? topic.span(),
             "No relevant help page found for this topic",
         )),
       }
@@ -366,10 +363,7 @@ fn run_pager(mut page_stack: PageStack) -> ShResult<()> {
           Ok(_)             => { /* fall through */ }
           Err(Errno::EINTR) => continue, // just retry
           Err(e) => {
-            return Err(sherr!(
-              InternalErr,
-              "Error polling for help pager input: {e}"
-            ));
+            return Err(sherr!(InternalErr, "Error polling for help pager input: {e}"));
           }
         }
 

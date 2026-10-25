@@ -29,7 +29,7 @@ impl Builtin for ZdAdd {
 
     let mut dirs: Vec<PathBuf> = args
       .arguments()
-      .map(|(a, _)| PathBuf::from(a.clone()))
+      .map(|a| PathBuf::from(a.content()))
       .collect();
     if dirs.is_empty()
       && let Ok(cwd) = env::current_dir()

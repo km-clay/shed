@@ -1,24 +1,23 @@
-use crate::{expand::arithmetic::Num, set_var};
+use std::rc::Rc;
+
+use crate::{
+  expand::{Words, arithmetic::Num, glob::Pattern},
+  set_var,
+  state::params,
+};
 use bstr::ByteSlice;
+use itertools::Itertools;
 
 use crate::{
   eval::lex::{Span, TkFlags},
-  expand::{
-    Expander, arithmetic,
-    stream::{SegStream, Unit},
-    var,
-  },
-  match_loop, sherr, shopt,
+  expand::{Expander, arithmetic, stream::SegStream, var},
+  sherr, shopt,
   state::{
     Shed,
     scopes::ScopeStack,
     vars::{ArrIndex, ShellParam, VarKind, VarName, VarStr},
   },
-  util::{
-    self,
-    error::ShResult,
-    strops::{ByteCursor, SliceCursor},
-  },
+  util::error::ShResult,
   var, varstr,
 };
 
@@ -73,10 +72,10 @@ pub(crate) fn parse_param_exp(body: &SegStream) -> ShResult<ParamExp> {
   // The operator is markerless ASCII at the very front of the body, so match it
   // against the leading bytes; the operand (which may carry markers) is the
   // remainder stream after the operator is peeled off.
-  let lead      = body.to_bytes();
+  let lead      = body.as_bytes();
   let lead_run  = body.leading_bytes();
 
-  match lead.as_slice() {
+  match lead {
     b"^^" => return Ok(PE::ToUpperAll),
     b"^"  => return Ok(PE::ToUpperFirst),
     b",," => return Ok(PE::ToLowerAll),
@@ -117,7 +116,7 @@ pub(crate) fn parse_param_exp(body: &SegStream) -> ShResult<ParamExp> {
   }
   if lead_run.starts_with(b"/") {
     let rest = body.split_off_front(1).1;
-    match rest.to_bytes().first() {
+    match rest.as_bytes().first() {
       Some(&b'%') => {
         let (pattern, repl) = split_search_repl(rest.split_off_front(1).1);
         return Ok(PE::ReplaceSuffix(pattern, repl));
@@ -175,12 +174,12 @@ fn eval_slice_index(
   allow_side_effects: bool,
 ) -> ShResult<Num> {
   let expanded = var::expand_raw_inner(span, &mut stream.cursor(), allow_side_effects, false)?;
-  let bytes    = expanded.into_bytes();
+  let bytes    = expanded.as_bytes();
   // An empty index (e.g. an unset variable) is 0, as in an empty arith context.
   if bytes.iter().all(u8::is_ascii_whitespace) {
     return Ok(0);
   }
-  arithmetic::eval_expanded(&bytes)
+  arithmetic::eval_expanded(bytes)
 }
 
 /// Resolve a possibly-negative substring offset against a char count `n`.
@@ -193,59 +192,299 @@ fn resolve_offset(pos: Num, n: Num) -> Num {
   }
 }
 
-/// Expand an array subscript (`[...]`) in a `${...}` body *before* the body is
-/// flattened for name/operator parsing, so `${arr[$i]}` resolves `$i`.
-fn expand_body_subscripts(
-  span: Option<Span>,
-  body: &SegStream,
-  allow_side_effects: bool,
+fn align_slice(start: Num, len: Option<Num>, n: Num) -> ShResult<(usize, usize)> {
+  let start = resolve_offset(start, n);
+  let end = match len {
+    Some(l) if l < 0 => n + l,
+    Some(l)          => (start + l).min(n),
+    None             => n,
+  };
+
+  if end < start {
+    return Err(sherr!(ExecFail, "substring expression < 0"));
+  }
+  Ok((start as usize, (end - start) as usize))
+}
+
+fn slice_chars(value: &VarStr, start: Num, len: Option<Num>) -> ShResult<VarStr> {
+  let bytes        = value.as_bytes();
+  let starts       = bytes.char_indices().map(|(s, _, _)| s).collect_vec();
+  let (skip, take) = align_slice(start, len, starts.len() as Num)?;
+
+  let start_byte   = starts.get(skip).copied().unwrap_or(bytes.len());
+  let end_byte     = starts.get(skip + take).copied().unwrap_or(bytes.len());
+
+  value
+    .try_slice(start_byte..end_byte)
+    .ok_or_else(|| sherr!(ExecFail, "substring expression < 0"))
+}
+
+fn slice_words(words: Words, start: Num, len: Option<Num>) -> ShResult<Words> {
+  let (skip, take) = align_slice(start, len, words.len() as Num)?;
+
+  let slice        = words.into_iter().skip(skip).take(take).collect();
+
+  Ok(slice)
+}
+
+fn slice_param(parsed: &VarName, start: Num, len: Option<Num>) -> ShResult<SegStream> {
+  if parsed.index().is_none() && matches!(parsed.name(), "@" | "*") {
+    let words = Shed::vars(|v| {
+      v.sh_argv_scope()
+        .sh_argv()
+        .iter()
+        .cloned()
+        .collect::<Words>()
+    });
+    let sliced = slice_words(words, start, len)?;
+
+    if parsed.name() == "*" {
+      Ok(SegStream::from(
+        sliced.join_with(&params::get_separator().to_str_lossy()),
+      ))
+    } else {
+      Ok(var::emit_words(parsed, &sliced))
+    }
+  } else {
+    let value = Shed::vars(|v| v.resolve_words(parsed).unwrap_or_default()).join_with("");
+
+    slice_chars(&value, start, len).map(SegStream::from)
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TrimLen {
+  Longest,
+  Shortest,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Trim {
+  Prefix(TrimLen),
+  Suffix(TrimLen),
+}
+
+fn trim_param(
+  parsed: &VarName,
+  words: Words,
+  pat_src: SegStream,
+  trim: Trim,
 ) -> ShResult<SegStream> {
-  let mut out      = SegStream::new();
-  let mut cursor   = body.cursor();
-  let mut in_name  = true;
-  let mut seen_any = false;
-  while let Some(unit) = cursor.next() {
-    match unit {
-      // A leading `#` is the length operator; the name follows it.
-      Unit::Byte(b'#') if !seen_any => out.push_byte(b'#'),
-      Unit::Byte(b'[') if in_name => {
-        in_name = false;
-        out.push_byte(b'[');
-        let mut inner = SegStream::new();
-        let mut depth = 1;
-        while let Some(u) = cursor.next() {
-          match u {
-            Unit::Byte(b'[') => {
-              depth += 1;
-              inner.push(u);
-            }
-            Unit::Byte(b']') => {
-              depth -= 1;
-              if depth == 0 {
-                break;
-              }
-              inner.push(u);
-            }
-            _ => inner.push(u),
-          }
-        }
-        out.append(var::expand_raw_inner(
-          span,
-          &mut inner.cursor(),
-          allow_side_effects,
-          false,
-        )?);
-        out.push_byte(b']');
+  let expanded = Expander::from_raw_no_brace_pattern(pat_src, TkFlags::empty())
+    .no_glob()
+    .expand_for_glob()?;
+
+  let pattern = Shed::meta_mut(|m| m.get_glob(&expanded));
+
+  let trimmed = words.map_content(|word| {
+    let range = {
+      let hit = match trim {
+        Trim::Prefix(TrimLen::Longest)  => pattern.match_longest_prefix(&word),
+        Trim::Prefix(TrimLen::Shortest) => pattern.match_shortest_prefix(&word),
+        Trim::Suffix(TrimLen::Longest)  => pattern.match_longest_suffix(&word),
+        Trim::Suffix(TrimLen::Shortest) => pattern.match_shortest_suffix(&word),
+      };
+
+      match (hit, trim) {
+        (Some(hit_len), Trim::Prefix(_)) => hit_len..word.len(),
+        (Some(hit_len), Trim::Suffix(_)) => 0..word.len() - hit_len,
+
+        (None, _) => 0..word.len(),
       }
-      Unit::Byte(b) if b.is_ascii_alphanumeric() || b == b'_' => out.push_byte(b),
+    };
+
+    VarStr::from(&word[range])
+  });
+
+  Ok(var::emit_words(parsed, &trimmed))
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ReplaceMode {
+  First,
+  All,
+  Prefix,
+  Suffix,
+}
+
+#[derive(Debug, Clone)]
+struct ReplaceSpec {
+  pat    : Rc<Pattern>,
+  replace: VarStr,
+}
+
+impl ReplaceSpec {
+  fn from_parts(
+    search: SegStream,
+    replace: SegStream,
+    mode: ReplaceMode,
+  ) -> ShResult<Option<Self>> {
+    let expanded_search = Expander::from_raw_pattern(search, TkFlags::empty())
+      .no_glob()
+      .expand_for_glob()?;
+
+    if expanded_search.is_empty() && matches!(mode, ReplaceMode::First | ReplaceMode::All) {
+      return Ok(None);
+    }
+
+    let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
+      .no_glob()
+      .expand_for_glob()?;
+
+    Ok(Some(Self {
+      pat    : Shed::meta_mut(|m| m.get_glob(&expanded_search)),
+      replace: expanded_replace,
+    }))
+  }
+}
+
+fn replace_in(haystack: &VarStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option<VarStr> {
+  let ReplaceSpec { pat, replace } = spec;
+
+  match mode {
+    ReplaceMode::First => {
+      let mut out: Vec<u8> = Vec::with_capacity(haystack.len());
+      let     (start, end) = pat.find(haystack, 0)?;
+
+      out.extend_from_slice(&haystack[..start]);
+      out.extend_from_slice(&replace);
+      out.extend_from_slice(&haystack[end..]);
+
+      Some(VarStr::from(out))
+    }
+    ReplaceMode::All => {
+      let mut out  = Vec::new();
+      let mut last = 0;
+      let mut from = 0;
+      let mut hit  = false;
+
+      while let Some((start, end)) = pat.find(haystack, from) {
+        hit = true;
+        out.extend_from_slice(&haystack[last..start]);
+        out.extend_from_slice(&replace);
+        last = end;
+        from = if end > start { end } else { end + 1 };
+      }
+
+      hit.then(|| {
+        out.extend_from_slice(&haystack[last..]);
+        VarStr::from(out)
+      })
+    }
+    ReplaceMode::Prefix => {
+      let     len = pat.match_longest_prefix(haystack)?;
+      let mut out = replace;
+
+      out.push_slice(&haystack[len..]);
+
+      Some(out)
+    }
+    ReplaceMode::Suffix => {
+      let     len = pat.match_longest_suffix(haystack)?;
+      let     pos = haystack.len() - len;
+      let mut out = haystack.clone();
+
+      out.truncate(pos);
+      out.push_slice(&replace);
+
+      Some(out)
+    }
+  }
+}
+
+fn replace_param(
+  parsed: &VarName,
+  words: Words,
+  search: SegStream,
+  replace: SegStream,
+  mode: ReplaceMode,
+) -> ShResult<SegStream> {
+  let Some(spec) = ReplaceSpec::from_parts(search, replace, mode)? else {
+    return Ok(var::emit_words(parsed, &words));
+  };
+
+  let replaced = words.map_content(|word| replace_in(&word, spec.clone(), mode).unwrap_or(word));
+
+  Ok(var::emit_words(parsed, &replaced))
+}
+
+enum Case {
+  Upper,
+  Lower,
+}
+
+fn change_first_case(parsed: &VarName, words: Words, case: Case) -> SegStream {
+  let mapped = words.map_content(|v| {
+    if v.is_empty() {
+      return v;
+    }
+
+    let first = v.try_slice(..1).unwrap();
+    let rest  = v.try_slice(1..).unwrap();
+
+    match case {
+      Case::Upper => first.to_ascii_uppercase().chain(rest),
+      Case::Lower => first.to_ascii_lowercase().chain(rest),
+    }
+  });
+
+  var::emit_words(parsed, &mapped)
+}
+
+fn null_expand(parsed: &VarName) -> SegStream {
+  if parsed.is_all_split() {
+    var::emit_words(parsed, &Words::default())
+  } else {
+    SegStream::new()
+  }
+}
+
+fn handle_len_expansion(raw: &str, allow_side_effects: bool) -> ShResult<SegStream> {
+  let var_spec = raw.strip_prefix('#').unwrap();
+  if var_spec.is_empty() || var_spec == "*" || var_spec == "@" {
+    // this is either asking for the `#` parameter directly, or asking for the length
+    // of `$*` or `$@`. All of these refer to the same thing: the number of positional
+    // arguments.
+    return Ok(Shed::vars(|v| v.get_param(ShellParam::ArgCount)).into());
+  }
+
+  if let Ok(param) = var_spec.parse::<ShellParam>() {
+    let len = Shed::vars(|v| v.try_get_param(param)).map_or(0, |val| val.chars().count());
+    return Ok(varstr!("{len}").into());
+  }
+
+  let parsed = VarName::parse(var_spec, allow_side_effects)?;
+  if let Some(idx) = parsed.index() {
+    match idx {
+      ArrIndex::AllSplit | ArrIndex::AllJoined | ArrIndex::ArgCount => {
+        let var = Shed::vars(|v| v.get_var_meta(parsed.name()));
+        let len = match var.kind() {
+          VarKind::Arr(items)      => items.len(),
+          VarKind::AssocArr(items) => items.len(),
+          _ => 0,
+        };
+
+        return Ok(varstr!("{len}").into());
+      }
       _ => {
-        in_name = false;
-        out.push(unit);
+        let val = Shed::vars(|v| v.index_var(parsed.name(), idx))?;
+        let len = val.chars().count();
+        return Ok(varstr!("{len}").into());
       }
     }
-    seen_any = true;
   }
-  Ok(out)
+
+  let var = Shed::vars(|v| v.get_var_meta(var_spec));
+  let len = match var.kind() {
+    VarKind::Magic(func)     => func().unwrap_or_default().chars().count(),
+    VarKind::Str(v)          => v.chars().count(),
+    VarKind::Int(i)          => varstr!("{i}").chars().count(),
+    VarKind::Arr(items)      => items.len(),
+    VarKind::AssocArr(items) => items.len(),
+    VarKind::Unset           => 0,
+  };
+
+  Ok(varstr!("{len}").into())
 }
 
 pub(crate) fn perform_param_expansion(
@@ -253,133 +492,11 @@ pub(crate) fn perform_param_expansion(
   body: &SegStream,
   allow_side_effects: bool,
 ) -> ShResult<SegStream> {
-  perform_param_expansion_inner(span, body, allow_side_effects)
-    .map(SegStream::reinterpret_sentinels)
-}
-
-fn perform_param_expansion_inner(
-  span: Option<Span>,
-  body: &SegStream,
-  allow_side_effects: bool,
-) -> ShResult<SegStream> {
-  // FIXME: this is probably the single hideous function in this entire codebase
-
-  // Resolve the array subscript first (`${arr[$i]}`), then parse the name /
-  // operator against a lossy string view; the operand (the suffix after the
-  // operator) keeps its markers and is sliced back off `body` once we know the
-  // split point.
-  let     body       = expand_body_subscripts(span, body, allow_side_effects)?;
-  let     body_bytes = body.to_bytes();
-  let     raw        = String::from_utf8_lossy(&body_bytes);
-  let mut var_name   = util::scratch_buf();
-  let mut rest       = util::scratch_buf();
-  if raw.starts_with('#') {
-    let var_spec = raw.strip_prefix('#').unwrap();
-    if var_spec.is_empty() || var_spec == "*" || var_spec == "@" {
-      // this is either asking for the `#` parameter directly, or asking for the length
-      // of `$*` or `$@`. All of these refer to the same thing: the number of positional
-      // arguments.
-      return Ok(Shed::vars(|v| v.get_param(ShellParam::ArgCount)).into());
-    }
-
-    if let Ok(param) = var_spec.parse::<ShellParam>() {
-      let len = Shed::vars(|v| v.try_get_param(param)).map_or(0, |val| val.chars().count());
-      return Ok(len.to_string().into());
-    }
-    let parsed = VarName::parse(var_spec, allow_side_effects)?;
-    if let Some(idx) = parsed.index() {
-      match idx {
-        ArrIndex::AllSplit | ArrIndex::AllJoined | ArrIndex::ArgCount => {
-          let var = Shed::vars(|v| v.get_var_meta(parsed.name()));
-          return Ok(
-            match var.kind() {
-              VarKind::Arr(items)      => items.len(),
-              VarKind::AssocArr(items) => items.len(),
-              _ => 0,
-            }
-            .to_string()
-            .into(),
-          );
-        }
-        _ => {
-          let val = Shed::vars(|v| v.index_var(parsed.name(), idx))?;
-          return Ok(val.chars().count().to_string().into());
-        }
-      }
-    }
-    let var = Shed::vars(|v| v.get_var_meta(var_spec));
-    return Ok(
-      match var.kind() {
-        VarKind::Magic(func)     => func().unwrap_or_default().chars().count(),
-        VarKind::Str(v)          => v.chars().count(),
-        VarKind::Int(i)          => varstr!("{i}").chars().count(),
-        VarKind::Arr(items)      => items.len(),
-        VarKind::AssocArr(items) => items.len(),
-        VarKind::Unset           => 0,
-      }
-      .to_string()
-      .into(),
-    );
+  if body.as_bytes().starts_with(b"#") {
+    return handle_len_expansion(&body.content().to_str_lossy(), allow_side_effects);
   }
 
-  // Scan for the variable name (may include [index]) and the operator.
-  let mut cur           = SliceCursor::new(&body_bytes);
-  let mut is_glob_index = false;
-  let mut seen_bracket  = false;
-  match_loop!(cur.next_byte() => ch, {
-    b'[' => {
-      // Include brackets as part of the var name
-      let is_first_bracket = !seen_bracket;
-      seen_bracket = true;
-      var_name.push(ch);
-      let mut idx_content = util::scratch_buf();
-      let mut bracket_depth = 1;
-      match_loop!(cur.next_byte() => bc, {
-        b'[' => { bracket_depth += 1; var_name.push(bc); idx_content.push(bc); }
-        b']' => {
-          bracket_depth -= 1;
-          var_name.push(bc);
-          if bracket_depth == 0 {
-            if is_first_bracket {
-              is_glob_index = *idx_content == *b"@" || *idx_content == *b"*";
-            }
-            break;
-          }
-          idx_content.push(bc);
-        }
-        _ => { var_name.push(bc); idx_content.push(bc); }
-      });
-    }
-    _ if is_glob_index && (ch == b':' || ch.is_ascii_digit()) => {
-      // For [@] and [*], include :start:len as part of the var name
-      // so VarName::parse handles it as an array slice
-      var_name.push(ch);
-    }
-
-    // it's a shell parameter, don't get it confused with the operators below
-    ch if var_name.is_empty() && matches!(ch, b'?' | b'!' | b'#' | b'-') => {
-
-      let next_is_name_char = cur
-        .peek_byte()
-        .is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_');
-      if next_is_name_char {
-        rest.push(ch);
-        rest.extend_from_slice(&body_bytes[cur.pos()..]);
-      } else {
-        var_name.push(ch);
-        rest.extend_from_slice(&body_bytes[cur.pos()..]);
-      }
-      break;
-    }
-    b'!' | b'#' | b'%' | b':' | b'-' | b'+' | b'^' | b',' | b'=' | b'/' | b'?' => {
-      rest.push(ch);
-      rest.extend_from_slice(&body_bytes[cur.pos()..]);
-      break;
-    }
-    _ => var_name.push(ch),
-  });
-
-  let mut parsed = VarName::parse(&String::from_utf8_lossy(&var_name), allow_side_effects)?;
+  let (mut parsed, consumed) = VarName::parse_stream(body, allow_side_effects)?;
 
   if matches!(parsed.index(), Some(ArrIndex::Raw(_))) {
     let tag = Shed::vars(|v| v.try_get_var_kind_tag(parsed.name()));
@@ -388,365 +505,166 @@ fn perform_param_expansion_inner(
       parsed.set_index(resolved);
     }
   }
-  let get     = |v: &ScopeStack| v.resolve_var(&parsed).unwrap_or_default();
-  let try_get = |v: &ScopeStack| v.resolve_var(&parsed);
 
-  let operand = body.split_off_front(var_name.len()).1;
-  let _       = &rest;
-  if let Ok(expansion) = parse_param_exp(&operand) {
-    match expansion {
-      ParamExp::ToUpperAll => {
-        let value = Shed::vars(get);
-        let new   = value.to_ascii_uppercase();
-        Ok(new.into())
-      }
-      ParamExp::ToLowerAll => {
-        let value = Shed::vars(get);
-        let new   = value.to_ascii_lowercase();
-        Ok(new.into())
-      }
-      ParamExp::ToUpperFirst => {
-        let value = Shed::vars(get);
-        if value.is_empty() {
-          Ok(value.into())
-        } else {
-          let first = value.try_slice(..1).unwrap();
-          let rest  = value.try_slice(1..).unwrap();
+  let get     = |v: &ScopeStack| v.resolve_words(&parsed).unwrap_or_default();
+  let try_get = |v: &ScopeStack| v.resolve_words(&parsed).filter(|w| !w.is_empty());
+  let operand = body.split_off_front(consumed).1;
 
-          let new   = first.to_ascii_uppercase().chain(rest);
-
-          Ok(new.into())
-        }
-      }
-      ParamExp::ToLowerFirst => {
-        let value = Shed::vars(get);
-        if value.is_empty() {
-          Ok(value.into())
-        } else {
-          let first = value.try_slice(..1).unwrap();
-          let rest  = value.try_slice(1..).unwrap();
-
-          let new   = first.to_ascii_lowercase().chain(rest);
-
-          Ok(new.into())
-        }
-      }
-      ParamExp::DefaultUnsetOrNull(default) => {
-        match Shed::vars(try_get).filter(|v| !v.is_empty()) {
-          Some(val) => Ok(val.into()),
-          None => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
-        }
-      }
-      ParamExp::DefaultUnset(default) => match Shed::vars(try_get) {
-        Some(val) => Ok(val.into()),
-        None      => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
-      },
-      ParamExp::SetDefaultUnsetOrNull(default) => {
-        if let Some(val) = Shed::vars(try_get).filter(|v| !v.is_empty()) {
-          Ok(val.into())
-        } else {
-          let expanded =
-            var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
-          if allow_side_effects {
-            let stored = VarStr::from(expanded.to_bytes());
-            set_var!(parsed.name(), VarKind::string(stored))?;
-          }
-          Ok(expanded)
-        }
-      }
-      ParamExp::SetDefaultUnset(default) => {
-        if let Some(val) = Shed::vars(try_get) {
-          Ok(val.into())
-        } else {
-          let expanded =
-            var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
-          if allow_side_effects {
-            let stored = VarStr::from(expanded.to_bytes());
-            set_var!(parsed.name(), VarKind::string(stored))?;
-          }
-          Ok(expanded)
-        }
-      }
-      ParamExp::AltSetNotNull(alt) => match Shed::vars(try_get).filter(|v| !v.is_empty()) {
-        Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
-        None    => Ok(SegStream::new()),
-      },
-      ParamExp::AltNotNull(alt) => match Shed::vars(try_get) {
-        Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
-        None    => Ok(SegStream::new()),
-      },
-      ParamExp::ErrUnsetOrNull(err) => {
-        if let Some(val) = Shed::vars(try_get).filter(|v| !v.is_empty()) {
-          Ok(val.into())
-        } else {
-          if !allow_side_effects {
-            return Ok(SegStream::new());
-          }
-          let expanded = var::expand_raw_inner(span, &mut err.cursor(), allow_side_effects, false)?;
-          Err(sherr!(
-            ExecFail,
-            "{}",
-            String::from_utf8_lossy(&expanded.into_bytes())
-          ))
-        }
-      }
-      ParamExp::ErrUnset(err) => {
-        if let Some(val) = Shed::vars(try_get) {
-          Ok(val.into())
-        } else {
-          if !allow_side_effects {
-            return Ok(SegStream::new());
-          }
-          let expanded = var::expand_raw_inner(span, &mut err.cursor(), allow_side_effects, false)?;
-          Err(sherr!(
-            ExecFail,
-            "{}",
-            String::from_utf8_lossy(&expanded.into_bytes())
-          ))
-        }
-      }
-      ParamExp::SliceOpen(offset) => {
-        let pos                = eval_slice_index(span, &offset, allow_side_effects)?;
-        let value              = Shed::vars(get);
-        let bytes              = value.as_bytes();
-        let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();
-        let n                  = starts.len() as Num;
-
-        let start              = resolve_offset(pos, n) as usize;
-        let start_byte         = starts.get(start).copied().unwrap_or(bytes.len());
-
-        value
-          .try_slice(start_byte..bytes.len())
-          .map(SegStream::from)
-          .ok_or_else(|| sherr!(ExecFail, "substring expression < 0"))
-      }
-      ParamExp::SliceClosed(offset, length) => {
-        let pos                = eval_slice_index(span, &offset, allow_side_effects)?;
-        let len                = eval_slice_index(span, &length, allow_side_effects)?;
-        let value              = Shed::vars(get);
-        let bytes              = value.as_bytes();
-        let starts: Vec<usize> = bytes.char_indices().map(|(s, _, _)| s).collect();
-        let n                  = starts.len() as Num;
-
-        let start              = resolve_offset(pos, n);
-        let start_byte         = starts.get(start as usize).copied().unwrap_or(bytes.len());
-
-        // A negative length is an offset from the end of the string; a positive
-        // one counts forward from `start`. bash errors if the end lands before
-        // the start ("substring expression < 0").
-        let end = if len < 0 {
-          n + len
-        } else {
-          (start + len).min(n)
-        };
-        let end_byte = starts.get(end as usize).copied().unwrap_or(bytes.len());
-        if end < start {
-          return Err(sherr!(ExecFail, "substring expression < 0"));
-        }
-
-        value
-          .try_slice(start_byte..end_byte)
-          .map(SegStream::from)
-          .ok_or_else(|| sherr!(ExecFail, "substring expression < 0"))
-      }
-      ParamExp::RemShortestPrefix(prefix) => {
-        let value = Shed::vars(get);
-        let value = value.as_bytes();
-        let expanded = Expander::from_raw_no_brace_pattern(prefix, TkFlags::empty())
-          .no_glob()
-          .expand_for_glob()?;
-
-        let pattern = Shed::meta_mut(|m| m.get_glob(expanded.as_bytes()));
-        if let Some(len) = pattern.match_shortest_prefix(value) {
-          return Ok(VarStr::from(&value[len..]).into());
-        }
-
-        Ok(VarStr::from(value).into())
-      }
-      ParamExp::RemLongestPrefix(prefix) => {
-        let value = Shed::vars(get);
-        let value = value.as_bytes();
-        let expanded = Expander::from_raw_no_brace_pattern(prefix, TkFlags::empty())
-          .no_glob()
-          .expand_for_glob()?;
-
-        let pattern = Shed::meta_mut(|m| m.get_glob(expanded.as_bytes()));
-        if let Some(len) = pattern.match_longest_prefix(value) {
-          return Ok(VarStr::from(&value[len..]).into());
-        }
-
-        Ok(VarStr::from(value).into()) // no match
-      }
-      ParamExp::RemShortestSuffix(suffix) => {
-        let value = Shed::vars(get);
-        let value = value.as_bytes();
-        let expanded = Expander::from_raw_no_brace_pattern(suffix, TkFlags::empty())
-          .no_glob()
-          .expand_for_glob()?;
-
-        let pattern = Shed::meta_mut(|m| m.get_glob(expanded.as_bytes()));
-        if let Some(len) = pattern.match_shortest_suffix(value) {
-          let pos = value.len() - len;
-          return Ok(VarStr::from(&value[..pos]).into());
-        }
-
-        Ok(VarStr::from(value).into())
-      }
-      ParamExp::RemLongestSuffix(suffix) => {
-        let value = Shed::vars(get);
-        let value = value.as_bytes();
-        let expanded_suffix = Expander::from_raw_no_brace_pattern(suffix, TkFlags::empty())
-          .no_glob()
-          .expand_for_glob()?;
-
-        let pattern = Shed::meta_mut(|m| m.get_glob(expanded_suffix.as_bytes()));
-        if let Some(len) = pattern.match_longest_suffix(value) {
-          let pos = value.len() - len;
-          return Ok(VarStr::from(&value[..pos]).into());
-        }
-
-        Ok(VarStr::from(value).into())
-      }
-      ParamExp::ReplaceFirstMatch(search, replace) => {
-        let value = Shed::vars(get);
-        let value = value.as_bytes();
-        let expanded_search = Expander::from_raw_pattern(search, TkFlags::empty())
-          .no_glob()
-          .expand_for_glob()?;
-
-        if expanded_search.is_empty() {
-          return Ok(VarStr::from(value).into());
-        }
-
-        let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
-          .no_glob()
-          .expand_no_split()?;
-        let glob = Shed::meta_mut(|m| m.get_glob(expanded_search.as_bytes())); // unanchored
-
-        if let Some((start, end)) = glob.find(value, 0) {
-          let mut result = Vec::with_capacity(value.len());
-          result.extend_from_slice(&value[..start]);
-          result.extend_from_slice(expanded_replace.as_bytes());
-          result.extend_from_slice(&value[end..]);
-          Ok(VarStr::from(result).into())
-        } else {
-          Ok(VarStr::from(value).into())
-        }
-      }
-      ParamExp::ReplaceAllMatches(search, replace) => {
-        let value = Shed::vars(get);
-        let value = value.as_bytes();
-        let expanded_search = Expander::from_raw_pattern(search, TkFlags::empty())
-          .no_glob()
-          .expand_for_glob()?;
-
-        if expanded_search.is_empty() {
-          return Ok(VarStr::from(value).into());
-        }
-
-        let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
-          .no_glob()
-          .expand_no_split()?;
-        let     glob            = Shed::meta_mut(|m| m.get_glob(expanded_search.as_bytes()));
-        let mut result: Vec<u8> = Vec::new();
-        let mut last_match_end  = 0;
-        let mut from            = 0;
-
-        while let Some((start, end)) = glob.find(value, from) {
-          result.extend_from_slice(&value[last_match_end..start]);
-          result.extend_from_slice(expanded_replace.as_bytes());
-          last_match_end = end;
-          // non-overlapping; step past a zero-width match so we don't spin
-          from = if end > start { end } else { end + 1 };
-        }
-
-        // Append the rest of the string
-        result.extend_from_slice(&value[last_match_end..]);
-        Ok(VarStr::from(result).into())
-      }
-      ParamExp::ReplacePrefix(search, replace) => {
-        let value = Shed::vars(get);
-        let value = value.as_bytes();
-        let expanded_search = Expander::from_raw_pattern(search, TkFlags::empty())
-          .no_glob()
-          .expand_for_glob()?;
-        let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
-          .no_glob()
-          .expand_no_split()?;
-
-        let pattern = Shed::meta_mut(|m| m.get_glob(expanded_search.as_bytes()));
-        if let Some(len) = pattern.match_longest_prefix(value) {
-          let mut result = expanded_replace.as_bytes().to_vec();
-          result.extend_from_slice(&value[len..]);
-          return Ok(VarStr::from(result).into());
-        }
-
-        Ok(VarStr::from(value).into())
-      }
-      ParamExp::ReplaceSuffix(search, replace) => {
-        let value = Shed::vars(get);
-        let value = value.as_bytes();
-        let expanded_search = Expander::from_raw_pattern(search, TkFlags::empty())
-          .no_glob()
-          .expand_for_glob()?;
-        let expanded_replace = Expander::from_raw_pattern(replace, TkFlags::empty())
-          .no_glob()
-          .expand_no_split()?;
-
-        let pattern = Shed::meta_mut(|m| m.get_glob(expanded_search.as_bytes()));
-        if let Some(len) = pattern.match_longest_suffix(value) {
-          let     pos    = value.len() - len;
-          let mut result = Vec::with_capacity(pos + expanded_replace.as_bytes().len());
-          result.extend_from_slice(&value[..pos]);
-          result.extend_from_slice(expanded_replace.as_bytes());
-          return Ok(VarStr::from(result).into());
-        }
-
-        Ok(VarStr::from(value).into())
-      }
-      ParamExp::VarNamesWithPrefix(prefix) => {
-        let flat = Shed::vars(ScopeStack::flatten_vars);
-        let match_vars: Vec<_> = flat
-          .keys()
-          .filter(|var| var.starts_with(&prefix))
-          .cloned()
-          .collect();
-        Ok(match_vars.join(" ").into())
-      }
-      ParamExp::ExpandInnerVar(inner) => {
-        if inner.contains("[@]") || inner.contains("[*]") {
-          let var_name = if let Some(pos) = inner.find('[') {
-            &inner[..pos]
-          } else {
-            &inner
-          };
-          if inner.contains("[*]") {
-            Shed::vars(|v| v.get_array_keys(var_name, true)).map(Into::into)
-          } else if let Some(fields) = Shed::vars(|v| v.array_keys_fields(var_name)) {
-            Ok(var::positional_fields_seg(&fields))
-          } else {
-            Shed::vars(|v| v.get_array_keys(var_name, false)).map(Into::into)
-          }
-        } else {
-          let inner_name = VarName::parse(&inner, allow_side_effects)?;
-          let value      = Shed::vars(|v| v.resolve_var(&inner_name).unwrap_or_default());
-          Ok(var!(&value.to_str_lossy()).into())
-        }
-      }
+  let Ok(expansion) = parse_param_exp(&operand) else {
+    if let Some(fields) = Shed::vars(|v| v.split_values(&parsed)) {
+      return Ok(var::emit_words(&parsed, &fields));
     }
-  } else {
-    if *var_name == *b"@" {
-      let fields = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect::<Vec<_>>());
-      return Ok(var::positional_fields_seg(&fields));
-    }
-    if let Some(fields) = Shed::vars(|v| v.split_fields(&parsed)) {
-      return Ok(var::positional_fields_seg(&fields));
-    }
-    let var = Shed::vars(try_get);
-    if var.is_none() && shopt!(set.nounset) {
+    let words = Shed::vars(try_get);
+    if words.is_none() && shopt!(set.nounset) {
       return Err(sherr!(NotFound, "Variable '{}' is not set", parsed.name()));
     }
-    Ok(var.unwrap_or_default().into())
+
+    return Ok(var::emit_words(&parsed, &words.unwrap_or_default()));
+  };
+
+  match expansion {
+    ParamExp::ToUpperFirst => Ok(change_first_case(&parsed, Shed::vars(get), Case::Upper)),
+    ParamExp::ToLowerFirst => Ok(change_first_case(&parsed, Shed::vars(get), Case::Lower)),
+
+    ParamExp::ToUpperAll => {
+      let words  = Shed::vars(get);
+      let mapped = words.map_content(|c| c.to_ascii_uppercase());
+
+      Ok(var::emit_words(&parsed, &mapped))
+    }
+    ParamExp::ToLowerAll => {
+      let words  = Shed::vars(get);
+      let mapped = words.map_content(|c| c.to_ascii_lowercase());
+
+      Ok(var::emit_words(&parsed, &mapped))
+    }
+    ParamExp::DefaultUnsetOrNull(default) => match Shed::vars(try_get).filter(|v| !v.empty_param())
+    {
+      Some(val) => Ok(var::emit_words(&parsed, &val)),
+      None      => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
+    },
+    ParamExp::DefaultUnset(default) => match Shed::vars(try_get) {
+      Some(val) => Ok(var::emit_words(&parsed, &val)),
+      None      => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
+    },
+    ParamExp::SetDefaultUnsetOrNull(default) => {
+      match Shed::vars(try_get).filter(|v| !v.empty_param()) {
+        Some(val) => Ok(var::emit_words(&parsed, &val)),
+        None => {
+          let expanded =
+            var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
+          if allow_side_effects {
+            let stored = VarStr::from(expanded.as_bytes());
+            set_var!(parsed.name(), VarKind::string(stored))?;
+          }
+          Ok(expanded)
+        }
+      }
+    }
+    ParamExp::SetDefaultUnset(default) => match Shed::vars(try_get) {
+      Some(val) => Ok(var::emit_words(&parsed, &val)),
+      None => {
+        let expanded =
+          var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
+        if allow_side_effects {
+          let stored = VarStr::from(expanded.as_bytes());
+          set_var!(parsed.name(), VarKind::string(stored))?;
+        }
+        Ok(expanded)
+      }
+    },
+    ParamExp::AltSetNotNull(alt) => match Shed::vars(try_get).filter(|v| !v.empty_param()) {
+      Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
+      None    => Ok(null_expand(&parsed)),
+    },
+    ParamExp::AltNotNull(alt) => match Shed::vars(try_get) {
+      Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
+      None    => Ok(null_expand(&parsed)),
+    },
+    ParamExp::ErrUnsetOrNull(err) => match Shed::vars(try_get).filter(|v| !v.empty_param()) {
+      Some(val) => Ok(var::emit_words(&parsed, &val)),
+      None => {
+        if !allow_side_effects {
+          return Ok(SegStream::new());
+        }
+        let expanded = var::expand_raw_inner(span, &mut err.cursor(), allow_side_effects, false)?;
+        Err(sherr!(ExecFail, "{}", String::from_utf8_lossy(expanded.as_bytes())))
+      }
+    },
+    ParamExp::ErrUnset(err) => match Shed::vars(try_get) {
+      Some(val) => Ok(var::emit_words(&parsed, &val)),
+      None => {
+        if !allow_side_effects {
+          return Ok(SegStream::new());
+        }
+        let expanded = var::expand_raw_inner(span, &mut err.cursor(), allow_side_effects, false)?;
+        Err(sherr!(ExecFail, "{}", String::from_utf8_lossy(expanded.as_bytes())))
+      }
+    },
+    ParamExp::SliceOpen(offset) => {
+      let pos = eval_slice_index(span, &offset, allow_side_effects)?;
+      slice_param(&parsed, pos, None)
+    }
+    ParamExp::SliceClosed(offset, length) => {
+      let pos = eval_slice_index(span, &offset, allow_side_effects)?;
+      let len = eval_slice_index(span, &length, allow_side_effects)?;
+      slice_param(&parsed, pos, Some(len))
+    }
+
+    ParamExp::RemShortestPrefix(p) => {
+      trim_param(&parsed, Shed::vars(get), p, Trim::Prefix(TrimLen::Shortest))
+    }
+    ParamExp::RemLongestPrefix(p) => {
+      trim_param(&parsed, Shed::vars(get), p, Trim::Prefix(TrimLen::Longest))
+    }
+    ParamExp::RemShortestSuffix(p) => {
+      trim_param(&parsed, Shed::vars(get), p, Trim::Suffix(TrimLen::Shortest))
+    }
+    ParamExp::RemLongestSuffix(p) => {
+      trim_param(&parsed, Shed::vars(get), p, Trim::Suffix(TrimLen::Longest))
+    }
+
+    ParamExp::ReplaceFirstMatch(s, r) => {
+      replace_param(&parsed, Shed::vars(get), s, r, ReplaceMode::First)
+    }
+    ParamExp::ReplaceAllMatches(s, r) => {
+      replace_param(&parsed, Shed::vars(get), s, r, ReplaceMode::All)
+    }
+    ParamExp::ReplacePrefix(s, r) => {
+      replace_param(&parsed, Shed::vars(get), s, r, ReplaceMode::Prefix)
+    }
+    ParamExp::ReplaceSuffix(s, r) => {
+      replace_param(&parsed, Shed::vars(get), s, r, ReplaceMode::Suffix)
+    }
+
+    ParamExp::VarNamesWithPrefix(prefix) => {
+      let flat = Shed::vars(ScopeStack::flatten_vars);
+      let match_vars: Vec<_> = flat
+        .keys()
+        .filter(|var| var.starts_with(&prefix))
+        .cloned()
+        .collect();
+      Ok(match_vars.join(" ").into())
+    }
+    ParamExp::ExpandInnerVar(inner) => {
+      if inner.contains("[@]") || inner.contains("[*]") {
+        let var_name = inner.find('[').map_or(&inner[..], |pos| &inner[..pos]);
+
+        if inner.contains("[*]") {
+          return Shed::vars(|v| v.get_array_keys(var_name)).map(Into::into);
+        }
+
+        let name = VarName::parse(&inner, allow_side_effects)?;
+        match Shed::vars(|v| v.split_keys(&name)) {
+          Some(fields) => Ok(var::emit_words(&parsed, &fields)),
+          None         => unreachable!("inner has an index, so it always returns fields"),
+        }
+      } else {
+        let inner_name = VarName::parse(&inner, allow_side_effects)?;
+        let value = Shed::vars(|v| v.resolve_words(&inner_name).unwrap_or_default()).as_one_word();
+        Ok(var!(&value.to_str_lossy()).into())
+      }
+    }
   }
 }
 
@@ -763,7 +681,7 @@ mod tests {
 
   fn test_param_expansion(val: &str) -> ShResult<VarStr> {
     perform_param_expansion(None, &SegStream::from_bytes(val.as_bytes()), true)
-      .map(|s| VarStr::from(s.into_bytes()))
+      .map(|s| VarStr::from(s.as_bytes()))
   }
 
   // ===================== ParamExp parsing =====================
@@ -1757,6 +1675,43 @@ mod tests {
     assert_eq!(test_param_expansion("x:0:1").unwrap(), "田");
     assert_eq!(test_param_expansion("x:1:1").unwrap(), "中");
     assert_eq!(test_param_expansion("x:2:2").unwrap(), "さん");
+  }
+
+  #[test]
+  fn slice_array_at_selects_elements() {
+    let guard = TestGuard::new();
+    test_input(r#"arr=(a b c d); printf '<%s>' "${arr[@]:1:2}""#).unwrap();
+    assert_eq!(guard.read_output(), "<b><c>");
+  }
+
+  #[test]
+  fn slice_array_at_start_only_takes_the_rest() {
+    let guard = TestGuard::new();
+    test_input(r#"arr=(a b c d); printf '<%s>' "${arr[@]:2}""#).unwrap();
+    assert_eq!(guard.read_output(), "<c><d>");
+  }
+
+  #[test]
+  fn slice_array_star_joins_the_selected_elements() {
+    let guard = TestGuard::new();
+    test_input(r#"arr=(a b c d); printf '<%s>' "${arr[*]:1:2}""#).unwrap();
+    assert_eq!(guard.read_output(), "<b c>");
+  }
+
+  #[test]
+  fn slice_positional_params_selects_elements() {
+    let guard = TestGuard::new();
+    test_input(r#"set -- one two three; printf '<%s>' "${@:1:2}""#).unwrap();
+    assert_eq!(guard.read_output(), "<one><two>");
+  }
+
+  #[test]
+  fn slice_on_scalar_with_at_subscript_selects_elements_not_chars() {
+    let _g = TestGuard::new();
+    set("x", "foo");
+    // Deviation: bash treats `[@]` on a scalar as a no-op subscript and
+    // substrings to "f". shed treats a scalar as a one-element array.
+    assert_eq!(test_param_expansion("x[@]:0:1").unwrap(), "foo");
   }
 
   // ─── pattern operands must not treat `(` as a subshell ────────────

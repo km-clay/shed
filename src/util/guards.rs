@@ -1,17 +1,18 @@
 //! RAII guards that snapshot and restore shell state (cwd, umask, scopes, shopts) on drop, plus the `defer!` macro.
 
+use itertools::Itertools;
 use nix::sys::stat;
 
 use crate::{
   HashSet,
   eval::{
     execute,
-    lex::Span,
     parse::{
       NdRule,
       ast::{Ast, NodeId},
     },
   },
+  expand::Word,
   state::{
     Shed, params,
     scopes::ScopeStack,
@@ -91,7 +92,7 @@ fn guard_drop(_: ()) {
 /// ## Safety
 /// This calls `Shed::meta_mut` internally.
 /// If this is called inside of another `meta()`/`meta_mut()` call, that is a `RefCell` panic.
-pub(crate) fn isolation_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
+pub(crate) fn isolation_guard(args: Option<Vec<Word>>) -> impl Drop {
   let ceiling_guard    = scope_ceiling_guard(args);
   let cwd_guard        = cwd_guard();
   let umask_guard      = umask_guard();
@@ -140,17 +141,17 @@ pub(crate) fn shopt_guard() -> impl Drop {
   })
 }
 
-fn make_arg_vec(args: Option<Vec<(VarStr, Span)>>) -> Option<Vec<VarStr>> {
-  args.map(|a| a.into_iter().map(|(s, _)| s).collect::<Vec<_>>())
+fn make_arg_vec(args: Option<Vec<Word>>) -> Option<Vec<VarStr>> {
+  args.map(|a| a.into_iter().map(|s| s.content()).collect_vec())
 }
 
-pub(crate) fn scope_ceiling_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
+pub(crate) fn scope_ceiling_guard(args: Option<Vec<Word>>) -> impl Drop {
   let arg_vec = make_arg_vec(args);
   Shed::vars_mut(|v| v.descend_with_ceiling(arg_vec));
   guard((), guard_drop)
 }
 
-pub(crate) fn function_scope_guard(args: Option<Vec<(VarStr, Span)>>) -> impl Drop {
+pub(crate) fn function_scope_guard(args: Option<Vec<Word>>) -> impl Drop {
   let arg_vec = make_arg_vec(args);
   Shed::vars_mut(|v| v.descend_into_function(arg_vec));
   guard((), guard_drop)

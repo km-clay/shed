@@ -8,6 +8,7 @@ use std::collections::{VecDeque, hash_map::Entry};
 use std::os::unix::ffi::OsStringExt;
 
 use bstr::ByteSlice;
+use itertools::Itertools;
 
 use super::{
   ShResult, Shed,
@@ -15,12 +16,18 @@ use super::{
   sherr,
   vars::{self, ArrIndex, ShellParam, Var, VarFlags, VarKind, VarKindTag, VarName, VarTab},
 };
+use crate::expand::Words;
 use crate::{
   HashMap,
-  expand::markers,
   state::vars::{VarStr, VarStrSliceExt},
 };
 use crate::{shopt, varstr};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SplitKind {
+  Values,
+  Keys,
+}
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ScopeStack {
@@ -286,10 +293,7 @@ impl ScopeStack {
       .get_local_var_flags(dst.name())
       .is_some_and(|flags| flags.contains(VarFlags::READONLY))
     {
-      return Err(sherr!(
-        ExecFail,
-        "Variable '{}' is readonly", dst.name()
-      ));
+      return Err(sherr!(ExecFail, "Variable '{}' is readonly", dst.name()));
     }
 
     let Some(var) = self.take_name(src)? else {
@@ -321,10 +325,7 @@ impl ScopeStack {
     if flags.contains(VarFlags::LOCAL) {
       let idx = self.local_scope_idx().unwrap_or(0);
       let Some(scope) = self.scopes.get_mut(idx) else {
-        return Err(sherr!(
-          ExecFail,
-          "No local scope available to set variable '{var_name}'"
-        ));
+        return Err(sherr!(ExecFail, "No local scope available to set variable '{var_name}'"));
       };
       if scope.var_exists(var_name) {
         scope.merge_flags(var_name, flags);
@@ -354,10 +355,7 @@ impl ScopeStack {
         .get_var_flags(var_name)
         .is_some_and(|flags| flags.contains(VarFlags::READONLY))
       {
-        return Err(sherr!(
-            ExecFail,
-            "Cannot overwrite readonly global '{var_name}'"
-        ));
+        return Err(sherr!(ExecFail, "Cannot overwrite readonly global '{var_name}'"));
       }
     }
 
@@ -447,10 +445,7 @@ impl ScopeStack {
   fn set_var_local(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
     let idx = self.local_scope_idx().unwrap_or(0);
     let Some(scope) = self.scopes.get_mut(idx) else {
-      return Err(sherr!(
-        ExecFail,
-        "No local scope available to set variable '{var_name}'"
-      ));
+      return Err(sherr!(ExecFail, "No local scope available to set variable '{var_name}'"));
     };
     scope.set_var(var_name, val, flags)
   }
@@ -481,11 +476,7 @@ impl ScopeStack {
             return Ok(items.clone());
           }
           _ => {
-            return Err(sherr!(
-              ExecFail,
-              "Variable '{}' is not an associative array",
-              var_name,
-            ));
+            return Err(sherr!(ExecFail, "Variable '{}' is not an associative array", var_name,));
           }
         }
       }
@@ -517,10 +508,7 @@ impl ScopeStack {
         match var.kind_mut() {
           VarKind::AssocArr(items) => return Ok(items),
           _ => {
-            return Err(sherr!(
-              ExecFail,
-              "Variable '{var_name}' is not an associative array"
-            ));
+            return Err(sherr!(ExecFail, "Variable '{var_name}' is not an associative array"));
           }
         }
       }
@@ -590,31 +578,17 @@ impl ScopeStack {
               if n < items.len() {
                 return Ok(items.remove(n));
               }
-              return Err(sherr!(
-                  ExecFail,
-                  "Index {} out of bounds for array '{}'",
-                  n,
-                  var_name,
-                ));
+              return Err(sherr!(ExecFail, "Index {} out of bounds for array '{}'", n, var_name,));
             }
             ArrIndex::FromBack(n) => {
               if n >= 1 && n <= items.len() {
                 let idx = items.len() - n;
                 return Ok(items.remove(idx));
               }
-              return Err(sherr!(
-                  ExecFail,
-                  "Index {} out of bounds for array '{}'",
-                  n,
-                  var_name,
-                ));
+              return Err(sherr!(ExecFail, "Index {} out of bounds for array '{}'", n, var_name,));
             }
             _ => {
-              return Err(sherr!(
-                  ExecFail,
-                  "Cannot take all elements of array '{}'",
-                  var_name,
-                ));
+              return Err(sherr!(ExecFail, "Cannot take all elements of array '{}'", var_name,));
             }
           },
           _ => {
@@ -641,19 +615,7 @@ impl ScopeStack {
         match var.kind() {
           VarKind::Arr(items) => {
             match idx {
-              ArrIndex::AllSplit => {
-                let arg_sep          = crate::expand::markers::ARG_SEP.to_string();
-                let start            = slice_start.unwrap_or(0);
-                let take             = slice_len.unwrap_or(items.len().saturating_sub(start));
-                let selected: Vec<_> = items.iter().skip(start).take(take).cloned().collect();
-
-                if selected.is_empty() {
-                  let mut buf = [0u8; 4];
-                  return Ok(VarStr::from(markers::NULL_EXPAND.encode_utf8(&mut buf)));
-                }
-
-                return Ok(selected.join_with(&arg_sep));
-              }
+              ArrIndex::AllSplit => unreachable!(),
               ArrIndex::AllJoined => {
                 let ifs = self
                   .try_get_var("IFS")
@@ -684,42 +646,23 @@ impl ScopeStack {
                 if items.len() >= n {
                   items.len() - n
                 } else {
-                  return Err(sherr!(
-                    ExecFail,
-                    "Index {} out of bounds for array '{}'",
-                    n,
-                    var_name,
-                  ));
+                  return Err(
+                    sherr!(ExecFail, "Index {} out of bounds for array '{}'", n, var_name,),
+                  );
                 }
               }
               _ => {
-                return Err(sherr!(
-                  ExecFail,
-                  "Cannot index all elements of array '{}'",
-                  var_name,
-                ));
+                return Err(sherr!(ExecFail, "Cannot index all elements of array '{}'", var_name,));
               }
             };
 
             if let Some(item) = items.get(idx) {
               return Ok(item.clone());
             }
-            return Err(sherr!(
-              ExecFail,
-              "Index {idx} out of bounds for array '{}'",
-              var_name,
-            ));
+            return Err(sherr!(ExecFail, "Index {idx} out of bounds for array '{}'", var_name,));
           }
           VarKind::AssocArr(items) => match idx {
-            ArrIndex::AllSplit => {
-              if items.is_empty() {
-                let mut buf = [0u8; 4];
-                return Ok(VarStr::from(markers::NULL_EXPAND.encode_utf8(&mut buf)));
-              }
-              let arg_sep              = crate::expand::markers::ARG_SEP.to_string();
-              let values: Vec<&VarStr> = items.iter().map(|(_, v)| v).collect();
-              return Ok(values.join_with(&arg_sep));
-            }
+            ArrIndex::AllSplit => unreachable!(),
             ArrIndex::AllJoined => {
               let ifs = self
                 .try_get_var("IFS")
@@ -753,24 +696,7 @@ impl ScopeStack {
     Ok(VarStr::default())
   }
 
-  /// The index/key fields of `${!arr[@]}` for a split expansion. `None` when
-  /// `var_name` names no existing array.
-  pub(crate) fn array_keys_fields(&self, var_name: &str) -> Option<Vec<VarStr>> {
-    for scope in self.scopes_rev() {
-      if scope.var_exists(var_name)
-        && let Some(var) = scope.vars().get(var_name)
-      {
-        return Some(match var.kind() {
-          VarKind::Arr(items)      => (0..items.len()).map(|i| i.to_string().into()).collect(),
-          VarKind::AssocArr(items) => items.iter().map(|(k, _)| k.clone()).collect(),
-          _ => return None,
-        });
-      }
-    }
-    None
-  }
-
-  pub(crate) fn get_array_keys(&self, var_name: &str, joined: bool) -> ShResult<VarStr> {
+  pub(crate) fn get_array_keys(&self, var_name: &str) -> ShResult<VarStr> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)
@@ -778,32 +704,26 @@ impl ScopeStack {
         match var.kind() {
           VarKind::Arr(items) => {
             let indices: Vec<VarStr> = (0..items.len()).map(|i| i.to_string().into()).collect();
-            let sep = if joined {
-              self
-                .try_get_var("IFS")
-                .unwrap_or_else(|| " \t\n".into())
-                .chars()
-                .next()
-                .unwrap_or(' ')
-                .to_string()
-            } else {
-              crate::expand::markers::ARG_SEP.to_string()
-            };
+            let sep = self
+              .try_get_var("IFS")
+              .unwrap_or_else(|| " \t\n".into())
+              .chars()
+              .next()
+              .unwrap_or(' ')
+              .to_string();
+
             return Ok(indices.join_with(&sep));
           }
           VarKind::AssocArr(items) => {
             let keys: Vec<&VarStr> = items.iter().map(|(k, _)| k).collect();
-            let sep = if joined {
-              self
-                .try_get_var("IFS")
-                .unwrap_or_else(|| " \t\n".into())
-                .chars()
-                .next()
-                .unwrap_or(' ')
-                .to_string()
-            } else {
-              crate::expand::markers::ARG_SEP.to_string()
-            };
+            let sep = self
+              .try_get_var("IFS")
+              .unwrap_or_else(|| " \t\n".into())
+              .chars()
+              .next()
+              .unwrap_or(' ')
+              .to_string();
+
             return Ok(keys.join_with(&sep));
           }
           _ => {
@@ -906,7 +826,7 @@ impl ScopeStack {
     }
     false
   }
-  pub(crate) fn resolve_var(&self, var: &VarName) -> Option<VarStr> {
+  fn resolve_var(&self, var: &VarName) -> Option<VarStr> {
     if let Some(idx) = var.index() {
       if !self.index_is_set(var.name(), idx) {
         return None;
@@ -919,29 +839,80 @@ impl ScopeStack {
     }
   }
 
+  pub(crate) fn resolve_words(&self, var: &VarName) -> Option<Words> {
+    if var.is_argv_joined() || var.is_argv_split() {
+      // "$@" or "$*"
+      Some(self.sh_argv_scope().pos_args().cloned().collect())
+    } else if var.is_all_joined() || var.is_all_split() {
+      // "${array[@]}" or "${array[*]}"
+      self.split_values(var)
+    } else {
+      // "$var"
+      self.resolve_var(var).map(Words::from)
+    }
+  }
+
+  pub(crate) fn split_keys(&self, var: &VarName) -> Option<Words> {
+    self.split_words(var, SplitKind::Keys)
+  }
+
+  pub(crate) fn split_values(&self, var: &VarName) -> Option<Words> {
+    self.split_words(var, SplitKind::Values)
+  }
+
   /// The individual fields of an `[@]` split expansion, honoring an array
   /// slice. `None` when `var` is not a split form or names no existing array.
-  pub(crate) fn split_fields(&self, var: &VarName) -> Option<Vec<VarStr>> {
-    if !matches!(var.index(), Some(ArrIndex::AllSplit)) {
+  fn split_words(&self, var: &VarName, split_kind: SplitKind) -> Option<Words> {
+    if !matches!(var.index(), Some(ArrIndex::AllSplit | ArrIndex::AllJoined)) {
       return None;
     }
     for scope in self.scopes_rev() {
-      if scope.var_exists(var.name())
-        && let Some(v) = scope.vars().get(var.name())
-      {
-        let start = var.slice_start().unwrap_or(0);
-        return Some(match v.kind() {
-          VarKind::Arr(items) => {
-            let take = var.slice_len().unwrap_or(items.len().saturating_sub(start));
+      let Some(v) = scope.vars().get(var.name()) else {
+        continue;
+      };
 
-            items.iter().skip(start).take(take).cloned().collect()
-          }
-          VarKind::AssocArr(items) => items.iter().map(|(_, v)| v.clone()).collect(),
-          _ => return None,
-        });
-      }
+      let fields = match (v.kind(), split_kind) {
+        (VarKind::Arr(items), SplitKind::Values) => items.iter().cloned().collect_vec(),
+        (VarKind::Arr(items), SplitKind::Keys) => items
+          .iter()
+          .enumerate()
+          .map(|(i, _)| varstr!("{i}"))
+          .collect_vec(),
+
+        (VarKind::AssocArr(items), SplitKind::Values) => {
+          items.iter().map(|(_, v)| v.clone()).collect_vec()
+        }
+        (VarKind::AssocArr(items), SplitKind::Keys) => {
+          items.iter().map(|(k, _)| k.clone()).collect_vec()
+        }
+
+        (VarKind::Str(s), SplitKind::Values) => {
+          vec![s.clone()]
+        }
+        (VarKind::Int(i), SplitKind::Values) => {
+          vec![varstr!("{i}")]
+        }
+        (VarKind::Magic(m), SplitKind::Values) => match m() {
+          Some(s) => vec![s],
+          None    => vec![],
+        },
+
+        (VarKind::Int(_) | VarKind::Str(_) | VarKind::Magic(_), SplitKind::Keys) => {
+          vec![varstr!("0")]
+        }
+
+        (VarKind::Unset, _) => vec![],
+      };
+
+      let skip   = var.slice_start().unwrap_or(0);
+      let take   = var.slice_len().unwrap_or(fields.len().saturating_sub(skip));
+
+      let sliced = fields.into_iter().skip(skip).take(take);
+
+      return Some(sliced.collect());
     }
-    None
+
+    Some(Words::default())
   }
   pub(crate) fn try_take_var_kind(&mut self, var_name: &str) -> ShResult<Option<VarKind>> {
     Ok(self.try_take_var(var_name)?.map(Var::into_kind))
@@ -1038,10 +1009,7 @@ impl ScopeStack {
   }
   pub(crate) fn try_take_param(&mut self, param: ShellParam) -> ShResult<Option<VarStr>> {
     if param.is_global() && self.global_params.contains_key(&param) {
-      return Err(sherr!(
-        ExecFail,
-        "Cannot take global shell parameter '{param}'"
-      ));
+      return Err(sherr!(ExecFail, "Cannot take global shell parameter '{param}'"));
     }
     // Positional params are scope-local; only check the current scope
     if matches!(
@@ -1180,18 +1148,6 @@ mod index_var_sliced_tests {
   // ─── Arr: AllSplit / AllJoined ────────────────────────────────────
 
   #[test]
-  fn arr_all_split_joins_with_arg_sep() {
-    let _g = TestGuard::new();
-    set_arr("arr", &["a", "b", "c"]);
-    // ARG_SEP is the marker char that splits later. We just check that
-    // all values appear.
-    let result = index("arr", &ArrIndex::AllSplit, None, None).unwrap();
-    assert!(result.to_str_lossy().contains('a'));
-    assert!(result.to_str_lossy().contains('b'));
-    assert!(result.to_str_lossy().contains('c'));
-  }
-
-  #[test]
   fn arr_all_joined_uses_first_char_of_ifs() {
     let _g = TestGuard::new();
     set_str("IFS", ",xy");
@@ -1218,18 +1174,6 @@ mod index_var_sliced_tests {
   }
 
   // ─── Arr: slicing ────────────────────────────────────────────────
-
-  #[test]
-  fn arr_all_split_with_slice_skips_and_takes() {
-    let _g = TestGuard::new();
-    set_arr("arr", &["a", "b", "c", "d", "e"]);
-    // start=1, len=2 → ["b","c"]
-    let result = index("arr", &ArrIndex::AllSplit, Some(1), Some(2)).unwrap();
-    assert!(result.to_str_lossy().contains('b'));
-    assert!(result.to_str_lossy().contains('c'));
-    assert!(!result.to_str_lossy().contains('a'));
-    assert!(!result.to_str_lossy().contains('d'));
-  }
 
   #[test]
   fn arr_all_joined_with_slice() {
@@ -1293,15 +1237,6 @@ mod index_var_sliced_tests {
     assert_eq!(result, "1+2");
   }
 
-  #[test]
-  fn assoc_arr_all_split() {
-    let _g = TestGuard::new();
-    set_assoc("amap", &[("a", "1"), ("b", "2")]);
-    let result = index("amap", &ArrIndex::AllSplit, None, None).unwrap();
-    assert!(result.to_str_lossy().contains('1'));
-    assert!(result.to_str_lossy().contains('2'));
-  }
-
   // ─── Scalar var errors ───────────────────────────────────────────
 
   #[test]
@@ -1361,8 +1296,8 @@ mod get_array_keys_tests {
     });
   }
 
-  fn get_keys(name: &str, joined: bool) -> ShResult<VarStr> {
-    Shed::vars(|v| v.get_array_keys(name, joined))
+  fn get_keys(name: &str, _joined: bool) -> ShResult<VarStr> {
+    Shed::vars(|v| v.get_array_keys(name))
   }
 
   #[test]
@@ -1382,31 +1317,12 @@ mod get_array_keys_tests {
   }
 
   #[test]
-  fn arr_joined_false_uses_arg_sep_marker() {
-    let _g = TestGuard::new();
-    set_arr("arr", &["x", "y"]);
-    let out = get_keys("arr", false).unwrap();
-    // Separator is the ARG_SEP marker char between the two indices.
-    let sep = crate::expand::markers::ARG_SEP.to_string();
-    assert_eq!(out, format!("0{sep}1"));
-  }
-
-  #[test]
   fn assoc_keys_returned_in_insertion_order() {
     let _g = TestGuard::new();
     set_assoc("h", &[("foo", "1"), ("bar", "2"), ("baz", "3")]);
     let out = get_keys("h", true).unwrap();
     // Joined with space (default IFS first char).
     assert_eq!(out, "foo bar baz");
-  }
-
-  #[test]
-  fn assoc_joined_false_uses_arg_sep_marker() {
-    let _g = TestGuard::new();
-    set_assoc("h", &[("k1", "a"), ("k2", "b")]);
-    let out = get_keys("h", false).unwrap();
-    let sep = crate::expand::markers::ARG_SEP.to_string();
-    assert_eq!(out, format!("k1{sep}k2"));
   }
 
   #[test]

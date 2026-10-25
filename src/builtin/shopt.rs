@@ -1,4 +1,5 @@
 use crate::{
+  expand::Word,
   outln, sherr,
   state::{Shed, shopt::ShOpts, vars::VarStr},
   util::{
@@ -32,7 +33,7 @@ impl super::Builtin for Shopt {
       return util::with_status(0);
     }
 
-    for (mut arg, span) in arg_vec {
+    for mut arg in arg_vec {
       // Split into key + optional value so the deprecation check works
       // for both `shopt key` and `shopt key=value`.
       let (key, value) = match arg.to_str_lossy().split_once('=') {
@@ -44,17 +45,18 @@ impl super::Builtin for Shopt {
         .iter()
         .find(|(old, _)| *old == key.to_str_lossy())
       {
-        sherr!(DeprecationWarning @ span,
+        sherr!(DeprecationWarning ? arg.span(),
           "shopt: '{key}' has been renamed to '{new_key}'"
         )
         .print_error();
         arg = match value {
-          Some(v) => varstr!("{new_key}={v}"),
+          Some(v) => Word::new(varstr!("{new_key}={v}")).with_span_opt(arg.span()),
           None    => (*new_key).into(),
         };
       }
 
-      let Some(output) = Shed::shopts_mut(|s| s.query(&arg.to_str_lossy())).promote_err(span)?
+      let Some(output) =
+        Shed::shopts_mut(|s| s.query(&arg.to_str_lossy())).option_promote(arg.span())?
       else {
         continue;
       };

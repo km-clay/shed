@@ -4,7 +4,17 @@ use std::{fs, io, sync::Arc};
 use nix::libc::STDOUT_FILENO;
 
 use crate::{
-  builtin::{BuiltinArgs, opt::OptSpec}, errln, eval::lex::Span, opt, procio::{self, OsSink, RedirSpec, RedirType, Sink}, sherr, signal, state::vars::VarStr, util::{self, error::{ShErr, ShResult}},
+  builtin::{BuiltinArgs, opt::OptSpec},
+  errln,
+  expand::Word,
+  opt,
+  procio::{self, OsSink, RedirSpec, RedirType, Sink},
+  sherr, signal,
+  state::vars::VarStr,
+  util::{
+    self,
+    error::{ShErr, ShResult},
+  },
 };
 
 struct ThruOpts {
@@ -38,8 +48,7 @@ fn open_tee_dest(dest: VarStr, append: bool) -> Result<Arc<dyn Sink>, (VarStr, S
       Ok(Arc::new(OsSink::new(file.into())))
     }
     (None, false) => {
-      let file = std::fs::File::create(&dest)
-        .map_err(|e| (dest, e.into()))?;
+      let file = std::fs::File::create(&dest).map_err(|e| (dest, e.into()))?;
       Ok(Arc::new(OsSink::new(file.into())))
     }
   }
@@ -98,9 +107,9 @@ impl super::Builtin for Thru {
       })
       .unwrap_or_default();
 
-    let mut sources: Vec<Option<(VarStr, Span)>> = args
+    let mut sources: Vec<Option<Word>> = args
       .arguments()
-      .map(|(a, s)| (a.to_str_lossy() != "-").then(|| (a.clone(), s)))
+      .map(|a| (a.to_str_lossy() != "-").then(|| a.clone()))
       .collect();
     if sources.is_empty() {
       sources.push(None);
@@ -114,10 +123,10 @@ impl super::Builtin for Thru {
       }
 
       let reader: Arc<dyn Sink> = match &src {
-        Some((path, p_span)) => match fs::File::open(path) {
+        Some(path) => match fs::File::open(path) {
           Ok(f) => Arc::new(OsSink::new(f.into())),
           Err(e) => {
-            sherr!(ExecFail @ *p_span, "{e}").print_error();
+            sherr!(ExecFail ? path.span(), "{e}").print_error();
             continue;
           }
         },
@@ -129,7 +138,7 @@ impl super::Builtin for Thru {
           }
         },
       };
-      let span = src.map(|(_, s)| s);
+      let span = src.and_then(|w| w.span());
 
       let can_seek =
         (from.is_some() || until.is_some()) && reader.seek(io::SeekFrom::Current(0)).is_ok();
@@ -285,10 +294,10 @@ impl super::Builtin for Thru {
 
 impl Thru {
   fn parse_opts(args: &BuiltinArgs) -> ShResult<ThruOpts> {
-    let count  = args.has_opt("count");
-    let once   = args.has_opt("once");
-    let append = args.has_opt("append");
-    let mut tee = vec![];
+    let     count  = args.has_opt("count");
+    let     once   = args.has_opt("once");
+    let     append = args.has_opt("append");
+    let mut tee    = vec![];
 
     for opt in args.options() {
       if opt.key() == "tee" {

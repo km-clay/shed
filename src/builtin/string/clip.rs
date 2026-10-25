@@ -50,19 +50,15 @@ impl ClipSpec {
     Ok(chosen.unwrap_or(Unit::Chars))
   }
   fn parse_args(args: &mut BuiltinArgs) -> ShResult<Self> {
-    let mut arguments = args
-      .arguments()
-      .map(|(a, s)| (a.clone(), s))
-      .collect::<Vec<_>>()
-      .into_iter();
+    let mut arguments = args.arguments().cloned().collect::<Vec<_>>().into_iter();
 
-    let unit = Self::get_unit(args)?;
+    let     unit      = Self::get_unit(args)?;
 
     let limit = arguments
       .next()
-      .map(|(a, s)| {
-        a.parse::<usize>()
-          .map_err(|v| sherr!(ParseErr @ s, "invalid limit '{v}'"))
+      .map(|w| {
+        w.parse::<usize>()
+          .map_err(|v| sherr!(ParseErr ? w.span(), "invalid limit '{v}'"))
       })
       .transpose()?;
 
@@ -113,7 +109,7 @@ impl Builtin for Clip {
     let string = self
       .get_input_with(&mut args, |a| a.arguments().count() <= 1)
       .map_or_else(
-        || argv::join_raw_arg_iter(args.arguments().skip(1)).0,
+        || argv::join_raw_arg_iter(args.arguments().skip(1)).content(),
         VarStr::from,
       );
 

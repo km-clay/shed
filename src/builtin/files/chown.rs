@@ -64,7 +64,7 @@ impl Builtin for ChOwn {
     let mut arguments = args.arguments().peekable();
     let     no_deref  = args.has_opt("no-deref");
 
-    let Some((owner, o_span)) = arguments.next() else {
+    let Some(owner) = arguments.next() else {
       return Err(sherr!(ExecFail @ args.cmd_span(), "missing owner for `fs chown`").with_code(2));
     };
 
@@ -75,11 +75,17 @@ impl Builtin for ChOwn {
     let (user, group) = split_owner(owner);
 
     if let (None, None) = (user, group) {
-      return Err(sherr!(ExecFail @ o_span, "no user or group given for `fs chown`").with_code(2));
+      return Err(
+        sherr!(ExecFail ? owner.span(), "no user or group given for `fs chown`").with_code(2),
+      );
     }
 
-    let u_span = user.map(|u| o_span.sub_span(|s, _| (s, s + u.len())));
-    let g_span = group.map(|g| o_span.sub_span(|s, e| (s + owner.len() - g.len(), e)));
+    let u_span = user.and_then(|u| owner.span().map(|s| s.sub_span(|s, _| (s, s + u.len()))));
+    let g_span = group.and_then(|g| {
+      owner
+        .span()
+        .map(|s| s.sub_span(|s, e| (s + owner.len() - g.len(), e)))
+    });
 
     let uid = user
       .map(|u| resolve_uid(&u.to_str_lossy()))
@@ -93,7 +99,7 @@ impl Builtin for ChOwn {
       .option_promote(g_span)?
       .map(Gid::as_raw);
 
-    for (file, f_span) in arguments {
+    for file in arguments {
       let path: &Path = file.as_ref();
       let res = if no_deref {
         fs::lchown(path, uid, gid)
@@ -104,36 +110,29 @@ impl Builtin for ChOwn {
       if let Err(e) = res {
         let msg = varstr!("cannot change owner of `{file}`");
         let err = match e.kind() {
-          EK::NotFound => sherr!(ExecFail @ f_span, "{msg}: no such file or directory"        ),
-          EK::InvalidFilename => {
-            sherr!(ExecFail @ f_span, "{msg}: invalid filename"                 )
-          }
-          EK::ReadOnlyFilesystem => {
-            sherr!(ExecFail @ f_span, "{msg}: read-only filesystem"             )
-          }
-          EK::NotADirectory => {
-            sherr!(ExecFail @ f_span, "{msg}: path component is not a directory")
-          }
+          EK::NotFound           => sherr!(ExecFail, "{msg}: no such file or directory"),
+          EK::InvalidFilename    => sherr!(ExecFail, "{msg}: invalid filename"),
+          EK::ReadOnlyFilesystem => sherr!(ExecFail, "{msg}: read-only filesystem"),
+          EK::NotADirectory      => sherr!(ExecFail, "{msg}: path component is not a directory"),
+
           EK::PermissionDenied => match e.raw_os_error() {
-            Some(libc::EPERM) => {
-              sherr!(ExecFail @ f_span, "{msg}: operation not permitted"          ).with_note(
-                "only the superuser can change a file's user; a group must be one you belong to"
-                  .into(),
-              )
-            }
-            _ => sherr!(ExecFail @ f_span, "{msg}: permission denied"                ),
+            Some(libc::EPERM) => sherr!(ExecFail, "{msg}: operation not permitted").with_note(
+              "only the superuser can change a file's user; a group must be one you belong to"
+                .into(),
+            ),
+            _ => sherr!(ExecFail, "{msg}: permission denied"),
           },
 
           _ => {
             if e.raw_os_error() == Some(libc::ELOOP) {
-              sherr!(ExecFail @ f_span, "{msg}: too many levels of symbolic links")
+              sherr!(ExecFail, "{msg}: too many levels of symbolic links")
             } else {
-              sherr!(ExecFail @ f_span, "{msg}: {e}")
+              sherr!(ExecFail, "{msg}: {e}")
             }
           }
         };
 
-        err.print_error();
+        err.option_promote(file.span()).print_error();
         status = 1;
       }
     }

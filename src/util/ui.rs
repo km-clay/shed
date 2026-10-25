@@ -8,7 +8,9 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 use yansi::{Paint, Painted, Style};
 
+use crate::state::vars::VarStr;
 use crate::util::error::ShErr;
+use crate::varstr;
 use crate::{
   match_loop, sherr,
   state::{Shed, terminal::Terminal},
@@ -500,11 +502,7 @@ pub(crate) fn hex_to_rgb(hex: &str) -> ShResult<(u8, u8, u8)> {
       .chars()
       .all(|ch: char| ('a'..='f').contains(&ch) || ch.is_ascii_digit())
   {
-    return Err(sherr!(
-      ParseErr,
-      "Invalid hex color '{}' in color description",
-      hex
-    ));
+    return Err(sherr!(ParseErr, "Invalid hex color '{}' in color description", hex));
   }
   let r = u8::from_str_radix(&hex[..2], 16).unwrap();
   let g = u8::from_str_radix(&hex[2..4], 16).unwrap();
@@ -513,7 +511,7 @@ pub(crate) fn hex_to_rgb(hex: &str) -> ShResult<(u8, u8, u8)> {
   Ok((r, g, b))
 }
 
-pub(crate) fn stylize_loglevel(level: log::Level) -> String {
+pub(crate) fn stylize_loglevel(level: log::Level) -> VarStr {
   let style = match level {
     log::Level::Error => style_from_description("red bold").unwrap(),
     log::Level::Warn  => style_from_description("yellow bold").unwrap(),
@@ -521,7 +519,7 @@ pub(crate) fn stylize_loglevel(level: log::Level) -> String {
     log::Level::Debug => style_from_description("blue bold").unwrap(),
     log::Level::Trace => style_from_description("magenta bold").unwrap(),
   };
-  format!("{level}").paint(style.style()).to_string()
+  varstr!("{}", level.paint(style.style()))
 }
 
 pub(crate) fn calc_str_width(s: &str) -> usize {
@@ -841,8 +839,8 @@ mod stylize_loglevel_tests {
       log::Level::Trace,
     ] {
       let out  = stylize_loglevel(level);
-      let name = format!("{level}");
-      assert!(out.contains(&name), "level {level}: {out:?}");
+      let name = varstr!("{level}");
+      assert!(out.contains_slice(&name), "level {level}: {out:?}");
     }
   }
 
@@ -851,7 +849,7 @@ mod stylize_loglevel_tests {
   #[test]
   fn output_is_ansi_styled() {
     let out = stylize_loglevel(log::Level::Error);
-    assert!(out.contains('\x1b'));
+    assert!(out.contains(&b'\x1b'));
     assert!(out.len() > "ERROR".len());
   }
 
@@ -867,7 +865,7 @@ mod stylize_loglevel_tests {
       log::Level::Debug,
       log::Level::Trace,
     ];
-    let outputs: Vec<String> = levels.iter().copied().map(stylize_loglevel).collect();
+    let outputs: Vec<VarStr> = levels.iter().copied().map(stylize_loglevel).collect();
     for (i, a) in outputs.iter().enumerate() {
       for (j, b) in outputs.iter().enumerate() {
         if i != j {

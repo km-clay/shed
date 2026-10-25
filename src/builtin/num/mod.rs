@@ -36,10 +36,7 @@ impl ReadLimit {
       .parse::<usize>()
       .map_err(|_| sherr!(ParseErr, "invalid integer for -n: {arg}"))?;
     if n == 0 {
-      return Err(sherr!(
-        ParseErr,
-        "invalid integer for -n: {arg} (must be > 0)"
-      ));
+      return Err(sherr!(ParseErr, "invalid integer for -n: {arg} (must be > 0)"));
     }
     Ok(Self::AtMost(n))
   }
@@ -49,10 +46,7 @@ impl ReadLimit {
       .parse::<usize>()
       .map_err(|_| sherr!(ParseErr, "invalid integer for -N: {arg}"))?;
     if n == 0 {
-      return Err(sherr!(
-        ParseErr,
-        "invalid integer for -N: {arg} (must be > 0)"
-      ));
+      return Err(sherr!(ParseErr, "invalid integer for -N: {arg} (must be > 0)"));
     }
     Ok(Self::Exactly(n))
   }

@@ -417,9 +417,10 @@ pub(crate) fn scan_param_exp<C: ByteCursor>(c: &mut C, mut depth: usize) -> bool
   let mut qt = QuoteState::default();
   match_loop!(c.next_byte() => b, {
     b'\\' if !qt.in_single() => c.bump(),
-    b'\'' => qt.toggle_single(),
-    b'"' if !qt.in_single() => qt.toggle_double(),
+
+    b'\'' | b'"' => { qt.toggle_from(b); },
     _ if qt.in_quote() => {}
+
     b'$' if c.peek_byte() == Some(b'{') => {
       c.next_byte();
       depth += 1;
@@ -453,9 +454,10 @@ fn scan_delims<C: ByteCursor>(opener: u8, c: &mut C, mut depth: usize) -> bool {
   let mut qt = QuoteState::default();
   match_loop!(c.next_byte() => b, {
     b'\\' if !qt.in_single() => c.bump(),
-    b'\'' => qt.toggle_single(),
-    b'"' if !qt.in_single() => qt.toggle_double(),
+
+    b'\'' | b'"' => { qt.toggle_from(b); },
     _ if qt.in_quote() => {}
+
     _ if b == opener => depth += 1,
     _ if b == closer => {
       depth -= 1;

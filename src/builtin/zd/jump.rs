@@ -20,7 +20,7 @@ impl Builtin for ZdJump {
     // `zd pro fern` still finds `~/projects/fern`.
     let query = args
       .arguments()
-      .map(|(a, _)| a.to_str_lossy())
+      .map(|a| a.to_str_lossy())
       .collect::<String>()
       .trim_end_matches('/')
       .to_string();

@@ -113,9 +113,7 @@ impl super::Builtin for ReadFloat {
     if let ReadLimit::Exactly(_) = limit
       && whole < want
     {
-      return Err(
-        sherr!(ExecFail @ args.cmd_span(), "incomplete float read: got {whole} floats, expected {want}"),
-      );
+      return Err(sherr!(ExecFail @ args.cmd_span(), "incomplete float read: got {whole} floats, expected {want}"));
     }
 
     if whole == 0 {
@@ -158,7 +156,7 @@ impl super::Builtin for WriteFloat {
     if let Some(input) = self.get_input(&mut args) {
       fields = strops::ifs_split(&input, &ifs, None);
     } else {
-      for (arg, _) in args.arguments() {
+      for arg in args.arguments() {
         let split = strops::ifs_split(arg, &ifs, None);
         fields.extend(split);
       }
@@ -170,7 +168,8 @@ impl super::Builtin for WriteFloat {
 
     let per = if spec.decimal() { 1 } else { 3 };
     if !fields.len().is_multiple_of(per) {
-      return Err(sherr!(ParseErr @ args.cmd_span(), "expected a multiple of {per} fields per float, got {}", fields.len())).with_code(2);
+      return Err(sherr!(ParseErr @ args.cmd_span(), "expected a multiple of {per} fields per float, got {}", fields.len()))
+        .with_code(2);
     }
 
     for chunk in fields.chunks_exact(per) {

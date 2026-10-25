@@ -1,15 +1,9 @@
-pub(crate) type Marker = char;
+type Marker = char;
 
 #[cfg(test)]
 pub(crate) fn is_marker(c: Marker) -> bool {
   ('\u{fdd0}'..='\u{fdef}').contains(&c)
 }
-
-/// Used to separate args in `$@` expansions
-pub(crate) const ARG_SEP: Marker = '\u{fdd6}';
-/// Used to represent an empty `$@` expansion
-pub(crate) const NULL_EXPAND: Marker = '\u{fdd5}';
-
 
 // Help command formatting markers
 pub(crate) const TAG: Marker = '\u{fddb}';

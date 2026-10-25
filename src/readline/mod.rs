@@ -1198,10 +1198,7 @@ impl ShedLine {
       let ev = if remap {
         defer! { dec_map_depth(); }
         if inc_map_depth() > MAX_KEYMAP_DEPTH {
-          return Err(sherr!(
-            ExecFail,
-            "keymap recursion limit ({MAX_KEYMAP_DEPTH}) exceeded"
-          ));
+          return Err(sherr!(ExecFail, "keymap recursion limit ({MAX_KEYMAP_DEPTH}) exceeded"));
         }
 
         self.dispatch_key(key)?

@@ -1,5 +1,7 @@
 use std::fs;
 
+use itertools::Itertools;
+
 use crate::{
   opt, sherr,
   state::db,
@@ -14,8 +16,8 @@ impl Builtin for ZdRemove {
     vec![opt!("recursive" | b'r')]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let recursive            = args.has_opt("recursive");
-    let targets: Vec<String> = args.arguments().map(|(a, _)| a.to_string()).collect();
+    let recursive = args.has_opt("recursive");
+    let targets   = args.arguments().map(|a| a.to_string()).collect_vec();
 
     if targets.is_empty() {
       return Err(sherr!(ExecFail @ args.span(), "remove requires a directory").with_code(2));

@@ -434,29 +434,20 @@ impl FloatSpec {
 
     let (e_raw, m_raw) = if shifted == exp_mask as Num {
       if mant > mant_mask {
-        return Err(sherr!(
-          ParseErr,
-          "mantissa out of range for infinity/NaN: {mant}"
-        ))
-        .with_code(2);
+        return Err(sherr!(ParseErr, "mantissa out of range for infinity/NaN: {mant}"))
+          .with_code(2);
       }
       (exp_mask, mant)
     } else if mant >= implicit {
       if shifted < 1 {
-        return Err(sherr!(
-          ParseErr,
-          "exponent too small for normalized mantissa: {exp}"
-        ))
-        .with_code(2);
+        return Err(sherr!(ParseErr, "exponent too small for normalized mantissa: {exp}"))
+          .with_code(2);
       }
       (shifted as u128, mant - implicit)
     } else {
       if shifted != 1 {
-        return Err(sherr!(
-          ParseErr,
-          "exponent too large for denormalized mantissa: {exp}"
-        ))
-        .with_code(2);
+        return Err(sherr!(ParseErr, "exponent too large for denormalized mantissa: {exp}"))
+          .with_code(2);
       }
       (0, mant)
     };

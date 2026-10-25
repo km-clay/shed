@@ -129,10 +129,7 @@ impl super::LineBuf {
       end.saturating_sub(1)
     };
     let AddressRange::Single(addr) = dest else {
-      return Err(sherr!(
-        ExecFail,
-        "move/copy take a single destination address"
-      ));
+      return Err(sherr!(ExecFail, "move/copy take a single destination address"));
     };
     let insert_idx = match addr {
       LineAddr::Number(n) if *n == 0 => 0,

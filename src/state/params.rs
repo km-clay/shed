@@ -11,7 +11,7 @@ use crate::{
   try_var,
   util::{
     self, guards,
-    strops::{ByteCursor, SliceCursor},
+    strops::{ByteCursor, QuoteState, SliceCursor},
   },
   varstr,
 };
@@ -36,18 +36,28 @@ pub(crate) fn parse_arr_bracket(var_name: &[u8]) -> Option<(VarStr, VarStr)> {
   let mut name          = util::scratch_buf();
   let mut idx_raw       = util::scratch_buf();
   let mut bracket_depth = 0;
+  let mut qt_state      = QuoteState::default();
 
   match_loop!(cur.next_byte() => ch, {
     b'\\' => {
       cur.next_byte();
     }
-    b'[' => {
+    b'\'' | b'"' => {
+      qt_state.toggle_from(ch);
+      if bracket_depth > 0 {
+        idx_raw.push(ch);
+      } else {
+        name.push(ch);
+      }
+    }
+
+    b'[' if qt_state.outside() => {
       bracket_depth += 1;
       if bracket_depth > 1 {
         idx_raw.push(ch);
       }
     }
-    b']' => {
+    b']' if qt_state.outside() => {
       if bracket_depth > 0 {
         bracket_depth -= 1;
         if bracket_depth == 0 {

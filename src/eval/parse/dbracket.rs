@@ -10,7 +10,7 @@ use nix::{
 use crate::{
   eval::lex::TkRule,
   expand::{
-    Expander, case, escape, glob,
+    Expander, Word, case, escape, glob,
     stream::{Marker, Quote, Unit},
     var,
   },
@@ -171,11 +171,11 @@ pub(crate) fn eval_test_expr(ast: &Ast, expr: ExprId) -> ShResult<bool> {
     TestExpr::Not { expr }     => !eval_test_expr(ast, expr)?,
 
     TestExpr::Unary { op, operand } => {
-      let (val, _) = expand_operand(&ast[operand])?;
+      let val = expand_operand(&ast[operand])?;
       eval_unary(&op, val)
     }
     TestExpr::Truthy { operand } => {
-      let (val, _) = expand_operand(&ast[operand])?;
+      let val = expand_operand(&ast[operand])?;
       !val.is_empty()
     }
     TestExpr::Binary { lhs, op, rhs } => {
@@ -188,13 +188,13 @@ pub(crate) fn eval_test_expr(ast: &Ast, expr: ExprId) -> ShResult<bool> {
   Ok(res)
 }
 
-fn expand_operand(tk: &Tk) -> ShResult<(VarStr, Span)> {
+fn expand_operand(tk: &Tk) -> ShResult<Word> {
   let val = Expander::new(tk).no_glob().no_split().expand_no_split()?;
 
-  Ok((val, tk.span))
+  Ok(Word::new(val).with_span(tk.span))
 }
 
-fn expand_rhs(tk: &Tk, op: BinaryOp) -> ShResult<(VarStr, Span)> {
+fn expand_rhs(tk: &Tk, op: BinaryOp) -> ShResult<Word> {
   let val = match op {
     BinaryOp::String(StringOp::Equal | StringOp::NotEqual) => {
       case::expand_case_pattern(Some(tk.span), tk.slice().as_bytes())?
@@ -205,7 +205,7 @@ fn expand_rhs(tk: &Tk, op: BinaryOp) -> ShResult<(VarStr, Span)> {
     _ => Expander::new(tk).no_glob().no_split().expand_no_split()?,
   };
 
-  Ok((val, tk.span))
+  Ok(Word::new(val).with_span(tk.span))
 }
 
 fn expand_regex_operand(span: Option<Span>, bytes: &[u8]) -> ShResult<VarStr> {
@@ -219,8 +219,12 @@ fn expand_regex_operand(span: Option<Span>, bytes: &[u8]) -> ShResult<VarStr> {
 
   match_loop!(cursor.next() => unit, {
     Unit::Mark(Marker::Quote(q)) => match q {
-      Quote::Single => qt_state.toggle_double(),
-      Quote::Double => qt_state.toggle_single(),
+      Quote::Single => {
+        qt_state.toggle_double();
+      },
+      Quote::Double => {
+        qt_state.toggle_single();
+      },
     }
     Unit::Byte(b) => {
       if qt_state.in_quote() && RE_META.contains(&b) {
@@ -235,7 +239,9 @@ fn expand_regex_operand(span: Option<Span>, bytes: &[u8]) -> ShResult<VarStr> {
 }
 
 /// Evaluate a single unary test (`-OP OPERAND`).
-pub(crate) fn eval_unary(op: &UnaryOp, operand: VarStr) -> bool {
+pub(crate) fn eval_unary(op: &UnaryOp, operand: Word) -> bool {
+  let operand = operand.content();
+
   match op {
     UnaryOp::NonNull    => !operand.is_empty(),
     UnaryOp::Null       => operand.is_empty(),
@@ -285,18 +291,13 @@ pub(crate) fn eval_unary(op: &UnaryOp, operand: VarStr) -> bool {
 }
 
 /// Evaluate a single binary test (`LHS OP RHS`).
-pub(crate) fn eval_binary(
-  op: &BinaryOp,
-  lhs: &(VarStr, Span),
-  rhs: &(VarStr, Span),
-  extended: bool,
-) -> ShResult<bool> {
+pub(crate) fn eval_binary(op: &BinaryOp, lhs: &Word, rhs: &Word, extended: bool) -> ShResult<bool> {
   match op {
     BinaryOp::String(str_op) => match str_op {
       StringOp::Less | StringOp::Greater | StringOp::LessEq | StringOp::GreaterEq => {
         let eq_check = matches!(str_op, StringOp::LessEq | StringOp::GreaterEq);
         let ge_check = matches!(str_op, StringOp::Greater | StringOp::GreaterEq);
-        let ordering = lhs.0.cmp(&rhs.0);
+        let ordering = lhs.cmp(rhs);
 
         match ordering {
           Ordering::Less    => Ok(!ge_check),
@@ -307,19 +308,20 @@ pub(crate) fn eval_binary(
       StringOp::Equal | StringOp::NotEqual => {
         let polarity = matches!(str_op, StringOp::Equal);
         let is_eq = if extended {
-          let pat = Shed::meta_mut(|m| m.get_glob(rhs.0.as_bytes()));
-          pat.is_match(lhs.0.as_bytes())
+          let pat = Shed::meta_mut(|m| m.get_glob(rhs.as_bytes()));
+          pat.is_match(lhs.as_bytes())
         } else {
-          lhs.0 == rhs.0
+          lhs == rhs
         };
 
         Ok(is_eq == polarity)
       }
       StringOp::Match => {
-        let cleaned = glob::replace_posix_classes(&rhs.0.to_str_lossy());
+        let cleaned = glob::replace_posix_classes(&rhs.to_str_lossy());
         let re = Shed::meta_mut(|m| m.get_regex(&cleaned))
-          .map_err(|e| sherr!(SyntaxErr @ rhs.1, "Invalid regex: {e}"))?;
-        if let Some(caps) = re.captures(&lhs.0.to_str_lossy()) {
+          .map_err(|e| sherr!(SyntaxErr ? rhs.span(), "Invalid regex: {e}"))?;
+
+        if let Some(caps) = re.captures(&lhs.to_str_lossy()) {
           let groups: VecDeque<VarStr> = caps
             .iter()
             .map(|m| m.map(|mat| VarStr::from(mat.as_str())).unwrap_or_default())
@@ -334,17 +336,16 @@ pub(crate) fn eval_binary(
     },
     BinaryOp::Int(int_op) => {
       let lhs_i = lhs
-        .0
         .to_str_lossy()
         .trim()
         .parse::<i64>()
-        .map_err(|_| sherr!(SyntaxErr @ lhs.1, "test: integer expected, got '{}'", &lhs.0))?;
+        .map_err(|_| sherr!(SyntaxErr ? lhs.span(), "test: integer expected, got '{lhs}'"))?;
       let rhs_i = rhs
-        .0
         .to_str_lossy()
         .trim()
         .parse::<i64>()
-        .map_err(|_| sherr!(SyntaxErr @ rhs.1, "test: integer expected, got '{}'", &rhs.0))?;
+        .map_err(|_| sherr!(SyntaxErr ? rhs.span(), "test: integer expected, got '{rhs}'"))?;
+
       Ok(match int_op {
         IntOp::Eq  => lhs_i == rhs_i,
         IntOp::Neq => lhs_i != rhs_i,
@@ -363,12 +364,12 @@ pub(crate) fn eval_binary(
       };
 
       Ok(match file_op {
-        FileOp::NewerThan => mtime(&lhs.0) > mtime(&rhs.0),
-        FileOp::OlderThan => mtime(&lhs.0) < mtime(&rhs.0),
+        FileOp::NewerThan => mtime(lhs) > mtime(rhs),
+        FileOp::OlderThan => mtime(lhs) < mtime(rhs),
         FileOp::FileEq => {
-          let left_file  = PathBuf::from(lhs.0.clone());
+          let left_file  = PathBuf::from(lhs.content());
           let left_data  = left_file.metadata();
-          let right_file = PathBuf::from(rhs.0.clone());
+          let right_file = PathBuf::from(rhs.content());
           let right_data = right_file.metadata();
 
           match (left_data, right_data) {

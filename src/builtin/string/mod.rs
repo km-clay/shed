@@ -13,24 +13,9 @@ impl BuiltinRouter for Str {
   }
   fn sub_commands(&self) -> &'static [SubCommand] {
     const SUB_COMMANDS: &[SubCommand] = &[
-      sub_command!(
-        &trim::Trim,
-        "trim",
-        "<string>",
-        "trim whitespace or charsets from a string"
-      ),
-      sub_command!(
-        &clip::Clip,
-        "clip",
-        "<width> [string]",
-        "clip a string to a given width"
-      ),
-      sub_command!(
-        &split::Split,
-        "split",
-        "[options] [string]",
-        "split a string into parts"
-      ),
+      sub_command!(&trim::Trim, "trim", "<string>", "trim whitespace or charsets from a string"),
+      sub_command!(&clip::Clip, "clip", "<width> [string]", "clip a string to a given width"),
+      sub_command!(&split::Split, "split", "[options] [string]", "split a string into parts"),
     ];
     SUB_COMMANDS
   }

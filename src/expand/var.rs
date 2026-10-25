@@ -5,14 +5,17 @@ use nix::unistd::{Uid, User};
 use crate::{
   eval::lex::{self, Span},
   match_loop, sherr, shopt,
-  state::{Shed, vars::VarStr},
+  state::{
+    Shed, params,
+    vars::{VarName, VarStr},
+  },
   try_var,
   util::{error::ShResult, strops::QuoteState},
   var, varstr,
 };
 
 use super::{
-  PARAMETERS, param,
+  PARAMETERS, Words, param,
   stream::{Marker, ProcSubKind, Quote, SegCursor, SegStream, Unit},
   subshell,
 };
@@ -94,11 +97,7 @@ pub(crate) fn expand_raw_inner(
       result.push_bytes(fd_path.as_bytes());
     }
     Unit::Mark(Marker::Quote(q)) => {
-      match q {
-        Quote::Double if !qt_state.in_single() => qt_state.toggle_double(),
-        Quote::Single if !qt_state.in_double() => qt_state.toggle_single(),
-        _ => {}
-      }
+      qt_state.toggle_from(q);
       result.push_marker(Marker::Quote(q));
     }
     Unit::Mark(Marker::VarSub) => {
@@ -209,8 +208,8 @@ pub(crate) fn expand_var(
       stream.bump();
 
       if b == b'@' {
-        let fields = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect::<Vec<_>>());
-        return Ok(positional_fields_seg(&fields));
+        let fields = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect::<Words>());
+        return Ok(words_seg(&fields));
       }
 
       let mut buf = [0u8; 4];
@@ -237,7 +236,16 @@ pub(crate) fn expand_var(
   }
 }
 
-pub(crate) fn positional_fields_seg(fields: &[VarStr]) -> SegStream {
+/// Wrapper used by parameter expansion to handle joining of "*" expansions
+pub(crate) fn emit_words(parsed: &VarName, words: &Words) -> SegStream {
+  if parsed.is_all_joined() {
+    SegStream::from(words.join_with(&params::get_separator().to_str_lossy()))
+  } else {
+    words_seg(words)
+  }
+}
+
+fn words_seg(fields: &Words) -> SegStream {
   let mut out = SegStream::new();
   if fields.is_empty() {
     out.push_marker(Marker::NullExpand);
@@ -254,8 +262,8 @@ pub(crate) fn positional_fields_seg(fields: &[VarStr]) -> SegStream {
 
 /// Look up a bare `$name` and return its value, honoring `set -u` (nounset).
 fn lookup_var(var_name: &SegStream) -> ShResult<SegStream> {
-  let name_bytes = var_name.to_bytes();
-  let name       = String::from_utf8_lossy(&name_bytes);
+  let name_bytes = var_name.as_bytes();
+  let name       = String::from_utf8_lossy(name_bytes);
   let val        = try_var!(name.as_ref());
   if val.is_none() && shopt!(set.nounset) {
     return Err(sherr!(NotFound, "Variable '{name}' is not set"));
@@ -521,7 +529,11 @@ mod tests {
     if let Some(prev) = saved {
       let _ = std::env::set_current_dir(prev);
     }
-    result.to_vec()
+    result
+      .into_words()
+      .into_iter()
+      .map(|w| w.content())
+      .collect_vec()
   }
 
   /// Build a tempdir populated with the given filenames.

@@ -16,14 +16,16 @@ impl Builtin for ReadLink {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut arguments = args.arguments().peekable();
 
-    let Some((target, t_span)) = arguments.next() else {
+    let Some(target) = arguments.next() else {
       return Err(
         sherr!(ExecFail @ args.cmd_span(), "missing arguments for `fs readlink`").with_code(2),
       );
     };
     if arguments.peek().is_some() {
-      let (_, rest) = super::super::argv::join_raw_arg_iter(arguments);
-      return Err(sherr!(ExecFail @ rest, "too many arguments for `fs readlink`").with_code(2));
+      let rest = super::super::argv::join_raw_arg_iter(arguments);
+      return Err(
+        sherr!(ExecFail ? rest.span(), "too many arguments for `fs readlink`").with_code(2),
+      );
     }
 
     let link = PathBuf::from(target);
@@ -36,19 +38,14 @@ impl Builtin for ReadLink {
         util::with_status(0)
       }
       Err(e) => {
+        #[rustfmt::skip]
         let err = match e.kind() {
-          EK::InvalidInput => {
-            sherr!(ExecFail @ t_span, "cannot readlink `{target}`: not a symbolic link")
-          }
-          EK::NotFound => {
-            sherr!(ExecFail @ t_span, "cannot readlink `{target}`: file does not exist")
-          }
-          EK::PermissionDenied => {
-            sherr!(ExecFail @ t_span, "cannot readlink `{target}`: permission denied"  )
-          }
-          _ => sherr!(ExecFail @ t_span, "cannot readlink `{target}`: {e}"                ),
+          EK::InvalidInput     => sherr!(ExecFail, "cannot readlink `{target}`: not a symbolic link"),
+          EK::NotFound         => sherr!(ExecFail, "cannot readlink `{target}`: file does not exist"),
+          EK::PermissionDenied => sherr!(ExecFail, "cannot readlink `{target}`: permission denied"),
+          _                    => sherr!(ExecFail, "cannot readlink `{target}`: {e}"),
         };
-        Err(err.with_code(1))
+        Err(err.option_promote(target.span()).with_code(1))
       }
     }
   }

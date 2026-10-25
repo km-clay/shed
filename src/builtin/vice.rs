@@ -10,14 +10,13 @@ use bstr::ByteSlice;
 
 use crate::{
   builtin::opt::{Opt, OptSpec},
-  eval::lex::Span,
   expand::{alias, escape},
   keys::KeyEvent,
-  opt, outln,
+  opt,
   procio::{self, OsSink, Sink, SinkIo, SinkLines},
   readline::EditorCore,
   sherr, signal,
-  state::vars::VarStr,
+  state::vars::{VarStr, VarStrSliceExt},
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -75,22 +74,13 @@ impl ViceCmd {
   /// Parse the shared `<number>:<number>` argument for `-r` / `--repeat`.
   pub(crate) fn parse_repeat(arg: &str) -> ShResult<Self> {
     let Some((left, right)) = arg.split_once(':') else {
-      return Err(sherr!(
-        ParseErr,
-        "Expected '<number>:<number>' for repeat argument"
-      ));
+      return Err(sherr!(ParseErr, "Expected '<number>:<number>' for repeat argument"));
     };
     let Ok(num_cmds) = left.parse::<usize>() else {
-      return Err(sherr!(
-        ParseErr,
-        "Failed to parse number of commands in repeat argument"
-      ));
+      return Err(sherr!(ParseErr, "Failed to parse number of commands in repeat argument"));
     };
     let Ok(num_repeats) = right.parse::<usize>() else {
-      return Err(sherr!(
-        ParseErr,
-        "Failed to parse number of repeats in repeat argument"
-      ));
+      return Err(sherr!(ParseErr, "Failed to parse number of repeats in repeat argument"));
     };
     Ok(Self::Repeat(num_cmds, num_repeats))
   }
@@ -149,7 +139,7 @@ impl Vice {
     core: &mut EditorCore,
     prog: &ViceProg,
     cmds: Vec<ViceCmd>,
-    fields: &mut Vec<String>,
+    fields: &mut Vec<VarStr>,
     spent_cmds: &mut Vec<ViceCmd>,
   ) -> ShResult<()> {
     for cmd in cmds {
@@ -164,13 +154,14 @@ impl Vice {
             return Ok(());
           }
 
-          let field = if let Some(sel) = core.selection() {
+          let field: VarStr = if let Some(sel) = core.selection() {
             log::debug!("Vice: selection found: {sel:?}");
-            sel
+            sel.into()
           } else {
             let mut end = core.editor.cursor();
             end.col = core.editor.offset_col_absolute(end.row, 1);
-            core.editor.slice_pos(start, end)
+
+            core.editor.slice_pos(start, end).into()
           };
 
           fields.push(if prog.quoted() {
@@ -221,29 +212,28 @@ impl Vice {
 
   /// Run the program against the current buffer and render one output record:
   /// the cut fields joined by the delimiter, or the whole buffer if no `-c`.
-  fn render(core: &mut EditorCore, prog: &ViceProg, span: Span) -> ShResult<String> {
+  fn render(core: &mut EditorCore, prog: &ViceProg) -> ShResult<VarStr> {
     let mut fields     = vec![];
     let mut spent_cmds = vec![];
-    Self::exec_cmds(core, prog, prog.cmds.clone(), &mut fields, &mut spent_cmds)
-      .promote_err(span)?;
+    Self::exec_cmds(core, prog, prog.cmds.clone(), &mut fields, &mut spent_cmds)?;
 
     Ok(if !fields.is_empty() {
-      fields.join(&prog.delim.to_str_lossy()) // captured fields, kept even on abort
+      fields.join_with(&prog.delim.to_str_lossy()) // captured fields, kept even on abort
     } else if core.editor.search_failed() {
-      String::new() // aborted before capturing anything
+      VarStr::default() // aborted before capturing anything
     } else {
-      core.text() // no -c: pass the whole buffer through
+      core.text().into() // no -c: pass the whole buffer through
     })
   }
 
-  fn run_inplace(file: &str, stream: Arc<dyn Sink>, prog: &ViceProg, span: Span) -> ShResult<bool> {
-    let mut collected = String::new();
-    let ok = Self::run(stream, prog, span, |record| {
-      collected.push_str(record);
+  fn run_inplace(file: &str, stream: Arc<dyn Sink>, prog: &ViceProg) -> ShResult<bool> {
+    let mut collected = vec![];
+    let ok = Self::run(stream, prog, |record| {
+      collected.extend_from_slice(record);
       // Linewise emits one record per line; whole-buffer mode is written
       // back verbatim, so only the linewise records get terminators.
       if prog.lines() {
-        collected.push('\n');
+        collected.push(b'\n');
       }
       Ok(())
     })?;
@@ -251,13 +241,13 @@ impl Vice {
       // A whole-buffer search failed; leave the file untouched.
       return Ok(false);
     }
-    Self::write_inplace(file, &collected, prog.backup_ext.as_ref(), span)?;
+    Self::write_inplace(file, &collected, prog.backup_ext.as_ref())?;
     Ok(true)
   }
 
-  fn run_stream(stream: Arc<dyn Sink>, prog: &ViceProg, span: Span) -> ShResult<bool> {
-    Self::run(stream, prog, span, |record| {
-      outln!("{record}");
+  fn run_stream(stream: Arc<dyn Sink>, prog: &ViceProg) -> ShResult<bool> {
+    Self::run(stream, prog, |record| {
+      procio::outln_bytes(record);
       Ok(())
     })
   }
@@ -266,8 +256,7 @@ impl Vice {
   fn run_lines(
     stream: Arc<dyn Sink>,
     prog: &ViceProg,
-    span: Span,
-    mut sink: impl FnMut(&str) -> ShResult<()>,
+    mut sink: impl FnMut(&[u8]) -> ShResult<()>,
   ) -> ShResult<bool> {
     let mut emitted_line = false;
     let mut core         = EditorCore::empty();
@@ -279,7 +268,7 @@ impl Vice {
       let line = line.to_str_lossy();
       core.set_buffer(&line);
 
-      let record = Self::render(&mut core, prog, span)?;
+      let record = Self::render(&mut core, prog)?;
       if core.editor.search_failed() && record.is_empty() {
         continue;
       }
@@ -294,21 +283,19 @@ impl Vice {
   fn run_buffered(
     stream: Arc<dyn Sink>,
     prog: &ViceProg,
-    span: Span,
-    mut sink: impl FnMut(&str) -> ShResult<()>,
+    mut sink: impl FnMut(&[u8]) -> ShResult<()>,
   ) -> ShResult<bool> {
-    let mut buf = Vec::new();
+    let mut buf = vec![];
     if let Err(e) = SinkIo(stream).read_to_end(&mut buf) {
-      return Err(sherr!(ExecFail @ span, "Failed to read input: '{e}'"));
+      return Err(sherr!(ExecFail, "Failed to read input: '{e}'"));
     }
+
     let     input   = buf.to_str_lossy();
-
     let mut core    = EditorCore::headless(&input);
-    let     record  = Self::render(&mut core, prog, span)?;
+    let     record  = Self::render(&mut core, prog)?;
     let     aborted = core.editor.search_failed();
-
-    // emit whatever was captured before an abort; drop only if nothing was
     let     emit    = !(aborted && record.is_empty());
+
     if emit {
       sink(&record)?;
     }
@@ -320,24 +307,18 @@ impl Vice {
   fn run(
     stream: Arc<dyn Sink>,
     prog: &ViceProg,
-    span: Span,
-    sink: impl FnMut(&str) -> ShResult<()>,
+    sink: impl FnMut(&[u8]) -> ShResult<()>,
   ) -> ShResult<bool> {
     if prog.lines() {
-      Self::run_lines(stream, prog, span, sink)
+      Self::run_lines(stream, prog, sink)
     } else {
-      Self::run_buffered(stream, prog, span, sink)
+      Self::run_buffered(stream, prog, sink)
     }
   }
 
   /// Atomically write `output` back to `file`, preserving permissions and
   /// copying a backup first when `backup_ext` is set.
-  fn write_inplace(
-    file: &str,
-    output: &str,
-    backup_ext: Option<&VarStr>,
-    span: Span,
-  ) -> ShResult<()> {
+  fn write_inplace(file: &str, output: &[u8], backup_ext: Option<&VarStr>) -> ShResult<()> {
     if let Some(ext) = backup_ext {
       let ext   = ext.to_str_lossy();
       let slice = ext.strip_prefix('.').unwrap_or(&ext);
@@ -355,7 +336,7 @@ impl Vice {
     temp.as_file().set_permissions(perms)?;
     temp
       .persist(file)
-      .map_err(|e| sherr!(ExecFail @ span, "Failed to write output to file: '{e}'"))?;
+      .map_err(|e| sherr!(ExecFail, "Failed to write output to file: '{e}'"))?;
     Ok(())
   }
 }
@@ -382,22 +363,22 @@ impl super::Builtin for Vice {
 
     if arg_vec.is_empty() {
       let stream = procio::stdin_sink()?;
-      let ok     = Self::run_stream(stream, &prog, span)?;
+      let ok     = Self::run_stream(stream, &prog)?;
       return util::with_status(ok);
     }
 
     let mut ok = true;
-    for (path, span) in arg_vec {
+    for path in arg_vec {
       let file = OpenOptions::new()
         .read(true)
         .open(&path)
-        .map_err(|e| sherr!(ExecFail @ span, "Failed to open file '{}': '{e}'", &path))?;
+        .map_err(|e| sherr!(ExecFail ? path.span(), "Failed to open file '{}': '{e}'", &path))?;
       let stream = Arc::new(OsSink::new(file.into()));
 
       let file_ok = if prog.inplace() {
-        Self::run_inplace(&path.to_str_lossy(), stream, &prog, span)?
+        Self::run_inplace(&path.to_str_lossy(), stream, &prog).option_promote(path.span())?
       } else {
-        Self::run_stream(stream, &prog, span)?
+        Self::run_stream(stream, &prog).option_promote(path.span())?
       };
       ok = ok && file_ok;
     }

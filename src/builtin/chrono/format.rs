@@ -4,11 +4,7 @@ use crate::{
   builtin::opt::OptSpec,
   opt, procio, sherr,
   state::vars::VarStr,
-  util::{
-    self,
-    error::ShResultExt,
-    strops::{self, VarStrDisplay},
-  },
+  util::{self, error::ShResultExt, strops},
 };
 
 use super::{
@@ -52,7 +48,7 @@ impl Builtin for Format {
 
     // Operands are joined, so a multi-word expression needs no quoting. A
     // span reads as `A to B`, which `parse_dur` splits.
-    let (time, span) = argv::join_raw_arg_iter(arguments);
+    let time = argv::join_raw_arg_iter(arguments);
     if time.is_empty() {
       return Err(sherr!(ExecFail @ args.cmd_span(), "missing time argument").with_code(2));
     }
@@ -64,7 +60,7 @@ impl Builtin for Format {
         Ok(micros) => TimeDelta::microseconds(micros),
         Err(dur_err) => {
           let Ok(instant) = strops::TimeReader::interpret(&text) else {
-            return Err(dur_err).promote_err(span).with_code(2);
+            return Err(dur_err).option_promote(time.span()).with_code(2);
           };
           instant - Utc::now()
         }
@@ -75,21 +71,21 @@ impl Builtin for Format {
       strops::StrFormatter::parse(&DurFmt { running: None }, &fmt_string)
         .and_then(|f| f.render(&mut elapsed, &mut buf))
         .option_promote(args.opt_span("format"))
-        .promote_err(span)
+        .option_promote(time.span())
         .with_code(1)?;
 
       VarStr::from(buf)
     } else {
       let dt = strops::TimeReader::interpret(&time.to_str_lossy())
-        .promote_err(span)
+        .option_promote(time.span())
         .with_code(2)?;
 
-      let fmt = fmt_string.to_str_lossy();
+      let fmt = fmt_string;
 
       match tz {
-        Zone::Utc       => strops::strftime(&dt, &fmt)?.to_var_str(),
-        Zone::Local     => strops::strftime(&dt.with_timezone(&Local), &fmt)?.to_var_str(),
-        Zone::Named(tz) => strops::strftime(&dt.with_timezone(&tz), &fmt)?.to_var_str(),
+        Zone::Utc       => strops::strftime(&dt, &fmt)?,
+        Zone::Local     => strops::strftime(&dt.with_timezone(&Local), &fmt)?,
+        Zone::Named(tz) => strops::strftime(&dt.with_timezone(&tz), &fmt)?,
       }
     };
 

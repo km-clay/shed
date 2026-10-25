@@ -701,7 +701,7 @@ fn unescape_for_completion(raw: &str) -> String {
   let unescaped = escape::unescape_str(raw.as_bytes());
   var::expand_raw_inner(None, &mut unescaped.cursor(), false, false).map_or_else(
     |_| raw.to_string(),
-    |s| String::from_utf8_lossy(&s.into_bytes()).into_owned(),
+    |s| String::from_utf8_lossy(s.as_bytes()).into_owned(),
   )
 }
 
@@ -1001,9 +1001,9 @@ impl BashCompSpec {
     let input = format!(
       "{} {} {} {}",
       self.function.as_ref().unwrap(),
-      escape::shell_quote(&cmd_name),
-      escape::shell_quote(&cword_str),
-      escape::shell_quote(&pword_str),
+      escape::shell_quote(cmd_name.as_bytes()),
+      escape::shell_quote(cword_str.as_bytes()),
+      escape::shell_quote(pword_str.as_bytes()),
     );
 
     let _cooked = Shed::term_mut(|t| t.yield_terminal(false));
@@ -1031,7 +1031,7 @@ impl CompSpec for BashCompSpec {
 
     let unescaped = escape::unescape_str(prefix.as_bytes());
     let expanded  = var::expand_raw_inner(None, &mut unescaped.cursor(), false, false)?;
-    let stripped  = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
+    let stripped  = String::from_utf8_lossy(expanded.as_bytes()).into_owned();
 
     // path-shaped: wrapper handles expansion and escaping, candidates are
     // already display-ready and skip the reformat below

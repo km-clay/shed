@@ -14,7 +14,7 @@ use crate::{
     Shed,
     scopes::ScopeStack,
     shopt::ShOptSet,
-    vars::{ValueBytes, VarKind, VarStr, VarStrSliceExt},
+    vars::{ValueBytes, VarKind, VarStrSliceExt},
   },
   util::{
     self,
@@ -260,15 +260,15 @@ fn reset_set_opts() {
 
 /// Apply a resolved [`SetFlags`] set to the shell's shopt table with the given
 /// polarity (`on` = enable). `emacs` is special-cased to invert `vi`.
-pub(crate) fn apply_set_flags(on: bool, flags: SetFlags, span: Span) -> ShResult<()> {
+pub(crate) fn apply_set_flags(on: bool, flags: SetFlags) -> ShResult<()> {
   for opt in flags.get_shopt_fields() {
     if opt == "emacs" {
       let val = if on { "false" } else { "true" };
-      Shed::shopts_mut(|o| o.query(&format!("set.vi={val}"))).promote_err(span)?;
+      Shed::shopts_mut(|o| o.query(&format!("set.vi={val}")))?;
       continue;
     }
     let val = if on { "true" } else { "false" };
-    Shed::shopts_mut(|o| o.query(&format!("set.{opt}={val}"))).promote_err(span)?;
+    Shed::shopts_mut(|o| o.query(&format!("set.{opt}={val}")))?;
   }
   Ok(())
 }
@@ -277,10 +277,10 @@ pub(crate) fn apply_set_flags(on: bool, flags: SetFlags, span: Span) -> ShResult
 /// is applied; `None` (bare `-o`/`+o`) prints the current settings, matching
 /// `set -o`. This is the `long_opt` hook passed to [`scan_options`], shared by
 /// the `set` builtin and shell invocation parsing.
-pub(crate) fn apply_long_set(on: bool, name: Option<&str>, span: Span) -> ShResult<()> {
+pub(crate) fn apply_long_set(on: bool, name: Option<&str>) -> ShResult<()> {
   if let Some(name) = name {
-    let flag = SetFlags::from_str(name).promote_err(span)?;
-    apply_set_flags(on, flag, span)
+    let flag = SetFlags::from_str(name)?;
+    apply_set_flags(on, flag)
   } else {
     outln!("{}", build_set_call(on));
     Ok(())
@@ -293,7 +293,7 @@ impl super::Builtin for Set {
     true
   }
 
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+  fn parse_argv(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     Ok(
       execute::prepare_argv_with(argv, no_split)
         .promote_err(cmd_span)?
@@ -311,7 +311,7 @@ impl super::Builtin for Set {
           line.extend_from_slice(b"=( ");
           let mut item_iter = items.iter().peekable();
           while let Some(item) = item_iter.next() {
-            line.extend_from_slice(&escape::shell_quote_bytes(item.as_bytes()));
+            line.extend_from_slice(&escape::shell_quote(item.as_bytes()));
             if item_iter.peek().is_some() {
               line.push(b' ');
             }
@@ -319,7 +319,7 @@ impl super::Builtin for Set {
           line.extend_from_slice(b" )");
         } else {
           line.push(b'=');
-          line.extend_from_slice(&escape::shell_quote_bytes(&v.value_bytes()));
+          line.extend_from_slice(&escape::shell_quote(&v.value_bytes()));
         }
         procio::outln_bytes(&line);
       }
@@ -329,7 +329,7 @@ impl super::Builtin for Set {
     let mut it           = arg_vec.into_iter().peekable();
 
     // `set -` (a bare dash) resets every set-option to its default.
-    if matches!(it.peek(), Some((w, _)) if w == "-") {
+    if matches!(it.peek(), Some(w) if ***w == *b"-") {
       reset_set_opts();
       it.next();
     }
@@ -341,11 +341,12 @@ impl super::Builtin for Set {
       |ch| SetFlags::try_from(ch).map_or(Role::Unknown, Role::Set),
       apply_set_flags,
       apply_long_set,
-      |ch, _, _, span| Err(sherr!(ParseErr @ span, "invalid option: -{ch}").with_code(2)),
+      |ch, _, _| Err(sherr!(ParseErr, "invalid option: -{ch}").with_code(2)),
       true,
-    )?;
+    )
+    .promote_err(args.cmd_span())?;
 
-    let pos_args: Vec<VarStr> = it.map(|(arg, _)| arg).collect();
+    let pos_args = it.map(|s| s.content()).collect_vec();
 
     if !pos_args.is_empty() || outcome.terminated {
       Shed::vars_mut(|v| {

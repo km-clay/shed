@@ -10,9 +10,7 @@ use std::{
 use serde_json::{Map, Value};
 
 use crate::{
-  builtin::BuiltinArgs,
   errln,
-  eval::lex::Span,
   procio::{self, OsSink, Sink},
   readline::{self, Branch, HistDump, HistEntry, MAIN_HIST_TABLE_NAME, ReflogEntry, Table},
   sherr,
@@ -25,7 +23,7 @@ use crate::{
   },
 };
 
-use super::super::{Builtin, opt::OptSpec};
+use super::super::{Builtin, BuiltinArgs, opt::OptSpec};
 
 use super::open_history;
 
@@ -35,12 +33,11 @@ impl Builtin for HistImport {
     vec![OptSpec::new_short("force", b'f')]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let source: Arc<dyn Sink> = if let Some((path, span)) = args.arguments().next() {
-      let resolved = Self::resolve_source(&path.to_str_lossy(), span)?;
-      let file = OpenOptions::new()
-        .read(true)
-        .open(&resolved)
-        .map_err(|e| sherr!(ExecFail @ span, "failed to open {}: {e}", resolved.display()))?;
+    let source: Arc<dyn Sink> = if let Some(path) = args.arguments().next() {
+      let resolved = Self::resolve_source(&path.to_str_lossy()).option_promote(path.span())?;
+      let file = OpenOptions::new().read(true).open(&resolved).map_err(|e| {
+        sherr!(ExecFail ? path.span(), "failed to open {}: {e}", resolved.display())
+      })?;
 
       Arc::new(OsSink::new(file.into()))
     } else {
@@ -62,14 +59,12 @@ impl Builtin for HistImport {
 }
 
 impl HistImport {
-  fn resolve_source(arg: &str, span: Span) -> ShResult<PathBuf> {
+  fn resolve_source(arg: &str) -> ShResult<PathBuf> {
     if !matches!(arg, "bash" | "zsh" | "fish") {
       return Ok(PathBuf::from(arg));
     }
     let Some(home) = paths::get_home() else {
-      return Err(
-        sherr!(ExecFail @ span, "cannot resolve '{arg}' history without a home directory"),
-      );
+      return Err(sherr!(ExecFail, "cannot resolve '{arg}' history without a home directory"));
     };
     Ok(match arg {
       "bash" => home.join(".bash_history"),

@@ -27,7 +27,7 @@ impl Builtin for ChMod {
     let mut status    = 0;
     let mut arguments = args.arguments().peekable();
 
-    let Some((mode_s, m_span)) = arguments.next() else {
+    let Some(mode) = arguments.next() else {
       return Err(
         sherr!(ExecFail @ args.cmd_span(), "missing mode operand for `fs chmod`").with_code(2),
       );
@@ -39,13 +39,13 @@ impl Builtin for ChMod {
       );
     }
 
-    let spec   = mode_s.to_str_lossy();
+    let spec   = mode.to_str_lossy();
     let digits = spec.strip_prefix("0o").unwrap_or(&spec);
     let octal  = u32::from_str_radix(digits, 8).ok().filter(|&n| n <= 0o7777);
 
     if octal.is_none() && !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
       return Err(
-        sherr!(ExecFail @ m_span, "invalid mode: `{spec}`")
+        sherr!(ExecFail ? mode.span(), "invalid mode: `{spec}`")
           .with_note("octal mode must be in the range 0o0000 to 0o7777".into())
           .with_code(2),
       );
@@ -55,10 +55,10 @@ impl Builtin for ChMod {
       .is_none()
       .then(|| strops::parse_mode_clauses(&spec))
       .transpose()
-      .promote_err(m_span)
+      .option_promote(mode.span())
       .with_code(2)?;
 
-    for (file, f_span) in arguments {
+    for file in arguments {
       let path: &Path = file.as_ref();
 
       let mode = match (octal, &clauses) {
@@ -66,7 +66,7 @@ impl Builtin for ChMod {
         (None, Some(clauses)) => {
           let meta = std::fs::metadata(path)
             .map_err(|e| handle_err(e, file))
-            .promote_err(f_span);
+            .option_promote(file.span());
 
           if let Err(e) = meta {
             e.print_error();
@@ -84,7 +84,7 @@ impl Builtin for ChMod {
         continue;
       };
 
-      let err = handle_err(e, file).promote(f_span).with_code(1);
+      let err = handle_err(e, file).option_promote(file.span()).with_code(1);
 
       err.print_error();
       status = 1;
@@ -97,40 +97,25 @@ impl Builtin for ChMod {
 pub(super) fn handle_err(err: io::Error, file: &VarStr) -> ShErr {
   match err.kind() {
     EK::NotFound => {
-      sherr!(
-        ExecFail,
-        "cannot set mode of `{file}`: no such file or directory"
-      )
+      sherr!(ExecFail, "cannot set mode of `{file}`: no such file or directory")
     }
     EK::InvalidFilename => {
       sherr!(ExecFail, "cannot set mode of `{file}`: invalid filename")
     }
     EK::NotADirectory => {
-      sherr!(
-        ExecFail,
-        "cannot set mode of `{file}`: path component is not a directory"
-      )
+      sherr!(ExecFail, "cannot set mode of `{file}`: path component is not a directory")
     }
     EK::ReadOnlyFilesystem => {
-      sherr!(
-        ExecFail,
-        "cannot set mode of `{file}`: read-only filesystem"
-      )
+      sherr!(ExecFail, "cannot set mode of `{file}`: read-only filesystem")
     }
     EK::PermissionDenied => match err.raw_os_error() {
-      Some(libc::EPERM) => sherr!(
-        ExecFail,
-        "cannot set mode of `{file}`: operation not permitted"
-      )
-      .with_note("only the file's owner or the superuser can change its mode".into()),
+      Some(libc::EPERM) => sherr!(ExecFail, "cannot set mode of `{file}`: operation not permitted")
+        .with_note("only the file's owner or the superuser can change its mode".into()),
       _ => sherr!(ExecFail, "cannot set mode of `{file}`: permission denied"),
     },
     _ => {
       if err.raw_os_error() == Some(libc::ELOOP) {
-        sherr!(
-          ExecFail,
-          "cannot set mode of `{file}`: too many levels of symbolic links"
-        )
+        sherr!(ExecFail, "cannot set mode of `{file}`: too many levels of symbolic links")
       } else {
         sherr!(ExecFail, "cannot set mode of `{file}`: {err}")
       }

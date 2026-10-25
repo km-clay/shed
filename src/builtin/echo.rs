@@ -56,13 +56,17 @@ impl Builtin for Echo {
 
     let prepared: ShResult<Vec<VarStr>> = args
       .arguments()
-      .map(|(st, sp)| -> ShResult<VarStr> {
+      .map(|st| -> ShResult<VarStr> {
         if use_escape {
-          Ok(escape::expand_ansi_c(st.as_bytes()).into())
+          Ok(escape::expand_ansi_c(st.as_bytes()))
         } else if use_prompt {
-          Ok(prompt::expand_prompt(st.as_bytes()).promote_err(sp)?.into())
+          Ok(
+            prompt::expand_prompt(st.as_bytes())
+              .option_promote(st.span())?
+              .into(),
+          )
         } else {
-          Ok(st.clone())
+          Ok(st.content())
         }
       })
       .collect();

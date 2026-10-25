@@ -24,7 +24,7 @@ impl StashOpts {
     for opt in opts {
       match opt.key() {
         "save" => {
-          let mut args = opt.args().iter().map(|(s, _)| s.clone());
+          let mut args = opt.args().iter().map(|s| s.content());
 
           // length of 'args' is enforced by the opt spec
           let Some(name) = args.next() else {

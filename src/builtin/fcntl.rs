@@ -65,7 +65,7 @@ impl FdFlags {
 
 pub(super) struct Fcntl;
 impl super::Builtin for Fcntl {
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+  fn parse_argv(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     // fcntl's flags work exactly the same way that `set`'s flags do
     // so we don't parse them here. pass through directly
     Ok(
@@ -75,94 +75,98 @@ impl super::Builtin for Fcntl {
     )
   }
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
-    let     (arg_vec, _) = args.take_argv();
-    let mut it           = arg_vec.into_iter().peekable();
+    let     (arguments, _) = args.take_argv();
+    let mut arguments      = arguments.into_iter().peekable();
 
-    let Some((fd_word, fd_span)) = it.next() else {
+    let Some(fd) = arguments.next() else {
       return Err(
         sherr!(ExecFail @ args.cmd_span(), "missing file descriptor argument").with_code(2),
       );
     };
 
-    let fd: RawFd = fd_word
+    let fd_span = fd.span();
+    let fd: RawFd = fd
       .to_str_lossy()
       .parse()
-      .map_err(|_| sherr!(ExecFail @ fd_span, "invalid file descriptor: {fd_word}").with_code(2))?;
+      .map_err(|_| sherr!(ExecFail ? fd_span, "invalid file descriptor: {fd}").with_code(2))?;
 
-    if it.peek().is_none() {
-      return Self::print_fd_flags(true, fd, fd_span);
+    if arguments.peek().is_none() {
+      return Self::print_fd_flags(true, fd).option_promote(fd_span);
     }
 
     opt::scan_options(
-      &mut it,
+      &mut arguments,
       FdFlags::role,
-      |on, flag, span| Self::set_fd_flag(fd, on, flag, span),
-      |on, name, span| Self::set_long_flag(fd, on, name, span),
-      |ch, _, _, span| Err(sherr!(ExecFail @ span, "unknown option: -{ch}").with_code(2)),
+      |on, flag| Self::set_fd_flag(fd, on, flag),
+      |on, name| Self::set_long_flag(fd, on, name),
+      |ch, _, _| Err(sherr!(ExecFail, "unknown option: -{ch}").with_code(2)),
       true,
-    )?;
+    )
+    .option_promote(fd_span)?;
 
     util::with_status(0)
   }
 }
 
 impl Fcntl {
-  fn set_fd_flag(fd: RawFd, on: bool, flag: FdFlags, span: Span) -> ShResult<()> {
+  fn set_fd_flag(fd: RawFd, on: bool, flag: FdFlags) -> ShResult<()> {
     let Some((get, set, bit)) = flag.get_set_bit() else {
       unreachable!()
     };
 
     let Some(sink) = Shed::sinks(|s| s.get(fd)) else {
-      return Err(sherr!(ExecFail @ span, "fd {fd} is not open").with_code(1));
+      return Err(sherr!(ExecFail, "fd {fd} is not open").with_code(1));
     };
     let Ok(sink_fd) = sink.as_os_fd() else {
-      return Err(sherr!(ExecFail @ span, "fd {fd} is not a valid file descriptor").with_code(1));
+      return Err(sherr!(ExecFail, "fd {fd} is not a valid file descriptor").with_code(1));
     };
     let raw = sink_fd.as_raw_fd();
 
     let cur = unsafe { libc::fcntl(raw, get) };
     if cur < 0 {
-      return Err(Self::fd_err(raw, span));
+      return Err(Self::fd_err(raw));
     }
 
     let new = if on { cur | bit } else { cur & !bit };
 
     if unsafe { libc::fcntl(raw, set, new) } < 0 {
-      return Err(Self::fd_err(fd, span));
+      return Err(Self::fd_err(fd));
     }
 
     Ok(())
   }
-  fn set_long_flag(fd: RawFd, on: bool, name: Option<&str>, span: Span) -> ShResult<()> {
+  fn set_long_flag(fd: RawFd, on: bool, name: Option<&str>) -> ShResult<()> {
     match name {
       Some(name) => {
         let flag = FdFlags::parse_name(name.as_bytes())
-          .ok_or_else(|| sherr!(ExecFail @ span, "unknown flag: '{name}'").with_code(2))?;
-        Self::set_fd_flag(fd, on, flag, span)
+          .ok_or_else(|| sherr!(ExecFail, "unknown flag: '{name}'").with_code(2))?;
+        Self::set_fd_flag(fd, on, flag)
       }
-      None => Self::print_fd_flags(on, fd, span),
+      None => Self::print_fd_flags(on, fd),
     }
   }
-  fn print_fd_flags(verbose: bool, fd: RawFd, fd_span: Span) -> ShResult<()> {
+
+  fn print_fd_flags(verbose: bool, fd: RawFd) -> ShResult<()> {
     if verbose {
-      Self::print_flags_verbose(fd, fd_span)
+      Self::print_flags_verbose(fd)
     } else {
-      Self::print_flags_terse(fd, fd_span)
+      Self::print_flags_terse(fd)
     }
   }
-  fn read_flags(fd: RawFd, span: Span) -> ShResult<(FdFlags, libc::c_int)> {
+
+  fn read_flags(fd: RawFd) -> ShResult<(FdFlags, libc::c_int)> {
     let Some(sink) = Shed::sinks(|s| s.get(fd)) else {
-      return Err(sherr!(ExecFail @ span, "fd {fd} is not open").with_code(1));
+      return Err(sherr!(ExecFail, "fd {fd} is not open").with_code(1));
     };
     let Ok(sink_fd) = sink.as_os_fd() else {
-      return Err(sherr!(ExecFail @ span, "fd {fd} is not a valid file descriptor").with_code(1));
+      return Err(sherr!(ExecFail, "fd {fd} is not a valid file descriptor").with_code(1));
     };
     let raw      = sink_fd.as_raw_fd();
 
     let fd_flags = unsafe { libc::fcntl(raw, libc::F_GETFD) };
     let status   = unsafe { libc::fcntl(raw, libc::F_GETFL) };
     if fd_flags < 0 || status < 0 {
-      return Err(Self::fd_err(fd, span));
+      return Err(Self::fd_err(fd));
     }
 
     let mut flags = FdFlags::empty();
@@ -171,8 +175,8 @@ impl Fcntl {
     flags.set(FdFlags::APPEND, status & libc::O_APPEND != 0);
     Ok((flags, status))
   }
-  fn print_flags_verbose(fd: RawFd, fd_span: Span) -> ShResult<()> {
-    let (flags, status) = Self::read_flags(fd, fd_span)?;
+  fn print_flags_verbose(fd: RawFd) -> ShResult<()> {
+    let (flags, status) = Self::read_flags(fd)?;
     let mode = match status & libc::O_ACCMODE {
       libc::O_WRONLY => "write-only",
       libc::O_RDWR   => "read-write",
@@ -193,8 +197,8 @@ impl Fcntl {
     );
     util::with_status(0)
   }
-  fn print_flags_terse(fd: RawFd, fd_span: Span) -> ShResult<()> {
-    let (flags, _)  = Self::read_flags(fd, fd_span)?;
+  fn print_flags_terse(fd: RawFd) -> ShResult<()> {
+    let (flags, _)  = Self::read_flags(fd)?;
     let on : String = flags.iter().map(FdFlags::as_char).collect();
     let off: String = (!flags).iter().map(FdFlags::as_char).collect();
 
@@ -214,8 +218,8 @@ impl Fcntl {
     if b { "on" } else { "off" }
   }
 
-  fn fd_err(fd: RawFd, span: Span) -> ShErr {
-    sherr!(ExecFail @ span, "fd {fd}: {}", std::io::Error::last_os_error()).with_code(1)
+  fn fd_err(fd: RawFd) -> ShErr {
+    sherr!(ExecFail, "fd {fd}: {}", std::io::Error::last_os_error()).with_code(1)
   }
 }
 

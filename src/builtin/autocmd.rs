@@ -24,13 +24,13 @@ impl super::Builtin for AutoCmdBuiltin {
 
     let mut arg_vec = args.arguments();
 
-    let Some((kind, kind_span)) = arg_vec.next() else {
+    let Some(kind) = arg_vec.next() else {
       return display_autocmds(None);
     };
 
     let Ok(autocmd_kind) = kind.to_str_lossy().parse::<AutoCmdKind>() else {
       return Err(sherr!(
-          ExecFail @ kind_span,
+          ExecFail ? kind.span(),
           "invalid autocmd kind: {kind}",
       ));
     };
@@ -44,11 +44,11 @@ impl super::Builtin for AutoCmdBuiltin {
       return util::with_status(0);
     }
 
-    let Some((autocmd_cmd, _)) = arg_vec.next() else {
+    let Some(autocmd_cmd) = arg_vec.next() else {
       return display_autocmds(Some(autocmd_kind));
     };
 
-    let autocmd = AutoCmd::new(autocmd_kind, autocmd_cmd.clone());
+    let autocmd = AutoCmd::new(autocmd_kind, autocmd_cmd.content());
 
     Shed::logic_mut(|l| l.insert_autocmd(autocmd));
 

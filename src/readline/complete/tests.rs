@@ -1073,9 +1073,9 @@ fn run_comp_func_with_args(cmd: &str, cword: &str, pword: &str) -> (String, Stri
   test_input("_capture() { CAP1=\"$1\"; CAP2=\"$2\"; CAP3=\"$3\"; }").unwrap();
   let input = format!(
     "_capture {} {} {}",
-    shell_quote(cmd),
-    shell_quote(cword),
-    shell_quote(pword),
+    shell_quote(cmd.as_bytes()),
+    shell_quote(cword.as_bytes()),
+    shell_quote(pword.as_bytes()),
   );
   test_input(input).unwrap();
   (

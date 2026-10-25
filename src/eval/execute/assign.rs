@@ -10,7 +10,7 @@
 //! Also handles assignment arithmetic operations like `+=`, `-=`, `*=`, and `/=` for integer and string variables,
 //! as well as array appending for indexed arrays.
 
-use crate::set_var;
+use crate::{set_var, state::vars::VarStrSliceExt, varstr};
 use std::collections::VecDeque;
 
 use itertools::Itertools;
@@ -111,16 +111,14 @@ impl super::Dispatcher {
         // `name=` prefix, so quote the value/elements and emit the assembled
         // line directly (xtrace_line doesn't re-quote).
         let rhs = match &val {
-          VarKind::Arr(items) => {
-            let items = items
-              .iter()
-              .map(|i| escape::xtrace_quote(&i.to_str_lossy()))
-              .join(" ");
-            format!("({items})")
-          }
-          other => escape::xtrace_quote(&other.to_string()),
+          VarKind::Arr(items) => items
+            .iter()
+            .map(|i| escape::xtrace_quote(i))
+            .collect_vec()
+            .join_with(" "),
+          other => escape::xtrace_quote(&varstr!("{other}")),
         };
-        shopt::xtrace_line(&format!("{var_name}{op}{rhs}"));
+        shopt::xtrace_line(&varstr!("{var_name}{op}{rhs}"));
       }
 
       match kind {

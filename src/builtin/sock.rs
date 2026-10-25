@@ -230,11 +230,8 @@ impl UnixAddr {
           }
           Ok(_) if self.poke()? => {
             return Err(io::Error::other(
-              varstr!(
-                "Cannot bind to Unix socket '{}': already in use",
-                path_buf.display()
-              )
-              .to_str_lossy(),
+              varstr!("Cannot bind to Unix socket '{}': already in use", path_buf.display())
+                .to_str_lossy(),
             ));
           }
           Ok(_) => {
@@ -320,10 +317,7 @@ impl SockOpts {
     }
 
     if unix_addr.is_some() && (tcp_addr.is_some() || tcp_port.is_some()) {
-      return Err(sherr!(
-        ExecFail,
-        "Cannot specify both a Unix socket path and a TCP host/port",
-      ));
+      return Err(sherr!(ExecFail, "Cannot specify both a Unix socket path and a TCP host/port",));
     } else if unix_addr.is_none() && (tcp_addr.is_none() || tcp_port.is_none()) {
       return Err(sherr!(
         ExecFail,
@@ -399,7 +393,7 @@ impl super::Builtin for Accept {
       }
     }
 
-    let Some((fd, span)) = argv_iter.next() else {
+    let Some(fd) = argv_iter.next() else {
       return Err(sherr!(
         ExecFail @ cmd_span,
         "Missing file descriptor argument for accept",
@@ -407,18 +401,18 @@ impl super::Builtin for Accept {
     };
 
     let Ok(listen) = fd.to_str_lossy().parse::<u32>() else {
-      return Err(sherr!(ExecFail @ span, "Invalid file descriptor '{fd}'"));
+      return Err(sherr!(ExecFail ? fd.span(), "Invalid file descriptor '{}'", &fd));
     };
 
     match argv_iter.next() {
       None => Self::bind_mode(listen as i32, None, var),
-      Some((arg, span)) => {
+      Some(arg) => {
         if let Ok(fd) = arg.to_str_lossy().parse::<u32>()
           && fd < 10
         {
           Self::bind_mode(listen as i32, Some(fd as RawFd), var)
         } else {
-          Self::serve_mode(span, listen as i32, arg)
+          Self::serve_mode(arg.span().unwrap_or_default(), listen as i32, arg.content())
         }
       }
     }
@@ -507,20 +501,19 @@ impl super::Builtin for Listen {
       ));
     }
 
-    let target_fd = if let Some((arg, span)) = arg_vec.first() {
-      let span = *span;
-      let Ok(arg) = arg.to_str_lossy().parse::<u32>() else {
-        return Err(sherr!(ExecFail @ span, "Invalid file descriptor '{arg}'"));
+    let target_fd = if let Some(arg) = arg_vec.first() {
+      let Ok(fd) = arg.to_str_lossy().parse::<u32>() else {
+        return Err(sherr!(ExecFail ? arg.span(), "Invalid file descriptor '{arg}'"));
       };
 
-      if arg >= 10 {
+      if fd >= 10 {
         return Err(sherr!(
-          ExecFail @ span,
-          "File descriptor '{arg}' is too high, must be less than 10",
+          ExecFail ? arg.span(),
+          "File descriptor '{fd}' is too high, must be less than 10",
         ));
       }
 
-      Some(arg)
+      Some(fd)
     } else {
       None
     };
@@ -570,7 +563,7 @@ impl super::Builtin for Sock {
     } = SockOpts::from_opts(&opts).promote_err(args.cmd_span())?;
 
     if oneshot {
-      let (mut message, _) = super::join_raw_args(arg_vec);
+      let mut message = super::join_raw_args(arg_vec);
       if message.is_empty()
         && let Some(input) = self.get_input(&mut args)
       {
@@ -600,21 +593,19 @@ impl super::Builtin for Sock {
       ));
     }
 
-    let target_fd = if let Some((arg, span)) = arg_vec.first() {
-      let span = *span;
-
-      let Ok(arg) = arg.to_str_lossy().parse::<u32>() else {
-        return Err(sherr!(ExecFail @ span, "Invalid file descriptor '{arg}'"));
+    let target_fd = if let Some(arg) = arg_vec.first() {
+      let Ok(fd) = arg.to_str_lossy().parse::<u32>() else {
+        return Err(sherr!(ExecFail ? arg.span(), "Invalid file descriptor '{arg}'"));
       };
 
-      if arg >= 10 {
+      if fd >= 10 {
         return Err(sherr!(
-          ExecFail @ span,
+          ExecFail ? arg.span(),
           "File descriptor '{arg}' is too high, must be less than 10",
         ));
       }
 
-      Some(arg)
+      Some(fd)
     } else {
       None
     };

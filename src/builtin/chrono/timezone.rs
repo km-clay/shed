@@ -27,16 +27,15 @@ impl Builtin for Timezone {
     vec![opt!("regex" | b'E')]
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
-    let (arg, arg_span) = argv::join_raw_arg_iter(args.arguments());
-    let use_re          = args.has_opt("regex");
-
-    let raw             = arg.trim().to_str_lossy().to_string();
+    let arg    = argv::join_raw_arg_iter(args.arguments());
+    let use_re = args.has_opt("regex");
+    let raw    = arg.trim().to_str_lossy().to_string();
 
     let target = if raw.is_empty() {
       None
     } else if use_re {
       let re = Shed::meta_mut(|m| m.get_regex(&raw))
-        .map_err(|_| sherr!(ParseErr @ arg_span, "invalid regex pattern: {raw}").with_code(2))?;
+        .map_err(|_| sherr!(ParseErr ? arg.span(), "invalid regex pattern: {raw}").with_code(2))?;
       Some(Target::Regex(re))
     } else {
       Some(Target::Substring(raw.to_ascii_lowercase()))

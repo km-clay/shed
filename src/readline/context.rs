@@ -802,7 +802,7 @@ fn check_path_exists(path: &str) -> bool {
   let Ok(expanded) = var::expand_raw_inner(None, &mut unescaped.cursor(), false, false) else {
     return false;
   };
-  let stripped = String::from_utf8_lossy(&expanded.into_bytes()).into_owned();
+  let stripped = String::from_utf8_lossy(expanded.as_bytes()).into_owned();
   if stripped.is_empty() {
     return false;
   }
@@ -1702,8 +1702,7 @@ fn lex_backtick(chars: &mut Peekable<CharIndices>) -> (bool, usize) {
     '\\' if (!qt_state.in_single() || chars.peek().is_some_and(|(_,c)| *c == '\'')) => {
       advance(chars, &mut consumed);
     }
-    '"' => qt_state.toggle_double(),
-    '\'' => qt_state.toggle_single(),
+    '"' | '\'' => { qt_state.toggle_from(ch); }
 
     '`' if qt_state.outside() => {
       closed = true;
@@ -1743,8 +1742,7 @@ fn lex_delim(chars: &mut Peekable<CharIndices>, opener: char) -> (bool, usize) {
     '\\' if (!qt_state.in_single() || chars.peek().is_some_and(|(_,c)| *c == '\'')) => {
       advance(chars, &mut consumed);
     }
-    '"' => qt_state.toggle_double(),
-    '\'' => qt_state.toggle_single(),
+    '"' | '\'' => { qt_state.toggle_from(ch); }
 
     _ if ch == opener && qt_state.outside() => depth += 1,
     _ if ch == closer && qt_state.outside() => {

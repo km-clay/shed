@@ -11,13 +11,19 @@ pub(crate) mod stream;
 pub(crate) mod subshell;
 pub(crate) mod var;
 
-use std::{convert::Into, sync::Arc};
-
-use smallvec::{SmallVec, smallvec};
+use std::{
+  convert::Into,
+  ffi::OsStr,
+  fmt::Display,
+  hash::{Hash, Hasher},
+  ops::{Deref, DerefMut},
+  path::Path,
+  sync::Arc,
+};
 
 use crate::{
   eval::lex::{Span, Tk, TkFlags, TkRule},
-  match_loop, shopt,
+  match_loop, sherr, shopt,
   state::{
     params,
     vars::{VarStr, VarStrSliceExt},
@@ -27,9 +33,265 @@ use crate::{
 
 use stream::Quote;
 
-/// Expanded words. Inline for the common single-word case, spills to the heap
-/// only when a token splits or globs into multiple words.
-pub(crate) type Words = SmallVec<[VarStr; 1]>;
+/// The shell's main "word" representation.
+///
+/// Carries a [`VarStr`] (reference counted pointer to a byte array), and optionally a [`Span`].
+/// The `Option<Span>` can be used to tag errors on the way up during propagation.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Word {
+  content: VarStr,
+  span   : Option<Span>,
+}
+
+impl PartialEq for Word {
+  fn eq(&self, other: &Self) -> bool {
+    self.content == other.content
+  }
+}
+
+impl Eq for Word {}
+
+impl Hash for Word {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.content.hash(state);
+  }
+}
+
+impl Word {
+  pub(crate) fn new(content: impl Into<VarStr>) -> Self {
+    Self {
+      content: content.into(),
+      span   : None,
+    }
+  }
+  pub(crate) fn unpack(self) -> (VarStr, Option<Span>) {
+    (self.content, self.span)
+  }
+  pub(crate) fn with_span(mut self, span: Span) -> Self {
+    if self.span.is_none() {
+      self.clobber_span(span);
+    }
+    self
+  }
+  pub(crate) fn content(&self) -> VarStr {
+    self.content.clone()
+  }
+  pub(crate) fn set_span(&mut self, span: Span) {
+    if self.span.is_none() {
+      self.clobber_span(span);
+    }
+  }
+  pub(crate) fn clobber_span(&mut self, span: Span) {
+    self.span = Some(span);
+  }
+  pub(crate) fn with_span_opt(self, span: Option<Span>) -> Self {
+    if let Some(span) = span {
+      self.with_span(span)
+    } else {
+      self
+    }
+  }
+  pub(crate) fn span(&self) -> Option<Span> {
+    self.span
+  }
+  #[track_caller]
+  pub(crate) fn expect_span(&self) -> Span {
+    self.span.expect("Word has no span")
+  }
+  pub(crate) fn absorb(mut self, other: Word) -> Self {
+    let (other_c, other_s) = other.unpack();
+    self.content.push_slice(other_c);
+    if let Some(o_span) = other_s {
+      if let Some(s_span) = self.span.as_mut() {
+        s_span.merge_inplace(o_span);
+      } else {
+        self.span = Some(o_span);
+      }
+    }
+    self
+  }
+}
+
+impl Display for Word {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    self.content.fmt(f)
+  }
+}
+
+impl Deref for Word {
+  type Target = VarStr;
+
+  fn deref(&self) -> &Self::Target {
+    &self.content
+  }
+}
+
+impl AsRef<Path> for Word {
+  fn as_ref(&self) -> &Path {
+    self.content.as_ref()
+  }
+}
+
+impl AsRef<OsStr> for Word {
+  fn as_ref(&self) -> &OsStr {
+    self.content.as_ref()
+  }
+}
+
+impl From<Span> for Word {
+  fn from(value: Span) -> Self {
+    Self::new(value.slice()).with_span(value)
+  }
+}
+
+impl From<Tk> for Word {
+  fn from(tk: Tk) -> Self {
+    Self::from(&tk)
+  }
+}
+impl From<&Tk> for Word {
+  fn from(tk: &Tk) -> Self {
+    Word::new(tk.slice()).with_span(tk.span)
+  }
+}
+
+impl From<Vec<u8>> for Word {
+  fn from(value: Vec<u8>) -> Self {
+    Word::new(VarStr::from(value))
+  }
+}
+
+impl From<&[u8]> for Word {
+  fn from(value: &[u8]) -> Self {
+    Word::new(VarStr::from(value))
+  }
+}
+
+impl From<VarStr> for Word {
+  fn from(value: VarStr) -> Self {
+    Word::new(value)
+  }
+}
+
+impl From<&str> for Word {
+  fn from(value: &str) -> Self {
+    Word::new(VarStr::from(value))
+  }
+}
+
+/// A list of words. A word is a [`VarStr`] and a [`Span`] bundled together.
+///
+/// This type is used commonly in places that handle arg vectors and expansion
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Words(Vec<Word>);
+
+impl Words {
+  pub(crate) fn new(words: Vec<Word>) -> Self {
+    Self(words)
+  }
+  pub(crate) fn join_with(&self, sep: &str) -> VarStr {
+    self.0.join_with(sep)
+  }
+  pub(crate) fn into_words(self) -> Vec<Word> {
+    self.0
+  }
+  pub(crate) fn promote_words(&mut self, span: Span) {
+    for word in &mut self.0 {
+      word.set_span(span);
+    }
+  }
+  pub(crate) fn with_span(mut self, span: Span) -> Self {
+    self.promote_words(span);
+    self
+  }
+  pub(crate) fn map_content(self, f: impl Fn(VarStr) -> VarStr) -> Self {
+    self
+      .0
+      .into_iter()
+      .map(|word| {
+        let (content, span) = word.unpack();
+        Word::new(f(content)).with_span_opt(span)
+      })
+      .collect()
+  }
+
+  pub(crate) fn as_one_word(&self) -> Word {
+    let sep    = params::get_separator();
+    let joined = self.join_with(&sep.to_str_lossy());
+    Word::new(joined)
+  }
+
+  /// Whether the array is empty, or contains a single empty word
+  ///
+  /// Parameter expansion sees shell arrays as empty if they contain one empty word, or zero words at all
+  pub(crate) fn empty_param(&self) -> bool {
+    self.is_empty() || (self.len() == 1 && self[0].is_empty())
+  }
+}
+
+impl IntoIterator for Words {
+  type Item = Word;
+  type IntoIter = std::vec::IntoIter<Word>;
+
+  fn into_iter(self) -> Self::IntoIter {
+    self.0.into_iter()
+  }
+}
+
+impl FromIterator<VarStr> for Words {
+  fn from_iter<T: IntoIterator<Item = VarStr>>(iter: T) -> Self {
+    Self(iter.into_iter().map(Word::new).collect())
+  }
+}
+
+impl FromIterator<Word> for Words {
+  fn from_iter<T: IntoIterator<Item = Word>>(iter: T) -> Self {
+    Self(iter.into_iter().collect())
+  }
+}
+
+impl From<Words> for Arc<[Word]> {
+  fn from(words: Words) -> Self {
+    Arc::from(words.0)
+  }
+}
+
+impl From<Tk> for Words {
+  fn from(tk: Tk) -> Self {
+    Self::from(&tk)
+  }
+}
+impl From<&Tk> for Words {
+  fn from(tk: &Tk) -> Self {
+    Self(vec![Word::from(tk)])
+  }
+}
+
+impl From<&[Word]> for Words {
+  fn from(words: &[Word]) -> Self {
+    Self(words.to_vec())
+  }
+}
+
+impl From<VarStr> for Words {
+  fn from(vs: VarStr) -> Self {
+    Self(vec![Word::new(vs)])
+  }
+}
+
+impl Deref for Words {
+  type Target = Vec<Word>;
+
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl DerefMut for Words {
+  fn deref_mut(&mut self) -> &mut Vec<Word> {
+    &mut self.0
+  }
+}
 
 pub(crate) const PARAMETERS: [char; 8] = ['-', '@', '*', '#', '$', '?', '!', '0'];
 
@@ -41,7 +303,7 @@ impl Tk {
     }
 
     let class = TkRule::Expanded {
-      exp: self.expand_to_words()?.into_vec().into(),
+      exp: self.expand_to_words()?.into(),
     };
     Ok(Self {
       class,
@@ -54,22 +316,29 @@ impl Tk {
       return Ok(exp.iter().cloned().collect());
     }
     if self.is_literal() {
-      return Ok(smallvec![self.slice()]);
+      return Ok(self.into());
     }
     let span = self.span;
-    Expander::new(self).expand().promote_err(span)
+    Expander::new(self)
+      .expand()
+      .map(|w| w.with_span(span))
+      .promote_err(span)
   }
-  pub(crate) fn expand_to_words_pure(&self) -> ShResult<VarStr> {
+  pub(crate) fn expand_to_words_pure(&self) -> ShResult<Word> {
     if let TkRule::Expanded { exp } = &self.class {
-      return Ok(exp.first().cloned().unwrap_or_default());
+      match exp.first() {
+        Some(exp) => return Ok(exp.clone()),
+        None      => return Err(sherr!(InternalErr @ self.span, "Expanded token has no words")),
+      }
     }
     if self.is_literal() {
-      return Ok(self.slice());
+      return Ok(self.into());
     }
 
     let span = self.span;
     Expander::new(self)
       .expand_no_side_effects()
+      .map(|v| Word::new(v).with_span(self.span))
       .promote_err(span)
   }
   pub(crate) fn expand_no_side_effects(&self) -> ShResult<Self> {
@@ -102,14 +371,14 @@ impl Tk {
     Ok(exp)
   }
   /// Perform word splitting
-  pub(crate) fn get_words(&self) -> Arc<[VarStr]> {
+  pub(crate) fn get_words(&self) -> Arc<[Word]> {
     match &self.class {
       TkRule::Expanded { exp } => exp.clone(),
-      _ => [self.slice()].into(),
+      _ => [Word::from(self)].into(),
     }
   }
 
-  pub(crate) fn get_first_word(&self) -> Option<VarStr> {
+  pub(crate) fn get_first_word(&self) -> Option<Word> {
     self.get_words().iter().next().cloned()
   }
 }
@@ -181,7 +450,7 @@ impl Expander {
     if let Some(b) = self.raw.as_plain_bytes() {
       // single literal byte string, so no splitting is needed
       if noglob || !glob::might_be_glob(b) {
-        return Ok(smallvec![b.into()]); // no globs either, just return it
+        return Ok(Words::new(vec![b.into()])); // no globs either, just return it
       }
       let exp = glob::expand_glob(b).into_iter().map(VarStr::from).collect();
       return Ok(exp);
@@ -197,43 +466,48 @@ impl Expander {
     };
 
     if noglob {
-      return Ok(words.into_iter().map(|w| w.into_bytes().into()).collect());
+      return Ok(
+        words
+          .into_iter()
+          .map(|w| Word::from(w.as_bytes()))
+          .collect(),
+      );
     }
 
-    let mut glob_words: Words = SmallVec::with_capacity(words.len());
+    let mut glob_words = Vec::with_capacity(words.len());
 
     for word in words {
       if !word.has_glob_meta() {
         // no glob characters, just push the word
-        glob_words.push(word.into_bytes().into());
+        glob_words.push(word.as_bytes().into());
         continue;
       }
 
       let pattern_bytes   = escape::markers_to_glob_escapes(&word);
-      let literal: VarStr = word.into_bytes().into();
+      let literal: VarStr = word.as_bytes().into();
 
       if !glob::might_be_glob(&pattern_bytes) {
-        glob_words.push(literal);
+        glob_words.push(literal.into());
         continue;
       }
 
       let expansions = glob::expand_glob(&pattern_bytes)
         .into_iter()
-        .map(VarStr::from);
+        .map(Word::from);
 
       glob_words.extend(expansions);
     }
 
-    Ok(glob_words)
+    Ok(Words::new(glob_words))
   }
   pub(crate) fn expand_no_side_effects(mut self) -> ShResult<VarStr> {
     self.allow_side_effects = false;
     let raw = self.expand_inner(false)?;
-    Ok(raw.into_bytes().into())
+    Ok(raw.as_bytes().into())
   }
   pub(crate) fn expand_no_split(self) -> ShResult<VarStr> {
     let raw = self.expand_inner(false)?;
-    Ok(raw.into_bytes().into())
+    Ok(raw.as_bytes().into())
   }
   pub(crate) fn expand_keep_quotes(self) -> ShResult<VarStr> {
     let     raw          = self.expand_inner(false)?;
@@ -556,7 +830,7 @@ mod tests {
       flags: TkFlags::empty(),
     };
     let words = exp.expand().unwrap();
-    assert_eq!(words.to_vec(), vec!["hello world"]);
+    assert_eq!(words.to_vec(), vec!["hello world".into()]);
   }
 
   #[test]
@@ -573,7 +847,7 @@ mod tests {
       flags: TkFlags::empty(),
     };
     let words = exp.expand().unwrap();
-    assert_eq!(words.to_vec(), vec!["hello\tworld"]);
+    assert_eq!(words.to_vec(), vec!["hello\tworld".into()]);
   }
 
   #[test]
@@ -594,7 +868,7 @@ mod tests {
     // escaped `\:` nor the bare `:` splits — both are literal colons and the
     // word stays whole (matches bash: `IFS=:; echo a\:b:c` -> `a:b:c`).
     let words = exp.expand().unwrap();
-    assert_eq!(words.to_vec(), vec!["a:b:c"]);
+    assert_eq!(words.to_vec(), vec!["a:b:c".into()]);
   }
 
   // ===================== Array Indexing (TestGuard) =====================

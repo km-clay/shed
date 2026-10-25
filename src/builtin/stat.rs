@@ -92,11 +92,7 @@ impl StrFmt for FileFmt {
       b'z' => FileConv::Time(FileTime::StatChange(TimeDisplay::Readable)),
       b'Z' => FileConv::Time(FileTime::StatChange(TimeDisplay::EpochSeconds)),
       _ => {
-        return Err(sherr!(
-          ExecFail,
-          "stat: Unsupported format specifier '%{}'",
-          b as char
-        ));
+        return Err(sherr!(ExecFail, "stat: Unsupported format specifier '%{}'", b as char));
       }
     })
   }
@@ -111,7 +107,7 @@ impl StrFmt for FileFmt {
     conv
       .format(&mut body, src)
       .map_err(|e| sherr!(ExecFail, "stat: Failed to format field: {e}"))?;
-    let body = body.into_bytes();
+    let body = body.into();
     Ok(if conv.is_numeric() {
       Field::numeric(body, None, None)
     } else {
@@ -146,11 +142,7 @@ impl StrFmt for FsFmt {
       b't' => FsConv::FsType(StatDisplay::Machine(Base::Hex)),
       b'T' => FsConv::FsType(StatDisplay::Human),
       _ => {
-        return Err(sherr!(
-          ExecFail,
-          "stat: Unsupported format specifier '%{}'",
-          b as char
-        ));
+        return Err(sherr!(ExecFail, "stat: Unsupported format specifier '%{}'", b as char));
       }
     })
   }
@@ -163,10 +155,12 @@ impl StrFmt for FsFmt {
   ) -> ShResult<Field> {
     let mut body = String::new();
     let     name = src.path.clone();
+
     conv
       .format(&mut body, &name.to_str_lossy(), src)
       .map_err(|e| sherr!(ExecFail, "stat: Failed to format field: {e}"))?;
-    let body = body.into_bytes();
+
+    let body = body.into();
     Ok(if matches!(conv, FsConv::FileName | FsConv::FsType(_)) {
       Field::string(truncate_to_prec(body, field))
     } else {
@@ -177,9 +171,9 @@ impl StrFmt for FsFmt {
 
 /// Truncate a string field's body to the specifier's precision (`%.Ns`),
 /// mirroring `printf`. Numeric fields ignore precision.
-fn truncate_to_prec(body: Vec<u8>, field: &FieldParams) -> Vec<u8> {
+fn truncate_to_prec(body: VarStr, field: &FieldParams) -> VarStr {
   match field.precision() {
-    Some(Count::Static(p)) => body.get(..*p).map(<[u8]>::to_vec).unwrap_or(body),
+    Some(Count::Static(p)) => body.get(..*p).map(VarStr::from).unwrap_or(body),
     _ => body,
   }
 }
@@ -268,13 +262,7 @@ impl FileInfo {
     } else {
       stat::lstat::<Path>(name.as_ref())
     }
-    .map_err(|e| {
-      sherr!(
-        ExecFail,
-        "stat: Failed to stat '{}': {e}",
-        name.to_str_lossy()
-      )
-    })?;
+    .map_err(|e| sherr!(ExecFail, "stat: Failed to stat '{}': {e}", name.to_str_lossy()))?;
 
     let mut info = Self {
       name,
@@ -466,7 +454,7 @@ impl FileInfo {
   }
 
   fn fmt_quoted_name(&self, f: &mut impl fmt::Write) -> fmt::Result {
-    let quoted = escape::shell_quote(&self.name.to_str_lossy());
+    let quoted = escape::shell_quote(&self.name);
 
     if self.st_mode & 0o170_000 == S_IFLNK
       && let Ok(tgt) = std::fs::read_link(&self.name)
@@ -847,7 +835,7 @@ impl super::Builtin for Stat {
         &FsFmt,
         format.as_bytes(),
         arg_vec,
-        |(arg, _span)| match FsInfo::for_path(&arg) {
+        |arg| match FsInfo::for_path(&arg) {
           Ok(s) => Some(s),
           Err(e) => {
             errln!(
@@ -863,7 +851,7 @@ impl super::Builtin for Stat {
         &FileFmt,
         format.as_bytes(),
         arg_vec,
-        |(arg, _span)| match FileInfo::new(deref, arg.clone()) {
+        |arg| match FileInfo::new(deref, arg.content()) {
           Ok(s) => Some(s),
           Err(e) => {
             errln!("stat: Failed to stat '{}': {e}", arg.to_str_lossy());

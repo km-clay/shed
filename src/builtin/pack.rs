@@ -6,6 +6,7 @@ use itertools::Itertools;
 use crate::{
   HashSet,
   eval::lex::Span,
+  expand::Word,
   opt,
   procio::{self, ScratchGuard, Sink},
   sherr, shopt,
@@ -39,20 +40,22 @@ impl SpecField {
     }
   }
   fn parse_named<'a>(
-    fields: impl Iterator<Item = (&'a VarStr, Span)>,
-  ) -> ShResult<Vec<(Self, Span)>> {
-    let mut result: Vec<(Self, Span)> = vec![];
-    let mut seen  : HashSet<VarStr>   = HashSet::default();
-    let mut idx   : i32               = 0;
-    let mut fields = fields.into_iter().peekable();
+    fields: impl Iterator<Item = &'a Word>,
+  ) -> ShResult<Vec<(Self, Option<Span>)>> {
+    let mut result = vec![];
+    let mut seen   = HashSet::default();
+    let mut idx    = 0;
+    let mut fields = fields.peekable();
 
-    while let Some((field, span)) = fields.next() {
-      if let Some(ty) = Self::try_skip(field) {
-        let ty = ty.promote_err(span)?;
+    while let Some(field) = fields.next() {
+      let (field, span) = field.clone().unpack();
+
+      if let Some(ty) = Self::try_skip(&field) {
+        let ty = ty.option_promote(span)?;
 
         if ty == SpecType::ToEnd && fields.peek().is_some() {
           return Err(sherr!(
-              ParseErr @ span,
+              ParseErr ? span,
               "the '{field}' specifier can only be used as the last field in a spec",
           ));
         }
@@ -61,8 +64,8 @@ impl SpecField {
         continue;
       }
 
-      let (name, Some(val)) = strops::split_assignment_raw(field) else {
-        return Err(sherr!(ParseErr @ span, "invalid field spec '{field}' (missing '=')"));
+      let (name, Some(val)) = strops::split_assignment_raw(&field) else {
+        return Err(sherr!(ParseErr ? span, "invalid field spec '{field}' (missing '=')"));
       };
       let val = VarStr::from(val);
       let name = if name.is_empty() {
@@ -72,14 +75,14 @@ impl SpecField {
       };
 
       if !seen.insert(name.clone()) {
-        return Err(sherr!(ParseErr @ span, "duplicate field name '{name}' in spec"));
+        return Err(sherr!(ParseErr ? span, "duplicate field name '{name}' in spec"));
       }
 
-      let ty = SpecType::parse_type(&val).promote_err(span)?;
+      let ty = SpecType::parse_type(&val).option_promote(span)?;
 
       if ty == SpecType::ToEnd && fields.peek().is_some() {
         return Err(sherr!(
-            ParseErr @ span,
+            ParseErr ? span,
             "the '{val}' specifier can only be used as the last field in a spec",
         ));
       }
@@ -98,25 +101,25 @@ impl SpecField {
   }
 
   fn parse_positional<'a>(
-    fields: impl Iterator<Item = (&'a VarStr, Span)>,
-  ) -> ShResult<Vec<(Self, Span)>> {
-    let mut result: Vec<(Self, Span)> = vec![];
-    let mut seen  : HashSet<VarStr>   = HashSet::default();
-    let mut idx   : i32               = 0;
-    let mut fields = fields.into_iter().peekable();
+    fields: impl Iterator<Item = &'a Word>,
+  ) -> ShResult<Vec<(Self, Option<Span>)>> {
+    let mut result = vec![];
+    let mut seen   = HashSet::default();
+    let mut idx    = 0;
+    let mut fields = fields.peekable();
 
-    while let Some((field, span)) = fields.next() {
+    while let Some(field) = fields.next() {
       if let Some(ty) = Self::try_skip(field) {
-        let ty = ty.promote_err(span)?;
+        let ty = ty.option_promote(field.span())?;
 
         if ty == SpecType::ToEnd && fields.peek().is_some() {
           return Err(sherr!(
-              ParseErr @ span,
+              ParseErr ? field.span(),
               "the '{field}' specifier can only be used as the last field in a spec",
           ));
         }
 
-        result.push((SpecField::Skip(ty), span));
+        result.push((SpecField::Skip(ty), field.span()));
         continue;
       }
 
@@ -134,23 +137,23 @@ impl SpecField {
           };
 
           if !seen.insert(name.clone()) {
-            return Err(sherr!(ParseErr @ span, "duplicate field name '{name}' in spec"));
+            return Err(sherr!(ParseErr ? field.span(), "duplicate field name '{name}' in spec"));
           }
-          SpecType::parse_type(v).promote_err(span)?
+          SpecType::parse_type(v).option_promote(field.span())?
         }
-        None => SpecType::parse_type(field).promote_err(span)?,
+        None => SpecType::parse_type(field).option_promote(field.span())?,
       };
 
       if ty == SpecType::ToEnd && fields.peek().is_some() {
         return Err(sherr!(
-          ParseErr @ span,
+          ParseErr ? field.span(),
           "the '{}' specifier can only be used as the last field in a spec",
-          val.unwrap_or(field.clone())
+          val.unwrap_or(field.content())
         ));
       }
 
       idx += 1;
-      result.push((SpecField::Positional(ty), span));
+      result.push((SpecField::Positional(ty), field.span()));
     }
 
     Ok(result)
@@ -232,8 +235,8 @@ impl SpecType {
     if count > max {
       let size = strops::human_size(max as u64);
       return Err(sherr!(
-          ParseErr,
-          "field length {count} exceeds core.max_read_limit value ({size})",
+        ParseErr,
+        "field length {count} exceeds core.max_read_limit value ({size})",
       ));
     }
     Ok(())
@@ -244,10 +247,7 @@ impl SpecType {
     let max = *shopt!(core.max_read_limit) as usize;
     if got >= max {
       let size = strops::human_size(max as u64);
-      return Err(sherr!(
-          ParseErr,
-          "{what} exceeds core.max_read_limit value ({size})",
-      ));
+      return Err(sherr!(ParseErr, "{what} exceeds core.max_read_limit value ({size})",));
     }
     let grow = buffer.len().saturating_mul(2).max(8192).min(max);
     buffer.resize(grow, 0);
@@ -349,10 +349,7 @@ impl SpecType {
       | SpecType::Str(SpecStr::Len(SpecLen::Dynamic(spec))) => spec.width_bytes(),
 
       SpecType::ToEnd => {
-        return Err(sherr!(
-            ParseErr,
-            "cannot write a pad for a field of type '*' (to-end)"
-        ));
+        return Err(sherr!(ParseErr, "cannot write a pad for a field of type '*' (to-end)"));
       }
     };
 
@@ -400,8 +397,8 @@ impl SpecType {
         if n > limit {
           let size = strops::human_size(limit as u64);
           return Err(sherr!(
-              ParseErr,
-              "field length {n} exceeds core.max_read_limit value ({size})",
+            ParseErr,
+            "field length {n} exceeds core.max_read_limit value ({size})",
           ));
         }
         let mut out = vec![0u8; n];
@@ -416,8 +413,8 @@ impl SpecType {
         let max   = 1u128 << (width * 8);
         if n as u128 >= max {
           return Err(sherr!(
-              ParseErr,
-              "value of {n} bytes does not fit a {width}-byte length prefix"
+            ParseErr,
+            "value of {n} bytes does not fit a {width}-byte length prefix"
           ));
         }
 
@@ -614,7 +611,7 @@ impl Pack {
         SpecField::Named { name, ty, .. } => {
           let Some(pos) = array.iter().position(|(k, _)| k.as_ref() == Some(name)) else {
             return Err(sherr!(
-                ParseErr @ span,
+                ParseErr ? span,
                 "field name '{name}' not found in {arr_name}"
             ));
           };
@@ -622,14 +619,14 @@ impl Pack {
           let (_, value) = array.remove(pos).unwrap();
 
           let len        = value.len();
-          let data       = ty.write_field(value).promote_err(span)?;
+          let data       = ty.write_field(value).option_promote(span)?;
 
           if exact
             && let Some(width) = ty.exact_width()
             && width != len
           {
             return Err(sherr!(
-                ParseErr @ span,
+                ParseErr ? span,
                 "field length {width} does not match value length ({len})",
             ));
           }
@@ -638,14 +635,14 @@ impl Pack {
         SpecField::Positional(ty) => match array.pop_front() {
           Some((_, value)) => {
             let len  = value.len();
-            let data = ty.write_field(value).promote_err(span)?;
+            let data = ty.write_field(value).option_promote(span)?;
 
             if exact
               && let Some(width) = ty.exact_width()
               && width != len
             {
               return Err(sherr!(
-                  ParseErr @ span,
+                  ParseErr ? span,
                   "field length {width} does not match value length ({len})",
               ));
             }
@@ -658,7 +655,7 @@ impl Pack {
             ));
           }
         },
-        SpecField::Skip(ty) => ty.write_pad().promote_err(span)?,
+        SpecField::Skip(ty) => ty.write_pad().option_promote(span)?,
       };
 
       let buf     = scratch.buf_mut();
@@ -813,7 +810,7 @@ enum Field {
   Named {
     name: VarStr,
     data: VarStr,
-    span: Span,
+    span: Option<Span>,
   },
   Positional {
     data: VarStr,
@@ -821,7 +818,7 @@ enum Field {
 }
 
 impl Field {
-  fn into_named_data(self) -> Option<(VarStr, VarStr, Span)> {
+  fn into_named_data(self) -> Option<(VarStr, VarStr, Option<Span>)> {
     match self {
       Field::Named { name, data, span } => Some((name, data, span)),
       _ => None,
@@ -857,7 +854,7 @@ impl Unpack {
           return util::with_status(1);
         } else {
           return Err(sherr!(
-              ParseErr @ span,
+              ParseErr ? span,
               "truncated record: expected more fields"
           ));
         }
@@ -893,7 +890,7 @@ impl Unpack {
             .find(|(name, _, _)| assoc.iter().any(|(key, _)| key == name))
           {
             return Err(sherr!(
-                ParseErr @ *span,
+                ParseErr ? *span,
                 "field name '{name}' already exists in {arr_name}"
             ));
           }

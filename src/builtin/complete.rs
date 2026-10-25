@@ -18,7 +18,7 @@ use crate::{
 
 use super::{
   BuiltinArgs, Dispatcher, NdRule, ShResult,
-  opt::{Opt, OptSpec, Word, parse_opts},
+  opt::{Arg, Opt, OptSpec, parse_opts},
 };
 
 pub(super) struct Complete;
@@ -58,7 +58,7 @@ impl super::Builtin for Complete {
         })?;
       } else {
         Shed::meta(|m| -> ShResult<()> {
-          for (cmd, _) in args.arguments() {
+          for cmd in args.arguments() {
             if let Some(spec) = m.comp_specs().get(cmd) {
               out!("{}", spec.source());
             }
@@ -72,7 +72,7 @@ impl super::Builtin for Complete {
 
     if comp_opts.flags.contains(CompFlags::REMOVE) {
       Shed::meta_mut(|m| {
-        for (cmd, _) in args.arguments() {
+        for cmd in args.arguments() {
           m.remove_comp_spec(&cmd.to_str_lossy());
         }
       });
@@ -89,8 +89,8 @@ impl super::Builtin for Complete {
 
     let comp_spec = BashCompSpec::from_comp_opts(comp_opts).with_source(src);
 
-    for (cmd, _) in args.arguments() {
-      Shed::meta_mut(|m| m.set_comp_spec(cmd.clone(), Box::new(comp_spec.clone())));
+    for cmd in args.arguments() {
+      Shed::meta_mut(|m| m.set_comp_spec(cmd.content(), Box::new(comp_spec.clone())));
     }
 
     util::with_status(0)
@@ -136,9 +136,9 @@ impl super::Builtin for CompGen {
     let mut args   = vec![];
     for word in parsed.words {
       match word {
-        Word::Opt(opt)         => opts.push(opt),
-        Word::Arg(value, span) => args.push((value, span)),
-        Word::Sep(_)           => {}
+        Arg::Opt(opt)    => opts.push(opt),
+        Arg::Word(value) => args.push(value),
+        Arg::Sep(_)      => {}
       }
     }
 
@@ -146,7 +146,7 @@ impl super::Builtin for CompGen {
     let mut prefix = args
       .into_iter()
       .nth(1)
-      .map(|(v, _)| v.to_string())
+      .map(|v| v.to_string())
       .unwrap_or_default();
     if prefix.as_str() == "--" {
       prefix.clear();
@@ -208,7 +208,8 @@ impl super::Builtin for Compadd {
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let opts = CompaddOpts::from_args(&args);
 
-    let make_candidate = |a: &str| -> Candidate {
+    let make_candidate = |cand: VarStr| -> Candidate {
+      let a = cand.to_str_lossy();
       match (&opts.prefix, &opts.suffix) {
         (Some(p), Some(s)) => format!("{p}{a}{s}").into(),
         (Some(p), None)    => format!("{p}{a}").into(),
@@ -219,13 +220,13 @@ impl super::Builtin for Compadd {
 
     let mut candidates: Vec<Candidate> = args
       .arguments()
-      .map(|(s, _)| make_candidate(&s.to_str_lossy()))
+      .map(|c| make_candidate(c.content()))
       .collect();
 
     if let Some(cand_arr) = opts.cand_arr {
       let elems: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems(&cand_arr.to_str_lossy()))
-        .iter()
-        .map(|v| make_candidate(&v.to_str_lossy()))
+        .into_iter()
+        .map(make_candidate)
         .collect();
 
       candidates.extend(elems);
@@ -258,7 +259,7 @@ impl super::Builtin for Compadd {
       && let VarKind::AssocArr(arr) = assoc_arr.kind()
     {
       for (cand, desc) in arr {
-        let cand = make_candidate(&cand.to_str_lossy()).with_desc(desc);
+        let cand = make_candidate(cand.clone()).with_desc(desc);
 
         described.push(cand);
       }
@@ -279,12 +280,12 @@ fn build_source(args: &BuiltinArgs) -> VarStr {
   for opt in args.options() {
     // the flag as written (e.g. `-W`), followed by its argument words
     parts.push(opt.span().slice());
-    for (arg, _) in opt.args() {
-      parts.push(arg.clone());
+    for arg in opt.args() {
+      parts.push(arg.content());
     }
   }
-  for (arg, _) in args.arguments() {
-    parts.push(arg.clone());
+  for arg in args.arguments() {
+    parts.push(arg.content());
   }
   parts.join_with(" ")
 }

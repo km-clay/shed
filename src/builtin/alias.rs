@@ -29,25 +29,27 @@ impl super::Builtin for Alias {
       return util::with_status(0);
     }
 
-    for (arg, span) in args.arguments() {
-      let (name, value) = strops::split_assignment_raw(arg);
+    for word in args.arguments() {
+      let (name, value) = strops::split_assignment_raw(word);
 
       // reject these two
       if name == b"command" || name == b"builtin" {
         return Err(sherr!(
-          ExecFail @ span,
+          ExecFail ? word.span(),
           "Cannot assign alias to reserved name '{}'",
           name.to_str_lossy()
         ));
       }
 
-      if let Some(value) = value {
+      if let Some(value) = value
+        && let Some(span) = word.span()
+      {
         Shed::logic_mut(|l| l.insert_alias(&name.to_str_lossy(), &value.into(), span));
       } else if let Some(alias) = Shed::logic(|l| l.get_alias(&name.to_str_lossy())) {
         outln_bytes(&vars::display_as_var(name, alias.body()));
       } else {
         return Err(sherr!(
-          SyntaxErr @ span,
+          SyntaxErr ? word.span(),
           "Unknown alias '{}'",
           name.to_str_lossy()
         ));
@@ -69,14 +71,14 @@ impl super::Builtin for Unalias {
       return util::with_status(0);
     }
 
-    for (arg, span) in args.arguments() {
-      if Shed::logic(|l| l.get_alias(&arg.to_str_lossy())).is_none() {
+    for word in args.arguments() {
+      if Shed::logic(|l| l.get_alias(&word.to_str_lossy())).is_none() {
         return Err(sherr!(
-          SyntaxErr @ span,
-          "unalias: alias '{arg}' not found",
+          SyntaxErr ? word.span(),
+          "unalias: alias '{word}' not found",
         ));
       }
-      Shed::logic_mut(|l| l.remove_alias(&arg.to_str_lossy()));
+      Shed::logic_mut(|l| l.remove_alias(&word.to_str_lossy()));
     }
 
     util::with_status(0)
@@ -110,17 +112,21 @@ impl super::Builtin for ExCmd {
       }
     }
 
-    for (arg, span) in args.arguments() {
-      let (name, value) = strops::split_assignment_raw(arg);
+    for word in args.arguments() {
+      let arg           = word.content();
+      let (name, value) = strops::split_assignment_raw(&arg);
       let name          = &name.to_str_lossy();
 
-      if !remove && let Some(value) = value {
+      if !remove
+        && let Some(value) = value
+        && let Some(span) = word.span()
+      {
         Shed::logic_mut(|l| l.insert_ex_alias(name, &value.into(), span));
       } else {
         match Shed::logic(|l| l.get_ex_alias(name)) {
           Some(_) if remove => Shed::logic_mut(|l| l.remove_ex_alias(name)),
           Some(alias)       => outln_bytes(&vars::display_as_var(name.as_bytes(), alias.body())),
-          None => return Err(sherr!(SyntaxErr @ span,"Unknown ex command alias '{name}'")),
+          None => return Err(sherr!(SyntaxErr ? word.span(), "Unknown ex command alias '{name}'")),
         }
       }
     }

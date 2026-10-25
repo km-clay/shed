@@ -4,8 +4,8 @@ use crate::{
     lex::{Span, Tk, TkVecUtils},
     parse::dbracket::{BinaryOp, UnaryOp, eval_binary, eval_unary},
   },
+  expand::Word,
   sherr,
-  state::vars::VarStr,
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -17,7 +17,7 @@ impl super::Builtin for Test {
   /// Custom override so we can pair the opener (`[`/`[[`/`test`) against its
   /// required closer (`]`/`]]`/none) while `argv[0]` is still present, then
   /// hand the operands-only argv to `execute`.
-  fn get_argv_and_opts(
+  fn parse_argv(
     &self,
     cmd_span: Span,
     argv: &[Tk],
@@ -30,7 +30,7 @@ impl super::Builtin for Test {
       .collect::<Vec<_>>();
     let opener = argv
       .first()
-      .map(|(s, _)| s.to_str_lossy())
+      .map(|s| s.to_str_lossy())
       .unwrap_or_default()
       .to_string();
     let want_close: Option<&str> = match opener.as_str() {
@@ -38,9 +38,10 @@ impl super::Builtin for Test {
       "[[" => Some("]]"),
       _    => None,
     };
+
     if let Some(close) = want_close {
       match argv.last() {
-        Some((last, _)) if last == close => {}
+        Some(last) if **last == close => {}
         _ => {
           return Err(sherr!(
             SyntaxErr @ span,
@@ -66,7 +67,7 @@ impl super::Builtin for Test {
     // middle is a binary test, whatever the operands look like (`[ -a = -a ]`,
     // `[ b = -a ]`). The general `-a`/`-o` grammar would otherwise misread an
     // operand as the conjunction operator.
-    if arg_vec.len() == 3 && arg_vec[1].0.to_str_lossy().parse::<BinaryOp>().is_ok() {
+    if arg_vec.len() == 3 && arg_vec[1].parse::<BinaryOp>().is_ok() {
       return match eval_leaf(&arg_vec, extended).map_err(|e| e.try_blame(span)) {
         Err(e)  => Err(e.with_code(2)),
         Ok(res) => util::with_status(res),
@@ -97,7 +98,7 @@ impl super::Builtin for Test {
 ///   2 args → unary op + operand   (e.g. `-f foo`)
 ///   3 args → lhs op rhs           (e.g. `a -eq b`)
 struct ArgvParser<'a> {
-  argv    : &'a [(VarStr, Span)],
+  argv    : &'a [Word],
   pos     : usize,
   extended: bool,
 }
@@ -105,7 +106,7 @@ struct ArgvParser<'a> {
 const STOP_TOKENS: &[&str] = &["-a", "-o", "&&", "||", ")", "!"];
 
 impl<'a> ArgvParser<'a> {
-  fn new(argv: &'a [(VarStr, Span)], extended: bool) -> Self {
+  fn new(argv: &'a [Word], extended: bool) -> Self {
     Self {
       argv,
       pos: 0,
@@ -114,7 +115,7 @@ impl<'a> ArgvParser<'a> {
   }
 
   fn peek(&self) -> Option<std::borrow::Cow<'_, str>> {
-    self.argv.get(self.pos).map(|s| s.0.to_str_lossy())
+    self.argv.get(self.pos).map(|s| s.to_str_lossy())
   }
 
   fn advance(&mut self) {
@@ -166,12 +167,7 @@ impl<'a> ArgvParser<'a> {
       if STOP_TOKENS.contains(&tok.as_ref()) {
         // if this is true, this token refers to the right hand side of a test
         // and is therefore literal.
-        let is_rhs = self.pos - start == 2
-          && self.argv[start + 1]
-            .0
-            .to_str_lossy()
-            .parse::<BinaryOp>()
-            .is_ok();
+        let is_rhs = self.pos - start == 2 && self.argv[start + 1].parse::<BinaryOp>().is_ok();
 
         if is_rhs {
           self.advance();
@@ -190,27 +186,31 @@ impl<'a> ArgvParser<'a> {
 }
 
 /// POSIX arity dispatch on a leaf (no `!`, `(`, `)`, or conjuncts).
-fn eval_leaf(leaf: &[(VarStr, Span)], extended: bool) -> ShResult<bool> {
+fn eval_leaf(leaf: &[Word], extended: bool) -> ShResult<bool> {
   if leaf.is_empty() {
     return Ok(false);
   }
-  let start_span = leaf.first().unwrap().1;
-  let end_span   = leaf.last().unwrap().1;
+  let start_span = leaf.first().unwrap().expect_span();
+  let end_span   = leaf.last().unwrap().expect_span();
   let major_span = start_span.merge_with(end_span).unwrap_or(end_span);
 
   match leaf.len() {
     1 => {
       // Arity-1: implicit `-n`, true if the lone argument is non-empty.
-      Ok(!leaf[0].0.is_empty())
+      Ok(!leaf[0].is_empty())
     }
     2 => {
       // Arity-2: `-OP OPERAND`.
-      let op: UnaryOp = leaf[0].0.to_str_lossy().parse()?;
-      Ok(eval_unary(&op, leaf[1].0.clone()))
+      let op: UnaryOp = leaf[0]
+        .parse()
+        .map_err(|e| sherr!(SyntaxErr @ major_span, "bad unary operator: '{e}'"))?;
+      Ok(eval_unary(&op, leaf[1].clone()))
     }
     3 => {
       // Arity-3: `LHS OP RHS`.
-      let op: BinaryOp = leaf[1].0.to_str_lossy().parse()?;
+      let op: BinaryOp = leaf[1]
+        .parse()
+        .map_err(|e| sherr!(SyntaxErr @ major_span, "bad binary operator: '{e}'"))?;
       eval_binary(&op, &leaf[0], &leaf[2], extended)
     }
     _ => Err(sherr!(

@@ -53,7 +53,7 @@ impl Builtin for HistList {
     let     needs_write     = query.delete || query.restore;
     let     hist            = open_history(span, query.ex_hist, needs_write)?;
 
-    for (arg, span) in arg_vec {
+    for arg in arg_vec {
       let Ok(id) = arg.to_str_lossy().parse::<i64>() else {
         return Err(sherr!(ParseErr @ span, "Invalid command ID: {arg}").with_code(2));
       };

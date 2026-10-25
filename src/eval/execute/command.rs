@@ -295,7 +295,7 @@ impl super::Dispatcher {
       child_logic(existing_pgid);
     }
 
-    let cmd_span = expanded.first().map(|(_, s)| *s).unwrap_or_default();
+    let cmd_span = expanded.first().and_then(|w| w.span()).unwrap_or_default();
     match super::traced_fork(cmd_span, ForkKind::Command)? {
       ForkResult::Child => child_logic(existing_pgid),
       ForkResult::Parent { child } => {

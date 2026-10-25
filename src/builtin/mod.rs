@@ -10,7 +10,7 @@ use nix::{sys::signal::Signal, unistd::Pid};
 use std::io::{self, Read};
 
 use crate::{
-  builtin::opt::Word,
+  builtin::opt::Arg,
   defer, errln,
   eval::{
     execute::{self, AssignBehavior, Dispatcher},
@@ -20,7 +20,7 @@ use crate::{
       ast::{Ast, NodeId},
     },
   },
-  expand::{arithmetic, escape},
+  expand::{Word, arithmetic, escape},
   lifecycle, outln,
   procio::{self, RedirSet, SinkIo, Sinks},
   sherr, shopt, signal,
@@ -315,7 +315,7 @@ pub(crate) trait Builtin: Sync {
   }
 
   /// The way that the builtin parses its options. Some of them are weird, like `set`
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
+  fn parse_argv(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
     let opts = self.opts();
     let parsed = opt::parse_opts_with(argv, &opts, self.strict_opts(), self.double_dash_operand())
       .promote_err(cmd_span)?;
@@ -500,7 +500,7 @@ pub(crate) trait Builtin: Sync {
 
     let cmd_span = argv.first().map_or_else(|| span, |tk| tree[tk].span);
 
-    let parsed   = self.get_argv_and_opts(cmd_span, &tree[*argv], no_split)?;
+    let parsed   = self.parse_argv(cmd_span, &tree[*argv], no_split)?;
 
     if !node.flags.contains(NdFlags::NO_TRACE) {
       // Trace the flat, in-order expansion (options + their args intact),
@@ -509,15 +509,16 @@ pub(crate) trait Builtin: Sync {
     }
 
     let mut argv = parsed.words;
-    let cmd_name = match argv.first() {
-      Some(Word::Arg(name, _)) => name.clone(),
-      _ => cmd_span.slice(),
+    let cmd = match argv.first() {
+      Some(Arg::Word(word)) => Word::new(word.content()).with_span(cmd_span),
+      _ => Word::from(cmd_span),
     };
+
     if !argv.is_empty() {
       argv.remove(0);
     }
 
-    let builtin_args = BuiltinArgs::new(argv, span, cmd_span, cmd_name);
+    let builtin_args = BuiltinArgs::new(argv, span, cmd);
 
     self.execute(builtin_args)
   }
@@ -591,12 +592,12 @@ impl SubCommand {
 /// rather than being lumped into a single `Builtin` implementation with a big match statement.
 ///
 /// Structs implementing this trait should also implement Builtin, and delegate like this:
-/// [`Builtin::get_argv_and_opts`] -> [`BuiltinRouter::route_parse`]
+/// [`Builtin::parse_argv`] -> [`BuiltinRouter::route_parse`]
 /// [`Builtin::execute`] -> [`BuiltinRouter::dispatch_sub`]
 pub(super) trait BuiltinRouter {
   fn sub_from_args(&self, args: &BuiltinArgs) -> Option<&'static dyn Builtin> {
     match args.argv().first() {
-      Some(Word::Arg(word, _)) => self.sub_for(word.as_bytes()),
+      Some(Arg::Word(word)) => self.sub_for(word.as_bytes()),
       _ => None,
     }
   }
@@ -641,21 +642,21 @@ pub(super) trait BuiltinRouter {
   }
   fn dispatch_sub(&self, args: BuiltinArgs) -> ShResult<()> {
     let sub = self.sub_from_args(&args);
-    let (mut words, span, mut cmd_span, cmd_name) = args.unpack();
+    let (mut words, span, mut cmd) = args.unpack();
 
     // strip subcommand, adjust cmd_span
     if sub.is_some()
-      && let Some(pos) = words.iter().position(|w| matches!(w, Word::Arg(_, _)))
-      && let Word::Arg(_, span) = words.remove(pos)
+      && let Some(pos) = words.iter().position(|w| matches!(w, Arg::Word(_)))
+      && let Arg::Word(word) = words.remove(pos)
     {
-      cmd_span = span;
+      cmd = word;
     }
 
     let Some(sub) = sub.or_else(|| self.default_sub()) else {
-      return self.sub_not_found(BuiltinArgs::new(words, span, cmd_span, cmd_name));
+      return self.sub_not_found(BuiltinArgs::new(words, span, cmd));
     };
 
-    sub.execute(BuiltinArgs::new(words, span, cmd_span, cmd_name))
+    sub.execute(BuiltinArgs::new(words, span, cmd))
   }
   /// The default subcommand to run if no subcommand is specified.
   fn default_sub(&self) -> Option<&'static dyn Builtin> {
@@ -685,10 +686,10 @@ pub(super) trait BuiltinRouter {
       .map(|s| s.name().to_var_str())
       .collect::<Vec<_>>();
 
-    for (arg, span) in args.arguments() {
+    for arg in args.arguments() {
       if !arg.starts_with(b"-") {
         let suggestions = cmd::check_typo_against(arg.as_bytes(), sub_cmd_names);
-        let err = sherr!(ExecFail @ span, "unknown subcommand `{arg}` for `{name}`")
+        let err = sherr!(ExecFail ? arg.span(), "unknown subcommand `{arg}` for `{name}`")
           .with_code(2)
           .with_suggestions(&suggestions);
         return Err(err);
@@ -742,7 +743,7 @@ impl<T: BuiltinRouter + Sync> Builtin for T {
   fn as_router(&self) -> Option<&dyn BuiltinRouter> {
     Some(self)
   }
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+  fn parse_argv(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     self.route_parse(cmd_span, argv, no_split)
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
@@ -808,8 +809,9 @@ impl Builtin for Let {
       return util::with_status(1);
     }
     let mut last = 0i64;
-    for (expr, _) in args.arguments() {
+    for expr in args.arguments() {
       let result = arithmetic::expand_arithmetic(Some(args.cmd_span()), expr.as_bytes())?;
+
       last = result.to_str_lossy().trim().parse::<i64>().unwrap_or(0);
     }
     util::with_status(i32::from(last == 0))
@@ -825,7 +827,7 @@ impl Builtin for Yes {
         if args.no_arguments() {
           VarStr::from("y")
         } else {
-          argv::join_raw_arg_iter(args.arguments()).0
+          argv::join_raw_arg_iter(args.arguments()).content()
         }
       }
     };
@@ -906,7 +908,7 @@ impl Builtin for BuiltinBuiltin {
 fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
   let mut out = Vec::with_capacity(argv.len());
   for tk in argv {
-    for word in tk.expand_to_words()? {
+    for word in tk.expand_to_words()?.into_words() {
       out.push(Tk {
         class: TkRule::Expanded { exp: [word].into() },
         ..tk.clone()
@@ -1048,10 +1050,7 @@ impl CommandBuiltin {
             let Some(alias) = Shed::logic(|l| l.get_alias(&name_str)) else {
               return util::with_status(127);
             };
-            outln!(
-              "alias {name_str}={}",
-              escape::shell_quote(&alias.body().to_str_lossy())
-            );
+            outln!("alias {name_str}={}", escape::shell_quote(&alias.body()));
           }
           UtilKind::Function | UtilKind::Builtin   => outln!("{name_str}"),
           UtilKind::Command(p) | UtilKind::File(p) => outln!("{}", p.display()),
@@ -1076,7 +1075,7 @@ impl CommandBuiltin {
             };
             outln!(
               "{name_str} is an alias for {}",
-              escape::shell_quote(&alias.body().to_str_lossy())
+              escape::shell_quote(&alias.body())
             );
           }
           UtilKind::Function => outln!("{name_str} is a function"),

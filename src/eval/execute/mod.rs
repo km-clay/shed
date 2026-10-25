@@ -11,7 +11,6 @@ use super::{
     ast::{Ast, NodeId},
   },
 };
-use crate::set_var;
 use crate::{
   builtin::{self, BUILTIN_NAMES},
   errln,
@@ -35,6 +34,7 @@ use crate::{
     guards,
   },
 };
+use crate::{expand::Word, set_var};
 
 use bstr::ByteSlice;
 use std::{
@@ -74,7 +74,7 @@ pub(crate) fn traced_fork(span: Span, kind: ForkKind) -> ShResult<ForkResult> {
   Ok(unsafe { nix::unistd::fork()? })
 }
 
-pub(crate) fn prepare_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
+pub(crate) fn prepare_argv(argv: &[Tk]) -> ShResult<Vec<Word>> {
   prepare_argv_with(argv, false)
 }
 
@@ -82,7 +82,7 @@ pub(crate) fn prepare_argv(argv: &[Tk]) -> ShResult<Vec<(VarStr, Span)>> {
 /// `no_split` is set by `parse_cmd` for `[[`/`]]` commands so operands like
 /// `$unset` survive expansion as the empty string instead of vanishing
 /// from argv (bash `[[ ]]` semantics).
-pub(crate) fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(VarStr, Span)>> {
+pub(crate) fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<Word>> {
   let mut out = Vec::with_capacity(argv.len());
 
   for arg in argv {
@@ -90,19 +90,20 @@ pub(crate) fn prepare_argv_with(argv: &[Tk], no_split: bool) -> ShResult<Vec<(Va
     if no_split {
       // this is the bash regex thing, not a tilde expansion
       if arg.span.slice().as_bytes() == b"=~" {
-        out.push(("=~".into(), span));
+        out.push(Word::new("=~").with_span(span));
         continue;
       }
+
       let word = arg.expand_no_split()?;
-      out.push((word, span));
+      out.push(Word::new(word).with_span(span));
     } else {
       for exp in arg.expand_to_words()? {
-        out.push((exp, span));
+        out.push(exp);
       }
     }
   }
 
-  record_last_arg(out.last().map(|(s, _)| s.clone()));
+  record_last_arg(out.last().map(|s| s.content()));
 
   Ok(out)
 }
@@ -164,20 +165,20 @@ pub(crate) struct ExecArgs {
 }
 
 impl ExecArgs {
-  pub(crate) fn from_expanded(argv: Vec<(VarStr, Span)>) -> Self {
+  pub(crate) fn from_expanded(argv: Vec<Word>) -> Self {
     let cmd  = Self::get_cmd(&argv);
     let argv = Self::get_argv(argv);
     let envp = Self::get_envp();
     Self { cmd, argv, envp }
   }
-  pub(crate) fn get_cmd(argv: &[(VarStr, Span)]) -> (CString, Span) {
-    let (cmd, span) = &argv[0];
-    (cmd.to_cstring_lossy(), *span)
+  pub(crate) fn get_cmd(argv: &[Word]) -> (CString, Span) {
+    let (cmd, span) = argv[0].clone().unpack();
+    (cmd.to_cstring_lossy(), span.unwrap_or_default())
   }
-  pub(crate) fn get_argv(argv: Vec<(VarStr, Span)>) -> Rc<[CString]> {
+  pub(crate) fn get_argv(argv: Vec<Word>) -> Rc<[CString]> {
     argv
       .into_iter()
-      .map(|s| s.0.to_cstring_lossy())
+      .map(|s| s.to_cstring_lossy())
       .collect::<Vec<CString>>()
       .into()
   }
@@ -222,8 +223,7 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
     let scope = v.cur_scope_mut();
     scope.sh_argv_mut().clear();
 
-    let args = args.into_iter()
-      .map(VarStr::from);
+    let args = args.into_iter().map(VarStr::from);
 
     scope.extend_args(args);
   });

@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Pos {
   pub row: usize,
   pub col: usize,

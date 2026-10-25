@@ -17,10 +17,7 @@ use super::{BuiltinArgs, ReadLimit, opt::OptSpec};
 impl IntSpec {
   fn from_args(args: &super::BuiltinArgs) -> ShResult<Self> {
     if args.has_opt("type") && (args.has_opt("width") || args.has_opt("signed")) {
-      return Err(sherr!(
-        ParseErr,
-        "cannot specify both --type and --width/--signed"
-      ));
+      return Err(sherr!(ParseErr, "cannot specify both --type and --width/--signed"));
     }
 
     let endian = if args.has_opt("big-endian") {
@@ -109,9 +106,7 @@ impl ReadInt {
       return util::with_status(1);
     }
     if got > 16 {
-      return Err(
-        sherr!(ExecFail @ args.cmd_span(), "input too long to infer width: got {got} bytes, max 16"),
-      );
+      return Err(sherr!(ExecFail @ args.cmd_span(), "input too long to infer width: got {got} bytes, max 16"));
     }
 
     spec.set_width(got as u8);
@@ -136,10 +131,7 @@ impl ReadInt {
     let     rem   = got % width;
 
     if rem != 0 {
-      return Err(sherr!(
-        ExecFail,
-        "trailing {rem} bytes do not form a complete integer"
-      ));
+      return Err(sherr!(ExecFail, "trailing {rem} bytes do not form a complete integer"));
     }
 
     if let ReadLimit::Exactly(_) = limit
@@ -196,8 +188,8 @@ impl super::Builtin for WriteInt {
       };
 
       // arg case, used mainly to consume arrays created by readint
-      for (arg, span) in args.arguments() {
-        Self::encode_into(&mut out, spec, arg).promote_err(span)?;
+      for arg in args.arguments() {
+        Self::encode_into(&mut out, spec, arg).option_promote(arg.span())?;
       }
     };
 

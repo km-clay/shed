@@ -59,14 +59,14 @@ impl super::Builtin for KeyMapBuiltin {
 
     let mut arguments = args.arguments();
 
-    let Some((keys, _)) = arguments.next() else {
+    let Some(keys) = arguments.next() else {
       return Err(sherr!(
         ExecFail @ span,
         "missing keys argument",
       ));
     };
 
-    let Some((action, _)) = arguments.next() else {
+    let Some(action) = arguments.next() else {
       return Err(sherr!(
         ExecFail @ span,
         "missing action argument",
@@ -76,8 +76,8 @@ impl super::Builtin for KeyMapBuiltin {
     let keymap = KeyMap {
       flags,
       remap,
-      keys: keys.clone(),
-      action: action.clone(),
+      keys: keys.content(),
+      action: action.content(),
     };
 
     Shed::logic_mut(|l| l.insert_keymap(keymap));

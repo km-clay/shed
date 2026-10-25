@@ -16,31 +16,31 @@ impl super::Builtin for Source {
     let     (arg_vec, _) = args.take_argv();
     let mut arg_iter     = arg_vec.into_iter();
 
-    let Some((file, span)) = arg_iter.next() else {
+    let Some(file) = arg_iter.next() else {
       return Err(sherr!(
         ExecFail @ args.span(),
         "source: filename argument required",
       ));
     };
-    let path = PathBuf::from(file);
+    let path = PathBuf::from(file.content());
 
     if !path.exists() {
       return Err(sherr!(
-        ExecFail @ span,
+        ExecFail ? file.span(),
         "source: File '{}' not found", path.display(),
       ));
     } else if !path.is_file() {
       return Err(sherr!(
-        ExecFail @ span,
+        ExecFail ? file.span(),
         "source: Given path '{}' is not a file", path.display(),
       ));
     }
 
-    let extra: Vec<VarStr> = arg_iter.map(|(arg, _)| arg).collect();
+    let extra: Vec<VarStr> = arg_iter.map(|arg| arg.content()).collect();
     let saved_argv = (!extra.is_empty()).then(|| {
       Shed::vars_mut(|v| {
-        let scope   = v.cur_scope_mut();
-        let saved   = scope.sh_argv().clone();
+        let scope = v.cur_scope_mut();
+        let saved = scope.sh_argv().clone();
 
         scope.clear_pos_args();
         scope.extend_args(extra);
@@ -64,11 +64,14 @@ impl super::Builtin for Source {
       });
     }
 
-    if let Err(e) = result
+    if let Err(mut e) = result
       && let ShErrKind::Raised(_, code) = e.kind()
     {
       Shed::set_status(*code);
-      return Err(e.force_promote(span));
+      if let Some(span) = file.span() {
+        e = e.force_promote(span);
+      }
+      return Err(e);
     }
 
     Ok(())

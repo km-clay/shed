@@ -48,20 +48,19 @@ impl Builtin for List {
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut arguments = args.arguments();
     let mut fmt       = None;
-    let mut fmt_span  = None;
 
-    if let Some((arg, span)) = arguments.next()
-      && WatchName::new(arg.clone()).promote_err(span)?.is_none()
+    if let Some(arg) = arguments.next()
+      && WatchName::new(arg.content())
+        .option_promote(arg.span())?
+        .is_none()
     {
       fmt = Some(arg.clone());
-      fmt_span = Some(span);
     }
 
     if fmt.is_none()
-      && let Some((arg, span)) = arguments.next()
+      && let Some(arg) = arguments.next()
     {
       fmt = Some(arg.clone());
-      fmt_span = Some(span);
     }
 
     // snapshot under the borrow, render and print outside it
@@ -82,7 +81,7 @@ impl Builtin for List {
         };
         strops::StrFormatter::parse(&dur_fmt, fmt)
           .and_then(|f| f.render(&mut strops::dur_delta(status.elapsed()), &mut buf))
-          .option_promote(fmt_span)
+          .option_promote(fmt.span())
           .promote_err(args.cmd_span())?;
         VarStr::from(buf)
       } else {
@@ -104,11 +103,11 @@ trait TimerCmd {
     let name = args
       .arguments()
       .next()
-      .map(|(n, s)| {
+      .map(|n| {
         if strops::has_unescaped(n, b"%") {
-          Err(sherr!(ParseErr @ s, "timer name cannot contain `%`"))
+          Err(sherr!(ParseErr ? n.span(), "timer name cannot contain `%`"))
         } else {
-          WatchName::new(n.clone()).promote_err(s)
+          WatchName::new(n.content()).option_promote(n.span())
         }
       })
       .transpose()?
@@ -182,26 +181,22 @@ impl Builtin for Status {
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let mut arguments = args.arguments();
-
     let mut name      = None;
     let mut fmt       = None;
-    let mut fmt_span  = None;
 
-    if let Some((arg, span)) = arguments.next() {
-      let watch_name = WatchName::new(arg.clone()).promote_err(span)?;
+    if let Some(arg) = arguments.next() {
+      let watch_name = WatchName::new(arg.content()).option_promote(arg.span())?;
       if let Some(n) = watch_name {
         name = Some(n);
       } else {
         fmt = Some(arg.clone());
-        fmt_span = Some(span);
       }
     }
 
     if fmt.is_none()
-      && let Some((arg, span)) = arguments.next()
+      && let Some(arg) = arguments.next()
     {
       fmt = Some(arg.clone());
-      fmt_span = Some(span);
     }
 
     let status = if let Some(name) = name.as_ref() {
@@ -222,7 +217,7 @@ impl Builtin for Status {
         .and_then(|f| f.render(&mut strops::dur_delta(status.elapsed()), &mut buf));
 
       if let Err(e) = res {
-        let mut e = e.option_promote(fmt_span).promote(args.cmd_span());
+        let mut e = e.option_promote(fmt.span()).promote(args.cmd_span());
         if name.is_none() {
           e = e.with_note(
             "if this was meant to be a timer name, timer names cannot contain `%`".into(),

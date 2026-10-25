@@ -1,4 +1,6 @@
-use crate::set_var;
+use itertools::Itertools;
+
+use crate::{expand::Word, set_var};
 use std::str::FromStr;
 
 use crate::{
@@ -19,7 +21,7 @@ use crate::{
   var,
 };
 
-use super::opt::{Parsed, Word};
+use super::opt::{Arg, Parsed};
 
 enum OptMatch {
   NoMatch,
@@ -85,13 +87,10 @@ impl super::Builtin for GetOpts {
   /// flags like `-ab`, attached args like `-bVALUE`, and `--`). The internal
   /// option parser would split those apart, so pass every word through as a
   /// plain argument and let `getopts_inner` do the parsing.
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
+  fn parse_argv(&self, cmd_span: Span, argv: &[Tk], no_split: bool) -> ShResult<Parsed> {
     let expanded = execute::prepare_argv_with(argv, no_split).promote_err(cmd_span)?;
-    let trace    = expanded.iter().map(|(word, _)| word.clone()).collect();
-    let words = expanded
-      .into_iter()
-      .map(|(word, span)| Word::Arg(word, span))
-      .collect();
+    let trace    = expanded.iter().map(Word::content).collect();
+    let words    = expanded.into_iter().map(Arg::Word).collect();
     Ok(Parsed { words, trace })
   }
 
@@ -99,24 +98,24 @@ impl super::Builtin for GetOpts {
     let     span    = args.span();
     let mut arg_vec = args.arguments();
 
-    let Some((arg_string, arg_span)) = arg_vec.next() else {
+    let Some(arg) = arg_vec.next() else {
       return Err(sherr!(
           ExecFail @ span,
           "getopts: missing option spec",
       ));
     };
-    let Some((opt_var, _)) = arg_vec.next() else {
+    let Some(opt_var) = arg_vec.next() else {
       return Err(sherr!(
           ExecFail @ span,
           "getopts: missing variable name",
       ));
     };
 
-    let opts_spec = GetOptsSpec::from_str(&arg_string.to_str_lossy()).promote_err(arg_span)?;
+    let opts_spec     = GetOptsSpec::from_str(&arg.to_str_lossy()).option_promote(arg.span())?;
+    let explicit_args = arg_vec.map(Word::content).collect_vec();
 
-    let explicit_args: Vec<VarStr> = arg_vec.map(|(word, _)| word.clone()).collect();
     if explicit_args.is_empty() {
-      let pos_params: Vec<VarStr> = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect());
+      let pos_params = Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect_vec());
       Self::getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &pos_params, span)
     } else {
       Self::getopts_inner(&opts_spec, &opt_var.to_str_lossy(), &explicit_args, span)

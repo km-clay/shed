@@ -40,7 +40,7 @@ impl super::Builtin for Scry {
   fn strict_opts(&self) -> bool {
     true
   }
-  fn get_argv_and_opts(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
+  fn parse_argv(&self, cmd_span: Span, argv: &[Tk], _no_split: bool) -> ShResult<Parsed> {
     let     opts = self.opts();
     let mut argv = argv.to_vec();
 
@@ -129,7 +129,7 @@ impl super::Builtin for Scry {
       input.lines().map(|s| (s.to_string(), 0)).collect()
     };
 
-    for (arg, _) in args.arguments() {
+    for arg in args.arguments() {
       entries.push((arg.to_string(), 0));
     }
 
@@ -206,7 +206,7 @@ impl Scry {
     match picked {
       Some(item) => {
         if quote_out && let Ok(out) = procio::stdout_sink() {
-          escape::shell_quote_fmt(&item, &mut SinkIo(out)).ok();
+          escape::shell_quote_fmt(item.as_bytes(), &mut SinkIo(out)).ok();
         } else if no_newline {
           out!("{item}");
         } else {
@@ -221,7 +221,7 @@ impl Scry {
   fn emit_item(item: &str, quote_out: bool) {
     if quote_out {
       if let Ok(out) = procio::stdout_sink() {
-        escape::shell_quote_fmt(item, &mut SinkIo(out)).ok();
+        escape::shell_quote_fmt(item.as_bytes(), &mut SinkIo(out)).ok();
       }
       outln!();
     } else {
@@ -252,7 +252,7 @@ impl Scry {
   ) -> ShResult<()> {
     let query: Vec<char> = query.unwrap_or_default().chars().collect();
 
-    for (arg, _) in args.arguments() {
+    for arg in args.arguments() {
       let arg = arg.to_string();
       if readline::is_subsequence(&arg, &query) {
         Self::emit_item(&arg, quote_out);
@@ -279,7 +279,7 @@ impl Scry {
     quote_out: bool,
     no_newline: bool,
   ) -> ShResult<()> {
-    let entries: Vec<(String, i32)> = args.arguments().map(|(a, _)| (a.to_string(), 0)).collect();
+    let entries: Vec<(String, i32)> = args.arguments().map(|a| (a.to_string(), 0)).collect();
     let stream = Self::spawn_stdin_stream(stdin, null_in)?;
 
     let mut selector = FuzzyBuilder::new()
@@ -311,7 +311,7 @@ impl Scry {
           outln!();
         }
         let content = cand.content();
-        escape::shell_quote_fmt(content, &mut SinkIo(out.clone())).ok();
+        escape::shell_quote_fmt(content.as_bytes(), &mut SinkIo(out.clone())).ok();
         first = false;
       }
       if !no_newline {

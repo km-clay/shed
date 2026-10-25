@@ -221,10 +221,7 @@ impl CmdTimer {
 
   pub(crate) fn format_report(&self, fmt_str: &str) -> ShResult<String> {
     if self.still_running() {
-      return Err(sherr!(
-        InternalErr,
-        "attempt to format a CmdTimer that is still running"
-      ));
+      return Err(sherr!(InternalErr, "attempt to format a CmdTimer that is still running"));
     }
 
     let mut output = String::new();

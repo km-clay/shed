@@ -2,9 +2,10 @@ use std::{iter::Peekable, vec};
 
 use crate::{
   HashMap,
-  eval::{execute, lex::Span},
+  eval::execute,
+  expand::Word,
   opt, sherr,
-  state::{Shed, logic::TrapTarget, vars::VarStr},
+  state::{Shed, logic::TrapTarget},
   util::{
     self,
     error::{self, ShErr, ShErrKind, ShResult, ShResultExt},
@@ -26,7 +27,7 @@ enum RaiseConv {
 
 #[derive(Debug)]
 struct RaiseCtx {
-  args     : Peekable<vec::IntoIter<(VarStr, Span)>>,
+  args     : Peekable<vec::IntoIter<Word>>,
   color_map: HashMap<usize, yansi::Color>,
 }
 
@@ -43,11 +44,8 @@ impl StrFmt for RaiseFmt {
     let mut buf = util::scratch_buf();
     let paren_err = || {
       Err(
-        sherr!(
-          ParseErr,
-          "format specifiers be numbers enclosed in parenthesis",
-        )
-        .with_note("e.g. `%(1)`".into()),
+        sherr!(ParseErr, "format specifiers be numbers enclosed in parenthesis",)
+          .with_note("e.g. `%(1)`".into()),
       )
     };
 
@@ -87,16 +85,13 @@ impl StrFmt for RaiseFmt {
     src: &mut Self::Source,
   ) -> ShResult<Field> {
     let RaiseConv::Index(idx) = conv;
-    let Some((arg, _)) = src.args.next() else {
-      return Err(sherr!(
-        ParseErr,
-        "invalid format specifier: no argument for '%({idx})'",
-      ));
+    let Some(arg) = src.args.next() else {
+      return Err(sherr!(ParseErr, "invalid format specifier: no argument for '%({idx})'",));
     };
     let color   = src.get_color(*idx);
     let painted = arg.paint(color);
 
-    Ok(Field::styled(varstr!("{painted}").into_bytes()))
+    Ok(Field::styled(varstr!("{painted}")))
   }
 }
 
@@ -114,10 +109,10 @@ trait FlowCtl: super::Builtin {
     let code = args
       .arguments()
       .next()
-      .map(|(st, sp)| {
+      .map(|st| {
         st.to_str_lossy().parse::<i32>().map_err(|_| {
           sherr!(
-            SyntaxErr @ sp,
+            SyntaxErr ? st.span(),
             "{}: Expected a number",
             self.cmd(),
           )
@@ -174,10 +169,7 @@ impl FlowCtl for Break {
   }
   fn flow_control(&self, count: i32) -> ShErr {
     if count <= 0 {
-      sherr!(
-        ParseErr,
-        "'break' count must be a positive integer, got {count}",
-      )
+      sherr!(ParseErr, "'break' count must be a positive integer, got {count}",)
     } else {
       sherr!(LoopBreak(count), "'break' found outside of loop",)
     }
@@ -203,10 +195,7 @@ impl FlowCtl for Continue {
   }
   fn flow_control(&self, count: i32) -> ShErr {
     if count <= 0 {
-      sherr!(
-        ParseErr,
-        "'continue' count must be a positive integer, got {count}",
-      )
+      sherr!(ParseErr, "'continue' count must be a positive integer, got {count}",)
     } else {
       sherr!(LoopContinue(count), "'continue' found outside of loop",)
     }
@@ -296,7 +285,7 @@ impl super::Builtin for Raise {
     let mut message_parts = vec![];
     let arg_iter = args
       .arguments()
-      .map(|(a, s)| (a.clone(), s))
+      .cloned()
       .collect::<Vec<_>>()
       .into_iter()
       .peekable();
@@ -306,7 +295,7 @@ impl super::Builtin for Raise {
       color_map: HashMap::default(),
     };
 
-    while let Some((fmt, span)) = ctx.args.next() {
+    while let Some(fmt) = ctx.args.next() {
       let     f   = strops::StrFormatter::parse(&RaiseFmt, &fmt).promote_err(span)?;
       let mut buf = vec![];
       f.render(&mut ctx, &mut buf).promote_err(span)?;
@@ -472,8 +461,7 @@ mod tests {
     // `continue 2` abandons the inner loop and resumes the OUTER loop's next
     // iteration, so `echo un` and the rest of the inner loop are skipped.
     let guard = TestGuard::new();
-    test_input("for i in 1 2; do for j in a b; do echo $i$j; continue 2; echo un; done; echo in$i; done; echo end")
-      .unwrap();
+    test_input("for i in 1 2; do for j in a b; do echo $i$j; continue 2; echo un; done; echo in$i; done; echo end").unwrap();
     assert_eq!(
       guard.read_output().split_whitespace().collect::<Vec<_>>(),
       ["1a", "2a", "end"]
@@ -485,8 +473,7 @@ mod tests {
     // POSIX: n greater than the nesting resumes the outermost loop.
     // `continue 5` inside 2 loops == `continue 2`.
     let guard = TestGuard::new();
-    test_input("for i in 1 2; do for j in a b; do echo $i$j; continue 5; echo un; done; echo in$i; done; echo end")
-      .unwrap();
+    test_input("for i in 1 2; do for j in a b; do echo $i$j; continue 5; echo un; done; echo in$i; done; echo end").unwrap();
     assert_eq!(
       guard.read_output().split_whitespace().collect::<Vec<_>>(),
       ["1a", "2a", "end"]

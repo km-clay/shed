@@ -1,6 +1,11 @@
-use std::ops::Range;
+use std::{
+  io::{self, Write},
+  ops::Range,
+};
 
 use bitflags::bitflags;
+use bstr::ByteSlice;
+use smallvec::SmallVec;
 
 use crate::{
   eval::lex,
@@ -8,14 +13,24 @@ use crate::{
     stream::{ProcSubKind, SegCursor},
     var,
   },
-  match_loop, sherr, try_var,
+  match_loop, sherr,
+  state::vars::VarStr,
+  try_var,
   util::{
+    self,
     error::ShResult,
     strops::{ByteCursor, QuoteState, SliceCursor},
   },
+  varstr,
 };
 
 use super::stream::{Marker, Quote, SegStream, Unit};
+
+/// All ASCII control characters, for use in `$'...'` ANSI-C quoting.
+///
+/// Excludes `\x09` (tab), `\x0a` (newline)
+const HARD_CONTROLS: &[u8] = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0d\x0e\x0f\
+  \x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f";
 
 bitflags! {
   #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -386,11 +401,11 @@ fn read_dub_quote(stream: &mut SegCursor, out: &mut SegStream) {
   });
 }
 
-pub(crate) fn expand_ansi_c(s: &[u8]) -> Vec<u8> {
+pub(crate) fn expand_ansi_c(s: &[u8]) -> VarStr {
   let     input = SegStream::from_bytes(s);
   let mut out   = SegStream::new();
   expand_ansi_c_stream(&mut input.cursor(), &mut out, None);
-  out.into_bytes()
+  out.content()
 }
 
 pub(crate) fn expand_dollar_quote(chars: &mut SegCursor, out: &mut SegStream) {
@@ -693,8 +708,7 @@ pub(crate) fn unescape_math(raw: &[u8]) -> ShResult<SegStream> {
         out.push_byte(next_ch);
       }
     }
-    b'"' => qt_state.toggle_double(),
-    b'\'' => qt_state.toggle_single(),
+    b'"' | b'\'' => { qt_state.toggle_from(ch); },
     _ if qt_state.in_single() => out.push_byte(ch),
     b'$' => {
       out.push_marker(Marker::VarSub);
@@ -736,128 +750,99 @@ pub(crate) fn unescape_math(raw: &[u8]) -> ShResult<SegStream> {
   Ok(out)
 }
 
-fn quote_fmt(
-  s: &str,
-  f: &mut impl std::fmt::Write,
-  special_chars: &str,
+fn quote_fmt<F: io::Write>(
+  raw: &[u8],
+  f: &mut F,
+  special: &[u8],
   escape_ws_controls: bool,
-) -> std::fmt::Result {
-  // An empty string MUST be quoted, otherwise interpolating it into a command
-  // line collapses into surrounding whitespace and the arg is silently dropped.
-  if s.is_empty() {
-    return write!(f, "''");
+) -> io::Result<()> {
+  if raw.is_empty() {
+    return f.write_all(b"''");
   }
+  let has_hard_control = raw.find_byteset(HARD_CONTROLS).is_some();
+  let has_ws_control   = raw.find_byteset(b"\n\t").is_some();
+  let has_special      = raw.find_byteset(special).is_some();
+  let use_ansi_c = (has_hard_control || (has_ws_control && escape_ws_controls))
+    || std::str::from_utf8(raw).is_err();
 
-  let has_hard_control = s
-    .chars()
-    .any(|c| c.is_ascii_control() && c != '\n' && c != '\t');
-  let has_ws_control = s.chars().any(|c| c == '\n' || c == '\t');
-  let has_special    = s.chars().any(|c| special_chars.contains(c));
+  let mut cur = SliceCursor::new(raw);
+  let mut buf = util::scratch_buf();
 
-  if has_hard_control || (has_ws_control && escape_ws_controls) {
-    // $'...' ANSI-C quoting: backslashes and all special chars must be escaped
-    write!(f, "$'")?;
-    for ch in s.chars() {
-      match ch {
-        '\\'   => write!(f, "\\\\")?,
-        '\''   => write!(f, "\\'")?,
-        '\n'   => write!(f, "\\n")?,
-        '\r'   => write!(f, "\\r")?,
-        '\t'   => write!(f, "\\t")?,
-        '\x07' => write!(f, "\\a")?,
-        '\x08' => write!(f, "\\b")?,
-        '\x0B' => write!(f, "\\v")?,
-        '\x0C' => write!(f, "\\f")?,
-        c if c.is_ascii_control() => {
-          let _ = write!(f, "\\x{:02x}", c as u8);
-        }
-        c => write!(f, "{c}")?,
+  if use_ansi_c {
+    buf.write_all(b"$'")?;
+
+    for chunk in raw.utf8_chunks() {
+      for b in chunk.valid().bytes() {
+        push_ansi_c_escaped(&mut buf, b)?;
+      }
+
+      for &b in chunk.invalid() {
+        write!(&mut buf, "\\x{b:02x}")?;
       }
     }
-    write!(f, "'")
+
+    buf.write_all(b"'")?;
   } else if has_special || has_ws_control {
-    write!(f, "'")?;
-    for ch in s.chars() {
-      if ch == '\'' {
-        write!(f, "'\\''")?;
-      } else {
-        write!(f, "{ch}")?;
-      }
-    }
-    write!(f, "'")
+    buf.write_all(b"'")?;
+
+    match_loop!(cur.next_byte() => b, {
+      b'\'' => buf.write_all(b"'\\''")?,
+      c => buf.write_all(&[c])?,
+    });
+
+    buf.write_all(b"'")?;
   } else {
-    write!(f, "{s}")
+    buf.write_all(raw)?;
   }
+
+  f.write_all(&buf)
 }
 
-pub(crate) fn xtrace_quote_fmt<W: std::fmt::Write>(s: &str, f: &mut W) -> std::fmt::Result {
-  quote_fmt(s, f, r#" !*?$;|&<>(){}[]`'"\"#, false)
+pub(crate) fn xtrace_quote_fmt<W: io::Write>(s: &[u8], f: &mut W) -> io::Result<()> {
+  quote_fmt(s, f, br#" !*?$;|&<>(){}[]`'"\"#, false)
 }
 
-pub(crate) fn shell_quote_fmt<W: std::fmt::Write>(s: &str, f: &mut W) -> std::fmt::Result {
-  quote_fmt(s, f, r#"\\!#$^*()=|{}[]`<>?~;& "'"#, true)
+pub(crate) fn shell_quote_fmt<W: io::Write>(s: &[u8], f: &mut W) -> io::Result<()> {
+  quote_fmt(s, f, br#"\\!#$^*()=|{}[]`<>?~;& "'"#, true)
 }
 
 /// Quotes a string such that it can be round-tripped as shell syntax
-pub(crate) fn shell_quote(s: &str) -> String {
+pub(crate) fn shell_quote(s: &[u8]) -> VarStr {
   quote(s, shell_quote_fmt)
-}
-
-/// Byte-native shell quoting: like [`shell_quote`], but preserves arbitrary
-/// non-UTF-8 bytes by rendering the value in `$'...'` ANSI-C form, so
-/// `declare`/`set`/`alias` output round-trips raw bytes instead of laundering
-/// them into `U+FFFD`. Valid UTF-8 values take the ordinary `shell_quote` path.
-pub(crate) fn shell_quote_bytes(bytes: &[u8]) -> Vec<u8> {
-  if let Ok(s) = std::str::from_utf8(bytes) {
-    shell_quote(s).into_bytes()
-  } else {
-    let mut out = Vec::with_capacity(bytes.len() + 4);
-    out.extend_from_slice(b"$'");
-    for chunk in bytes.utf8_chunks() {
-      for ch in chunk.valid().chars() {
-        push_ansi_c_escaped(&mut out, ch);
-      }
-      for &b in chunk.invalid() {
-        out.extend_from_slice(format!("\\x{b:02x}").as_bytes());
-      }
-    }
-    out.push(b'\'');
-    out
-  }
 }
 
 /// Append `ch` to `out` in the `$'...'` ANSI-C escaping convention (matching the
 /// `$'...'` branch of [`quote_fmt`]).
-fn push_ansi_c_escaped(out: &mut Vec<u8>, ch: char) {
-  match ch {
-    '\\'   => out.extend_from_slice(b"\\\\"),
-    '\''   => out.extend_from_slice(b"\\'"),
-    '\n'   => out.extend_from_slice(b"\\n"),
-    '\r'   => out.extend_from_slice(b"\\r"),
-    '\t'   => out.extend_from_slice(b"\\t"),
-    '\x07' => out.extend_from_slice(b"\\a"),
-    '\x08' => out.extend_from_slice(b"\\b"),
-    '\x0B' => out.extend_from_slice(b"\\v"),
-    '\x0C' => out.extend_from_slice(b"\\f"),
-    c if c.is_ascii_control() => out.extend_from_slice(format!("\\x{:02x}", c as u8).as_bytes()),
-    c => {
-      let mut buf = [0u8; 4];
-      out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
-    }
+fn push_ansi_c_escaped<T: io::Write>(out: &mut T, b: u8) -> io::Result<()> {
+  match b {
+    b'\\'   => out.write_all(b"\\\\"),
+    b'\''   => out.write_all(b"\\'"),
+    b'\n'   => out.write_all(b"\\n"),
+    b'\r'   => out.write_all(b"\\r"),
+    b'\t'   => out.write_all(b"\\t"),
+    b'\x07' => out.write_all(b"\\a"),
+    b'\x08' => out.write_all(b"\\b"),
+    b'\x0B' => out.write_all(b"\\v"),
+    b'\x0C' => out.write_all(b"\\f"),
+    c if c.is_ascii_control() => out.write_all(&varstr!("\\x{c:02x}")),
+    c => out.write_all(&[c]),
   }
 }
 
 /// Quotes an xtrace argument
-pub(crate) fn xtrace_quote(s: &str) -> String {
+pub(crate) fn xtrace_quote(s: &[u8]) -> VarStr {
   quote(s, xtrace_quote_fmt)
 }
 
 /// Takes a generic quoting function and applies it to the given string
-fn quote<S: AsRef<str>, F: Fn(&str, &mut String) -> std::fmt::Result>(s: S, f: F) -> String {
+fn quote<S: AsRef<[u8]>, F: Fn(&[u8], &mut SmallVec<[u8; 24]>) -> io::Result<()>>(
+  s: S,
+  f: F,
+) -> VarStr {
   let     s_str  = s.as_ref();
-  let mut result = String::new();
+  let mut result = util::scratch_buf();
   f(s_str, &mut result).unwrap();
-  result
+  result.into()
 }
 
 #[cfg(test)]
@@ -987,57 +972,57 @@ mod tests {
 
   #[test]
   fn display_simple_value_unquoted() {
-    assert_eq!(shell_quote("hello"), "hello");
+    assert_eq!(shell_quote(b"hello"), "hello");
   }
 
   #[test]
   fn display_value_with_spaces_single_quoted() {
-    assert_eq!(shell_quote("hello world"), "'hello world'");
+    assert_eq!(shell_quote(b"hello world"), "'hello world'");
   }
 
   #[test]
   fn display_backslash_no_escaping_in_single_quote_context() {
     // backslash not before ' - should not be doubled
-    assert_eq!(shell_quote("\\@prompt "), "'\\@prompt '");
+    assert_eq!(shell_quote(b"\\@prompt "), "'\\@prompt '");
   }
 
   #[test]
   fn display_backslash_passthrough_inside_squotes() {
-    assert_eq!(shell_quote("bar\\' biz"), "'bar\\'\\'' biz'");
+    assert_eq!(shell_quote(b"bar\\' biz"), "'bar\\'\\'' biz'");
   }
 
   #[test]
   fn display_single_quote_uses_posix_idiom() {
-    assert_eq!(shell_quote("it's"), "'it'\\''s'");
+    assert_eq!(shell_quote(b"it's"), "'it'\\''s'");
   }
 
   #[test]
   fn display_control_char_uses_ansi_c_quoting() {
-    assert_eq!(shell_quote("foo\nbar"), "$'foo\\nbar'");
+    assert_eq!(shell_quote(b"foo\nbar"), "$'foo\\nbar'");
   }
 
   #[test]
   fn display_backslash_escaped_in_ansi_c_context() {
-    assert_eq!(shell_quote("foo\\\nbar"), "$'foo\\\\\\nbar'");
+    assert_eq!(shell_quote(b"foo\\\nbar"), "$'foo\\\\\\nbar'");
   }
 
   #[test]
   fn display_tab_uses_ansi_c_quoting() {
-    assert_eq!(shell_quote("foo\tbar"), "$'foo\\tbar'");
+    assert_eq!(shell_quote(b"foo\tbar"), "$'foo\\tbar'");
   }
 
   #[test]
   fn display_special_chars_single_quoted() {
-    assert_eq!(shell_quote("$VAR"), "'$VAR'");
-    assert_eq!(shell_quote("foo|bar"), "'foo|bar'");
-    assert_eq!(shell_quote("foo&bar"), "'foo&bar'");
+    assert_eq!(shell_quote(b"$VAR"), "'$VAR'");
+    assert_eq!(shell_quote(b"foo|bar"), "'foo|bar'");
+    assert_eq!(shell_quote(b"foo&bar"), "'foo&bar'");
   }
 
   #[test]
   fn display_empty_string() {
     // Empty must be quoted so it survives whitespace collapsing when
     // interpolated into a command line.
-    assert_eq!(shell_quote(""), "''");
+    assert_eq!(shell_quote(b""), "''");
   }
 }
 
@@ -1130,7 +1115,7 @@ mod expand_ansi_c_tests {
   #[test]
   fn hex_uppercase_digits() {
     // `\xFF` is the raw byte 0xFF (byte-native), not the widened `U+00FF`.
-    assert_eq!(super::expand_ansi_c(b"\\xFF"), [0xFF]);
+    assert_eq!(super::expand_ansi_c(b"\\xFF").as_bytes(), [0xFF]);
   }
 
   #[test]

@@ -10,7 +10,6 @@ use bstr::ByteSlice;
 use nix::libc;
 
 use crate::{
-  eval::lex::Span,
   opt,
   procio::Sink,
   sherr, signal,
@@ -104,12 +103,12 @@ impl super::Builtin for Poll {
 }
 
 impl Poll {
-  fn resolve(logical: RawFd, events: libc::c_short, span: Span) -> ShResult<PollEntry> {
+  fn resolve(logical: RawFd, events: libc::c_short) -> ShResult<PollEntry> {
     let sink = Shed::sinks(|s| s.get(logical))
-      .ok_or_else(|| sherr!(ExecFail @ span, "fd {logical} is not open"))?;
+      .ok_or_else(|| sherr!(ExecFail, "fd {logical} is not open"))?;
     let raw = sink
       .as_os_fd()
-      .map_err(|e| sherr!(ExecFail @ span, "fd {logical} is not pollable: {e}"))?
+      .map_err(|e| sherr!(ExecFail, "fd {logical} is not pollable: {e}"))?
       .as_raw_fd();
     let pfd = libc::pollfd {
       fd: raw,
@@ -151,7 +150,7 @@ impl Poll {
       Some(flags.join(" ").into())
     }
   }
-  fn parse_flags(spec: &[u8], span: Span, ctx: &dyn Display) -> ShResult<libc::c_short> {
+  fn parse_flags(spec: &[u8], ctx: &dyn Display) -> ShResult<libc::c_short> {
     let mut flags: libc::c_short = 0;
     for tok in spec
       .split(|&c| c == b',' || c.is_ascii_whitespace())
@@ -166,11 +165,11 @@ impl Poll {
         #[cfg(not(linux_like))]
         b"rdhup" => {
           return Err(
-            sherr!(ExecFail @ span, "event flag `rdhup` is not supported on this platform"),
+            sherr!(ExecFail, "event flag `rdhup` is not supported on this platform"),
           );
         }
         _ => {
-          return Err(sherr!(ExecFail @ span,
+          return Err(sherr!(ExecFail,
             "invalid event flag `{}` in {ctx}", tok.to_str_lossy()));
         }
       };
@@ -186,20 +185,20 @@ impl Poll {
     let mut pfds = vec![];
     let mut meta = vec![];
 
-    for (arg, span) in args.arguments() {
+    for arg in args.arguments() {
       let (fd, flags) = match arg.split_once_str(":") {
         Some((fd, flags)) => (fd, flags),
         None              => (arg.as_bytes(), b"in".as_slice()),
       };
 
       let Ok(fd) = fd.to_str_lossy().parse::<RawFd>() else {
-        let span = span.sub_span(|s, _| (s, s + fd.len()));
+        let span = arg.span().map(|s| s.sub_span(|s, _| (s, s + fd.len())));
         let fd   = fd.to_str_lossy();
-        return Err(sherr!(ExecFail @ span, "invalid fd `{fd}` in argument `{arg}`"));
+        return Err(sherr!(ExecFail ? span, "invalid fd `{fd}` in argument `{arg}`"));
       };
-      let flags    = Self::parse_flags(flags, span, arg)?;
+      let flags    = Self::parse_flags(flags, arg).option_promote(arg.span())?;
 
-      let (pfd, m) = Self::resolve(fd, flags, span)?;
+      let (pfd, m) = Self::resolve(fd, flags).option_promote(arg.span())?;
       pfds.push(pfd);
       meta.push(m);
     }
@@ -225,8 +224,8 @@ impl Poll {
         return Err(sherr!(ExecFail @ span, "invalid fd `{fd}` in events array `{events}`"));
       };
 
-      let flags    = Self::parse_flags(flags.as_bytes(), span, &events)?;
-      let (pfd, m) = Self::resolve(fd, flags, span)?;
+      let flags    = Self::parse_flags(flags.as_bytes(), &events)?;
+      let (pfd, m) = Self::resolve(fd, flags)?;
       pfds.push(pfd);
       meta.push(m);
     }

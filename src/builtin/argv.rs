@@ -1,8 +1,8 @@
 use itertools::Itertools;
 
-use crate::{eval::lex::Span, state::vars::VarStr};
+use crate::{eval::lex::Span, expand::Word, state::vars::VarStr};
 
-use super::opt::{Opt, Word};
+use super::opt::{Arg, Opt};
 
 /// The arguments for a builtin.
 ///
@@ -10,57 +10,50 @@ use super::opt::{Opt, Word};
 /// `span` of the entire command for error reporting, and `stdin` piped in
 /// from a previous builtin in an in-process pipeline.
 pub(crate) struct BuiltinArgs {
-  argv    : Vec<Word>,
+  argv: Vec<Arg>,
   /// The span of the entire builtin call
-  span    : Span,
-  /// The span of just the command
-  cmd_span: Span,
-  /// The command word after expansion.
-  cmd_name: VarStr,
+  span: Span,
+  /// the command
+  cmd : Word,
 }
 
 impl BuiltinArgs {
-  pub(crate) fn new(argv: Vec<Word>, span: Span, cmd_span: Span, cmd_name: VarStr) -> Self {
-    Self {
-      argv,
-      span,
-      cmd_span,
-      cmd_name,
-    }
+  pub(crate) fn new(argv: Vec<Arg>, span: Span, cmd: Word) -> Self {
+    Self { argv, span, cmd }
   }
   pub(crate) fn span(&self) -> Span {
     self.span
   }
   pub(crate) fn cmd_span(&self) -> Span {
-    self.cmd_span
+    self.cmd.span().expect("should always have a span")
   }
-  pub(crate) fn cmd_name(&self) -> &VarStr {
-    &self.cmd_name
+  pub(crate) fn cmd_name(&self) -> VarStr {
+    self.cmd.content()
   }
 
   /// The arg vector of the builtin, including *BOTH* options and arguments.
   ///
   /// If you want just the arguments, use `arguments()`. If you want just the options, use `options()`.
-  pub(crate) fn argv(&self) -> &[Word] {
+  pub(crate) fn argv(&self) -> &[Arg] {
     &self.argv
   }
 
-  pub(crate) fn unpack(self) -> (Vec<Word>, Span, Span, VarStr) {
-    (self.argv, self.span, self.cmd_span, self.cmd_name)
+  pub(crate) fn unpack(self) -> (Vec<Arg>, Span, Word) {
+    (self.argv, self.span, self.cmd)
   }
 
   /// Get an iterator over the arguments (non-option words) of the builtin.
-  pub(crate) fn arguments(&self) -> impl Iterator<Item = (&VarStr, Span)> {
+  pub(crate) fn arguments(&self) -> impl Iterator<Item = &Word> {
     self.argv.iter().filter_map(|word| match word {
-      Word::Arg(value, span) => Some((value, *span)),
-      _ => None,
+      Arg::Word(word) => Some(word),
+      _               => None,
     })
   }
   /// Get an iterator over the options of the builtin.
   pub(crate) fn options(&self) -> impl Iterator<Item = &Opt> {
     self.argv.iter().filter_map(|word| match word {
-      Word::Opt(opt) => Some(opt),
-      _              => None,
+      Arg::Opt(opt) => Some(opt),
+      _             => None,
     })
   }
   /// Check if the builtin has an option with the given key.
@@ -80,57 +73,40 @@ impl BuiltinArgs {
       .find_map(|o| (o.key() == key).then(|| o.span()))
   }
   pub(crate) fn no_arguments(&self) -> bool {
-    self
-      .argv
-      .iter()
-      .all(|word| !matches!(word, Word::Arg(_, _)))
+    self.argv.iter().all(|word| !matches!(word, Arg::Word(_)))
   }
   pub(crate) fn no_options(&self) -> bool {
-    self.argv.iter().all(|word| !matches!(word, Word::Opt(_)))
+    self.argv.iter().all(|word| !matches!(word, Arg::Opt(_)))
   }
   /// Take the arguments and options from the builtin, leaving `argv` empty.
   /// Splits `argv` into a vector of `(VarStr, Span)` for arguments and a vector of `Opt` for options.
-  pub(crate) fn take_argv(&mut self) -> (Vec<(VarStr, Span)>, Vec<Opt>) {
+  pub(crate) fn take_argv(&mut self) -> (Vec<Word>, Vec<Opt>) {
     self
       .argv
       .drain(..)
-      .filter(|word| !matches!(word, Word::Sep(_)))
+      .filter(|word| !matches!(word, Arg::Sep(_)))
       .partition_map(|word| match word {
-        Word::Arg(var_str, span) => itertools::Either::Left((var_str, span)),
-        Word::Opt(opt)           => itertools::Either::Right(opt),
-        Word::Sep(_)             => unreachable!(),
+        Arg::Word(word) => itertools::Either::Left(word),
+        Arg::Opt(opt)   => itertools::Either::Right(opt),
+        Arg::Sep(_)     => unreachable!(),
       })
   }
 }
 
 /// Join all of the word-split arguments into a single string
 /// Preserve the span too
-pub(crate) fn join_raw_args(args: Vec<(VarStr, Span)>) -> (VarStr, Span) {
-  join_raw_arg_iter(args.into_iter())
+pub(crate) fn join_raw_args(args: Vec<Word>) -> Word {
+  join_raw_arg_iter(args.iter())
 }
 
 /// Join all of the word-split arguments into a single string
 /// Preserve the span too
-pub(crate) fn join_raw_arg_iter(
-  args: impl Iterator<Item = (impl AsRef<[u8]>, Span)>,
-) -> (VarStr, Span) {
-  args.fold((VarStr::default(), Span::default()), |mut acc, arg| {
-    let arg_span = arg.1;
-
-    if acc.1 == Span::default() {
-      acc.1 = arg_span;
+pub(crate) fn join_raw_arg_iter<'a>(args: impl Iterator<Item = &'a Word>) -> Word {
+  args.fold(Word::default(), |acc, arg| {
+    if acc.is_empty() {
+      acc.absorb(arg.clone())
     } else {
-      acc.1.merge_inplace(arg_span);
+      acc.absorb(Word::new(" ")).absorb(arg.clone())
     }
-
-    let bytes = arg.0.as_ref();
-
-    if acc.0.is_empty() {
-      acc.0 = bytes.into();
-    } else {
-      acc.0.push(b' ');
-      acc.0.push_slice(bytes);
-    }
-    acc
   })
 }

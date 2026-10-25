@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use crate::builtin::ForkBehavior;
 use crate::util::error::{LabelBuilder, ShResult};
+use crate::varstr;
 use crate::{
   HashMap,
   autoload::{self, AutoloadSrc, Autoloader},
@@ -136,10 +137,9 @@ impl ShFunc {
         }
         Ok(())
       }
-      Self::Autoload(_) => Err(sherr!(
-        InternalErr,
-        "Cannot set fork_behavior on autoload function"
-      )),
+      Self::Autoload(_) => {
+        Err(sherr!(InternalErr, "Cannot set fork_behavior on autoload function"))
+      }
     }
   }
 }
@@ -234,7 +234,7 @@ impl AutoCmd {
 impl Display for AutoCmd {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let kind    = self.kind.to_string();
-    let command = escape::shell_quote(&self.command.to_str_lossy());
+    let command = escape::shell_quote(&self.command);
     write!(f, "autocmd {kind} {command}")
   }
 }
@@ -327,24 +327,24 @@ impl LogTab {
   pub(crate) fn register_autoload_comps(&mut self) {
     self.comp_autoloads.extend(autoload::CompLoader.bundled());
   }
-  pub(crate) fn get_autoload_func_names(&self) -> Vec<String> {
-    let mut names: Vec<String> = self
+  pub(crate) fn get_autoload_func_names(&self) -> Vec<VarStr> {
+    let mut names: Vec<VarStr> = self
       .functions
       .iter()
       .filter_map(|(name, func)| match func {
-        ShFunc::Autoload(AutoloadSrc::Path(_)) => Some(name.clone()),
+        ShFunc::Autoload(AutoloadSrc::Path(_)) => Some(name.into()),
         _ => None,
       })
       .collect();
     names.sort();
     names
   }
-  pub(crate) fn get_autoload_comp_names(&self) -> Vec<String> {
-    let mut names: Vec<String> = self
+  pub(crate) fn get_autoload_comp_names(&self) -> Vec<VarStr> {
+    let mut names: Vec<VarStr> = self
       .comp_autoloads
       .iter()
       .filter_map(|(name, src)| match src {
-        AutoloadSrc::Path(_)         => Some(name.clone()),
+        AutoloadSrc::Path(_)         => Some(name.into()),
         AutoloadSrc::Embedded { .. } => None,
       })
       .collect();
@@ -369,7 +369,7 @@ impl LogTab {
   /// dumping for `genrc` shouldn't mark autocmds as fired.
   pub(crate) fn iter_autocmds(&self) -> impl Iterator<Item = &AutoCmd> {
     let mut kinds: Vec<&AutoCmdKind> = self.autocmds.keys().collect();
-    kinds.sort_by_key(ToString::to_string);
+    kinds.sort_by_key(|k| varstr!("{k}"));
     kinds
       .into_iter()
       .flat_map(move |k| self.autocmds.get(k).map(|v| v.iter()).into_iter().flatten())

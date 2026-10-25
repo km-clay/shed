@@ -10,11 +10,11 @@ impl super::Builtin for Shift {
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
-    let count = args.arguments().next().map_or(Ok(1), |(st, sp)| {
-      st.to_str_lossy().parse::<usize>().map_err(|_| {
+    let count = args.arguments().next().map_or(Ok(1), |st| {
+      st.parse::<usize>().map_err(|e| {
         sherr!(
-          ExecFail @ sp,
-          "Expected a number in shift args",
+          ExecFail ? st.span(),
+          "Expected a number in shift args, found: {e}",
         )
       })
     })?;

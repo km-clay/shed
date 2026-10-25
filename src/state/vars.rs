@@ -23,7 +23,6 @@ use std::{
 use bitflags::bitflags;
 use bstr::ByteSlice;
 use hipstr::HipByt;
-use itertools::Itertools;
 use nix::{
   NixPath,
   errno::Errno,
@@ -35,18 +34,32 @@ use smallvec::SmallVec;
 use smol_str::{SmolStr, SmolStrBuilder};
 
 use crate::{
-  HashMap, eval::{
+  HashMap,
+  eval::{
     lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
     parse::ast::Ast,
-  }, expand::{Expander, Word, arithmetic, escape, markers, stream::SegStream, var}, match_loop, procio, readline::Candidate, sherr, state::{self, Shed, params, paths}, util::{
+  },
+  expand::{
+    Expander, Word, arithmetic, escape,
+    stream::{Marker, Quote, SegStream, Unit},
+    var,
+  },
+  match_loop, procio,
+  readline::Candidate,
+  sherr,
+  state::{self, Shed, params, paths},
+  util::{
     self,
     error::{LabelBuilder, ShResult},
     random,
     strops::{ByteCursor, QuoteState, SliceCursor},
-  }, varstr,
+  },
+  varstr,
 };
 
 use super::{meta::MetaTab, scopes::ScopeStack, terminal::Terminal};
+
+const OPERATORS: &[u8] = b"!#%-+^,=/?";
 
 /// A variable/alias value that can be rendered as raw bytes for reuse as a
 /// shell assignment. Unlike `Display`, this preserves arbitrary non-UTF-8
@@ -93,9 +106,10 @@ impl ValueBytes for VarKind {
         let mut out       = Vec::new();
         let mut item_iter = items.iter().peekable();
         while let Some((k, v)) = item_iter.next() {
-          out.extend_from_slice(&escape::shell_quote_bytes(k.as_bytes()));
+          out.extend_from_slice(&escape::shell_quote(k));
           out.push(b'=');
-          out.extend_from_slice(&escape::shell_quote_bytes(v.as_bytes()));
+          out.extend_from_slice(&escape::shell_quote(v));
+
           if item_iter.peek().is_some() {
             out.push(b' ');
           }
@@ -160,31 +174,35 @@ pub(crate) fn serialize_var(name: &str, var: &Var) -> Option<VarStr> {
     VarKind::Arr(items) => {
       out.extend_from_slice(b"=(");
       let mut it = items.iter().peekable();
+
       while let Some(item) = it.next() {
-        out.extend_from_slice(&escape::shell_quote_bytes(item.as_bytes()));
+        out.extend_from_slice(&escape::shell_quote(item));
         if it.peek().is_some() {
           out.push(b' ');
         }
       }
+
       out.push(b')');
     }
     VarKind::AssocArr(items) => {
       out.extend_from_slice(b"=(");
       let mut it = items.iter().peekable();
+
       while let Some((k, v)) = it.next() {
         out.push(b'[');
-        out.extend_from_slice(&escape::shell_quote_bytes(k.as_bytes()));
+        out.extend_from_slice(&escape::shell_quote(k));
         out.extend_from_slice(b"]=");
-        out.extend_from_slice(&escape::shell_quote_bytes(v.as_bytes()));
+        out.extend_from_slice(&escape::shell_quote(v));
         if it.peek().is_some() {
           out.push(b' ');
         }
       }
+
       out.push(b')');
     }
     VarKind::Str(_) | VarKind::Int(_) => {
       out.push(b'=');
-      out.extend_from_slice(&escape::shell_quote_bytes(&kind.value_bytes()));
+      out.extend_from_slice(&escape::shell_quote(&kind.value_bytes()));
     }
     VarKind::Magic(_) => unreachable!(),
   }
@@ -213,7 +231,7 @@ pub(crate) fn display_as_vars(
 
 pub(crate) fn display_as_var(name: impl AsRef<[u8]>, value: impl ValueBytes) -> Vec<u8> {
   let     name  = name.as_ref();
-  let     value = escape::shell_quote_bytes(&value.value_bytes());
+  let     value = escape::shell_quote(&value.value_bytes());
   let mut out   = Vec::with_capacity(name.len() + value.len() + 1);
   out.extend_from_slice(name);
   out.push(b'=');
@@ -372,7 +390,7 @@ impl ArrIndex {
   pub(crate) fn parse(s: &str, allow_side_effects: bool) -> ShResult<Self> {
     let input    = SegStream::from_bytes(s.as_bytes());
     let expanded = var::expand_raw_inner(None, &mut input.cursor(), allow_side_effects, false)?;
-    let s        = VarStr::from(expanded.into_bytes());
+    let s        = VarStr::from(expanded.as_bytes());
 
     match s.as_bytes() {
       b"@" => Ok(Self::AllSplit),
@@ -403,10 +421,9 @@ impl ArrIndex {
   pub(crate) fn resolve_for(self, tag: VarKindTag) -> ShResult<Self> {
     match self {
       Self::Raw(s) => match tag {
-        VarKindTag::Unset => Err(sherr!(
-          ParseErr,
-          "Cannot resolve array index '{s}': variable is unset"
-        )),
+        VarKindTag::Unset => {
+          Err(sherr!(ParseErr, "Cannot resolve array index '{s}': variable is unset"))
+        }
         VarKindTag::AssocArr => Ok(Self::Key(s)),
         VarKindTag::Arr | VarKindTag::Str | VarKindTag::Int | VarKindTag::Magic => {
           let evaluated = arithmetic::expand_arithmetic(None, s.as_bytes())?;
@@ -423,23 +440,6 @@ impl ArrIndex {
   }
 }
 
-/// Find the first `:` that isn't nested inside `${}`, `$()`, or `(())`
-fn top_level_colon(s: &str) -> Option<usize> {
-  let mut brace_depth = 0;
-  let mut paren_depth = 0;
-  for (i, ch) in s.char_indices() {
-    match ch {
-      '{' => brace_depth += 1,
-      '}' => brace_depth -= 1,
-      '(' => paren_depth += 1,
-      ')' => paren_depth -= 1,
-      ':' if brace_depth == 0 && paren_depth == 0 => return Some(i),
-      _ => {}
-    }
-  }
-  None
-}
-
 /// A parsed variable name, optionally with an array index and slice.
 /// Index expansion happens at construction time, so it's safe
 /// to use inside `Shed::vars`/`write_vars` closures without
@@ -453,92 +453,207 @@ pub(crate) struct VarName {
 }
 
 impl VarName {
-  pub(crate) fn parse(raw: &str, allow_side_effects: bool) -> ShResult<Self> {
-    let Some(bracket_start) = raw.find('[') else {
-      return Ok(Self {
-        name       : raw.to_string(),
-        index      : None,
-        slice_start: None,
-        slice_len  : None,
-      });
+  fn plain(name: String) -> Self {
+    Self {
+      name,
+      index: None,
+      slice_start: None,
+      slice_len: None,
+    }
+  }
+  fn slice_component(part: &SegStream) -> Option<usize> {
+    var::expand_raw(None, &mut part.cursor())
+      .map_or_else(|_| part.content(), |sg| sg.content())
+      .parse::<usize>()
+      .ok()
+  }
+  pub(crate) fn parse_stream(
+    stream: &SegStream,
+    allow_side_effects: bool,
+  ) -> ShResult<(Self, usize)> {
+    let mut cursor    = stream.cursor();
+    let mut qt_state  = QuoteState::default();
+    let mut name      = SegStream::new();
+    let mut index     = SegStream::new();
+    let mut depth     = 0;
+    let mut saw_quote = false;
+    let mut closed    = false;
+
+    let push_to = |depth: usize, name: &mut SegStream, index: &mut SegStream, u: Unit| {
+      if depth == 0 {
+        name.push(u);
+      } else {
+        index.push(u);
+      }
     };
 
-    // Find the matching ']' by tracking depth, since the index
-    // content may contain nested brackets (e.g. ${arr[${i[0]}]})
-    let mut depth       = 0;
-    let mut bracket_end = None;
-    for (i, ch) in raw[bracket_start..].char_indices() {
-      match ch {
-        '[' => depth += 1,
-        ']' => {
-          depth -= 1;
-          if depth == 0 {
-            bracket_end = Some(bracket_start + i);
-            break;
+    // handling "${?}, ${!}, ${-}" as special cases, since these are shell paramaters
+    // also accounts for indirect expansion with "${!var}"
+    if let Some(b @ (b'?' | b'!' | b'-')) = cursor.peek_byte() {
+      let next_is_name = cursor
+        .peek_nth(1)
+        .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_');
+
+      if next_is_name {
+        return Ok((Self::plain(String::new()), 0));
+      }
+
+      cursor.bump();
+      return Ok((Self::plain((b as char).to_string()), 1));
+    }
+
+    while let Some(unit) = cursor.peek() {
+      match unit {
+        Unit::Mark(Marker::Escape) => {
+          cursor.bump();
+          push_to(depth, &mut name, &mut index, unit);
+          if let Some(next) = cursor.next() {
+            push_to(depth, &mut name, &mut index, next);
+          }
+          continue;
+        }
+
+        Unit::Mark(Marker::Quote(Quote::Single)) | Unit::Byte(b'\'') => {
+          if qt_state.toggle_single()
+            && let Unit::Byte(_) = unit
+          {
+            saw_quote = true;
+          }
+          push_to(depth, &mut name, &mut index, unit);
+        }
+        Unit::Mark(Marker::Quote(Quote::Double)) | Unit::Byte(b'"') => {
+          if qt_state.toggle_double()
+            && let Unit::Byte(_) = unit
+          {
+            saw_quote = true;
+          }
+          push_to(depth, &mut name, &mut index, unit);
+        }
+
+        Unit::Byte(b'[') if qt_state.outside() => {
+          depth += 1;
+          if depth > 1 {
+            index.push(unit);
           }
         }
-        _ => {}
+        Unit::Byte(b']') if qt_state.outside() => {
+          depth = depth.saturating_sub(1);
+          if depth == 0 {
+            closed = true;
+            cursor.bump();
+            break;
+          }
+
+          index.push(unit);
+        }
+
+        Unit::Byte(b)
+          if depth == 0
+            && qt_state.outside()
+            && !name.is_empty()
+            && (b == b':' || OPERATORS.contains(&b)) =>
+        {
+          break;
+        }
+
+        _ => push_to(depth, &mut name, &mut index, unit),
+      }
+
+      cursor.bump();
+    }
+
+    if !closed {
+      return Ok((Self::plain(name.content().to_string()), cursor.bpos()));
+    }
+
+    // expand array indexes
+    // ones with quotes need special handling
+    let index = if saw_quote {
+      params::expand_arr_index(index.as_bytes(), allow_side_effects)?
+    } else {
+      let mut idx_cursor = index.cursor();
+      let     expanded   = var::expand_raw_inner(None, &mut idx_cursor, allow_side_effects, false)?;
+      ArrIndex::parse(&expanded.content().to_str_lossy(), allow_side_effects)?
+    };
+
+    let mut slice_start      = None;
+    let mut slice_len        = None;
+    let     next_is_colon    = cursor.peek_byte() == Some(b':');
+    let     is_all_index     = matches!(index, ArrIndex::AllSplit | ArrIndex::AllJoined);
+    let     operator_follows = matches!(cursor.peek_nth(1), Some(b) if OPERATORS.contains(&b));
+    let     slice_follows    = next_is_colon && !operator_follows;
+    let     read_slices      = is_all_index && slice_follows;
+
+    if read_slices {
+      cursor.bump();
+      qt_state.reset();
+
+      let mut skip_part   = SegStream::new();
+      let mut take_part   = SegStream::new();
+      let mut seen_colon  = false;
+      let mut brace_depth = 0usize;
+      let mut paren_depth = 0usize;
+
+      while let Some(unit) = cursor.peek() {
+        match unit {
+          Unit::Mark(Marker::Quote(q)) => {
+            qt_state.toggle_from(q);
+          }
+          Unit::Byte(b @ (b'\'' | b'"')) => {
+            qt_state.toggle_from(b);
+          }
+
+          _ if qt_state.in_quote() => {}
+
+          Unit::Byte(b'{') => brace_depth += 1,
+          Unit::Byte(b'}') => brace_depth = brace_depth.saturating_sub(1),
+          Unit::Byte(b'(') => paren_depth += 1,
+          Unit::Byte(b')') => paren_depth = paren_depth.saturating_sub(1),
+
+          Unit::Byte(b':') if brace_depth == 0 && paren_depth == 0 => {
+            if seen_colon {
+              break;
+            }
+            seen_colon = true;
+            cursor.bump();
+            continue;
+          }
+
+          Unit::Byte(b) if brace_depth == 0 && paren_depth == 0 && OPERATORS.contains(&b) => {
+            break;
+          }
+
+          _ => {}
+        }
+
+        if seen_colon {
+          take_part.push(unit);
+        } else {
+          skip_part.push(unit);
+        }
+
+        cursor.bump();
+      }
+
+      slice_start = Self::slice_component(&skip_part);
+      if seen_colon {
+        slice_len = Self::slice_component(&take_part);
       }
     }
 
-    let Some(bracket_end) = bracket_end else {
-      return Ok(Self {
-        name       : raw.to_string(),
-        index      : None,
-        slice_start: None,
-        slice_len  : None,
-      });
-    };
-
-    let name    = raw[..bracket_start].to_string();
-    let idx_str = &raw[bracket_start + 1..bracket_end];
-    // quoted subscripts need special handling
-    let index = if idx_str.contains('"') || idx_str.contains('\'') {
-      super::params::expand_arr_index(idx_str.as_bytes(), allow_side_effects)?
-    } else {
-      ArrIndex::parse(idx_str, allow_side_effects)?
-    };
-
-    // Array slicing only applies to [@] and [*] indexes
-    let (slice_start, slice_len) = if matches!(index, ArrIndex::AllSplit | ArrIndex::AllJoined) {
-      let after_bracket = &raw[bracket_end + 1..];
-      if let Some(rest) = after_bracket.strip_prefix(':') {
-        // Split on ':' at the top level only (not inside ${} or $())
-        if let Some(split_pos) = top_level_colon(rest) {
-          let s       = &rest[..split_pos];
-          let l       = &rest[split_pos + 1..];
-          let s_input = SegStream::from_bytes(s.as_bytes());
-          let l_input = SegStream::from_bytes(l.as_bytes());
-          let s_exp = var::expand_raw(None, &mut s_input.cursor()).map_or_else(
-            |_| s.to_string(),
-            |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
-          );
-          let l_exp = var::expand_raw(None, &mut l_input.cursor()).map_or_else(
-            |_| l.to_string(),
-            |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
-          );
-          (s_exp.parse::<usize>().ok(), l_exp.parse::<usize>().ok())
-        } else {
-          let rest_input = SegStream::from_bytes(rest.as_bytes());
-          let expanded = var::expand_raw(None, &mut rest_input.cursor()).map_or_else(
-            |_| rest.to_string(),
-            |sg| String::from_utf8_lossy(&sg.into_bytes()).into_owned(),
-          );
-          (expanded.parse::<usize>().ok(), None)
-        }
-      } else {
-        (None, None)
-      }
-    } else {
-      (None, None)
-    };
-
-    Ok(Self {
-      name,
-      index: Some(index),
-      slice_start,
-      slice_len,
-    })
+    Ok((
+      Self {
+        name: name.content().to_string(),
+        index: Some(index),
+        slice_start,
+        slice_len,
+      },
+      cursor.bpos(),
+    ))
+  }
+  pub(crate) fn parse(raw: &str, allow_side_effects: bool) -> ShResult<Self> {
+    Self::parse_stream(&SegStream::from_bytes(raw.as_bytes()), allow_side_effects)
+      .map(|(varname, _)| varname)
   }
 
   pub(crate) fn name(&self) -> &str {
@@ -558,6 +673,19 @@ impl VarName {
   }
   pub(crate) fn slice_len(&self) -> Option<usize> {
     self.slice_len
+  }
+
+  pub(crate) fn is_all_split(&self) -> bool {
+    matches!(self.index(), Some(ArrIndex::AllSplit)) || self.is_argv_split()
+  }
+  pub(crate) fn is_all_joined(&self) -> bool {
+    matches!(self.index(), Some(ArrIndex::AllJoined)) || self.is_argv_joined()
+  }
+  pub(crate) fn is_argv_split(&self) -> bool {
+    self.index.is_none() && matches!(self.name(), "@")
+  }
+  pub(crate) fn is_argv_joined(&self) -> bool {
+    self.index.is_none() && matches!(self.name(), "*")
   }
 }
 
@@ -588,6 +716,21 @@ pub(crate) trait VarStrSliceExt {
 }
 
 impl VarStrSliceExt for [VarStr] {
+  fn join_with(&self, sep: &str) -> VarStr {
+    let mut out  = vec![];
+    let mut iter = self.iter();
+    if let Some(first) = iter.next() {
+      out.extend_from_slice(first.as_bytes());
+      for v in iter {
+        out.extend_from_slice(sep.as_bytes());
+        out.extend_from_slice(v.as_bytes());
+      }
+    }
+    VarStr::from(out)
+  }
+}
+
+impl VarStrSliceExt for [Word] {
   fn join_with(&self, sep: &str) -> VarStr {
     let mut out  = vec![];
     let mut iter = self.iter();
@@ -680,6 +823,10 @@ impl VarStr {
 
   pub(crate) fn try_slice(&self, range: impl RangeBounds<usize>) -> Option<Self> {
     self.0.try_slice(range).ok().map(Self)
+  }
+
+  pub(crate) fn truncate(&mut self, len: usize) {
+    self.0.truncate(len);
   }
 
   pub(crate) fn push_slice(&mut self, other: impl AsRef<[u8]>) {
@@ -793,7 +940,7 @@ impl From<&Path> for VarStr {
 
 impl From<Vec<u8>> for VarStr {
   fn from(value: Vec<u8>) -> Self {
-    Self::from(value.as_slice())
+    Self(HipByt::from(value))
   }
 }
 
@@ -995,11 +1142,7 @@ impl VarKind {
 
   pub(crate) fn arr_from_raw(raw: &[u8]) -> ShResult<Self> {
     if !raw.starts_with(b"(") || !raw.ends_with(b")") {
-      return Err(sherr!(
-        ParseErr,
-        "Invalid array syntax: {}",
-        raw.to_str_lossy(),
-      ));
+      return Err(sherr!(ParseErr, "Invalid array syntax: {}", raw.to_str_lossy(),));
     }
     let raw    = &raw[1..raw.len() - 1];
 
@@ -1013,7 +1156,7 @@ impl VarKind {
       .map(|tk| tk.and_then(|tk| tk.expand()).map(|tk| tk.get_words()))
       .try_fold(Vec::new(), |mut acc, wrds| {
         match wrds {
-          Ok(wrds) => acc.extend(wrds.iter().cloned()),
+          Ok(wrds) => acc.extend(wrds.iter().map(|w| w.content())),
           Err(e)   => return Err(e),
         }
         Ok(acc)
@@ -1042,11 +1185,7 @@ impl VarKind {
 
   pub(crate) fn assoc_arr_from_raw(raw: &[u8]) -> ShResult<Self> {
     if !raw.starts_with(b"(") || !raw.ends_with(b")") {
-      return Err(sherr!(
-        ParseErr,
-        "Invalid associative array syntax: {}",
-        raw.to_str_lossy(),
-      ));
+      return Err(sherr!(ParseErr, "Invalid associative array syntax: {}", raw.to_str_lossy(),));
     }
     let     body  = &raw[1..raw.len() - 1];
     let mut pairs = Vec::new();
@@ -1095,10 +1234,7 @@ impl VarKind {
 
       // Expect '=' immediately after ']'.
       if !bytes.bump_if_eq(b'=') {
-        return Err(sherr!(
-          ParseErr,
-          "Expected '=' after ']' in associative array element",
-        ));
+        return Err(sherr!(ParseErr, "Expected '=' after ']' in associative array element",));
       }
 
       // Read the value up to top-level whitespace. Quote chars are kept (and
@@ -1160,8 +1296,8 @@ impl Display for VarKind {
         let mut item_iter = items.iter().peekable();
         while let Some(item) = item_iter.next() {
           let (k, v) = item;
-          let key    = escape::shell_quote(&k.to_str_lossy());
-          let val    = escape::shell_quote(&v.to_str_lossy());
+          let key    = escape::shell_quote(k);
+          let val    = escape::shell_quote(v);
           write!(f, "{key}={val}")?;
           if item_iter.peek().is_some() {
             write!(f, " ")?;
@@ -1525,39 +1661,19 @@ impl VarTab {
   pub(crate) fn sh_argv_mut(&mut self) -> &mut VecDeque<VarStr> {
     &mut self.sh_argv
   }
-  fn update_arg_params(&mut self) {
-    // sh_argv[0] is $0 (script/function name); [1..] are positionals.
-    // When the deque is entirely empty, treat as zero positionals.
-    let positional_count = self.sh_argv.len().saturating_sub(1);
-    let positional_join = self
-      .sh_argv
-      .iter()
-      .skip(1)
-      .cloned()
-      .collect::<Vec<_>>()
-      .join_with(&markers::ARG_SEP.to_string());
-
-    self.set_param(ShellParam::AllArgs, &positional_join);
-    self.set_param(ShellParam::ArgCount, &positional_count.to_string().into());
-  }
   pub(crate) fn clear_pos_args(&mut self) {
     self.sh_argv.truncate(1);
-    self.update_arg_params();
   }
   pub(crate) fn extend_args(&mut self, args: impl IntoIterator<Item = VarStr>) {
     self.sh_argv.extend(args);
-    self.update_arg_params();
   }
   /// Push an arg to the back of the arg deque
   pub(crate) fn bpush_arg(&mut self, arg: VarStr) {
     self.sh_argv.push_back(arg);
-    self.update_arg_params();
   }
   /// Pop an arg from the front of the arg deque
   pub(crate) fn fpop_arg(&mut self) -> Option<VarStr> {
-    let arg = self.sh_argv.pop_front();
-    self.update_arg_params();
-    arg
+    self.sh_argv.pop_front()
   }
   pub(crate) fn vars(&self) -> &HashMap<String, Var> {
     &self.vars
@@ -1612,10 +1728,7 @@ impl VarTab {
   pub(crate) fn try_take_var(&mut self, var_name: &str) -> ShResult<Option<Var>> {
     if let Some(var) = self.vars.get(var_name) {
       if var.flags.contains(VarFlags::READONLY) {
-        return Err(sherr!(
-          ExecFail,
-          "cannot unset readonly variable '{var_name}'"
-        ));
+        return Err(sherr!(ExecFail, "cannot unset readonly variable '{var_name}'"));
       }
       if var.flags.contains(VarFlags::EXPORT) {
         Shed::meta_mut(MetaTab::clear_envp);
@@ -1639,17 +1752,11 @@ impl VarTab {
               if items.len() >= n {
                 items.len() - n
               } else {
-                return Err(sherr!(
-                  ExecFail,
-                  "Index {n} out of bounds for array '{var_name}'"
-                ));
+                return Err(sherr!(ExecFail, "Index {n} out of bounds for array '{var_name}'"));
               }
             }
             _ => {
-              return Err(sherr!(
-                ExecFail,
-                "Cannot index all elements of array '{var_name}'"
-              ));
+              return Err(sherr!(ExecFail, "Cannot index all elements of array '{var_name}'"));
             }
           };
 
@@ -1692,16 +1799,10 @@ impl VarTab {
       }
       ArrIndex::Key(key) => VarKind::AssocArr(vec![(key, val)]),
       ArrIndex::FromBack(n) => {
-        return Err(sherr!(
-          ExecFail,
-          "Index {n} out of bounds for array '{var_name}'"
-        ));
+        return Err(sherr!(ExecFail, "Index {n} out of bounds for array '{var_name}'"));
       }
       _ => {
-        return Err(sherr!(
-          ExecFail,
-          "Cannot index all elements of array '{var_name}'"
-        ));
+        return Err(sherr!(ExecFail, "Cannot index all elements of array '{var_name}'"));
       }
     };
 
@@ -1712,10 +1813,7 @@ impl VarTab {
       return Ok(());
     };
     if var.flags.contains(VarFlags::READONLY) {
-      return Err(sherr!(
-        ExecFail,
-        "cannot unset readonly variable '{var_name}'"
-      ));
+      return Err(sherr!(ExecFail, "cannot unset readonly variable '{var_name}'"));
     }
     match var.kind_mut() {
       VarKind::Arr(items) => {
@@ -1724,10 +1822,7 @@ impl VarTab {
           ArrIndex::FromBack(n) if items.len() >= n => items.len() - n,
           ArrIndex::FromBack(_) => return Ok(()),
           _ => {
-            return Err(sherr!(
-              ExecFail,
-              "Cannot unset all elements of array '{var_name}'"
-            ));
+            return Err(sherr!(ExecFail, "Cannot unset all elements of array '{var_name}'"));
           }
         };
         if i < items.len() {
@@ -1925,68 +2020,92 @@ fn get_set_flags() -> Option<VarStr> {
 }
 
 #[cfg(test)]
-mod top_level_colon_tests {
-  use super::top_level_colon;
+mod parse_stream_slice_tests {
+  use super::*;
+  use crate::expand::stream::SegStream;
 
-  #[test]
-  fn simple_colon_at_position() {
-    assert_eq!(top_level_colon("foo:bar"), Some(3));
+  fn slice_of(src: &str) -> (Option<usize>, Option<usize>) {
+    let (parsed, _) = VarName::parse_stream(&SegStream::from_bytes(src.as_bytes()), false).unwrap();
+    (parsed.slice_start(), parsed.slice_len())
+  }
+
+  fn consumed(src: &str) -> usize {
+    VarName::parse_stream(&SegStream::from_bytes(src.as_bytes()), false)
+      .unwrap()
+      .1
   }
 
   #[test]
-  fn no_colon_returns_none() {
-    assert_eq!(top_level_colon("foobar"), None);
-    assert_eq!(top_level_colon(""), None);
+  fn both_bounds_split_at_the_top_level_colon() {
+    assert_eq!(slice_of("arr[@]:1:2"), (Some(1), Some(2)));
   }
 
   #[test]
-  fn colon_at_start() {
-    assert_eq!(top_level_colon(":foo"), Some(0));
+  fn start_only_leaves_the_length_unset() {
+    assert_eq!(slice_of("arr[@]:1"), (Some(1), None));
   }
 
   #[test]
-  fn colon_at_end() {
-    assert_eq!(top_level_colon("foo:"), Some(3));
+  fn empty_start_is_unset() {
+    assert_eq!(slice_of("arr[@]::2"), (None, Some(2)));
   }
 
   #[test]
-  fn colon_inside_braces_skipped() {
-    // `${foo:bar}` — the `:` is nested inside braces.
-    assert_eq!(top_level_colon("${foo:bar}"), None);
+  fn empty_length_is_unset() {
+    assert_eq!(slice_of("arr[@]:1:"), (Some(1), None));
   }
 
   #[test]
-  fn colon_inside_parens_skipped() {
-    // `$(cmd:arg)` — the `:` is nested inside parens.
-    assert_eq!(top_level_colon("$(cmd:arg)"), None);
+  fn no_slice_suffix_leaves_both_unset() {
+    assert_eq!(slice_of("arr[@]"), (None, None));
   }
 
   #[test]
-  fn outer_colon_found_when_inner_nested() {
-    // Outer colon at index 1, inner colon nested inside `${}`.
-    assert_eq!(top_level_colon("x:${foo:bar}"), Some(1));
+  fn colon_inside_braces_does_not_split() {
+    // The split must land on the second top-level colon, not the one in `${u:-1}`.
+    assert_eq!(slice_of("arr[@]:${u:-1}:2").1, Some(2));
   }
 
   #[test]
-  fn first_colon_wins_when_multiple_top_level() {
-    assert_eq!(top_level_colon("a:b:c"), Some(1));
+  fn colon_inside_nested_braces_does_not_split() {
+    assert_eq!(slice_of("arr[@]:${a:-${b:-1}}:2").1, Some(2));
   }
 
   #[test]
-  fn nested_braces_keep_inner_colon_hidden() {
-    assert_eq!(top_level_colon("{{a:b}c}"), None);
+  fn colon_inside_parens_does_not_split() {
+    assert_eq!(slice_of("arr[@]:$(( 1 ? 2 : 3 )):4").1, Some(4));
   }
 
   #[test]
-  fn colon_after_closing_brace() {
-    // `${x}:y` — after `}` we're back to depth 0, the `:` is top-level.
-    assert_eq!(top_level_colon("${x}:y"), Some(4));
+  fn a_third_colon_terminates_the_suffix() {
+    assert_eq!(slice_of("arr[@]:1:2:3"), (Some(1), Some(2)));
   }
 
   #[test]
-  fn outer_then_inner_colons() {
-    // First colon at index 1 (top-level), second at 7 (inside parens).
-    assert_eq!(top_level_colon("a:$(cmd:arg):b"), Some(1));
+  fn quoted_colon_does_not_split() {
+    // `':'` is a literal colon, so the split is the one after it.
+    assert_eq!(slice_of("arr[@]:':':1").1, Some(1));
+  }
+
+  #[test]
+  fn slice_suffix_stops_at_an_operator() {
+    // `:-` is the default operator, not a slice: the name ends at `]`.
+    assert_eq!(consumed("arr[@]:-fallback"), "arr[@]".len());
+  }
+
+  #[test]
+  fn slice_bound_stops_at_an_operator() {
+    assert_eq!(consumed("arr[@]:1-x"), "arr[@]:1".len());
+  }
+
+  #[test]
+  fn consumed_covers_the_whole_slice_suffix() {
+    assert_eq!(consumed("arr[@]:1:2"), "arr[@]:1:2".len());
+  }
+
+  #[test]
+  fn slice_is_ignored_for_a_scalar_index() {
+    assert_eq!(slice_of("arr[0]:1:2"), (None, None));
   }
 }
 

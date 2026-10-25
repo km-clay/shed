@@ -36,15 +36,15 @@ impl super::Builtin for Cd {
       }
     }
 
-    let (mut new_dir, arg_span) = if let Some((arg, span)) = args.arguments().next() {
-      if arg == "-" {
+    let (mut new_dir, arg_span) = if let Some(arg) = args.arguments().next() {
+      if **arg == "-" {
         let old_pwd = get_old_pwd();
         print_dir = true;
-        (old_pwd, Some(span))
+        (old_pwd, arg.span())
       } else {
         // we only use cd path if the argument is not absolute or relative (starts with / or .)
         try_cd_path = !arg.to_str_lossy().starts_with(['/', '.']);
-        (PathBuf::from(arg), Some(span))
+        (PathBuf::from(arg), arg.span())
       }
     } else {
       let home_dir = paths::get_home_str().unwrap_or("/".into());

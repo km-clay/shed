@@ -1,9 +1,12 @@
+use std::os::unix::ffi::OsStrExt;
+
 use crate::{
   expand::escape,
   opt, outln, sherr,
   state::{
     Shed, cwd,
     meta::{JumpTableDirs, MetaTab},
+    vars::VarStr,
   },
   util::{
     self,
@@ -45,14 +48,15 @@ trait DirJump {
     let fire_autocmds = !args.has_opt("no-autocmd");
 
     if args.has_opt("list") {
-      let output = Shed::meta(|m| {
-        dir_list(m).fold(String::new(), |mut acc, dir| {
-          let dir_str = dir.to_string_lossy();
-          escape::shell_quote_fmt(&dir_str, &mut acc).ok();
-          acc.push(' ');
+      let buf = Shed::meta(|m| {
+        dir_list(m).fold(util::scratch_buf(), |mut acc, dir| {
+          escape::shell_quote_fmt(dir.as_os_str().as_bytes(), &mut acc).ok();
+          acc.push(b' ');
           acc
         })
       });
+
+      let output = VarStr::from(buf);
 
       outln!("{output}");
       return util::with_status(0);
@@ -60,8 +64,8 @@ trait DirJump {
 
     let count = match args.arguments().next() {
       None => 1,
-      Some((arg, span)) => util::parse_bytes::<usize>(arg.as_bytes())
-        .ok_or_else(|| sherr!(ParseErr @ span, "argument must be a non-negative integer"))?,
+      Some(arg) => util::parse_bytes::<usize>(arg.as_bytes())
+        .ok_or_else(|| sherr!(ParseErr ? arg.span(), "argument must be a non-negative integer"))?,
     };
 
     if count == 0 {

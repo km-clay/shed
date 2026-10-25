@@ -17,6 +17,7 @@ use bstr::ByteSlice;
 use crate::{
   assert_sorted,
   builtin::BUILTIN_NAMES,
+  expand::Word,
   match_loop, sherr,
   state::{
     self, Shed, SourceHandle, SourceId,
@@ -107,7 +108,7 @@ thread_local! {
 /// A slice of some source text. Ultimately wraps a [`crate::state::vars::VarStr`], which means these are cheap to clone.
 ///
 /// Load-bearing struct. Used extensively throughout the codebase for slicing shell input for various reasons (error reporting, tab completion, etc)
-#[derive(Clone, PartialEq, Copy, Debug)]
+#[derive(Clone, PartialEq, Copy, Debug, Hash, Eq)]
 pub(crate) struct Span {
   start : usize,
   end   : usize,
@@ -306,7 +307,7 @@ pub(crate) enum TkRule {
   /// These are only used as an intermediate state for tokens that are in the process of being expanded.
   /// You can be confident that any token you are working on does not have this rule.
   Expanded {
-    exp: Arc<[VarStr]>,
+    exp: Arc<[Word]>,
   },
 }
 

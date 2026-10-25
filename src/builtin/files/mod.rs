@@ -28,19 +28,9 @@ impl super::BuiltinRouter for Fs {
         "<from> <to>",
         "rename a file within one filesystem, atomically"
       ),
-      sub_command!(
-        &rmdir::RmDir,
-        "rmdir",
-        "<dir> ...",
-        "remove empty directories"
-      ),
+      sub_command!(&rmdir::RmDir, "rmdir", "<dir> ...", "remove empty directories"),
       sub_command!(&unlink::Unlink, "unlink", "<file> ...", "remove files"),
-      sub_command!(
-        &link::Link,
-        "link",
-        "<target> <link> ...",
-        "create hard links to files"
-      ),
+      sub_command!(&link::Link, "link", "<target> <link> ...", "create hard links to files"),
       sub_command!(
         &symlink::SymLink,
         "symlink",
@@ -71,12 +61,7 @@ impl super::BuiltinRouter for Fs {
         "<owner>[:<group>] <file> ...",
         "change the owner and/or group of files"
       ),
-      sub_command!(
-        &chmod::ChMod,
-        "chmod",
-        "<mode> <file> ...",
-        "change the permissions of files"
-      ),
+      sub_command!(&chmod::ChMod, "chmod", "<mode> <file> ...", "change the permissions of files"),
       sub_command!(
         &touch::Touch,
         "touch",

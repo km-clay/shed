@@ -136,37 +136,37 @@ impl Field {
 }
 
 impl Field {
-  pub(crate) fn string(body: Vec<u8>) -> Self {
-    let body = VarStr::from(body);
+  pub(crate) fn string(body: VarStr) -> Self {
+    let body = body;
     Self {
       body,
       kind: FieldKind::String,
     }
   }
-  pub(crate) fn styled(body: Vec<u8>) -> Self {
-    let body = VarStr::from(body);
+  pub(crate) fn styled(body: VarStr) -> Self {
+    let body = body;
     Self {
       body,
       kind: FieldKind::Styled,
     }
   }
-  pub(crate) fn raw(body: Vec<u8>) -> Self {
-    let body = VarStr::from(body);
+  pub(crate) fn raw(body: VarStr) -> Self {
+    let body = body;
     Self {
       body,
       kind: FieldKind::Raw,
     }
   }
-  pub(crate) fn numeric(body: Vec<u8>, sign: Option<Sign>, base: Option<Base>) -> Self {
+  pub(crate) fn numeric(body: VarStr, sign: Option<Sign>, base: Option<Base>) -> Self {
     Self::numeric_padded(body, sign, base, true)
   }
   pub(crate) fn numeric_padded(
-    body: Vec<u8>,
+    body: VarStr,
     sign: Option<Sign>,
     base: Option<Base>,
     zero_pad: bool,
   ) -> Self {
-    let body = VarStr::from(body);
+    let body = body;
     Self {
       body,
       kind: FieldKind::Numeric {
@@ -226,7 +226,7 @@ pub(crate) trait StrFmt {
   ///
   /// This is used by `printf` to expand ANSI-C escapes in the format string, for instance.
   /// Returns the literal untouched by default.
-  fn expand_literal(&self, literal: Vec<u8>) -> Vec<u8> {
+  fn expand_literal(&self, literal: VarStr) -> VarStr {
     literal
   }
 
@@ -251,7 +251,7 @@ impl RenderResult {
 }
 
 enum Segment<C> {
-  Literal(Vec<u8>),
+  Literal(VarStr),
   Spec(FieldParams, C),
   AnyGroup(FieldParams, Box<[Segment<C>]>),
   AllGroup(FieldParams, Box<[Segment<C>]>),
@@ -287,7 +287,7 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
 
     let push_lit = |l: &mut Vec<u8>, s: &mut Vec<Segment<S::Conv>>| {
       if !l.is_empty() {
-        let lit = set.expand_literal(std::mem::take(l));
+        let lit = set.expand_literal(std::mem::take(l).into());
         s.push(Segment::Literal(lit));
       }
     };
@@ -349,10 +349,7 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
         '}' => ("%{", "%}"),
         _   => unreachable!(),
       };
-      return Err(sherr!(
-        ParseErr,
-        "unmatched '{opener}' in format string, expected '{closer}'"
-      ));
+      return Err(sherr!(ParseErr, "unmatched '{opener}' in format string, expected '{closer}'"));
     }
 
     push_lit(&mut literal, &mut segments);
@@ -476,10 +473,13 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
             _ => unreachable!(),
           };
 
+          let mut buf = VarStr::from(buf);
+
           if should_render {
             let params = self.resolve_counts(field, src, None)?;
+
             if params.flags().contains(FmtFlags::TRIM) {
-              buf = buf.trim().to_vec();
+              buf = buf.trim().into();
             };
 
             pad_and_render(&Field::string(buf), &params, out);

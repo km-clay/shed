@@ -36,17 +36,17 @@ impl super::Builtin for Seek {
       ));
     }
 
-    let Some((fd, fd_span)) = arguments.next() else {
+    let Some(fd) = arguments.next() else {
       return Err(sherr!(ExecFail @ span, "missing required argument 'fd'",).with_code(2));
     };
 
     let fd = fd.parse::<u32>().map_err(|v| {
-      sherr!(ExecFail @ fd_span, "invalid file descriptor `{v}`")
+      sherr!(ExecFail ? fd.span(), "invalid file descriptor `{v}`")
         .with_code(2)
         .with_note("file descriptors are non-negative integers".into())
     })?;
 
-    let Some((offset, offset_span)) = arguments.next() else {
+    let Some(offset) = arguments.next() else {
       return Err(sherr!(
         ExecFail @ span,
         "missing required argument 'offset'",
@@ -54,13 +54,13 @@ impl super::Builtin for Seek {
     };
     let Ok(offset) = offset.to_str_lossy().parse::<i64>() else {
       return Err(
-        sherr!(ExecFail @ offset_span, "invalid offset")
+        sherr!(ExecFail ? offset.span(), "invalid offset")
           .with_note("offset can be a positive or negative integer".into()),
       );
     };
 
-    if let Some((extra, extra_span)) = arguments.next() {
-      return Err(sherr!(ExecFail @ extra_span, "unexpected argument: '{extra}'").with_code(2));
+    if let Some(extra) = arguments.next() {
+      return Err(sherr!(ExecFail ? extra.span(), "unexpected argument: '{extra}'").with_code(2));
     }
 
     let seek_from = if cursor_rel {

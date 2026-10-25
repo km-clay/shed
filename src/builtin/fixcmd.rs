@@ -6,12 +6,13 @@ use tempfile::NamedTempFile;
 use crate::{
   eval::{
     execute::{self, Dispatcher},
-    lex::{Span, Tk},
+    lex::Tk,
     parse::{
       NdRule,
       ast::{Ast, NodeId},
     },
   },
+  expand::Word,
   match_loop,
   readline::{HistEntry, History, MAIN_HIST_TABLE_NAME},
   sherr,
@@ -63,26 +64,25 @@ pub(super) struct FixCmdOpts {
   reverse   : bool,
 }
 
-pub(super) fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCmdOpts)> {
+pub(super) fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<Word>, FixCmdOpts)> {
   let mut args = args.iter();
   args.next(); // skip "fc" command itself
 
-  let mut words: Vec<(VarStr, Span)> = vec![];
   let mut opts = FixCmdOpts::default();
-  for tk in args {
-    let span     = tk.span;
+  let words: Vec<Word> = args.try_fold(vec![], |mut acc, tk| -> ShResult<Vec<Word>> {
     let expanded = tk.clone().expand()?;
     for word in expanded.get_words().iter() {
-      words.push((word.clone(), span));
+      acc.push(word.clone());
     }
-  }
+    Ok(acc)
+  })?;
 
   let mut words_iter = words.into_iter().peekable();
   let mut non_opts   = vec![];
 
-  while let Some((word, span)) = words_iter.next() {
-    if word == "--" {
-      non_opts.push((word, span));
+  while let Some(word) = words_iter.next() {
+    if **word == *b"--" {
+      non_opts.push(word);
       non_opts.extend(words_iter);
       break;
     }
@@ -95,7 +95,7 @@ pub(super) fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCm
       } else if opts.last.is_none() {
         opts.last = Some(RangeArg::Number(num));
       } else {
-        non_opts.push((word, span));
+        non_opts.push(word);
       }
       continue;
     }
@@ -122,7 +122,7 @@ pub(super) fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCm
         if opts.replace.is_none() {
           opts.replace = Some((old.into(), new.into()));
         } else {
-          non_opts.push((word, span));
+          non_opts.push(word);
         }
         continue;
       }
@@ -134,18 +134,18 @@ pub(super) fn parse_fc_args(args: &[Tk]) -> ShResult<(Vec<(VarStr, Span)>, FixCm
       "-s" => opts.mode = FixMode::Rerun,
       "-l" => opts.mode = FixMode::List,
       "-e" => {
-        let Some((word, _)) = words_iter.next() else {
-          return Err(sherr!(ParseErr @ span, "Option -e requires an argument"));
+        let Some(word) = words_iter.next() else {
+          return Err(sherr!(ParseErr ? word.span(), "Option -e requires an argument"));
         };
-        opts.editor = Some(word);
+        opts.editor = Some(word.content());
       }
       _ => {
         if opts.first.is_none() {
-          opts.first = Some(RangeArg::Prefix(word));
+          opts.first = Some(RangeArg::Prefix(word.content()));
         } else if opts.last.is_none() {
-          opts.last = Some(RangeArg::Prefix(word));
+          opts.last = Some(RangeArg::Prefix(word.content()));
         } else {
-          non_opts.push((word, span));
+          non_opts.push(word);
         }
       }
     }
@@ -349,7 +349,7 @@ fn get_entry_range(
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::eval::lex::{LexFlags, LexStream, TkRule};
+  use crate::eval::lex::{LexFlags, LexStream, Span, TkRule};
   use crate::state::SourceHandle;
   use crate::tests::testutil::TestGuard;
 
@@ -363,7 +363,17 @@ mod tests {
 
   fn parse(input: &SourceHandle) -> (Vec<(VarStr, Span)>, FixCmdOpts) {
     let tks = lex_fc(input);
-    parse_fc_args(&tks).expect("parse should succeed")
+    parse_fc_args(&tks)
+      .map(|(w, o)| {
+        (
+          w.into_iter()
+            .map(Word::unpack)
+            .map(|(w, s)| (w, s.unwrap()))
+            .collect(),
+          o,
+        )
+      })
+      .expect("parse should succeed")
   }
 
   // ─── Boolean flags ────────────────────────────────────────────────────

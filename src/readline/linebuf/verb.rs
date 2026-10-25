@@ -5,11 +5,7 @@ use super::{
   register::RegisterContent,
   status_msg,
 };
-use crate::{
-  eval::lex::TkFlags,
-  state::vars::{VarStr, VarStrSliceExt},
-  util, verb,
-};
+use crate::{eval::lex::TkFlags, state::vars::VarStr, util, verb};
 
 use super::{
   Grapheme, Line, Lines, MotionKind, Pos, SelectMode, killring, rot13_char, toggle_case_char,
