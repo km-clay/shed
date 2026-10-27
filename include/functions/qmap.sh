@@ -1,42 +1,54 @@
 qmap() {
-	local has_names=0
+  defer eval "$(shopt set.localvars)"
+  set -o localvars
 
-	while getopts ":n" opt; do
-		case "$opt" in
-			n) has_names=1 ;;
-		esac
-	done
-	shift $((OPTIND - 1))
+  has_names=0
 
-	local body="$1"
+  while getopts ":n" opt; do
+    case "$opt" in
+      n) has_names=1 ;;
+    esac
+  done
+  shift $((OPTIND - 1))
 
-	if ((has_names)); then
-		local prelude=""
-		IFS= read -q -a headers
-		for i in "${!headers[@]}"; do
-			prelude+="local ${headers[i]}=\"\${$((i+1))}\"; "
-		done
-		eval "__qmap_lambda() { $prelude $body; }"
-	else
-		eval "__qmap_lambda() { $body; }"
-	fi
+  body="$1"
 
-	defer unset -f __qmap_lambda
+  # save any existing lambdas so qmap can nest
+  declare -f __qmap_lambda >@__qmap_lambda_old
+  # restores on exit
+  defer if [ -z "$__qmap_lambda_old" ]; then
+    unset -f __qmap_lambda
+  else
+    eval "$__qmap_lambda_old"
+  fi
 
-	local buf=""
-	local first=1
-	while read -q -a record; do
-		if (( first == 0 )); then
-			buf+=$'\n'
-		else
-			first=0
-		fi
-		buf+="$(__qmap_lambda "${record[@]}")"
-	done
+  if ((has_names)); then
+    prelude=""
 
-	if ((has_names)); then
-		echo "${headers[@]}"
-	fi
+    IFS= read -q -a headers
 
-	echo "$buf"
+    for i in "${!headers[@]}"; do
+      # bind positional args to named variables
+      prelude+="${headers[i]}=\"\${$((i + 1))}\"; "
+    done
+
+    eval "__qmap_lambda() { $prelude $body; }"
+  else
+    eval "__qmap_lambda() { $body; }"
+  fi
+
+  buf="" first=1
+
+  # each record gets its own line
+  while read -q -a record; do
+    buf+="$(__qmap_lambda "${record[@]}")"
+    buf+=$'\n'
+  done
+
+  if ((has_names)); then
+    printf '%s\n%s' "${headers[*]}" "$buf"
+  else
+    printf '%s' "$buf"
+  fi
+
 }
