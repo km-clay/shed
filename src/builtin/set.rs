@@ -543,13 +543,41 @@ mod tests {
     }
 
     #[test]
-    fn localvars_still_updates_an_existing_global() {
-      // Only *creation* is redirected; assigning to a name that already
-      // exists must still write through, or accumulators break.
+    fn localvars_shadows_an_existing_global() {
       let g = TestGuard::new();
       test_input(r#"set -l; outer=original; f() { outer=modified; }; f; printf '<%s>' "$outer""#)
         .unwrap();
-      assert_eq!(g.read_output(), "<modified>");
+      assert_eq!(g.read_output(), "<original>");
+    }
+
+    #[test]
+    fn localvars_append_starts_from_empty() {
+      let g = TestGuard::new();
+      test_input(r#"set -l; outer=original; f() { outer+=more; printf '<%s>' "$outer"; }; f; printf '<%s>' "$outer""#)
+        .unwrap();
+      assert_eq!(g.read_output(), "<more><original>");
+    }
+
+    #[test]
+    fn localvars_array_append_does_not_escape() {
+      let g = TestGuard::new();
+      test_input(r#"set -l; arr=(a b); f() { arr+=(c); }; f; printf '<%s>' "${arr[*]}""#).unwrap();
+      assert_eq!(g.read_output(), "<a b>");
+    }
+
+    #[test]
+    fn localvars_indexed_write_does_not_escape() {
+      let g = TestGuard::new();
+      test_input(r#"set -l; arr=(a b c); f() { arr[0]=Z; }; f; printf '<%s>' "${arr[*]}""#)
+        .unwrap();
+      assert_eq!(g.read_output(), "<a b c>");
+    }
+
+    #[test]
+    fn localvars_does_not_affect_reads() {
+      let g = TestGuard::new();
+      test_input(r#"set -l; outer=visible; f() { printf '<%s>' "$outer"; }; f"#).unwrap();
+      assert_eq!(g.read_output(), "<visible>");
     }
 
     #[test]

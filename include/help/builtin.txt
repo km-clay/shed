@@ -4704,7 +4704,7 @@ SET                                              *builtin-set* *set*
     `-e`  errexit     exit on non-zero command status
     `-f`  noglob      disable filename expansion (globbing)
     `-h`  hashall     cache command paths on lookup
-    `-l`  localvars   variables created in functions default to local
+    `-l`  localvars   variables written in functions default to local
     `-m`  monitor     job control (on by default)
     `-n`  noexec      parse but do not execute
     `-u`  nounset     treat unset variable expansion as an error
@@ -4719,24 +4719,38 @@ SET                                              *builtin-set* *set*
 
   Function-local variables ~                               *set-localvars*
 
-  With `-l`, a variable that is newly created inside a function is
-  created in that function's scope rather than the global one, as
-  though `local` had been written for it.
+  With `-l`, a variable written inside a function is created in that
+  function's scope rather than the global one, as though `local` had
+  been written for it.
 
-  Assigning to a name that already exists is unaffected: the nearest
-  existing binding is updated, so a counter or flag owned by the caller
-  still works from inside a function.
+  This applies to every write, including assignment to a name the
+  caller already owns. The outer binding is shadowed rather than
+  updated, and reappears when the function returns.
 
       ```set -l
-      f() { tmp=scratch; }
+      count=1
+      f() { count=99; tmp=scratch; }
       f
-      printf '%s' "$tmp"```        empty -- `tmp` did not escape
+      printf '%s %s' "$count" "$tmp"```    `1` -- neither write escaped
 
-  The rule covers every way a variable comes into being, not just plain
+  Reads are not affected. An outer variable stays visible inside the
+  function until that name is written to, at which point the local
+  binding takes over for the rest of the call.
+
+  Because a write never reads through to an outer binding, compound
+  assignment starts from the empty value rather than the caller's:
+
+      ```set -l
+      buf=outer
+      f() { buf+=more; printf '%s' "$buf"; }
+      f```                        `more`, not `outermore`
+
+  The rule covers every way a variable is written, not just plain
   assignment. `for` loop variables, `declare` without a value, indexed
-  writes like `arr[0]=x`, |read|(builtin-read), |getopts|(builtin-getopts)
-  and the `-a`/`-A` targets of builtins such as |unpack|(builtin-unpack)
-  all become function-local as well.
+  writes like `arr[0]=x`, array appends like `arr+=(x)`,
+  |read|(builtin-read), |getopts|(builtin-getopts) and the `-a`/`-A`
+  targets of builtins such as |unpack|(builtin-unpack) all become
+  function-local as well.
 
   The |global|(builtin-global) builtin moves a single name back out to the global scope.
   This can be used to effectively return things like shell arrays from functions.

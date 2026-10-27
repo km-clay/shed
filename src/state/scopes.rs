@@ -303,7 +303,7 @@ impl ScopeStack {
     self.put_name(dst, var).map(|()| true)
   }
   pub(crate) fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
-    if flags.contains(VarFlags::LOCAL) {
+    if flags.contains(VarFlags::LOCAL) || self.writes_are_local() {
       return self.set_var_local(var_name, val, flags);
     }
     // Dynamic scoping: walk scopes from innermost to outermost,
@@ -396,8 +396,9 @@ impl ScopeStack {
     val: VarStr,
     flags: VarFlags,
   ) -> ShResult<()> {
-    if flags.contains(VarFlags::LOCAL) {
-      let Some(scope) = self.scopes.last_mut() else {
+    if flags.contains(VarFlags::LOCAL) || self.writes_are_local() {
+      let idx_scope = self.local_scope_idx().unwrap_or(0);
+      let Some(scope) = self.scopes.get_mut(idx_scope) else {
         return Ok(());
       };
       return scope.set_index(var_name, idx, val);
@@ -930,6 +931,16 @@ impl ScopeStack {
   }
   pub(crate) fn get_var_meta(&self, var_name: &str) -> Var {
     self.try_get_var_meta(var_name).unwrap_or_default()
+  }
+  pub(crate) fn writes_are_local(&self) -> bool {
+    shopt!(set.localvars) && Shed::meta(MetaTab::in_func)
+  }
+  pub(crate) fn try_get_var_meta_for_write(&self, var_name: &str) -> Option<Var> {
+    if self.writes_are_local() {
+      let idx = self.local_scope_idx()?;
+      return self.scopes.get(idx)?.try_get_var_meta(var_name);
+    }
+    self.try_get_var_meta(var_name)
   }
   pub(crate) fn try_get_var_meta(&self, var_name: &str) -> Option<Var> {
     for scope in self.scopes_rev() {

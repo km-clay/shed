@@ -22,7 +22,9 @@ use crate::{
   state::{
     Shed,
     meta::MetaTab,
-    params, shopt,
+    params,
+    scopes::ScopeStack,
+    shopt,
     vars::{ValueBytes, Var, VarFlags, VarKind, VarKindTag, VarStr},
   },
   util::error::ShResult,
@@ -158,6 +160,7 @@ impl super::Dispatcher {
           if matches!(op, AssignKind::PlusEq)
             && indexed.is_none()
             && matches!(behavior, AssignBehavior::Set)
+            && !Shed::vars(ScopeStack::writes_are_local)
           {
             let took_fast = Shed::vars_mut(|v| -> ShResult<bool> {
               let Ok(items) = v.try_get_arr_mut(var_name) else {
@@ -204,7 +207,7 @@ impl super::Dispatcher {
           let mut var = if let Some((name, idx)) = &indexed {
             Shed::vars(|v| v.index_var(&name.to_str_lossy(), idx))?.into()
           } else {
-            Shed::vars(|v| v.try_get_var_meta(var_name)).unwrap_or_else(|| {
+            Shed::vars(|v| v.try_get_var_meta_for_write(var_name)).unwrap_or_else(|| {
               let kind = if is_arr {
                 VarKind::Arr(VecDeque::new())
               } else {
