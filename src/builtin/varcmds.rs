@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use bstr::ByteSlice;
+use itertools::Itertools;
 
 use crate::{
   eval::lex::{Span, Tk},
@@ -10,7 +11,7 @@ use crate::{
     Shed,
     logic::ShFunc,
     meta::MetaTab,
-    vars::{self, VarFlags, VarKind, VarName},
+    vars::{self, VarFlags, VarKind, VarName, VarStr},
   },
   try_var,
   util::{
@@ -18,6 +19,7 @@ use crate::{
     error::{ShResult, ShResultExt},
     strops,
   },
+  varstr,
 };
 
 use super::{
@@ -271,7 +273,9 @@ fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
           .iter()
           .filter(|(_, f)| matches!(f, ShFunc::Defined { .. }))
           .collect();
+
         entries.sort_by_key(|(k, _)| (*k).clone());
+
         for (name, func) in entries {
           let ShFunc::Defined { source, .. } = func else {
             continue;
@@ -284,10 +288,21 @@ fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
           out.extend_from_slice(source.slice().as_bytes());
           out.push(b'\n');
         }
+
         out
       });
+
+      let missing = Shed::logic(|l| {
+        names
+          .iter()
+          .any(|n| !matches!(l.funcs().get(*n), Some(ShFunc::Defined { .. })))
+      });
+
       if !dump.is_empty() {
         procio::outln_bytes(dump.trim_end());
+      }
+      if missing {
+        return util::with_status(1);
       }
     }
     IntrospectMode::FunctionNames => {
@@ -296,18 +311,27 @@ fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
         .map(|n| n.to_str().unwrap_or_default())
         .collect();
 
-      let dump = Shed::logic(|l| {
-        let mut keys: Vec<_> = l.funcs().keys().cloned().collect();
-        keys.sort();
-        keys
-          .into_iter()
+      let dump = Shed::logic(|table| {
+        table
+          .funcs()
+          .keys()
+          .sorted()
           .filter(|k| names.is_empty() || names.contains(&k.as_str()))
-          .map(|k| format!("declare -f {k}"))
-          .collect::<Vec<_>>()
-          .join("\n")
+          .map(|k| varstr!("declare -f {k}"))
+          .fold(VarStr::default(), |mut acc, name| {
+            acc.push_slice(name);
+            acc.push(b'\n');
+            acc
+          })
       });
+
+      let missing = Shed::logic(|table| names.iter().any(|n| !table.funcs().contains_key(*n)));
+
       if !dump.is_empty() {
         outln!("{dump}");
+      }
+      if missing {
+        return util::with_status(1);
       }
     }
   }
