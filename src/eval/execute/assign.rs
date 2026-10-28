@@ -25,7 +25,7 @@ use crate::{
     params,
     scopes::ScopeStack,
     shopt,
-    vars::{ValueBytes, Var, VarFlags, VarKind, VarKindTag, ShStr},
+    vars::{ShStr, ValueBytes, Var, VarFlags, VarKind, VarKindTag},
   },
   util::error::ShResult,
 };
@@ -91,8 +91,7 @@ impl super::Dispatcher {
         .transpose()?;
 
       let indexed = if let Some((name, idx)) = indexed {
-        let tag =
-          Shed::vars(|v| v.try_get_var_kind_tag(&name)).unwrap_or(VarKindTag::Arr);
+        let tag = Shed::vars(|v| v.try_get_var_kind_tag(&name)).unwrap_or(VarKindTag::Arr);
         Some((name, idx.resolve_for(tag)?))
       } else {
         None
@@ -335,17 +334,14 @@ impl super::Dispatcher {
           }
 
           let indexed = if let Some((name, idx)) = indexed {
-            let tag = Shed::vars(|v| v.try_get_var_kind_tag(&name))
-              .unwrap_or(VarKindTag::Arr);
+            let tag = Shed::vars(|v| v.try_get_var_kind_tag(&name)).unwrap_or(VarKindTag::Arr);
             Some((name, idx.resolve_for(tag)?))
           } else {
             None
           };
 
           if let Some((name, idx)) = indexed {
-            Shed::vars_mut(|v| {
-              v.set_var_indexed(&name, idx, var.into(), VarFlags::empty())
-            })?;
+            Shed::vars_mut(|v| v.set_var_indexed(&name, idx, var.into(), VarFlags::empty()))?;
           } else {
             set_var!(var_name, var.kind().clone())?;
           }

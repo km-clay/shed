@@ -5,7 +5,7 @@ use crate::{
   procio, sherr,
   state::{
     Shed, params,
-    vars::{VarFlags, VarKind, ShStr},
+    vars::{ShStr, VarFlags, VarKind},
   },
   util::{
     error::ShResultExt,
@@ -181,14 +181,8 @@ impl Builtin for Split {
       SplitKind::Array(arr_name) => {
         let arr = parts.into_iter();
 
-        Shed::vars_mut(|v| {
-          v.set_var(
-            &arr_name,
-            VarKind::arr(arr),
-            VarFlags::empty(),
-          )
-        })
-        .promote_err(args.cmd_span())?;
+        Shed::vars_mut(|v| v.set_var(&arr_name, VarKind::arr(arr), VarFlags::empty()))
+          .promote_err(args.cmd_span())?;
       }
       SplitKind::Quoted => {
         let mut quoted = vec![];

@@ -149,8 +149,7 @@ trait ArrOp: Builtin {
           End::Front => arr.pop_front(),
           End::Back  => arr.pop_back(),
         };
-        let Some(popped_val) = Shed::vars_mut(|v| v.get_arr_mut(arg).map(pop))?
-        else {
+        let Some(popped_val) = Shed::vars_mut(|v| v.get_arr_mut(arg).map(pop))? else {
           return util::with_status(1);
         };
         popped.push_back(popped_val);
@@ -284,9 +283,7 @@ impl super::Builtin for Rotate {
     Shed::vars_mut(|v| -> ShResult<()> {
       // each arg is a variable name of an array to rotate
       for arg in args.arguments() {
-        let arr = v
-          .get_arr_mut(arg)
-          .promote_err(args.span())?;
+        let arr = v.get_arr_mut(arg).promote_err(args.span())?;
         if reverse {
           arr.rotate_right(count.min(arr.len()));
         } else {

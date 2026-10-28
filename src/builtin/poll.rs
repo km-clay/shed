@@ -15,7 +15,7 @@ use crate::{
   sherr, signal,
   state::{
     Shed,
-    vars::{VarKind, ShStr},
+    vars::{ShStr, VarKind},
   },
   util::{
     self,

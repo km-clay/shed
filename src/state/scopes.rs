@@ -267,9 +267,7 @@ impl ScopeStack {
       return Ok(None);
     }
 
-    self
-      .take_index_var(&name, idx)
-      .map(|v| v.map(VarKind::Str))
+    self.take_index_var(&name, idx).map(|v| v.map(VarKind::Str))
   }
   pub(crate) fn put_name(&mut self, dst: &VarName, val: VarKind) -> ShResult<()> {
     let name = dst.name();
@@ -361,7 +359,9 @@ impl ScopeStack {
         .get_var_flags(var_name)
         .is_some_and(|flags| flags.contains(VarFlags::READONLY))
       {
-        return Err(sherr!(ExecFail, "Cannot overwrite readonly global '{}'", var_name.to_str_lossy()));
+        return Err(
+          sherr!(ExecFail, "Cannot overwrite readonly global '{}'", var_name.to_str_lossy()),
+        );
       }
     }
 
@@ -452,7 +452,9 @@ impl ScopeStack {
   fn set_var_local(&mut self, var_name: &[u8], val: VarKind, flags: VarFlags) -> ShResult<()> {
     let idx = self.local_scope_idx().unwrap_or(0);
     let Some(scope) = self.scopes.get_mut(idx) else {
-      return Err(sherr!(ExecFail, "No local scope available to set variable '{}'", var_name.to_str_lossy()));
+      return Err(
+        sherr!(ExecFail, "No local scope available to set variable '{}'", var_name.to_str_lossy()),
+      );
     };
     scope.set_var(var_name, val, flags)
   }
@@ -580,24 +582,26 @@ impl ScopeStack {
             };
             return Ok(Some(items.remove(pos).1));
           }
-          VarKind::Arr(items) => match idx {
-            ArrIndex::Literal(n) => {
-              if n < items.len() {
-                return Ok(items.remove(n));
+          VarKind::Arr(items) => {
+            match idx {
+              ArrIndex::Literal(n) => {
+                if n < items.len() {
+                  return Ok(items.remove(n));
+                }
+                return Err(sherr!(ExecFail, "Index {} out of bounds for array '{}'", n, var_name.to_str_lossy()));
               }
-              return Err(sherr!(ExecFail, "Index {} out of bounds for array '{}'", n, var_name.to_str_lossy()));
-            }
-            ArrIndex::FromBack(n) => {
-              if n >= 1 && n <= items.len() {
-                let idx = items.len() - n;
-                return Ok(items.remove(idx));
+              ArrIndex::FromBack(n) => {
+                if n >= 1 && n <= items.len() {
+                  let idx = items.len() - n;
+                  return Ok(items.remove(idx));
+                }
+                return Err(sherr!(ExecFail, "Index {} out of bounds for array '{}'", n, var_name.to_str_lossy()));
               }
-              return Err(sherr!(ExecFail, "Index {} out of bounds for array '{}'", n, var_name.to_str_lossy()));
+              _ => {
+                return Err(sherr!(ExecFail, "Cannot take all elements of array '{}'", var_name.to_str_lossy()));
+              }
             }
-            _ => {
-              return Err(sherr!(ExecFail, "Cannot take all elements of array '{}'", var_name.to_str_lossy()));
-            }
-          },
+          }
           _ => {
             return Err(sherr!(ExecFail, "Variable '{}' is not an array", var_name.to_str_lossy()));
           }
@@ -669,7 +673,9 @@ impl ScopeStack {
             if let Some(item) = items.get(idx) {
               return Ok(item.clone());
             }
-            return Err(sherr!(ExecFail, "Index {idx} out of bounds for array '{}'", var_name.to_str_lossy()));
+            return Err(
+              sherr!(ExecFail, "Index {idx} out of bounds for array '{}'", var_name.to_str_lossy()),
+            );
           }
           VarKind::AssocArr(items) => match idx {
             ArrIndex::AllSplit => unreachable!(),
@@ -707,13 +713,15 @@ impl ScopeStack {
   }
 
   pub(crate) fn get_array_keys(&self, var_name: &[u8]) -> ShResult<ShStr> {
-    let get_sep = || self
-              .try_get_var(b"IFS")
-              .unwrap_or_else(|| " \t\n".into())
-              .chars()
-              .next()
-              .map(ShStr::from)
-              .unwrap_or_else(|| ShStr::from(' '));
+    let get_sep = || {
+      self
+        .try_get_var(b"IFS")
+        .unwrap_or_else(|| " \t\n".into())
+        .chars()
+        .next()
+        .map(ShStr::from)
+        .unwrap_or_else(|| ShStr::from(' '))
+    };
 
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name)
@@ -722,7 +730,7 @@ impl ScopeStack {
         match var.kind() {
           VarKind::Arr(items) => {
             let indices: Vec<ShStr> = (0..items.len()).map(|i| i.to_string().into()).collect();
-            let sep = get_sep();
+            let sep                 = get_sep();
 
             return Ok(indices.join_with(&sep));
           }

@@ -4,7 +4,7 @@ use crate::{
   match_loop, opt, procio, sherr,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, ShStr, ShStrSliceExt},
+    vars::{ShStr, ShStrSliceExt, VarFlags, VarKind},
   },
   util::{self, error::ShResult},
   varstr,
@@ -80,7 +80,7 @@ fn quote_var(name: &[u8]) -> Option<ShStr> {
   let var = Shed::vars(|v| v.try_get_var_meta(name))?;
   match var.kind() {
     VarKind::Str(var_str) => Some(escape::shell_quote(var_str)),
-    VarKind::Int(int) => Some(escape::shell_quote(&varstr!("{int}"))),
+    VarKind::Int(int)     => Some(escape::shell_quote(&varstr!("{int}"))),
 
     VarKind::Arr(var_strs) => Some(
       var_strs
@@ -92,7 +92,7 @@ fn quote_var(name: &[u8]) -> Option<ShStr> {
           escape::shell_quote_fmt(v, &mut acc).ok();
           acc
         })
-        .into()
+        .into(),
     ),
     VarKind::AssocArr(items) => Some(
       items
@@ -106,7 +106,7 @@ fn quote_var(name: &[u8]) -> Option<ShStr> {
           escape::shell_quote_fmt(v, &mut acc).ok();
           acc
         })
-        .into()
+        .into(),
     ),
     VarKind::Magic(magic_var) => {
       let resolved = magic_var()?;

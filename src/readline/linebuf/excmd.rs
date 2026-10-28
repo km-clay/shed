@@ -16,7 +16,7 @@ use crate::{
   sherr, shopt,
   state::{
     Shed, paths,
-    vars::{VarFlags, VarKind, ShStr},
+    vars::{ShStr, VarFlags, VarKind},
   },
   status_msg, system_msg, try_var,
   util::{self, error::ShResult, guards, pos::Pos, strops},
@@ -688,12 +688,12 @@ impl super::LineBuf {
     vars.insert("BUFFER".into());
     vars.insert("CURSOR".into());
     vars.insert("ANCHOR".into());
-    let     _guard         = guards::var_ctx_guard(vars);
+    let     _guard        = guards::var_ctx_guard(vars);
 
     let mut buf   : ShStr = self.to_string().into();
-    let     cursor_raw     = self.cursor_to_flat();
+    let     cursor_raw    = self.cursor_to_flat();
     let mut cursor: ShStr = cursor_raw.to_string().into();
-    let mut anchor         = self.anchor_to_flat();
+    let mut anchor        = self.anchor_to_flat();
 
     Shed::vars_mut(|v| -> ShResult<()> {
       v.set_var(b"BUFFER", VarKind::string(buf.clone()), VarFlags::EXPORT)?;

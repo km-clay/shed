@@ -17,7 +17,7 @@ use crate::{
   match_loop, set_var, sherr,
   state::{
     Shed,
-    vars::{VarKind, ShStr},
+    vars::{ShStr, VarKind},
   },
   util::{
     error::{ShErr, ShResult},

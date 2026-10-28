@@ -20,7 +20,19 @@ use std::{
 };
 
 use crate::{
-  HashSet, autoload::{self, Autoloader}, opt, outln, readline::ScoredCandidate, sherr, state::{Shed, meta::MetaTab, paths::{self, PathCache}, terminal::Terminal}, util::{error::ShResult, guards, with_status}, var,
+  HashSet,
+  autoload::{self, Autoloader},
+  opt, outln,
+  readline::ScoredCandidate,
+  sherr,
+  state::{
+    Shed,
+    meta::MetaTab,
+    paths::{self, PathCache},
+    terminal::Terminal,
+  },
+  util::{error::ShResult, guards, with_status},
+  var,
 };
 
 use super::opt::OptSpec;
@@ -102,10 +114,9 @@ fn cached_tags<F: FnOnce() -> Vec<ScoredTag>>(build: F) -> Vec<ScoredTag> {
 
     if needs_rebuild {
       let tags = build();
-      let path_cache = borrow.take().map_or_else(
-        || PathCache::new("SHED_HPATH".into()),
-        |(pc, _)| pc,
-      );
+      let path_cache = borrow
+        .take()
+        .map_or_else(|| PathCache::new("SHED_HPATH".into()), |(pc, _)| pc);
       *borrow = Some((path_cache, tags.clone()));
       tags
     } else {
@@ -441,7 +452,7 @@ mod open_help_tests {
   use crate::set_var;
   use crate::state::Shed;
   use crate::state::terminal::Terminal;
-  use crate::state::vars::{VarFlags, VarKind, ShStr};
+  use crate::state::vars::{ShStr, VarFlags, VarKind};
   use crate::tests::testutil::TestGuard;
 
   const SAMPLE: &str =
@@ -830,7 +841,7 @@ mod help_execute_tests {
 #[cfg(test)]
 mod get_all_tags_tests {
   use super::*;
-  use crate::state::vars::{VarFlags, VarKind, ShStr};
+  use crate::state::vars::{ShStr, VarFlags, VarKind};
   use crate::tests::testutil::TestGuard;
 
   #[test]

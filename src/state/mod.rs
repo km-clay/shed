@@ -19,13 +19,19 @@ use std::{
 };
 
 use crate::{
-  HashMap, builtin::ForkBehavior, eval::{
+  HashMap,
+  builtin::ForkBehavior,
+  eval::{
     lex::Span,
     parse::{
       ast::{Ast, NodeId},
       node,
     },
-  }, socket::SocketRequest, state::{jobs::Outcome, source::StrongSpan, vars::ShStr}, util::error, varstr,
+  },
+  socket::SocketRequest,
+  state::{jobs::Outcome, source::StrongSpan, vars::ShStr},
+  util::error,
+  varstr,
 };
 
 use super::{

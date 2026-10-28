@@ -38,7 +38,7 @@ use super::{
     logic::{LogTab, TrapTarget},
     meta::MetaTab,
     terminal::Terminal,
-    vars::{VarKind, ShStr},
+    vars::{ShStr, VarKind},
   },
   status_msg,
   util::{error::ShResult, flog},

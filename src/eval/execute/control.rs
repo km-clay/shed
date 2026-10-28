@@ -14,7 +14,7 @@ use crate::{
   state::{
     Shed,
     meta::{CmdTimer, MetaTab},
-    vars::{DeferredAst, VarFlags, VarKind, ShStr, ShStrSliceExt},
+    vars::{DeferredAst, ShStr, ShStrSliceExt, VarFlags, VarKind},
   },
   util::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt},
@@ -552,13 +552,7 @@ impl super::Dispatcher {
           .zip(chunk.iter().chain(std::iter::repeat(&empty)));
 
         for (var, val) in chunk_iter {
-          Shed::vars_mut(|v| {
-            v.set_var(
-              var,
-              VarKind::string(val.clone()),
-              VarFlags::empty(),
-            )
-          })?;
+          Shed::vars_mut(|v| v.set_var(var, VarKind::string(val.clone()), VarFlags::empty()))?;
         }
 
         let _guard = guards::shared_scope_guard();

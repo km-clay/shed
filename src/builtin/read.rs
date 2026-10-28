@@ -13,7 +13,7 @@ use crate::{
   state::{
     Shed, params,
     terminal::Terminal,
-    vars::{VarFlags, VarKind, ShStr},
+    vars::{ShStr, VarFlags, VarKind},
   },
   util::{
     self,
@@ -436,18 +436,11 @@ fn field_split_vars(input: &[u8], vars: &[Word]) -> ShResult<()> {
   for (i, name) in vars.iter().enumerate() {
     let value: &[u8] = fields.get(i).map_or(&[][..], Vec::as_slice);
 
-    Shed::vars_mut(|v| {
-      v.set_var(
-        name,
-        VarKind::string(ShStr::from(value)),
-        VarFlags::empty(),
-      )
-    })?;
+    Shed::vars_mut(|v| v.set_var(name, VarKind::string(ShStr::from(value)), VarFlags::empty()))?;
   }
 
   Ok(())
 }
-
 
 fn field_split_vars_quoted(input: &[u8], vars: &[Word]) -> ShResult<()> {
   let fields = glue_zero_width(quote::unquote_raw(input)?);
@@ -490,7 +483,7 @@ fn field_split_arr(input: &[u8], arr_name: &[u8], quoted: bool) -> ShResult<()> 
     return Err(sherr!(ExecFail, "read: Array name cannot be empty"));
   }
 
-  let sep    = params::get_separators();
+  let sep = params::get_separators();
   let fields = if quoted {
     glue_zero_width(quote::unquote_raw(input)?)
   } else {
@@ -576,13 +569,7 @@ impl super::Builtin for ReadKey {
     }
 
     if let Some(var) = var_name {
-      Shed::vars_mut(|v| {
-        v.set_var(
-          &var,
-          VarKind::string(vim_seq),
-          VarFlags::empty(),
-        )
-      })?;
+      Shed::vars_mut(|v| v.set_var(&var, VarKind::string(vim_seq), VarFlags::empty()))?;
     } else {
       out!("{vim_seq}");
     }

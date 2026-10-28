@@ -483,7 +483,7 @@ impl Expander {
         continue;
       }
 
-      let pattern_bytes   = escape::markers_to_glob_escapes(&word);
+      let pattern_bytes  = escape::markers_to_glob_escapes(&word);
       let literal: ShStr = word.as_bytes().into();
 
       if !glob::might_be_glob(&pattern_bytes) {
@@ -729,7 +729,7 @@ mod tests {
 
   use crate::state::{
     Shed,
-    vars::{ArrIndex, VarFlags, VarKind, ShStr},
+    vars::{ArrIndex, ShStr, VarFlags, VarKind},
   };
   use crate::tests::testutil::{TestGuard, test_input};
 

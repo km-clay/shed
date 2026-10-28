@@ -26,7 +26,7 @@ use crate::{
     logic::TrapTarget,
     meta::{CmdTimer, MetaTab},
     terminal::Terminal,
-    vars::{ShellParam, VarKind, ShStr},
+    vars::{ShStr, ShellParam, VarKind},
   },
   util::{
     self,

@@ -36,7 +36,7 @@ use crate::{
     Shed,
     jobs::Job,
     paths,
-    vars::{VarFlags, VarKind, ShStr, ShStrSliceExt},
+    vars::{ShStr, ShStrSliceExt, VarFlags, VarKind},
   },
   status_msg, system_msg, try_var,
   util::{
@@ -598,7 +598,7 @@ fn handle_query_request(header: QueryHeader, conn: &UnixStream) -> ShResult<Opti
       return Ok(None);
     }
     QueryHeader::SetVar(var, val, flags) => {
-      let val      = VarKind::string(val);
+      let val = VarKind::string(val);
       Shed::vars_mut(|v| v.set_var(&var, val, flags)).ok();
     }
     QueryHeader::Status(headers) => return handle_status_query(headers, conn),
@@ -713,12 +713,7 @@ fn handle_line_get(header: &LineHeader, conn: &UnixStream, readline: &mut ShedLi
   write(conn, b"\n").ok();
 }
 
-fn handle_line_set(
-  header: &LineHeader,
-  value: &ShStr,
-  conn: &UnixStream,
-  readline: &mut ShedLine,
-) {
+fn handle_line_set(header: &LineHeader, value: &ShStr, conn: &UnixStream, readline: &mut ShedLine) {
   let value = value.to_str_lossy();
   match header {
     LineHeader::Buffer => {

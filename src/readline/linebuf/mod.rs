@@ -10,7 +10,7 @@ use crate::{
   shopt,
   state::{
     self, Shed, paths,
-    vars::{VarFlags, VarKind, ShStr},
+    vars::{ShStr, VarFlags, VarKind},
   },
   status_msg,
   util::error::ShResult,
@@ -305,7 +305,7 @@ impl LineBuf {
         && let alias = alias.to_string()
         && !raw[tk_start..].starts_with(&alias)
       {
-        let word     = &word.to_string();
+        let word  = &word.to_string();
         let delta = alias.graphemes(true).count() as isize - word.graphemes(true).count() as isize;
         let expanded = last.replaced(&alias);
 

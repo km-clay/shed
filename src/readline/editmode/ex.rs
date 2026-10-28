@@ -21,7 +21,10 @@ use super::{
   status_msg,
 };
 use crate::{
-  HashSet, eval::lex::TkFlags, state::{Shed, SourceId, register_source, vars::ShStr}, varstr, verb,
+  HashSet,
+  eval::lex::TkFlags,
+  state::{Shed, SourceId, register_source, vars::ShStr},
+  varstr, verb,
 };
 use bitflags::bitflags;
 
@@ -192,7 +195,7 @@ const MAX_EX_ALIAS_DEPTH: usize = 50;
 /// already being expanded is left literal (via `active`), with the depth cap as
 /// a final backstop.
 fn expand_ex_aliases(input: &str) -> String {
-  let mut input = input.to_string();
+  let mut input                  = input.to_string();
   let mut active: HashSet<ShStr> = HashSet::default();
 
   for _ in 0..MAX_EX_ALIAS_DEPTH {

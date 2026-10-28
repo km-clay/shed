@@ -12,7 +12,7 @@ use crate::{
   sherr, shopt,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, ShStr},
+    vars::{ShStr, VarFlags, VarKind},
   },
   util::{
     self,
@@ -426,11 +426,7 @@ impl SpecType {
     }
   }
 
-  fn read_field(
-    self,
-    reader: &dyn Sink,
-    buffer: &mut Vec<u8>,
-  ) -> ShResult<(usize, Option<ShStr>)> {
+  fn read_field(self, reader: &dyn Sink, buffer: &mut Vec<u8>) -> ShResult<(usize, Option<ShStr>)> {
     match self {
       SpecType::Raw(len)    => Self::read_raw(len, reader, buffer),
       SpecType::Int(spec)   => Self::read_int(spec, reader, buffer),
@@ -563,8 +559,8 @@ impl super::Builtin for Pack {
       .with_code(2),
 
       (Some(_), Some(_)) => {
-        let ar_span : Span   = args.opt_span("array").unwrap();
-        let as_span : Span   = args.opt_span("assoc").unwrap();
+        let ar_span : Span  = args.opt_span("array").unwrap();
+        let as_span : Span  = args.opt_span("assoc").unwrap();
         let ar_slice: ShStr = ar_span.slice();
         let as_slice: ShStr = as_span.slice();
 
@@ -791,8 +787,8 @@ impl super::Builtin for Unpack {
       .with_code(2),
 
       (Some(_), Some(_)) => {
-        let ar_span : Span   = args.opt_span("array").unwrap();
-        let as_span : Span   = args.opt_span("assoc").unwrap();
+        let ar_span : Span  = args.opt_span("array").unwrap();
+        let as_span : Span  = args.opt_span("assoc").unwrap();
         let ar_slice: ShStr = ar_span.slice();
         let as_slice: ShStr = as_span.slice();
 
@@ -881,9 +877,7 @@ impl Unpack {
           .collect_vec();
 
         if append {
-          let assoc = v
-            .get_assoc_mut(&arr_name)
-            .promote_err(args.cmd_span())?;
+          let assoc = v.get_assoc_mut(&arr_name).promote_err(args.cmd_span())?;
 
           if let Some((name, _, span)) = named
             .iter()
@@ -909,17 +903,11 @@ impl Unpack {
         let data = fields.into_iter().map(Field::into_data).collect_vec();
 
         if append {
-          let arr = v
-            .get_arr_mut(&arr_name)
-            .promote_err(args.cmd_span())?;
+          let arr = v.get_arr_mut(&arr_name).promote_err(args.cmd_span())?;
 
           arr.extend(data);
         } else {
-          v.set_var(
-            &arr_name,
-            VarKind::arr(data),
-            VarFlags::empty(),
-          )?;
+          v.set_var(&arr_name, VarKind::arr(data), VarFlags::empty())?;
         }
 
         Ok(())

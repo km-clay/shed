@@ -118,8 +118,7 @@ pub(crate) fn is_builtin(cmd: NodeId, tree: &Ast) -> bool {
   let cmd = cmd_word.slice();
 
   !is_func(&cmd)
-    && builtin::fork_behavior_for(&cmd)
-      .is_some_and(|b| !matches!(b, ForkBehavior::Always))
+    && builtin::fork_behavior_for(&cmd).is_some_and(|b| !matches!(b, ForkBehavior::Always))
     && cmd_word.flags.contains(TkFlags::BUILTIN)
 }
 

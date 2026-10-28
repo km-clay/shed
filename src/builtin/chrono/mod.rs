@@ -10,7 +10,7 @@ use crate::{
   sub_command, try_var,
   util::{
     error::ShResult,
-    strops::{self, ByteCursor, Field, FieldParams, Sign, SliceCursor, StrFmt, ShStrDisplay},
+    strops::{self, ByteCursor, Field, FieldParams, ShStrDisplay, Sign, SliceCursor, StrFmt},
   },
   varstr,
 };

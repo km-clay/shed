@@ -5,7 +5,7 @@ use crate::{
   sherr,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, ShStr},
+    vars::{ShStr, VarFlags, VarKind},
   },
   util::{self, error::ShResultExt},
 };

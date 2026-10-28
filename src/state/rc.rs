@@ -4,7 +4,11 @@
 //! source the shell's rc, profile, and env files.
 
 use std::{
-  ffi::OsStr, fs::OpenOptions, io::{Read, Write}, os::unix::ffi::OsStrExt, path::PathBuf,
+  ffi::OsStr,
+  fs::OpenOptions,
+  io::{Read, Write},
+  os::unix::ffi::OsStrExt,
+  path::PathBuf,
 };
 
 use bstr::ByteSlice;
@@ -113,7 +117,7 @@ fn live_vars() -> Vec<ShStr> {
       .into_iter()
       .filter(|(_, var)| !var.flags().contains(vars::VarFlags::SHELL))
       .filter_map(|(name, var)| vars::serialize_var(&name, &var).map(|line| (name, line)))
-      .sorted_by(|(a_name,_), (b_name,_)| a_name.cmp(b_name))
+      .sorted_by(|(a_name, _), (b_name, _)| a_name.cmp(b_name))
       .map(|(_, line)| line)
       .collect_vec()
   })
@@ -128,8 +132,8 @@ fn live_funcs() -> Vec<ShStr> {
         ShFunc::Defined { source, .. } => Some((name.clone(), source.slice())),
         ShFunc::Autoload(_)            => None,
       })
-      .sorted_by(|(a_name,_), (b_name,_)| a_name.cmp(b_name))
-      .map(|(_,src)| src)
+      .sorted_by(|(a_name, _), (b_name, _)| a_name.cmp(b_name))
+      .map(|(_, src)| src)
       .collect_vec()
   })
 }
@@ -161,7 +165,7 @@ fn live_keymaps() -> Vec<ShStr> {
 pub(crate) fn compose_rc(config: &GenRcConfig) -> Vec<ShStr> {
   use ShoptSource::{Current, Defaults};
 
-  let     comments           = config.include_comments;
+  let     comments          = config.include_comments;
   let mut lines: Vec<ShStr> = vec![];
 
   // Append a section (header comments + content + trailing blank) only when it

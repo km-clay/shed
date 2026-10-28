@@ -30,7 +30,7 @@ impl std::fmt::Debug for Arg {
 
 /// The result of parsing a builtin's command line.
 pub(crate) struct Parsed {
-  pub words: Vec<Arg>,    // the parsed arguments and options
+  pub words: Vec<Arg>,   // the parsed arguments and options
   pub trace: Vec<ShStr>, // the flat word list used for `set -x` tracing
 }
 
@@ -95,10 +95,10 @@ impl Display for Opt {
 
 #[derive(Default, Debug)]
 pub(crate) struct OptSpec {
-  short: Option<u8>,     // form like '-a'
+  short: Option<u8>,    // form like '-a'
   long : Option<ShStr>, // form like '--arg'
   key  : ShStr,         // internal name used for matching
-  argc : usize,          // number of arguments the option takes
+  argc : usize,         // number of arguments the option takes
 }
 
 impl OptSpec {

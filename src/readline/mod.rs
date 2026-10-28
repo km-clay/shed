@@ -34,7 +34,7 @@ use crate::{
     params,
     shopt::CompleteStyle,
     terminal::{Scroll, SyncOutputGuard, TermCtl, Terminal},
-    vars::{Var, VarFlags, VarKind, ShStr},
+    vars::{ShStr, Var, VarFlags, VarKind},
   },
   status_msg, system_msg, try_var,
   util::{self, error::ShResult, ui},
@@ -1254,13 +1254,12 @@ impl ShedLine {
         let candidates     = comp.all_candidates();
         let num_candidates = candidates.len();
 
-        let cand_vec: Vec<(ShStr, ShStr)> =
-          candidates.into_iter().fold(vec![], |mut acc, cand| {
-            let desc = cand.desc().map(ShStr::from).unwrap_or_default();
-            let name = cand.content().to_var_str();
-            acc.push((name, desc));
-            acc
-          });
+        let cand_vec: Vec<(ShStr, ShStr)> = candidates.into_iter().fold(vec![], |mut acc, cand| {
+          let desc = cand.desc().map(ShStr::from).unwrap_or_default();
+          let name = cand.content().to_var_str();
+          acc.push((name, desc));
+          acc
+        });
         let cand_assoc = VarKind::AssocArr(cand_vec);
 
         Shed::vars_mut(|v| v.set_var(b"MATCHES", cand_assoc, VarFlags::LOCAL).unwrap());

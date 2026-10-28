@@ -37,7 +37,7 @@ use crate::{
   sherr, shopt, signal,
   state::{
     ForkKind, Shed,
-    vars::{VarKind, ShStr},
+    vars::{ShStr, VarKind},
   },
   util::{
     self,

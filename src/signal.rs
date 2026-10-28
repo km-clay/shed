@@ -568,8 +568,8 @@ pub(crate) fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
   });
 
   let children: Vec<(ShStr, ShStr)> = cmds.into_iter().zip(status_strs).collect();
-  let last_status = children.last().map(|c| c.1.clone()).unwrap_or_default();
-  let cmd_count   = children.len();
+  let last_status                   = children.last().map(|c| c.1.clone()).unwrap_or_default();
+  let cmd_count = children.len();
 
   // now run our post job autocmds
   // with these variables set

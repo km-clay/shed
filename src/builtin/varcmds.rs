@@ -11,7 +11,7 @@ use crate::{
     Shed,
     logic::ShFunc,
     meta::MetaTab,
-    vars::{self, VarFlags, VarKind, VarName, ShStr},
+    vars::{self, ShStr, VarFlags, VarKind, VarName},
   },
   try_var,
   util::{
@@ -242,10 +242,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
       }
     }
     IntrospectMode::FunctionsFull => {
-      let names = argv
-        .iter()
-        .map(|n| n.content())
-        .collect_vec();
+      let names = argv.iter().map(|n| n.content()).collect_vec();
 
       // Source any explicitly requested autoload functions so their bodies
       // become visible to the iteration below; otherwise `declare -f name`
@@ -305,10 +302,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
       }
     }
     IntrospectMode::FunctionNames => {
-      let names = argv
-        .iter()
-        .map(|n| n.content())
-        .collect_vec();
+      let names = argv.iter().map(|n| n.content()).collect_vec();
 
       let dump = Shed::logic(|table| {
         table
@@ -399,7 +393,7 @@ impl super::Builtin for Unset {
       }
 
       let parsed = VarName::parse(&arg.to_str_lossy(), true)?;
-      let name = parsed.name();
+      let name   = parsed.name();
 
       if !Shed::vars(|v| v.var_exists(&name)) {
         continue;

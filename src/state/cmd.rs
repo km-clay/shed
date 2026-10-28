@@ -95,10 +95,7 @@ pub(crate) fn check_typo(cmd: &[u8]) -> Vec<ShStr> {
   check_typo_against(cmd, list_util_names())
 }
 
-pub(crate) fn check_typo_against(
-  cmd: &[u8],
-  cand: impl IntoIterator<Item = ShStr>,
-) -> Vec<ShStr> {
+pub(crate) fn check_typo_against(cmd: &[u8], cand: impl IntoIterator<Item = ShStr>) -> Vec<ShStr> {
   let max_edits = (cmd.len() / 3).clamp(1, 2);
   let max_dist  = max_edits * strops::EDIT_WEIGHT;
 

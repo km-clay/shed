@@ -7,7 +7,17 @@
 //! * [`VarFlags`]: the attributes of the variable (exported, local, readonly, integer)
 
 use std::{
-  borrow::{Borrow, Cow}, collections::VecDeque, ffi::{CString, OsStr, OsString}, fmt::{self, Debug, Display}, ops::{Deref, RangeBounds}, os::unix::ffi::{OsStrExt, OsStringExt}, path::{Path, PathBuf}, rc::Rc, str::FromStr, sync::Arc, time::{Duration, Instant},
+  borrow::{Borrow, Cow},
+  collections::VecDeque,
+  ffi::{CString, OsStr, OsString},
+  fmt::{self, Debug, Display},
+  ops::{Deref, RangeBounds},
+  os::unix::ffi::{OsStrExt, OsStringExt},
+  path::{Path, PathBuf},
+  rc::Rc,
+  str::FromStr,
+  sync::Arc,
+  time::{Duration, Instant},
 };
 
 use bitflags::bitflags;
@@ -15,7 +25,10 @@ use bstr::ByteSlice;
 use hipstr::HipByt;
 use itertools::Itertools;
 use nix::{
-  NixPath, errno::Errno, sys::stat, unistd::{self, Pid, Uid, User},
+  NixPath,
+  errno::Errno,
+  sys::stat,
+  unistd::{self, Pid, Uid, User},
 };
 use rusqlite::{ToSql, types::FromSql};
 use smallvec::SmallVec;
@@ -640,8 +653,7 @@ impl VarName {
     ))
   }
   pub(crate) fn parse(raw: &str, allow_side_effects: bool) -> ShResult<Self> {
-    Self::parse_stream(&SegStream::from(raw), allow_side_effects)
-      .map(|(varname, _)| varname)
+    Self::parse_stream(&SegStream::from(raw), allow_side_effects).map(|(varname, _)| varname)
   }
 
   pub(crate) fn name(&self) -> ShStr {
@@ -705,7 +717,7 @@ pub(crate) trait ShStrSliceExt {
 
 impl ShStrSliceExt for [ShStr] {
   fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> ShStr {
-    let sep = sep.as_ref();
+    let     sep  = sep.as_ref();
 
     let mut out  = vec![];
     let mut iter = self.iter();
@@ -722,7 +734,7 @@ impl ShStrSliceExt for [ShStr] {
 
 impl ShStrSliceExt for [Word] {
   fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> ShStr {
-    let sep = sep.as_ref();
+    let     sep  = sep.as_ref();
 
     let mut out  = vec![];
     let mut iter = self.iter();
@@ -739,7 +751,7 @@ impl ShStrSliceExt for [Word] {
 
 impl ShStrSliceExt for [&ShStr] {
   fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> ShStr {
-    let sep = sep.as_ref();
+    let     sep  = sep.as_ref();
 
     let mut out  = vec![];
     let mut iter = self.iter();
@@ -929,7 +941,7 @@ impl From<SmallVec<[u8; 24]>> for ShStr {
 impl From<char> for ShStr {
   fn from(value: char) -> Self {
     let mut buf = [0u8; 4];
-    let s       = value.encode_utf8(&mut buf);
+    let     s   = value.encode_utf8(&mut buf);
     Self(HipByt::from(s.as_bytes()))
   }
 }
@@ -1535,9 +1547,7 @@ impl VarTab {
   }
   fn init_env() -> Vec<(ShStr, Var)> {
     let pathbuf_to_string =
-      |pb: Result<PathBuf, std::io::Error>| -> ShStr {
-        pb.unwrap_or_default().into()
-      };
+      |pb: Result<PathBuf, std::io::Error>| -> ShStr { pb.unwrap_or_default().into() };
 
     // real fd, not the sink table: this runs during Shed construction, before
     // the fd table exists — stdin_is_tty() -> Shed::sinks would re-enter init.
@@ -1608,10 +1618,7 @@ impl VarTab {
     // SHED_HPATH: prepend install_dir if it isn't already present.
     if let Some(install_dir) = super::builtin::HELP_PAGE_INSTALL_DIR {
       let new_hpath = match env.get(b"SHED_HPATH".as_slice()) {
-        Some(hpath)
-          if !paths::split_path_list(hpath)
-            .any(|p| p.as_os_str() == install_dir) =>
-        {
+        Some(hpath) if !paths::split_path_list(hpath).any(|p| p.as_os_str() == install_dir) => {
           Some(format!("{install_dir}:{}", hpath.to_str_lossy()))
         }
         None => Some(install_dir.to_string()),

@@ -40,7 +40,7 @@ use crate::{
     Shed, cmd,
     meta::UtilKind,
     params, paths,
-    vars::{ShellParam, ShStr},
+    vars::{ShStr, ShellParam},
   },
   util::strops::{self, QuoteState},
 };

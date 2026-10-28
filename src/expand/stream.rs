@@ -86,7 +86,7 @@ impl SegStream {
   pub(crate) fn new(content: ShStr) -> Self {
     Self {
       content,
-      marks  : Vec::new(),
+      marks: Vec::new(),
     }
   }
   pub(crate) fn from_bytes(b: Vec<u8>) -> Self {

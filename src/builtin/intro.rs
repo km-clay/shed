@@ -6,7 +6,7 @@ use crate::{
     Shed, cmd,
     logic::ShFunc,
     meta::UtilKind,
-    vars::{Var, VarKind, ShStr},
+    vars::{ShStr, Var, VarKind},
   },
   util::{self, error::ShResult},
 };

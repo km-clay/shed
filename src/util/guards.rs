@@ -16,7 +16,7 @@ use crate::{
   state::{
     Shed, params,
     scopes::ScopeStack,
-    vars::{Var, VarFlags, ShStr},
+    vars::{ShStr, Var, VarFlags},
   },
   try_var, util, var,
 };

@@ -7,7 +7,7 @@ use crate::{
   match_loop, sherr, shopt,
   state::{
     Shed, params,
-    vars::{VarName, ShStr},
+    vars::{ShStr, VarName},
   },
   try_var,
   util::{error::ShResult, strops::QuoteState},
@@ -333,8 +333,8 @@ mod tests {
   mod markers {
     pub(super) const DUB_QUOTE: char = '\u{fdd0}';
   }
-  use crate::state::vars::VarKind;
   use crate::state::vars::ShStr;
+  use crate::state::vars::VarKind;
   use crate::tests::testutil::TestGuard;
 
   // ===================== Variable Expansion (TestGuard) =====================

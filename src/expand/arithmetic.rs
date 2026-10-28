@@ -7,7 +7,7 @@ use crate::{
   match_loop, sherr,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, VarKindTag, VarName, ShStr},
+    vars::{ShStr, VarFlags, VarKind, VarKindTag, VarName},
   },
   try_var,
   util::{
@@ -215,7 +215,9 @@ fn resolve_var_num(name: &[u8]) -> ShResult<Num> {
     return Ok(n);
   }
   if ARITH_DEPTH.with(Cell::get) >= MAX_ARITH_DEPTH {
-    return Err(sherr!(ParseErr, "arithmetic recursion limit exceeded resolving '{}'", name.to_str_lossy()));
+    return Err(
+      sherr!(ParseErr, "arithmetic recursion limit exceeded resolving '{}'", name.to_str_lossy()),
+    );
   }
   ARITH_DEPTH.with(|d| d.set(d.get() + 1));
   let _guard = DepthGuard;
@@ -468,12 +470,10 @@ fn assign_var(name: &[u8], val: Num) -> ShResult<()> {
     // for an assoc array, an arithmetic subscript otherwise. That evaluation
     // can re-enter the variable table, so it happens outside both borrows.
     let name = vn.name();
-    let tag = Shed::vars(|v| v.try_get_var_kind_tag(&name)).unwrap_or(VarKindTag::Arr);
-    let idx = idx.clone().resolve_for(tag)?;
+    let tag  = Shed::vars(|v| v.try_get_var_kind_tag(&name)).unwrap_or(VarKindTag::Arr);
+    let idx  = idx.clone().resolve_for(tag)?;
 
-    Shed::vars_mut(|v| {
-      v.set_var_indexed(&name, idx, varstr!("{val}"), VarFlags::empty())
-    })
+    Shed::vars_mut(|v| v.set_var_indexed(&name, idx, varstr!("{val}"), VarFlags::empty()))
   } else {
     Shed::vars_mut(|v| {
       v.set_var(

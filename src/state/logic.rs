@@ -146,7 +146,7 @@ impl ShFunc {
 
 #[derive(Clone, Debug)]
 struct ShLambda {
-  src: Arc<Ast>,
+  src   : Arc<Ast>,
   source: Span,
 }
 

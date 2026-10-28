@@ -194,8 +194,7 @@ impl super::Dispatcher {
       // Apply the values resolved in the parent above (already `EXPORT`-flagged),
       // so `get_envp` picks them up for `execve`. No expansion happens here.
       for (name, var) in &resolved_env {
-        let _ =
-          Shed::vars_mut(|v| v.set_var(name, var.kind().clone(), var.flags()));
+        let _ = Shed::vars_mut(|v| v.set_var(name, var.kind().clone(), var.flags()));
       }
       let exec_args = super::ExecArgs::from_expanded(expanded.clone());
 

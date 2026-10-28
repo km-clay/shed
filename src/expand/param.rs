@@ -16,7 +16,7 @@ use crate::{
   state::{
     Shed,
     scopes::ScopeStack,
-    vars::{ArrIndex, ShellParam, VarKind, VarName, ShStr},
+    vars::{ArrIndex, ShStr, ShellParam, VarKind, VarName},
   },
   util::error::ShResult,
   var, varstr,
@@ -46,8 +46,8 @@ pub(crate) enum ParamExp {
   ReplaceAllMatches(SegStream, SegStream), // //search/replace
   ReplacePrefix(SegStream, SegStream),     // #search/replace
   ReplaceSuffix(SegStream, SegStream),     // %search/replace
-  VarNamesWithPrefix(ShStr),              // !prefix@ || !prefix*
-  ExpandInnerVar(ShStr),                  // !var
+  VarNamesWithPrefix(ShStr),               // !prefix@ || !prefix*
+  ExpandInnerVar(ShStr),                   // !var
 }
 
 /// Parse a parameter expansion
@@ -61,7 +61,7 @@ pub(crate) enum ParamExp {
 fn split_search_repl(rest: SegStream) -> (SegStream, SegStream) {
   match rest.split_once_unescaped(b'/') {
     Some(pair) => pair,
-    None => (rest, SegStream::default()),
+    None       => (rest, SegStream::default()),
   }
 }
 
@@ -73,15 +73,15 @@ pub(crate) fn parse_param_exp(body: &SegStream) -> ShResult<ParamExp> {
   // The operator is markerless ASCII at the very front of the body, so match it
   // against the leading bytes; the operand (which may carry markers) is the
   // remainder stream after the operator is peeled off.
-  let lead = body.as_bytes();
-  let lead_run = body.leading_bytes();
+  let lead      = body.as_bytes();
+  let lead_run  = body.leading_bytes();
 
   match lead {
     b"^^" => return Ok(PE::ToUpperAll),
-    b"^" => return Ok(PE::ToUpperFirst),
+    b"^"  => return Ok(PE::ToUpperFirst),
     b",," => return Ok(PE::ToLowerAll),
-    b"," => return Ok(PE::ToLowerFirst),
-    _ => {}
+    b","  => return Ok(PE::ToLowerFirst),
+    _     => {}
   }
 
   // Handle indirect var expansion: ${!var}
@@ -175,7 +175,7 @@ fn eval_slice_index(
   allow_side_effects: bool,
 ) -> ShResult<Num> {
   let expanded = var::expand_raw_inner(span, &mut stream.cursor(), allow_side_effects, false)?;
-  let bytes = expanded.as_bytes();
+  let bytes    = expanded.as_bytes();
   // An empty index (e.g. an unset variable) is 0, as in an empty arith context.
   if bytes.iter().all(u8::is_ascii_whitespace) {
     return Ok(0);
@@ -197,8 +197,8 @@ fn align_slice(start: Num, len: Option<Num>, n: Num) -> ShResult<(usize, usize)>
   let start = resolve_offset(start, n);
   let end = match len {
     Some(l) if l < 0 => n + l,
-    Some(l) => (start + l).min(n),
-    None => n,
+    Some(l)          => (start + l).min(n),
+    None             => n,
   };
 
   if end < start {
@@ -208,12 +208,12 @@ fn align_slice(start: Num, len: Option<Num>, n: Num) -> ShResult<(usize, usize)>
 }
 
 fn slice_chars(value: &ShStr, start: Num, len: Option<Num>) -> ShResult<ShStr> {
-  let bytes = value.as_bytes();
-  let starts = bytes.char_indices().map(|(s, _, _)| s).collect_vec();
+  let bytes        = value.as_bytes();
+  let starts       = bytes.char_indices().map(|(s, _, _)| s).collect_vec();
   let (skip, take) = align_slice(start, len, starts.len() as Num)?;
 
-  let start_byte = starts.get(skip).copied().unwrap_or(bytes.len());
-  let end_byte = starts.get(skip + take).copied().unwrap_or(bytes.len());
+  let start_byte   = starts.get(skip).copied().unwrap_or(bytes.len());
+  let end_byte     = starts.get(skip + take).copied().unwrap_or(bytes.len());
 
   value
     .try_slice(start_byte..end_byte)
@@ -223,7 +223,7 @@ fn slice_chars(value: &ShStr, start: Num, len: Option<Num>) -> ShResult<ShStr> {
 fn slice_words(words: Words, start: Num, len: Option<Num>) -> ShResult<Words> {
   let (skip, take) = align_slice(start, len, words.len() as Num)?;
 
-  let slice = words.into_iter().skip(skip).take(take).collect();
+  let slice        = words.into_iter().skip(skip).take(take).collect();
 
   Ok(slice)
 }
@@ -280,9 +280,9 @@ fn trim_param(
   let trimmed = words.map_content(|word| {
     let range = {
       let hit = match trim {
-        Trim::Prefix(TrimLen::Longest) => pattern.match_longest_prefix(&word),
+        Trim::Prefix(TrimLen::Longest)  => pattern.match_longest_prefix(&word),
         Trim::Prefix(TrimLen::Shortest) => pattern.match_shortest_prefix(&word),
-        Trim::Suffix(TrimLen::Longest) => pattern.match_longest_suffix(&word),
+        Trim::Suffix(TrimLen::Longest)  => pattern.match_longest_suffix(&word),
         Trim::Suffix(TrimLen::Shortest) => pattern.match_shortest_suffix(&word),
       };
 
@@ -310,7 +310,7 @@ enum ReplaceMode {
 
 #[derive(Debug, Clone)]
 struct ReplaceSpec {
-  pat: Rc<Pattern>,
+  pat    : Rc<Pattern>,
   replace: ShStr,
 }
 
@@ -333,7 +333,7 @@ impl ReplaceSpec {
       .expand_for_glob()?;
 
     Ok(Some(Self {
-      pat: Shed::meta_mut(|m| m.get_glob(&expanded_search)),
+      pat    : Shed::meta_mut(|m| m.get_glob(&expanded_search)),
       replace: expanded_replace,
     }))
   }
@@ -345,7 +345,7 @@ fn replace_in(haystack: &ShStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option<
   match mode {
     ReplaceMode::First => {
       let mut out: Vec<u8> = Vec::with_capacity(haystack.len());
-      let (start, end) = pat.find(haystack, 0)?;
+      let     (start, end) = pat.find(haystack, 0)?;
 
       out.extend_from_slice(&haystack[..start]);
       out.extend_from_slice(&replace);
@@ -354,10 +354,10 @@ fn replace_in(haystack: &ShStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option<
       Some(ShStr::from(out))
     }
     ReplaceMode::All => {
-      let mut out = Vec::new();
+      let mut out  = Vec::new();
       let mut last = 0;
       let mut from = 0;
-      let mut hit = false;
+      let mut hit  = false;
 
       while let Some((start, end)) = pat.find(haystack, from) {
         hit = true;
@@ -373,7 +373,7 @@ fn replace_in(haystack: &ShStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option<
       })
     }
     ReplaceMode::Prefix => {
-      let len = pat.match_longest_prefix(haystack)?;
+      let     len = pat.match_longest_prefix(haystack)?;
       let mut out = replace;
 
       out.push_slice(&haystack[len..]);
@@ -381,8 +381,8 @@ fn replace_in(haystack: &ShStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option<
       Some(out)
     }
     ReplaceMode::Suffix => {
-      let len = pat.match_longest_suffix(haystack)?;
-      let pos = haystack.len() - len;
+      let     len = pat.match_longest_suffix(haystack)?;
+      let     pos = haystack.len() - len;
       let mut out = haystack.clone();
 
       out.truncate(pos);
@@ -421,7 +421,7 @@ fn change_first_case(parsed: &VarName, words: Words, case: Case) -> SegStream {
     }
 
     let first = v.try_slice(..1).unwrap();
-    let rest = v.try_slice(1..).unwrap();
+    let rest  = v.try_slice(1..).unwrap();
 
     match case {
       Case::Upper => first.to_ascii_uppercase().chain(rest),
@@ -460,7 +460,7 @@ fn handle_len_expansion(raw: &[u8], allow_side_effects: bool) -> ShResult<SegStr
       ArrIndex::AllSplit | ArrIndex::AllJoined | ArrIndex::ArgCount => {
         let var = Shed::vars(|v| v.get_var_meta(&parsed.name()));
         let len = match var.kind() {
-          VarKind::Arr(items) => items.len(),
+          VarKind::Arr(items)      => items.len(),
           VarKind::AssocArr(items) => items.len(),
           _ => 0,
         };
@@ -477,12 +477,12 @@ fn handle_len_expansion(raw: &[u8], allow_side_effects: bool) -> ShResult<SegStr
 
   let var = Shed::vars(|v| v.get_var_meta(var_spec));
   let len = match var.kind() {
-    VarKind::Magic(func) => func().unwrap_or_default().chars().count(),
-    VarKind::Str(v) => v.chars().count(),
-    VarKind::Int(i) => varstr!("{i}").chars().count(),
-    VarKind::Arr(items) => items.len(),
+    VarKind::Magic(func)     => func().unwrap_or_default().chars().count(),
+    VarKind::Str(v)          => v.chars().count(),
+    VarKind::Int(i)          => varstr!("{i}").chars().count(),
+    VarKind::Arr(items)      => items.len(),
     VarKind::AssocArr(items) => items.len(),
-    VarKind::Unset => 0,
+    VarKind::Unset           => 0,
   };
 
   Ok(varstr!("{len}").into())
@@ -507,7 +507,7 @@ pub(crate) fn perform_param_expansion(
     }
   }
 
-  let get = |v: &ScopeStack| v.resolve_words(&parsed).unwrap_or_default();
+  let get     = |v: &ScopeStack| v.resolve_words(&parsed).unwrap_or_default();
   let try_get = |v: &ScopeStack| v.resolve_words(&parsed).filter(|w| !w.is_empty());
   let operand = body.split_off_front(consumed).1;
 
@@ -528,13 +528,13 @@ pub(crate) fn perform_param_expansion(
     ParamExp::ToLowerFirst => Ok(change_first_case(&parsed, Shed::vars(get), Case::Lower)),
 
     ParamExp::ToUpperAll => {
-      let words = Shed::vars(get);
+      let words  = Shed::vars(get);
       let mapped = words.map_content(|c| c.to_ascii_uppercase());
 
       Ok(var::emit_words(&parsed, &mapped))
     }
     ParamExp::ToLowerAll => {
-      let words = Shed::vars(get);
+      let words  = Shed::vars(get);
       let mapped = words.map_content(|c| c.to_ascii_lowercase());
 
       Ok(var::emit_words(&parsed, &mapped))
@@ -542,11 +542,11 @@ pub(crate) fn perform_param_expansion(
     ParamExp::DefaultUnsetOrNull(default) => match Shed::vars(try_get).filter(|v| !v.empty_param())
     {
       Some(val) => Ok(var::emit_words(&parsed, &val)),
-      None => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
+      None      => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
     },
     ParamExp::DefaultUnset(default) => match Shed::vars(try_get) {
       Some(val) => Ok(var::emit_words(&parsed, &val)),
-      None => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
+      None      => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
     },
     ParamExp::SetDefaultUnsetOrNull(default) => {
       match Shed::vars(try_get).filter(|v| !v.empty_param()) {
@@ -576,11 +576,11 @@ pub(crate) fn perform_param_expansion(
     },
     ParamExp::AltSetNotNull(alt) => match Shed::vars(try_get).filter(|v| !v.empty_param()) {
       Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
-      None => Ok(null_expand(&parsed)),
+      None    => Ok(null_expand(&parsed)),
     },
     ParamExp::AltNotNull(alt) => match Shed::vars(try_get) {
       Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
-      None => Ok(null_expand(&parsed)),
+      None    => Ok(null_expand(&parsed)),
     },
     ParamExp::ErrUnsetOrNull(err) => match Shed::vars(try_get).filter(|v| !v.empty_param()) {
       Some(val) => Ok(var::emit_words(&parsed, &val)),
@@ -653,11 +653,13 @@ pub(crate) fn perform_param_expansion(
         .cloned()
         .enumerate()
         .fold(vec![], strops::fold_bytes)
-        .into()
+        .into(),
     ),
     ParamExp::ExpandInnerVar(inner) => {
       if inner.contains_slice(b"[@]") || inner.contains_slice(b"[*]") {
-        let var_name = inner.find_byte(b'[').map_or(&inner[..], |pos| &inner[..pos]);
+        let var_name = inner
+          .find_byte(b'[')
+          .map_or(&inner[..], |pos| &inner[..pos]);
 
         if inner.contains_slice(b"[*]") {
           return Shed::vars(|v| v.get_array_keys(var_name)).map(Into::into);
@@ -667,7 +669,7 @@ pub(crate) fn perform_param_expansion(
 
         match Shed::vars(|v| v.split_keys(&name)) {
           Some(fields) => Ok(var::emit_words(&parsed, &fields)),
-          None => unreachable!("inner has an index, so it always returns fields"),
+          None         => unreachable!("inner has an index, so it always returns fields"),
         }
       } else {
         let inner_name = VarName::parse(&inner.to_str_lossy(), allow_side_effects)?;
@@ -691,8 +693,7 @@ mod tests {
   }
 
   fn test_param_expansion(val: &str) -> ShResult<ShStr> {
-    perform_param_expansion(None, &SegStream::from(val), true)
-      .map(|s| ShStr::from(s.as_bytes()))
+    perform_param_expansion(None, &SegStream::from(val), true).map(|s| ShStr::from(s.as_bytes()))
   }
 
   // ===================== ParamExp parsing =====================
@@ -1408,7 +1409,7 @@ mod tests {
 
   #[test]
   fn param_set_default_unset_or_null_when_unset() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = test_param_expansion("NEWVAR:=defaultval").unwrap();
     assert_eq!(result, "defaultval");
     // Side effect: variable should now be set.
@@ -1437,7 +1438,7 @@ mod tests {
 
   #[test]
   fn param_alt_set_not_null_unset_returns_empty() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = test_param_expansion("UNSET:+alt").unwrap();
     assert_eq!(result, "");
   }
@@ -1454,7 +1455,7 @@ mod tests {
 
   #[test]
   fn param_err_unset_or_null_when_unset() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = test_param_expansion("UNSET:?missing!");
     assert!(result.is_err());
   }
@@ -1477,7 +1478,7 @@ mod tests {
 
   #[test]
   fn param_err_unset_when_unset() {
-    let _g = TestGuard::new();
+    let _g     = TestGuard::new();
     let result = test_param_expansion("UNSET?missing");
     assert!(result.is_err());
   }

@@ -143,8 +143,7 @@ where
   for (name, val) in vars {
     let val = val.into();
     Shed::vars_mut(|v| {
-      v.set_var(&name, val.kind().clone(), val.flags())
-        .unwrap();
+      v.set_var(&name, val.kind().clone(), val.flags()).unwrap();
     });
   }
 

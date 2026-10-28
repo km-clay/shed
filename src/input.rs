@@ -17,7 +17,7 @@ use crate::{
   signal::QUIT_CODE,
   state::{
     Shed, paths,
-    vars::{ShellParam, ShStr},
+    vars::{ShStr, ShellParam},
   },
   status_msg,
   util::error::ShResult,
@@ -156,7 +156,7 @@ pub(crate) fn run_script<P: AsRef<Path>>(
 ) -> ShResult<()> {
   let path_str: ShStr = path.as_ref().as_os_str().as_bytes().into();
 
-  let args = std::iter::once(path_str.clone()).chain(args.into_iter().map(ShStr::from));
+  let args            = std::iter::once(path_str.clone()).chain(args.into_iter().map(ShStr::from));
 
   Shed::vars_mut(|v| {
     v.set_param(ShellParam::ShellName, path_str);

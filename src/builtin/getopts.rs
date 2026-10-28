@@ -12,7 +12,7 @@ use crate::{
   state::{
     Shed,
     meta::MetaTab,
-    vars::{VarFlags, VarKind, ShStr},
+    vars::{ShStr, VarFlags, VarKind},
   },
   util::{
     self,

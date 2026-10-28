@@ -59,7 +59,7 @@ use crate::{
     meta::MetaTab,
     shopt::ReadLimit,
     terminal::Terminal,
-    vars::{VarFlags, VarKind, VarKindTag, VarName, ShStr},
+    vars::{ShStr, VarFlags, VarKind, VarKindTag, VarName},
   },
   util::{
     self,
@@ -2293,7 +2293,7 @@ fn expand_var_target(raw: &ShStr) -> ShResult<VarName> {
 }
 
 fn commit_var(var_name: &VarName, bytes: &[u8]) -> ShResult<()> {
-  let val = ShStr::from(bytes);
+  let val  = ShStr::from(bytes);
   let name = var_name.name();
 
   STAGE_VAR_WRITES.with(|w| {

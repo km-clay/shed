@@ -14,7 +14,7 @@ use crate::{
     Shed,
     scopes::ScopeStack,
     shopt::ShOptSet,
-    vars::{ValueBytes, VarKind, ShStrSliceExt},
+    vars::{ShStrSliceExt, ValueBytes, VarKind},
   },
   util::{
     self,

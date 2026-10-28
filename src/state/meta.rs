@@ -4,7 +4,13 @@
 //! `$PATH` table ([`PathTable`], [`Utility`]), and loop/fork depth guards.
 
 use std::{
-  collections::{VecDeque, vec_deque}, ffi::CString, fmt::Write, os::{fd::OwnedFd, unix::ffi::OsStrExt}, path::{Path, PathBuf}, rc::Rc, time::{Duration, Instant},
+  collections::{VecDeque, vec_deque},
+  ffi::CString,
+  fmt::Write,
+  os::{fd::OwnedFd, unix::ffi::OsStrExt},
+  path::{Path, PathBuf},
+  rc::Rc,
+  time::{Duration, Instant},
 };
 
 use nix::{
@@ -18,10 +24,18 @@ use nix::{
 use regex::Regex;
 
 use crate::{
-  HashMap, HashSet, expand::{
+  HashMap, HashSet,
+  expand::{
     alias,
     glob::{GlobOpts, Pattern},
-  }, match_loop, readline::{Candidate, CompSpec}, sherr, state::{Shed, params, paths, vars::ShStr}, system_msg, util::{error::ShResult, ui}, var,
+  },
+  match_loop,
+  readline::{Candidate, CompSpec},
+  sherr,
+  state::{Shed, params, paths, vars::ShStr},
+  system_msg,
+  util::{error::ShResult, ui},
+  var,
 };
 
 use super::{
@@ -424,7 +438,10 @@ impl PathTable {
       }
       let name = entry.file_name();
 
-      self.index.entry(name.as_bytes().into()).or_insert_with(|| entry.path());
+      self
+        .index
+        .entry(name.as_bytes().into())
+        .or_insert_with(|| entry.path());
     }
   }
   pub(crate) fn lookup(&self, cmd: &[u8]) -> Option<&Path> {

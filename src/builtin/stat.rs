@@ -599,7 +599,7 @@ struct FsInfo {
   free_nodes: u64,
   fs_id: u64,
   name_max: u64,
-  fs_type_id: Option<u64>,      // numeric magic; linux only
+  fs_type_id: Option<u64>,     // numeric magic; linux only
   fs_type_name: Option<ShStr>, // human-readable type, if resolvable
 }
 

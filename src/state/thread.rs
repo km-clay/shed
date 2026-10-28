@@ -11,7 +11,7 @@ use crate::{
     scopes,
     shopt::ShOpts,
     timers::Timers,
-    vars::{VarName, ShStr, VarTab},
+    vars::{ShStr, VarName, VarTab},
   },
   util::error::LabelBuilder,
 };

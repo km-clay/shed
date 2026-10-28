@@ -8,7 +8,10 @@ use crate::{HashMap, state::vars::ShStr, util::strops};
 use super::try_var;
 
 use std::{
-  ffi::OsStr, os::unix::{ffi::OsStrExt, fs::PermissionsExt}, path::{Path, PathBuf}, time::SystemTime,
+  ffi::OsStr,
+  os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+  path::{Path, PathBuf},
+  time::SystemTime,
 };
 
 use nix::unistd::{User, getuid};

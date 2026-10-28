@@ -214,7 +214,7 @@ pub(crate) fn format_time(delta: TimeDelta, show_subsecond: bool) -> Option<ShSt
 
   // Format the result
   let mut result: Vec<ShStr> = Vec::new();
-  let     show_subsecond      = |res: &[ShStr]| show_subsecond || res.is_empty();
+  let     show_subsecond     = |res: &[ShStr]| show_subsecond || res.is_empty();
 
   if eternities > 0 {
     let mut string = varstr!("{eternities} eternit");

@@ -668,11 +668,7 @@ mod tests {
     (dir, path)
   }
 
-  fn fc_opts(
-    editor: Option<ShStr>,
-    first: Option<RangeArg>,
-    last: Option<RangeArg>,
-  ) -> FixCmdOpts {
+  fn fc_opts(editor: Option<ShStr>, first: Option<RangeArg>, last: Option<RangeArg>) -> FixCmdOpts {
     FixCmdOpts {
       editor,
       first,

@@ -27,10 +27,7 @@ pub(crate) trait Autoloader {
     self
       .files()
       .filter_map(|(name, content)| {
-        let stem: ShStr = PathBuf::from(name)
-          .file_stem()?
-          .as_bytes()
-          .into();
+        let stem: ShStr = PathBuf::from(name).file_stem()?.as_bytes().into();
         (!stem.is_empty()).then(|| {
           (
             stem,
