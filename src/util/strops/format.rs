@@ -8,7 +8,7 @@ use bstr::ByteSlice;
 
 use crate::{
   errln, match_loop, sherr,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::{self, error::ShResult, strops::ByteCursor, ui},
 };
 
@@ -121,12 +121,12 @@ pub(crate) enum FieldKind {
 
 /// One rendered directive, before width padding
 pub(crate) struct Field {
-  body: VarStr,
+  body: ShStr,
   kind: FieldKind,
 }
 
 impl Field {
-  pub(crate) fn body(&self) -> &VarStr {
+  pub(crate) fn body(&self) -> &ShStr {
     &self.body
   }
 
@@ -136,32 +136,32 @@ impl Field {
 }
 
 impl Field {
-  pub(crate) fn string(body: VarStr) -> Self {
+  pub(crate) fn string(body: ShStr) -> Self {
     let body = body;
     Self {
       body,
       kind: FieldKind::String,
     }
   }
-  pub(crate) fn styled(body: VarStr) -> Self {
+  pub(crate) fn styled(body: ShStr) -> Self {
     let body = body;
     Self {
       body,
       kind: FieldKind::Styled,
     }
   }
-  pub(crate) fn raw(body: VarStr) -> Self {
+  pub(crate) fn raw(body: ShStr) -> Self {
     let body = body;
     Self {
       body,
       kind: FieldKind::Raw,
     }
   }
-  pub(crate) fn numeric(body: VarStr, sign: Option<Sign>, base: Option<Base>) -> Self {
+  pub(crate) fn numeric(body: ShStr, sign: Option<Sign>, base: Option<Base>) -> Self {
     Self::numeric_padded(body, sign, base, true)
   }
   pub(crate) fn numeric_padded(
-    body: VarStr,
+    body: ShStr,
     sign: Option<Sign>,
     base: Option<Base>,
     zero_pad: bool,
@@ -226,7 +226,7 @@ pub(crate) trait StrFmt {
   ///
   /// This is used by `printf` to expand ANSI-C escapes in the format string, for instance.
   /// Returns the literal untouched by default.
-  fn expand_literal(&self, literal: VarStr) -> VarStr {
+  fn expand_literal(&self, literal: ShStr) -> ShStr {
     literal
   }
 
@@ -251,7 +251,7 @@ impl RenderResult {
 }
 
 enum Segment<C> {
-  Literal(VarStr),
+  Literal(ShStr),
   Spec(FieldParams, C),
   AnyGroup(FieldParams, Box<[Segment<C>]>),
   AllGroup(FieldParams, Box<[Segment<C>]>),
@@ -390,7 +390,7 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
       digits.push(b);
     }
 
-    let width = VarStr::from(digits)
+    let width = ShStr::from(digits)
       .parse::<usize>()
       .map_err(|v| sherr!(ParseErr, "invalid width: '{v}'"))?;
 
@@ -473,7 +473,7 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
             _ => unreachable!(),
           };
 
-          let mut buf = VarStr::from(buf);
+          let mut buf = ShStr::from(buf);
 
           if should_render {
             let params = self.resolve_counts(field, src, None)?;

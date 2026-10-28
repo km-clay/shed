@@ -2,7 +2,7 @@ use crate::{
   opt, outln,
   readline::stash::{Stash, StashedCmd},
   sherr,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::error::{ShResult, ShResultExt},
 };
 
@@ -11,7 +11,7 @@ use super::opt::{Opt, OptSpec};
 #[derive(Debug, Default)]
 pub(crate) struct StashOpts {
   pub to_save   : Vec<StashedCmd>,
-  pub to_delete : Vec<VarStr>,
+  pub to_delete : Vec<ShStr>,
   pub list      : bool,
   pub only_named: bool,
   pub only_stack: bool,

@@ -10,7 +10,7 @@
 //! Also handles assignment arithmetic operations like `+=`, `-=`, `*=`, and `/=` for integer and string variables,
 //! as well as array appending for indexed arrays.
 
-use crate::{set_var, state::vars::VarStrSliceExt, varstr};
+use crate::{set_var, state::vars::ShStrSliceExt, varstr};
 use std::collections::VecDeque;
 
 use itertools::Itertools;
@@ -25,7 +25,7 @@ use crate::{
     params,
     scopes::ScopeStack,
     shopt,
-    vars::{ValueBytes, Var, VarFlags, VarKind, VarKindTag, VarStr},
+    vars::{ValueBytes, Var, VarFlags, VarKind, VarKindTag, ShStr},
   },
   util::error::ShResult,
 };
@@ -43,7 +43,7 @@ impl super::Dispatcher {
     tree: &Ast,
     assigns: &[NodeId],
     behavior: AssignBehavior,
-  ) -> ShResult<Vec<VarStr>> {
+  ) -> ShResult<Vec<ShStr>> {
     let mut new_env_vars = vec![];
     let mut flags = match behavior {
       AssignBehavior::Export => VarFlags::EXPORT,
@@ -210,7 +210,7 @@ impl super::Dispatcher {
               let kind = if is_arr {
                 VarKind::Arr(VecDeque::new())
               } else {
-                VarKind::string(VarStr::default())
+                VarKind::string(ShStr::default())
               };
               Var::new(kind, VarFlags::empty())
             })
@@ -247,7 +247,7 @@ impl super::Dispatcher {
             } else if is_arr {
               VarKind::Arr(VecDeque::new())
             } else {
-              VarKind::string(VarStr::default())
+              VarKind::string(ShStr::default())
             };
             *var.kind_mut() = zero;
           }

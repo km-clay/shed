@@ -6,7 +6,7 @@ use crate::{
   state::{
     Shed, cwd,
     meta::{JumpTableDirs, MetaTab},
-    vars::VarStr,
+    vars::ShStr,
   },
   util::{
     self,
@@ -56,7 +56,7 @@ trait DirJump {
         })
       });
 
-      let output = VarStr::from(buf);
+      let output = ShStr::from(buf);
 
       outln!("{output}");
       return util::with_status(0);

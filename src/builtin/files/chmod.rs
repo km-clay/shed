@@ -8,7 +8,7 @@ use nix::libc;
 
 use crate::{
   sherr,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::{
     self,
     error::{ShErr, ShResult, ShResultExt},
@@ -94,7 +94,7 @@ impl Builtin for ChMod {
   }
 }
 
-pub(super) fn handle_err(err: io::Error, file: &VarStr) -> ShErr {
+pub(super) fn handle_err(err: io::Error, file: &ShStr) -> ShErr {
   match err.kind() {
     EK::NotFound => {
       sherr!(ExecFail, "cannot set mode of `{file}`: no such file or directory")

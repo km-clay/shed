@@ -25,7 +25,7 @@ use crate::{
       ast::{Ast, NodeId},
       node,
     },
-  }, socket::SocketRequest, state::{jobs::Outcome, source::StrongSpan, vars::VarStr}, util::error, varstr,
+  }, socket::SocketRequest, state::{jobs::Outcome, source::StrongSpan, vars::ShStr}, util::error, varstr,
 };
 
 use super::{
@@ -219,7 +219,7 @@ impl ForkBlame {
 
 pub(crate) struct ForgetSpec {
   flags       : ForgetFlags,
-  exclude_vars: Vec<VarStr>,
+  exclude_vars: Vec<ShStr>,
 }
 
 impl ForgetSpec {

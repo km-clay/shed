@@ -4,7 +4,7 @@ use chrono::{DateTime, Local};
 
 use crate::{
   opt, sherr,
-  state::{Shed, vars::VarStr},
+  state::{Shed, vars::ShStr},
   try_var,
   util::{
     self,
@@ -19,7 +19,7 @@ use super::{argv, opt::OptSpec};
 
 struct FlogCtx {
   level : log::Level,
-  source: VarStr,
+  source: ShStr,
   line  : usize,
   col   : usize,
   now   : DateTime<Local>,
@@ -30,7 +30,7 @@ enum FlogConv {
   Source,
   Line,
   Col,
-  Time(VarStr),
+  Time(ShStr),
 }
 
 struct LogFmt;
@@ -116,7 +116,7 @@ impl super::Builtin for Flog {
       .and_then(|r| r.render(&mut ctx, &mut buf))
       .option_promote(arg.span())?;
 
-    let mut formatted = VarStr::from(buf);
+    let mut formatted = ShStr::from(buf);
     formatted.push(b' ');
     formatted.push_slice(arg.content());
 

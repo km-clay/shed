@@ -3,7 +3,7 @@
 //! Utilities for interacting with paths, like [`path_list_entries`], along with caching utilities for
 //! path-list-style env vars like `$SHED_HPATH`.
 
-use crate::{HashMap, state::vars::VarStr, util::strops};
+use crate::{HashMap, state::vars::ShStr, util::strops};
 
 use super::try_var;
 
@@ -31,8 +31,8 @@ pub(crate) fn bytes_to_path(bytes: &[u8]) -> PathBuf {
 /// checked. The common "nothing changed" case costs one stat per directory
 /// plus one stat per cached file.
 pub(crate) struct PathCache {
-  name    : VarStr,
-  path_raw: VarStr,
+  name    : ShStr,
+  path_raw: ShStr,
   entries : HashMap<PathBuf, EntryCache>,
 }
 
@@ -85,7 +85,7 @@ fn build_entry(path: &Path) -> EntryCache {
 }
 
 impl PathCache {
-  pub(crate) fn new(name: VarStr) -> Self {
+  pub(crate) fn new(name: ShStr) -> Self {
     let path_raw = var!(&name);
     let entries  = Self::build_entries(&path_raw);
     Self {
@@ -254,11 +254,11 @@ pub(crate) fn display_path_normalized<P: AsRef<Path>>(path: P) -> String {
   display_path(lex_normalize_path(path.as_ref()))
 }
 
-/// A filesystem path's exact bytes as a `VarStr`. Unix paths are arbitrary
+/// A filesystem path's exact bytes as a `ShStr`. Unix paths are arbitrary
 /// bytes, so this avoids the lossy UTF-8 step of `display()`/`to_string_lossy`.
-pub(crate) fn path_to_varstr(path: &Path) -> VarStr {
+pub(crate) fn path_to_varstr(path: &Path) -> ShStr {
   use std::os::unix::ffi::OsStrExt;
-  VarStr::from(path.as_os_str().as_bytes())
+  ShStr::from(path.as_os_str().as_bytes())
 }
 
 /// Byte-native counterpart to [`display_path`]: collapse a leading `$HOME` to
@@ -309,7 +309,7 @@ pub(crate) fn runtime_dir() -> Option<PathBuf> {
   xdg_dir(b"XDG_RUNTIME_DIR", Fallback::Var(b"TMPDIR"))
 }
 
-pub(crate) fn get_exe_path() -> Option<VarStr> {
+pub(crate) fn get_exe_path() -> Option<ShStr> {
   std::env::current_exe()
     .ok()
     .map(|p| p.as_os_str().as_bytes().into())
@@ -321,7 +321,7 @@ pub(crate) fn get_home() -> Option<PathBuf> {
     .or_else(|| User::from_uid(getuid()).ok().flatten().map(|u| u.dir))
 }
 
-pub(crate) fn get_home_str() -> Option<VarStr> {
+pub(crate) fn get_home_str() -> Option<ShStr> {
   get_home().map(|h| h.to_string_lossy().into())
 }
 

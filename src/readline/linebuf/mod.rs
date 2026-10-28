@@ -10,7 +10,7 @@ use crate::{
   shopt,
   state::{
     self, Shed, paths,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarFlags, VarKind, ShStr},
   },
   status_msg,
   util::error::ShResult,
@@ -89,7 +89,7 @@ pub(crate) struct LineBuf {
   last_substitute: Option<EditCmd>,
   last_global    : Option<EditCmd>,
   last_search    : Option<Motion>,
-  pending_search : Option<VarStr>,
+  pending_search : Option<ShStr>,
 
   /// Set when the last command's `f`/`t`/search-style motion found no target.
   /// Drained by macro playback and the `vice` driver to abort a run.
@@ -110,7 +110,7 @@ pub(crate) struct LineBuf {
   indent_cache   : Option<Vec<(usize, usize)>>,
   byte_positions : Option<Vec<(usize, Pos)>>,
 
-  open_file: Option<VarStr>,
+  open_file: Option<ShStr>,
 }
 
 #[derive(Clone, Debug)]
@@ -389,7 +389,7 @@ impl LineBuf {
     }
   }
 
-  pub(crate) fn open_file(&self) -> Option<VarStr> {
+  pub(crate) fn open_file(&self) -> Option<ShStr> {
     self.open_file.clone()
   }
 }

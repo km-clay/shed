@@ -21,7 +21,7 @@ use crate::{
   HashMap, HashSet, expand::{
     alias,
     glob::{GlobOpts, Pattern},
-  }, match_loop, readline::{Candidate, CompSpec}, sherr, state::{Shed, params, paths, vars::VarStr}, system_msg, util::{error::ShResult, ui}, var,
+  }, match_loop, readline::{Candidate, CompSpec}, sherr, state::{Shed, params, paths, vars::ShStr}, system_msg, util::{error::ShResult, ui}, var,
 };
 
 use super::{
@@ -364,42 +364,42 @@ pub(crate) enum UtilKind {
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub(crate) struct Utility {
-  name: VarStr,
+  name: ShStr,
   kind: UtilKind,
 }
 
 impl Utility {
-  pub(crate) fn alias(name: VarStr) -> Self {
+  pub(crate) fn alias(name: ShStr) -> Self {
     Self {
       name,
       kind: UtilKind::Alias,
     }
   }
-  pub(crate) fn function(name: VarStr) -> Self {
+  pub(crate) fn function(name: ShStr) -> Self {
     Self {
       name,
       kind: UtilKind::Function,
     }
   }
-  pub(crate) fn builtin(name: VarStr) -> Self {
+  pub(crate) fn builtin(name: ShStr) -> Self {
     Self {
       name,
       kind: UtilKind::Builtin,
     }
   }
-  pub(crate) fn command(name: VarStr, path: PathBuf) -> Self {
+  pub(crate) fn command(name: ShStr, path: PathBuf) -> Self {
     Self {
       name,
       kind: UtilKind::Command(path),
     }
   }
-  pub(crate) fn file(name: VarStr, path: PathBuf) -> Self {
+  pub(crate) fn file(name: ShStr, path: PathBuf) -> Self {
     Self {
       name,
       kind: UtilKind::File(path),
     }
   }
-  pub(crate) fn name(&self) -> VarStr {
+  pub(crate) fn name(&self) -> ShStr {
     self.name.clone()
   }
   pub(crate) fn kind(&self) -> &UtilKind {
@@ -409,7 +409,7 @@ impl Utility {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PathTable {
-  index: HashMap<VarStr, PathBuf>,
+  index: HashMap<ShStr, PathBuf>,
 }
 
 impl PathTable {
@@ -433,7 +433,7 @@ impl PathTable {
   pub(crate) fn insert(&mut self, name: &[u8], path: PathBuf) {
     self.index.insert(name.into(), path);
   }
-  pub(crate) fn entries(&self) -> impl Iterator<Item = (&VarStr, &PathBuf)> {
+  pub(crate) fn entries(&self) -> impl Iterator<Item = (&ShStr, &PathBuf)> {
     self.index.iter()
   }
   pub(crate) fn clear(&mut self) {
@@ -601,7 +601,7 @@ pub(crate) struct MetaTab {
   // getopts char offset for opts like -abc
   getopts_offset: usize,
 
-  old_path  : Option<VarStr>,
+  old_path  : Option<ShStr>,
   // utility cache - commands, functions, aliases, etc
   path_cache: PathTable,
 
@@ -614,7 +614,7 @@ pub(crate) struct MetaTab {
   // programmable completion specs
   // NOTE: these arent on `LogTab` because we'd have to make
   // `CompSpec` send+sync otherwise
-  comp_specs: HashMap<VarStr, Box<dyn CompSpec>>,
+  comp_specs: HashMap<ShStr, Box<dyn CompSpec>>,
 
   // stack of currently open procsubs
   procsub_stack: Vec<Vec<OwnedFd>>,
@@ -1013,18 +1013,18 @@ impl MetaTab {
   pub(crate) fn reset_getopts_char_offset(&mut self) {
     self.getopts_offset = 0;
   }
-  pub(crate) fn comp_specs(&self) -> &HashMap<VarStr, Box<dyn CompSpec>> {
+  pub(crate) fn comp_specs(&self) -> &HashMap<ShStr, Box<dyn CompSpec>> {
     &self.comp_specs
   }
   pub(crate) fn get_comp_spec(&self, cmd: &str) -> Option<Box<dyn CompSpec>> {
-    let var_str = VarStr::from(cmd);
+    let var_str = ShStr::from(cmd);
     self.comp_specs.get(&var_str).cloned()
   }
-  pub(crate) fn set_comp_spec(&mut self, cmd: VarStr, spec: Box<dyn CompSpec>) {
+  pub(crate) fn set_comp_spec(&mut self, cmd: ShStr, spec: Box<dyn CompSpec>) {
     self.comp_specs.insert(cmd, spec);
   }
   pub(crate) fn remove_comp_spec(&mut self, cmd: &str) -> bool {
-    let var_str = VarStr::from(cmd);
+    let var_str = ShStr::from(cmd);
     self.comp_specs.remove(&var_str).is_some()
   }
   pub(super) fn clear_comp_specs(&mut self) {
@@ -1062,7 +1062,7 @@ impl MetaTab {
     // Walk scopes outermost-to-innermost so inner bindings shadow outer
     // ones in the flat map. Libc env is not consulted, so shell writes
     // outside this builder can't desync the env children inherit.
-    let mut flat: HashMap<VarStr, VarStr> = HashMap::default();
+    let mut flat: HashMap<ShStr, ShStr> = HashMap::default();
     Shed::vars(|v| {
       for scope in v.scopes_iter() {
         for (name, var) in scope.vars() {
@@ -1078,7 +1078,7 @@ impl MetaTab {
     let envp: Vec<CString> = flat
       .into_iter()
       .map(|(k, v)| {
-        let mut bytes = VarStr::with_capacity(k.len() + v.len() + 2);
+        let mut bytes = ShStr::with_capacity(k.len() + v.len() + 2);
         bytes.push_slice(k.as_bytes());
         bytes.push(b'=');
         bytes.push_slice(v.as_bytes());
@@ -1182,7 +1182,7 @@ impl MetaTab {
       let is_exec = paths::is_executable_file(&entry);
 
       if is_exec {
-        let name = VarStr::from(entry.file_name().as_bytes());
+        let name = ShStr::from(entry.file_name().as_bytes());
         if !seen.insert(name.clone()) {
           continue;
         }

@@ -11,7 +11,7 @@ use crate::{
     Shed,
     logic::ShFunc,
     meta::MetaTab,
-    vars::{self, VarFlags, VarKind, VarName, VarStr},
+    vars::{self, VarFlags, VarKind, VarName, ShStr},
   },
   try_var,
   util::{
@@ -317,7 +317,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
           .sorted()
           .filter(|k| names.is_empty() || names.contains(k))
           .map(|k| varstr!("declare -f {k}"))
-          .fold(VarStr::default(), |mut acc, name| {
+          .fold(ShStr::default(), |mut acc, name| {
             acc.push_slice(name);
             acc.push(b'\n');
             acc

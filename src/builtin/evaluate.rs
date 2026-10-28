@@ -1,7 +1,7 @@
 use crate::{
   eval::execute,
   expand::Word,
-  state::{Shed, meta::MetaTab, params, vars::VarStrSliceExt},
+  state::{Shed, meta::MetaTab, params, vars::ShStrSliceExt},
   util::{self, error::ShResult},
 };
 

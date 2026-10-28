@@ -33,7 +33,7 @@ use crate::{
     node::LabelCtx,
   },
   match_loop, procio, sherr,
-  state::{self, SourceHandle, vars::VarStr},
+  state::{self, SourceHandle, vars::ShStr},
   two_way_display,
   util::error::{ShErr, ShResult},
 };
@@ -51,13 +51,13 @@ pub(crate) struct ParsedSrc {
 }
 
 impl ParsedSrc {
-  pub(crate) fn new(src: VarStr) -> Self {
+  pub(crate) fn new(src: ShStr) -> Self {
     Self::new_inner(None, src)
   }
-  pub(crate) fn with_name(name: VarStr, src: VarStr) -> Self {
+  pub(crate) fn with_name(name: ShStr, src: ShStr) -> Self {
     Self::new_inner(Some(name), src)
   }
-  fn new_inner(name: Option<VarStr>, src: VarStr) -> Self {
+  fn new_inner(name: Option<ShStr>, src: ShStr) -> Self {
     let src = if src.contains_slice(b"\\\n") || src.contains(&b'\r') {
       lex::clean_input(&src)
     } else {

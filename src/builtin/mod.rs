@@ -30,13 +30,13 @@ use crate::{
     meta::{MetaTab, UtilKind},
     params, shopt as shopts,
     terminal::Terminal,
-    vars::VarStr,
+    vars::ShStr,
   },
   util::{
     self,
     error::{ShErrKind, ShResult, ShResultExt},
     guards,
-    strops::VarStrDisplay,
+    strops::ShStrDisplay,
   },
   varstr,
 };
@@ -326,8 +326,8 @@ pub(crate) trait Builtin: Sync {
     Ok(parsed)
   }
 
-  fn get_input_str(&self, args: &mut BuiltinArgs) -> Option<VarStr> {
-    self.get_input(args).map(VarStr::from)
+  fn get_input_str(&self, args: &mut BuiltinArgs) -> Option<ShStr> {
+    self.get_input(args).map(ShStr::from)
   }
 
   /// Default input getter
@@ -404,7 +404,7 @@ pub(crate) trait Builtin: Sync {
     if !self.no_help() && argv.len() == 2 && *tree[argv.get(1)].slice() == *b"--help" {
       // we have been asked for help
       // is this a hack? only the nose knows.
-      let help_call = VarStr::from_slice(b"help builtin-").chain(cmd_raw);
+      let help_call = ShStr::from_slice(b"help builtin-").chain(cmd_raw);
 
       return execute::exec_nonint(help_call, Some("<builtin-help>".into()));
     }
@@ -825,7 +825,7 @@ impl Builtin for Yes {
       Some(i) => i,
       None => {
         if args.no_arguments() {
-          VarStr::from("y")
+          ShStr::from("y")
         } else {
           argv::join_raw_arg_iter(args.arguments()).content()
         }

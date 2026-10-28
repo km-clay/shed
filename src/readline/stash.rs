@@ -2,15 +2,15 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::Connection;
 
-use crate::state::{db, vars::VarStr};
+use crate::state::{db, vars::ShStr};
 
 use super::{ShResult, sherr};
 
 #[derive(Debug)]
 pub(crate) struct StashedCmd {
-  pub name      : Option<VarStr>,
-  pub buffer    : VarStr,
-  pub cursor_pos: VarStr, // absolute grapheme pos or row:col
+  pub name      : Option<ShStr>,
+  pub buffer    : ShStr,
+  pub cursor_pos: ShStr, // absolute grapheme pos or row:col
 }
 
 pub(crate) struct Stash {
@@ -59,7 +59,7 @@ impl Stash {
       .unwrap_or(0i64) as usize
   }
 
-  pub(crate) fn list(&self, mut named_only: bool, mut stack_only: bool) -> VarStr {
+  pub(crate) fn list(&self, mut named_only: bool, mut stack_only: bool) -> ShStr {
     if named_only && stack_only {
       named_only = false;
       stack_only = false;
@@ -182,7 +182,7 @@ impl Stash {
 
   pub(crate) fn push(
     &self,
-    name: Option<&VarStr>,
+    name: Option<&ShStr>,
     buffer: &str,
     cursor: (usize, usize),
   ) -> ShResult<()> {

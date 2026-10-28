@@ -1,6 +1,6 @@
 use crate::{
   readline::{RegisterName, editcmd::CmdFlags},
-  state::vars::VarStr,
+  state::vars::ShStr,
 };
 
 use super::{
@@ -188,7 +188,7 @@ impl EditMode for ViInsert {
       .as_ref()
       .map_or_else(|| CursorStyle::Beam(false), super::EditMode::cursor_style)
   }
-  fn pending_seq(&self) -> Option<VarStr> {
+  fn pending_seq(&self) -> Option<ShStr> {
     self.normal.as_ref().and_then(super::EditMode::pending_seq)
   }
   fn clamp_cursor(&self) -> bool {

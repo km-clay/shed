@@ -1,7 +1,7 @@
 use crate::{
   expand::Word,
   outln, sherr,
-  state::{Shed, shopt::ShOpts, vars::VarStr},
+  state::{Shed, shopt::ShOpts, vars::ShStr},
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -37,7 +37,7 @@ impl super::Builtin for Shopt {
       // Split into key + optional value so the deprecation check works
       // for both `shopt key` and `shopt key=value`.
       let (key, value) = match arg.to_str_lossy().split_once('=') {
-        Some((k, v)) => (k.into(), Some(VarStr::from(v))),
+        Some((k, v)) => (k.into(), Some(ShStr::from(v))),
         None         => (arg.clone(), None),
       };
 

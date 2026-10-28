@@ -16,7 +16,7 @@ use crate::{
   sherr, shopt,
   state::{
     Shed, paths,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarFlags, VarKind, ShStr},
   },
   status_msg, system_msg, try_var,
   util::{self, error::ShResult, guards, pos::Pos, strops},
@@ -40,7 +40,7 @@ fn get_entry_id() -> usize {
   EX_MODE_ENTRIES.with(|counter| counter.fetch_add(1, Ordering::SeqCst))
 }
 
-fn get_entry_name() -> VarStr {
+fn get_entry_name() -> ShStr {
   let id = get_entry_id();
   format!("ex_entry #{id}").into()
 }
@@ -690,9 +690,9 @@ impl super::LineBuf {
     vars.insert("ANCHOR".into());
     let     _guard         = guards::var_ctx_guard(vars);
 
-    let mut buf   : VarStr = self.to_string().into();
+    let mut buf   : ShStr = self.to_string().into();
     let     cursor_raw     = self.cursor_to_flat();
-    let mut cursor: VarStr = cursor_raw.to_string().into();
+    let mut cursor: ShStr = cursor_raw.to_string().into();
     let mut anchor         = self.anchor_to_flat();
 
     Shed::vars_mut(|v| -> ShResult<()> {

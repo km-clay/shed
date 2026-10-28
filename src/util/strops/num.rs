@@ -9,7 +9,7 @@ use std::{
 use crate::{
   expand::arithmetic::{Num, uNum},
   sherr,
-  state::{params, vars::VarStr},
+  state::{params, vars::ShStr},
   util::error::{ShResult, ShResultExt},
   varstr,
 };
@@ -60,12 +60,12 @@ impl ParseRadix for u128 {
   }
 }
 
-pub(crate) trait VarStrDisplay {
-  fn to_var_str(&self) -> VarStr;
+pub(crate) trait ShStrDisplay {
+  fn to_var_str(&self) -> ShStr;
 }
 
-impl<T: Display + ?Sized> VarStrDisplay for T {
-  fn to_var_str(&self) -> VarStr {
+impl<T: Display + ?Sized> ShStrDisplay for T {
+  fn to_var_str(&self) -> ShStr {
     varstr!("{self}")
   }
 }
@@ -114,7 +114,7 @@ impl IntSpec {
     Ok(())
   }
 
-  pub(crate) fn parse_int(ty: &VarStr) -> ShResult<Self> {
+  pub(crate) fn parse_int(ty: &ShStr) -> ShResult<Self> {
     let mut cursor = SliceCursor::new(ty);
 
     let signed = match cursor.next_byte() {
@@ -125,7 +125,7 @@ impl IntSpec {
     };
 
     let (w_start, w_end) = cursor.bump_while_span(|b| b.is_ascii_digit());
-    let width            = VarStr::from(&ty[w_start..w_end]);
+    let width            = ShStr::from(&ty[w_start..w_end]);
 
     let width = match width.as_bytes() {
       b"8"   => 1,
@@ -178,7 +178,7 @@ impl IntSpec {
     val
   }
 
-  pub(crate) fn decode(self, bytes: &[u8]) -> VarStr {
+  pub(crate) fn decode(self, bytes: &[u8]) -> ShStr {
     debug_assert!(self.width.is_some());
     let width = u32::from(self.width.unwrap());
 
@@ -297,7 +297,7 @@ impl FloatSpec {
   }
 
   pub(crate) fn from_width(
-    width: VarStr,
+    width: ShStr,
     endian: Endian,
     decimal: bool,
     sep: char,
@@ -313,7 +313,7 @@ impl FloatSpec {
     ))
   }
 
-  pub(crate) fn parse_float(mut ty: VarStr) -> ShResult<Self> {
+  pub(crate) fn parse_float(mut ty: ShStr) -> ShResult<Self> {
     let endian = if let Some(pref) = ty.strip_suffix(b"le") {
       ty = pref.into();
       Some(Endian::Little)
@@ -338,14 +338,14 @@ impl FloatSpec {
     self.decimal = decimal;
   }
 
-  pub(crate) fn parse_width(s: &VarStr) -> ShResult<(usize, u32, u32)> {
+  pub(crate) fn parse_width(s: &ShStr) -> ShResult<(usize, u32, u32)> {
     match s.as_bytes() {
       b"32" => Ok((4, 8, 23)),
       b"64" => Ok((8, 11, 52)),
       _     => Err(sherr!(ParseErr, "invalid float width: {s}")).with_code(2),
     }
   }
-  pub(crate) fn parse_type(s: &VarStr) -> ShResult<(usize, u32, u32)> {
+  pub(crate) fn parse_type(s: &ShStr) -> ShResult<(usize, u32, u32)> {
     match s.as_bytes() {
       b"bf16" => Ok((2, 8, 7)),
       b"f16"  => Ok((2, 5, 10)),
@@ -355,8 +355,8 @@ impl FloatSpec {
     }
   }
 
-  pub(crate) fn format_decimal(self, bits: uNum) -> ShResult<VarStr> {
-    fn shortest<T: Display + LowerExp>(v: T) -> VarStr {
+  pub(crate) fn format_decimal(self, bits: uNum) -> ShResult<ShStr> {
+    fn shortest<T: Display + LowerExp>(v: T) -> ShStr {
       let plain = varstr!("{v}");
       let sci   = varstr!("{v:e}");
       if sci.len() < plain.len() { sci } else { plain }
@@ -368,7 +368,7 @@ impl FloatSpec {
     }
   }
 
-  pub(crate) fn decode(self, bytes: &[u8]) -> ShResult<VarStr> {
+  pub(crate) fn decode(self, bytes: &[u8]) -> ShResult<ShStr> {
     let mut bits: uNum = 0;
     if self.endian().little() {
       for (i, &b) in bytes.iter().enumerate() {
@@ -406,13 +406,13 @@ impl FloatSpec {
   }
 
   pub(crate) fn encode_triple(self, s: &[u8], e: &[u8], m: &[u8]) -> ShResult<Vec<u8>> {
-    let sign = VarStr::from(s)
+    let sign = ShStr::from(s)
       .parse::<Sign>()
       .map_err(|v| sherr!(ParseErr, "invalid sign: '{v}'"))?;
-    let exp = VarStr::from(e)
+    let exp = ShStr::from(e)
       .parse::<Num>()
       .map_err(|v| sherr!(ParseErr, "invalid exponent: '{v}'"))?;
-    let mant = VarStr::from(m)
+    let mant = ShStr::from(m)
       .parse::<uNum>()
       .map_err(|v| sherr!(ParseErr, "invalid mantissa: '{v}'"))?;
 
@@ -460,7 +460,7 @@ impl FloatSpec {
     Ok(self.emit_bits(bits))
   }
   pub(crate) fn encode_decimal(self, decimal: &[u8]) -> ShResult<Vec<u8>> {
-    let text = VarStr::from(decimal);
+    let text = ShStr::from(decimal);
     let bits = match (self.exp_bits, self.mant_bits) {
       (8, 23) => u128::from(
         text

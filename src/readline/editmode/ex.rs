@@ -21,7 +21,7 @@ use super::{
   status_msg,
 };
 use crate::{
-  HashSet, eval::lex::TkFlags, state::{Shed, SourceId, register_source, vars::VarStr}, varstr, verb,
+  HashSet, eval::lex::TkFlags, state::{Shed, SourceId, register_source, vars::ShStr}, varstr, verb,
 };
 use bitflags::bitflags;
 
@@ -163,7 +163,7 @@ impl EditMode for ViEx {
     true
   }
 
-  fn pending_seq(&self) -> Option<VarStr> {
+  fn pending_seq(&self) -> Option<ShStr> {
     Some(varstr!("{}", self.pending_cmd.editor.buf))
   }
 
@@ -193,7 +193,7 @@ const MAX_EX_ALIAS_DEPTH: usize = 50;
 /// a final backstop.
 fn expand_ex_aliases(input: &str) -> String {
   let mut input = input.to_string();
-  let mut active: HashSet<VarStr> = HashSet::default();
+  let mut active: HashSet<ShStr> = HashSet::default();
 
   for _ in 0..MAX_EX_ALIAS_DEPTH {
     let handle = register_source(input.as_str());
@@ -375,7 +375,7 @@ impl From<PatternEnd> for usize {
 }
 
 pub(crate) struct ExLexer<'a> {
-  input : VarStr,
+  input : ShStr,
   source: SourceId,
   chars : Peekable<CharIndices<'a>>,
   tokens: Vec<ExTk>,

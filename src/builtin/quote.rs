@@ -4,7 +4,7 @@ use crate::{
   match_loop, opt, procio, sherr,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, VarStr, VarStrSliceExt},
+    vars::{VarFlags, VarKind, ShStr, ShStrSliceExt},
   },
   util::{self, error::ShResult},
   varstr,
@@ -58,7 +58,7 @@ impl super::Builtin for Quote {
 
       util::with_status(0)
     } else {
-      let parts: Vec<VarStr> = args
+      let parts: Vec<ShStr> = args
         .arguments()
         .map(|s| escape::shell_quote(s.as_bytes()))
         .collect();
@@ -76,7 +76,7 @@ impl super::Builtin for Quote {
   }
 }
 
-fn quote_var(name: &[u8]) -> Option<VarStr> {
+fn quote_var(name: &[u8]) -> Option<ShStr> {
   let var = Shed::vars(|v| v.try_get_var_meta(name))?;
   match var.kind() {
     VarKind::Str(var_str) => Some(escape::shell_quote(var_str)),
@@ -117,8 +117,8 @@ fn quote_var(name: &[u8]) -> Option<VarStr> {
 }
 
 enum UnquoteTarget {
-  Array(VarStr),
-  Var(VarStr),
+  Array(ShStr),
+  Var(ShStr),
 }
 
 pub(super) struct Unquote;
@@ -135,12 +135,12 @@ impl super::Builtin for Unquote {
     log::debug!("entered unquote execute()");
     let (arg_vec, opts) = args.take_argv();
 
-    let input: VarStr = if arg_vec.is_empty() {
+    let input: ShStr = if arg_vec.is_empty() {
       self.get_input(&mut args)
     } else {
       None
     }
-    .map_or_else(|| super::join_raw_args(arg_vec).content(), VarStr::from);
+    .map_or_else(|| super::join_raw_args(arg_vec).content(), ShStr::from);
 
     let mut target = None;
     let mut delim  = "\n".into();
@@ -177,12 +177,12 @@ impl super::Builtin for Unquote {
         }
       }
       Some(UnquoteTarget::Array(name)) => {
-        let var = VarKind::arr(fields.map(VarStr::from));
+        let var = VarKind::arr(fields.map(ShStr::from));
         Shed::vars_mut(|v| v.set_var(&name, var, VarFlags::empty()))?;
       }
       Some(UnquoteTarget::Var(name)) => {
         let collected: Vec<Vec<u8>> = fields.collect();
-        let var = VarKind::string(VarStr::from(join_bytes(&collected, b" ")));
+        let var = VarKind::string(ShStr::from(join_bytes(&collected, b" ")));
         Shed::vars_mut(|v| v.set_var(&name, var, VarFlags::empty()))?;
       }
     }

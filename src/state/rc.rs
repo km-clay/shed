@@ -11,9 +11,9 @@ use bstr::ByteSlice;
 use itertools::Itertools;
 
 use crate::{
-  state::{Shed, logic::ShFunc, vars::VarStr},
+  state::{Shed, logic::ShFunc, vars::ShStr},
   try_var,
-  util::{error::ShErrKind, strops::VarStrDisplay},
+  util::{error::ShErrKind, strops::ShStrDisplay},
   varstr,
 };
 
@@ -78,7 +78,7 @@ impl GenRcConfig {
 }
 
 /// Format an rc entry with an aligned trailing doc comment when `comments` is on.
-fn rc_entry(entry: &str, doc: &str, comments: bool) -> VarStr {
+fn rc_entry(entry: &str, doc: &str, comments: bool) -> ShStr {
   if comments {
     varstr!("{entry:<50} # {doc}")
   } else {
@@ -87,7 +87,7 @@ fn rc_entry(entry: &str, doc: &str, comments: bool) -> VarStr {
 }
 
 /// Live `alias` definitions, sorted by name.
-fn live_aliases() -> Vec<VarStr> {
+fn live_aliases() -> Vec<ShStr> {
   let mut aliases = Shed::logic(|l| {
     l.aliases()
       .iter()
@@ -100,14 +100,14 @@ fn live_aliases() -> Vec<VarStr> {
     .map(|(name, body)| {
       let mut line = b"alias ".to_vec();
       line.extend_from_slice(&vars::display_as_var(name.as_bytes(), body));
-      VarStr::from(line)
+      ShStr::from(line)
     })
     .collect()
 }
 
 /// Live variable definitions as re-sourceable `declare` statements, sorted by
 /// name. Shell-managed vars (`PWD`, `LINENO`, …) and magic vars are excluded.
-fn live_vars() -> Vec<VarStr> {
+fn live_vars() -> Vec<ShStr> {
   Shed::vars(|v| {
     v.flatten_vars()
       .into_iter()
@@ -120,7 +120,7 @@ fn live_vars() -> Vec<VarStr> {
 }
 
 /// Live user function definitions (verbatim source), sorted by name.
-fn live_funcs() -> Vec<VarStr> {
+fn live_funcs() -> Vec<ShStr> {
   Shed::logic(|l| {
     l.funcs()
       .iter()
@@ -135,8 +135,8 @@ fn live_funcs() -> Vec<VarStr> {
 }
 
 /// Live `complete` registrations (verbatim source), sorted by command.
-fn live_completions() -> Vec<VarStr> {
-  let mut specs: Vec<(VarStr, VarStr)> = Shed::meta(|m| {
+fn live_completions() -> Vec<ShStr> {
+  let mut specs: Vec<(ShStr, ShStr)> = Shed::meta(|m| {
     m.comp_specs()
       .iter()
       .map(|(cmd, spec)| (cmd.clone(), spec.source().into()))
@@ -147,46 +147,46 @@ fn live_completions() -> Vec<VarStr> {
 }
 
 /// Live `autocmd` registrations, in registration order.
-fn live_autocmds() -> Vec<VarStr> {
-  Shed::logic(|l| l.iter_autocmds().map(VarStrDisplay::to_var_str).collect())
+fn live_autocmds() -> Vec<ShStr> {
+  Shed::logic(|l| l.iter_autocmds().map(ShStrDisplay::to_var_str).collect())
 }
 
 /// Live `keymap` registrations, in registration order.
-fn live_keymaps() -> Vec<VarStr> {
-  Shed::logic(|l| l.keymaps().iter().map(VarStrDisplay::to_var_str).collect())
+fn live_keymaps() -> Vec<ShStr> {
+  Shed::logic(|l| l.keymaps().iter().map(ShStrDisplay::to_var_str).collect())
 }
 
-/// Render an rc file to a `Vec<VarStr>` per `config`. Pure — no I/O, no
+/// Render an rc file to a `Vec<ShStr>` per `config`. Pure — no I/O, no
 /// side effects on `Shed` state. Caller decides where the lines go.
-pub(crate) fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
+pub(crate) fn compose_rc(config: &GenRcConfig) -> Vec<ShStr> {
   use ShoptSource::{Current, Defaults};
 
   let     comments           = config.include_comments;
-  let mut lines: Vec<VarStr> = vec![];
+  let mut lines: Vec<ShStr> = vec![];
 
   // Append a section (header comments + content + trailing blank) only when it
   // is enabled and has content, so empty sections aren't rendered as bare headers.
-  let section = |lines: &mut Vec<VarStr>, include: bool, header: &[&str], content: Vec<VarStr>| {
+  let section = |lines: &mut Vec<ShStr>, include: bool, header: &[&str], content: Vec<ShStr>| {
     if !include || content.is_empty() {
       return;
     }
     if comments {
-      lines.extend(header.iter().map(|h| VarStr::from(*h)));
+      lines.extend(header.iter().map(|h| ShStr::from(*h)));
     }
     lines.extend(content);
-    lines.push(VarStr::default());
+    lines.push(ShStr::default());
   };
 
   // Content for a user-defined section: live entries, or nothing for the
   // factory defaults (these have no built-in entries).
-  let user_section = |live: fn() -> Vec<VarStr>| match config.source {
+  let user_section = |live: fn() -> Vec<ShStr>| match config.source {
     Current  => live(),
     Defaults => vec![],
   };
 
   // Content for a section that ships built-in defaults: the hardcoded entries
   // for the factory rc, or the live registrations when regenerating.
-  let default_section = |defaults: &[(&str, &str)], live: fn() -> Vec<VarStr>| match config.source {
+  let default_section = |defaults: &[(&str, &str)], live: fn() -> Vec<ShStr>| match config.source {
     Defaults => defaults
       .iter()
       .map(|(e, d)| rc_entry(e, d, comments))
@@ -204,20 +204,20 @@ pub(crate) fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
     });
     lines.push("# Edit this file to customize, or use it as a reference.".into());
     lines.push("# Refer to the 'help' builtin for information on specific shed features.".into());
-    lines.push(VarStr::default());
+    lines.push(ShStr::default());
   }
 
   // Shell options
   if config.include_shopts {
     if comments {
       lines.push("# -- Shell Options --".into());
-      lines.push(VarStr::default());
+      lines.push(ShStr::default());
     }
     let mut current_group: Option<&'static str> = None;
     for (_key, group, entry, doc) in Shed::shopts(|o| o.rc_entries(config.source)) {
       if comments && Some(group) != current_group {
         if current_group.is_some() {
-          lines.push(VarStr::default());
+          lines.push(ShStr::default());
         }
         lines.push(varstr!("# - {group} -"));
         current_group = Some(group);
@@ -227,7 +227,7 @@ pub(crate) fn compose_rc(config: &GenRcConfig) -> Vec<VarStr> {
         _               => entry,
       });
     }
-    lines.push(VarStr::default());
+    lines.push(ShStr::default());
   }
 
   // Remaining sections

@@ -16,7 +16,7 @@ use crate::{
   autoload::{self, AutoloadSrc, Autoloader},
   eval::parse::ast::Ast,
   sherr,
-  state::vars::VarStr,
+  state::vars::ShStr,
 };
 
 use super::ForgetFlags;
@@ -29,15 +29,15 @@ use super::{
 
 #[derive(Clone, Debug)]
 pub(crate) struct ShAlias {
-  body  : VarStr,
+  body  : ShStr,
   source: Span,
 }
 
 impl ShAlias {
-  pub(crate) fn new(body: VarStr, source: Span) -> Self {
+  pub(crate) fn new(body: ShStr, source: Span) -> Self {
     Self { body, source }
   }
-  pub(crate) fn body(&self) -> VarStr {
+  pub(crate) fn body(&self) -> ShStr {
     self.body.clone()
   }
   pub(crate) fn source(&self) -> &Span {
@@ -225,14 +225,14 @@ crate::two_way_display!(AutoCmdKind,
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct AutoCmd {
   kind   : AutoCmdKind,
-  command: VarStr,
+  command: ShStr,
 }
 
 impl AutoCmd {
-  pub(crate) fn new(kind: AutoCmdKind, command: VarStr) -> Self {
+  pub(crate) fn new(kind: AutoCmdKind, command: ShStr) -> Self {
     Self { kind, command }
   }
-  pub(crate) fn command(&self) -> VarStr {
+  pub(crate) fn command(&self) -> ShStr {
     self.command.clone()
   }
 }
@@ -254,7 +254,7 @@ pub(crate) enum TrapTarget {
 }
 
 impl TrapTarget {
-  pub(crate) fn parse(s: &VarStr) -> ShResult<Self> {
+  pub(crate) fn parse(s: &ShStr) -> ShResult<Self> {
     match s.as_bytes() {
       b"0" | b"EXIT" => Ok(TrapTarget::Exit),
       b"RETURN"      => Ok(TrapTarget::Return),
@@ -283,13 +283,13 @@ impl Display for TrapTarget {
 /// Contains aliases and functions
 #[derive(Default, Clone, Debug)]
 pub(crate) struct LogTab {
-  functions     : HashMap<VarStr, ShFunc>,
-  comp_autoloads: HashMap<VarStr, AutoloadSrc>,
-  aliases       : HashMap<VarStr, ShAlias>,
-  ex_aliases    : HashMap<VarStr, ShAlias>,
-  lambdas       : HashMap<VarStr, ShLambda>,
+  functions     : HashMap<ShStr, ShFunc>,
+  comp_autoloads: HashMap<ShStr, AutoloadSrc>,
+  aliases       : HashMap<ShStr, ShAlias>,
+  ex_aliases    : HashMap<ShStr, ShAlias>,
+  lambdas       : HashMap<ShStr, ShLambda>,
 
-  traps   : HashMap<TrapTarget, VarStr>,
+  traps   : HashMap<TrapTarget, ShStr>,
   keymaps : Vec<KeyMap>,
   autocmds: HashMap<AutoCmdKind, Vec<AutoCmd>>,
 }
@@ -340,8 +340,8 @@ impl LogTab {
   pub(crate) fn register_autoload_comps(&mut self) {
     self.comp_autoloads.extend(autoload::CompLoader.bundled());
   }
-  pub(crate) fn get_autoload_func_names(&self) -> Vec<VarStr> {
-    let mut names: Vec<VarStr> = self
+  pub(crate) fn get_autoload_func_names(&self) -> Vec<ShStr> {
+    let mut names: Vec<ShStr> = self
       .functions
       .iter()
       .filter_map(|(name, func)| match func {
@@ -352,8 +352,8 @@ impl LogTab {
     names.sort();
     names
   }
-  pub(crate) fn get_autoload_comp_names(&self) -> Vec<VarStr> {
-    let mut names: Vec<VarStr> = self
+  pub(crate) fn get_autoload_comp_names(&self) -> Vec<ShStr> {
+    let mut names: Vec<ShStr> = self
       .comp_autoloads
       .iter()
       .filter_map(|(name, src)| match src {
@@ -429,19 +429,19 @@ impl LogTab {
     self.functions.insert(name.into(), src);
     self.invalidate_internal_cache();
   }
-  pub(crate) fn insert_trap(&mut self, target: TrapTarget, command: VarStr) {
+  pub(crate) fn insert_trap(&mut self, target: TrapTarget, command: ShStr) {
     self.traps.insert(target, command);
   }
-  pub(crate) fn get_trap(&self, target: TrapTarget) -> Option<VarStr> {
+  pub(crate) fn get_trap(&self, target: TrapTarget) -> Option<ShStr> {
     self.traps.get(&target).cloned()
   }
-  pub(crate) fn remove_trap(&mut self, target: TrapTarget) -> Option<VarStr> {
+  pub(crate) fn remove_trap(&mut self, target: TrapTarget) -> Option<ShStr> {
     self.traps.remove(&target)
   }
   pub(crate) fn reset_caught_traps(&mut self) {
     self.traps.retain(|_, command| command.is_empty());
   }
-  pub(crate) fn traps(&self) -> &HashMap<TrapTarget, VarStr> {
+  pub(crate) fn traps(&self) -> &HashMap<TrapTarget, ShStr> {
     &self.traps
   }
   pub(crate) fn has_command_func(&self, name: &[u8]) -> bool {
@@ -464,7 +464,7 @@ impl LogTab {
   pub(crate) fn take_comp_autoload(&mut self, name: &[u8]) -> Option<AutoloadSrc> {
     self.comp_autoloads.remove(name)
   }
-  pub(crate) fn insert_alias(&mut self, name: &[u8], body: &VarStr, source: Span) {
+  pub(crate) fn insert_alias(&mut self, name: &[u8], body: &ShStr, source: Span) {
     self
       .aliases
       .insert(name.into(), ShAlias::new(body.clone(), source));
@@ -476,7 +476,7 @@ impl LogTab {
     self.aliases.remove(name);
   }
 
-  pub(crate) fn insert_ex_alias(&mut self, name: &[u8], body: VarStr, source: Span) {
+  pub(crate) fn insert_ex_alias(&mut self, name: &[u8], body: ShStr, source: Span) {
     self
       .ex_aliases
       .insert(name.into(), ShAlias::new(body, source));
@@ -487,13 +487,13 @@ impl LogTab {
   pub(crate) fn get_ex_alias(&self, name: &[u8]) -> Option<ShAlias> {
     self.ex_aliases.get(name).cloned()
   }
-  pub(crate) fn ex_aliases(&self) -> &HashMap<VarStr, ShAlias> {
+  pub(crate) fn ex_aliases(&self) -> &HashMap<ShStr, ShAlias> {
     &self.ex_aliases
   }
-  pub(crate) fn funcs(&self) -> &HashMap<VarStr, ShFunc> {
+  pub(crate) fn funcs(&self) -> &HashMap<ShStr, ShFunc> {
     &self.functions
   }
-  pub(crate) fn aliases(&self) -> &HashMap<VarStr, ShAlias> {
+  pub(crate) fn aliases(&self) -> &HashMap<ShStr, ShAlias> {
     &self.aliases
   }
 }
@@ -504,7 +504,7 @@ mod tests {
 
   use super::*;
 
-  fn user_comp() -> (VarStr, AutoloadSrc) {
+  fn user_comp() -> (ShStr, AutoloadSrc) {
     (
       "jj".into(),
       AutoloadSrc::Path(PathBuf::from("/tmp/shed-comp/jj.sh")),

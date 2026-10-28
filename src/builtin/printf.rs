@@ -6,7 +6,7 @@ use crate::{
   errln,
   expand::{Word, escape},
   procio, sherr, shopt,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::{
     self,
     error::ShResult,
@@ -32,7 +32,7 @@ enum Conversion {
   RepeatStr,
   AnsiC,
   ShellQuote,
-  StrfTime(VarStr),
+  StrfTime(ShStr),
 }
 
 /// printf's value stream plus the soft-error accumulator. A bad number is
@@ -44,7 +44,7 @@ struct PrintfArgs {
 }
 
 impl PrintfArgs {
-  fn next_word(&mut self) -> Option<VarStr> {
+  fn next_word(&mut self) -> Option<ShStr> {
     self.args.next().map(|w| w.content())
   }
 }
@@ -55,7 +55,7 @@ impl StrFmt for PrintfFmt {
   type Source = PrintfArgs;
   type Conv = Conversion;
 
-  fn expand_literal(&self, literal: VarStr) -> VarStr {
+  fn expand_literal(&self, literal: ShStr) -> ShStr {
     escape::expand_ansi_c(&literal)
   }
 
@@ -140,7 +140,7 @@ impl StrFmt for PrintfFmt {
 /// a *present* argument that fails to parse yields `0` plus a
 /// [`PrintfErr::BadNumber`], so the caller still substitutes `0` and continues
 /// formatting while the run is flagged to exit non-zero.
-fn parse_num_arg<T: ParseRadix + Default>(arg: Option<VarStr>) -> Result<T, PrintfErr> {
+fn parse_num_arg<T: ParseRadix + Default>(arg: Option<ShStr>) -> Result<T, PrintfErr> {
   let Some(arg) = arg else {
     return Ok(T::default());
   };
@@ -166,7 +166,7 @@ fn parse_num_arg<T: ParseRadix + Default>(arg: Option<VarStr>) -> Result<T, Prin
 /// have no base prefixes and a leading `0` (`0.5`) is not an octal marker, so
 /// this parses decimal directly instead of routing through the integer-literal
 /// grammar. The POSIX leading-quote trick still applies.
-fn parse_float_arg(arg: Option<VarStr>) -> (f64, Option<PrintfErr>) {
+fn parse_float_arg(arg: Option<ShStr>) -> (f64, Option<PrintfErr>) {
   let Some(arg) = arg else {
     return (0.0, None);
   };
@@ -444,7 +444,7 @@ fn render_shell_quote(src: &mut PrintfArgs) -> Field {
 fn render_strftime(src: &mut PrintfArgs, format: &[u8]) -> ShResult<Field> {
   use crate::state::{Shed, meta::MetaTab};
   use chrono::{Local, TimeZone};
-  let arg       = src.next_word().unwrap_or_else(|| VarStr::from("-1"));
+  let arg       = src.next_word().unwrap_or_else(|| ShStr::from("-1"));
   let secs: i64 = arg.parse().unwrap_or(-1);
 
   let dt = if secs == -1 {
@@ -475,7 +475,7 @@ fn render_strftime(src: &mut PrintfArgs, format: &[u8]) -> ShResult<Field> {
 /// Convert Rust's exponent format (`1e2`, `1.5e-3`) to POSIX printf style
 /// (`1e+02`, `1.5e-03`): sign always present, exponent zero-padded to at
 /// least two digits.
-fn normalize_exponent(s: &[u8]) -> VarStr {
+fn normalize_exponent(s: &[u8]) -> ShStr {
   let Some(epos) = s.find_byteset(b"eE") else {
     return s.into();
   };
@@ -495,7 +495,7 @@ fn normalize_exponent(s: &[u8]) -> VarStr {
     digits.as_bytes().to_vec()
   };
 
-  let mut out = VarStr::default();
+  let mut out = ShStr::default();
 
   out.push_slice(mantissa);
   out.push(exp_char as u8);
@@ -505,8 +505,8 @@ fn normalize_exponent(s: &[u8]) -> VarStr {
   out
 }
 
-fn strip_trailing_zeros(s: &[u8]) -> VarStr {
-  let mut out = VarStr::default();
+fn strip_trailing_zeros(s: &[u8]) -> ShStr {
+  let mut out = ShStr::default();
 
   if let Some(epos) = s.find_byteset(b"eE") {
     let (mantissa, exp) = s.split_at(epos);

@@ -3,7 +3,7 @@ use std::borrow::Cow;
 #[cfg(test)]
 use smallvec::SmallVec;
 
-use crate::{state::vars::VarStr, util::strops::QuoteState};
+use crate::{state::vars::ShStr, util::strops::QuoteState};
 
 /// A stream of bytes and markers.
 ///
@@ -15,7 +15,7 @@ use crate::{state::vars::VarStr, util::strops::QuoteState};
 /// Markers are not added on creation or by `from_bytes`, so a stream created from a string is just a literal byte run.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct SegStream {
-  content: VarStr,
+  content: ShStr,
   marks  : Vec<(usize, Marker)>,
 }
 
@@ -77,13 +77,13 @@ impl From<Cow<'_, str>> for SegStream {
     Self::from_slice(s.as_bytes())
   }
 }
-impl From<VarStr> for SegStream {
-  fn from(v: VarStr) -> Self {
+impl From<ShStr> for SegStream {
+  fn from(v: ShStr) -> Self {
     Self::new(v)
   }
 }
 impl SegStream {
-  pub(crate) fn new(content: VarStr) -> Self {
+  pub(crate) fn new(content: ShStr) -> Self {
     Self {
       content,
       marks  : Vec::new(),
@@ -91,13 +91,13 @@ impl SegStream {
   }
   pub(crate) fn from_bytes(b: Vec<u8>) -> Self {
     Self {
-      content: VarStr::from(b),
+      content: ShStr::from(b),
       marks  : Vec::new(),
     }
   }
   pub(crate) fn from_slice(b: &[u8]) -> Self {
     Self {
-      content: VarStr::from(b),
+      content: ShStr::from(b),
       marks  : Vec::new(),
     }
   }
@@ -204,7 +204,7 @@ impl SegStream {
   /// Peel `n` leading bytes off the front (markers within that span move to the
   /// remainder), returning `(front_bytes, remainder)`. Used to strip an ASCII
   /// operator prefix off a parameter-expansion operand.
-  pub(crate) fn split_off_front(&self, n: usize) -> (VarStr, SegStream) {
+  pub(crate) fn split_off_front(&self, n: usize) -> (ShStr, SegStream) {
     let cut   = n.min(self.content.len());
     let front = self.content[..cut].into();
     let rest = SegStream {
@@ -221,7 +221,7 @@ impl SegStream {
   pub(crate) fn as_bytes(&self) -> &[u8] {
     &self.content
   }
-  pub(crate) fn content(&self) -> VarStr {
+  pub(crate) fn content(&self) -> ShStr {
     self.content.clone()
   }
   pub(crate) fn cursor(&self) -> SegCursor<'_> {

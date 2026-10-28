@@ -22,7 +22,7 @@ use crate::{
     Shed,
     meta::MetaTab,
     params,
-    vars::{VarStr, VarStrSliceExt},
+    vars::{ShStr, ShStrSliceExt},
   },
   system_msg,
   util::{
@@ -35,7 +35,7 @@ use crate::{
 use super::{sherr, two_way_display};
 
 /// Trace a command: shell-quote each argv word (like bash) and emit.
-pub(crate) fn xtrace_print_raw(argv: &[VarStr]) {
+pub(crate) fn xtrace_print_raw(argv: &[ShStr]) {
   if shopt!(set.xtrace) {
     let words = argv
       .iter()
@@ -76,7 +76,7 @@ pub(crate) fn xtrace_line(rendered: &[u8]) {
   if !shopt!(set.xtrace) {
     return;
   }
-  let rendered = VarStr::from(rendered);
+  let rendered = ShStr::from(rendered);
 
   let ps4      = params::get_ps4();
   let prefix_char = ps4
@@ -201,9 +201,9 @@ pub(crate) enum ShoptSource {
 /// line, optional doc string)`. The composer in `state::util` joins these
 /// into final rc text and decides whether to render the doc as a trailing
 /// comment based on `GenRcConfig::include_comments`.
-pub(crate) type ShoptRcEntry = (VarStr, &'static str, VarStr, Option<VarStr>);
+pub(crate) type ShoptRcEntry = (ShStr, &'static str, ShStr, Option<ShStr>);
 
-type RcEntries = Vec<(VarStr, VarStr, Option<VarStr>)>;
+type RcEntries = Vec<(ShStr, ShStr, Option<ShStr>)>;
 impl ShOpts {
   /// All rc entries for every shopt group, in stable group order. The
   /// `group` field is the human-readable section header used when
@@ -212,7 +212,7 @@ impl ShOpts {
     let to_var_strs = |entries: Vec<(String, String, Option<String>)>| -> RcEntries {
       entries
         .into_iter()
-        .map(|(key, line, doc)| (key.into(), line.into(), doc.map(VarStr::from)))
+        .map(|(key, line, doc)| (key.into(), line.into(), doc.map(ShStr::from)))
         .collect()
     };
 

@@ -26,7 +26,7 @@ use crate::{
   match_loop, sherr, shopt,
   state::{
     params,
-    vars::{VarStr, VarStrSliceExt},
+    vars::{ShStr, ShStrSliceExt},
   },
   util::error::{ShResult, ShResultExt},
 };
@@ -35,11 +35,11 @@ use stream::Quote;
 
 /// The shell's main "word" representation.
 ///
-/// Carries a [`VarStr`] (reference counted pointer to a byte array), and optionally a [`Span`].
+/// Carries a [`ShStr`] (reference counted pointer to a byte array), and optionally a [`Span`].
 /// The `Option<Span>` can be used to tag errors on the way up during propagation.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Word {
-  content: VarStr,
+  content: ShStr,
   span   : Option<Span>,
 }
 
@@ -58,13 +58,13 @@ impl Hash for Word {
 }
 
 impl Word {
-  pub(crate) fn new(content: impl Into<VarStr>) -> Self {
+  pub(crate) fn new(content: impl Into<ShStr>) -> Self {
     Self {
       content: content.into(),
       span   : None,
     }
   }
-  pub(crate) fn unpack(self) -> (VarStr, Option<Span>) {
+  pub(crate) fn unpack(self) -> (ShStr, Option<Span>) {
     (self.content, self.span)
   }
   pub(crate) fn with_span(mut self, span: Span) -> Self {
@@ -73,7 +73,7 @@ impl Word {
     }
     self
   }
-  pub(crate) fn content(&self) -> VarStr {
+  pub(crate) fn content(&self) -> ShStr {
     self.content.clone()
   }
   pub(crate) fn set_span(&mut self, span: Span) {
@@ -119,7 +119,7 @@ impl Display for Word {
 }
 
 impl Deref for Word {
-  type Target = VarStr;
+  type Target = ShStr;
 
   fn deref(&self) -> &Self::Target {
     &self.content
@@ -157,29 +157,29 @@ impl From<&Tk> for Word {
 
 impl From<Vec<u8>> for Word {
   fn from(value: Vec<u8>) -> Self {
-    Word::new(VarStr::from(value))
+    Word::new(ShStr::from(value))
   }
 }
 
 impl From<&[u8]> for Word {
   fn from(value: &[u8]) -> Self {
-    Word::new(VarStr::from(value))
+    Word::new(ShStr::from(value))
   }
 }
 
-impl From<VarStr> for Word {
-  fn from(value: VarStr) -> Self {
+impl From<ShStr> for Word {
+  fn from(value: ShStr) -> Self {
     Word::new(value)
   }
 }
 
 impl From<&str> for Word {
   fn from(value: &str) -> Self {
-    Word::new(VarStr::from(value))
+    Word::new(ShStr::from(value))
   }
 }
 
-/// A list of words. A word is a [`VarStr`] and a [`Span`] bundled together.
+/// A list of words. A word is a [`ShStr`] and a [`Span`] bundled together.
 ///
 /// This type is used commonly in places that handle arg vectors and expansion
 #[derive(Clone, Debug, Default)]
@@ -189,7 +189,7 @@ impl Words {
   pub(crate) fn new(words: Vec<Word>) -> Self {
     Self(words)
   }
-  pub(crate) fn join_with(&self, sep: &str) -> VarStr {
+  pub(crate) fn join_with(&self, sep: &str) -> ShStr {
     self.0.join_with(sep)
   }
   pub(crate) fn into_words(self) -> Vec<Word> {
@@ -204,7 +204,7 @@ impl Words {
     self.promote_words(span);
     self
   }
-  pub(crate) fn map_content(self, f: impl Fn(VarStr) -> VarStr) -> Self {
+  pub(crate) fn map_content(self, f: impl Fn(ShStr) -> ShStr) -> Self {
     self
       .0
       .into_iter()
@@ -238,8 +238,8 @@ impl IntoIterator for Words {
   }
 }
 
-impl FromIterator<VarStr> for Words {
-  fn from_iter<T: IntoIterator<Item = VarStr>>(iter: T) -> Self {
+impl FromIterator<ShStr> for Words {
+  fn from_iter<T: IntoIterator<Item = ShStr>>(iter: T) -> Self {
     Self(iter.into_iter().map(Word::new).collect())
   }
 }
@@ -273,8 +273,8 @@ impl From<&[Word]> for Words {
   }
 }
 
-impl From<VarStr> for Words {
-  fn from(vs: VarStr) -> Self {
+impl From<ShStr> for Words {
+  fn from(vs: ShStr) -> Self {
     Self(vec![Word::new(vs)])
   }
 }
@@ -354,7 +354,7 @@ impl Tk {
       flags: self.flags,
     })
   }
-  pub(crate) fn expand_no_split(&self) -> ShResult<VarStr> {
+  pub(crate) fn expand_no_split(&self) -> ShResult<ShStr> {
     if let TkRule::Expanded { exp } = &self.class {
       return Ok(exp.join_with(" "));
     }
@@ -403,7 +403,7 @@ impl Expander {
     let raw = if raw.contains(&b'{') {
       brace::expand_braces_full(None, raw).join_with(" ")
     } else {
-      VarStr::from(raw)
+      ShStr::from(raw)
     };
     let unescaped = if flags.contains(TkFlags::IS_HEREDOC) {
       escape::unescape_heredoc(&raw)
@@ -452,7 +452,7 @@ impl Expander {
       if noglob || !glob::might_be_glob(b) {
         return Ok(Words::new(vec![b.into()])); // no globs either, just return it
       }
-      let exp = glob::expand_glob(b).into_iter().map(VarStr::from).collect();
+      let exp = glob::expand_glob(b).into_iter().map(ShStr::from).collect();
       return Ok(exp);
     }
 
@@ -484,7 +484,7 @@ impl Expander {
       }
 
       let pattern_bytes   = escape::markers_to_glob_escapes(&word);
-      let literal: VarStr = word.as_bytes().into();
+      let literal: ShStr = word.as_bytes().into();
 
       if !glob::might_be_glob(&pattern_bytes) {
         glob_words.push(literal.into());
@@ -500,16 +500,16 @@ impl Expander {
 
     Ok(Words::new(glob_words))
   }
-  pub(crate) fn expand_no_side_effects(mut self) -> ShResult<VarStr> {
+  pub(crate) fn expand_no_side_effects(mut self) -> ShResult<ShStr> {
     self.allow_side_effects = false;
     let raw = self.expand_inner(false)?;
     Ok(raw.as_bytes().into())
   }
-  pub(crate) fn expand_no_split(self) -> ShResult<VarStr> {
+  pub(crate) fn expand_no_split(self) -> ShResult<ShStr> {
     let raw = self.expand_inner(false)?;
     Ok(raw.as_bytes().into())
   }
-  pub(crate) fn expand_keep_quotes(self) -> ShResult<VarStr> {
+  pub(crate) fn expand_keep_quotes(self) -> ShResult<ShStr> {
     let     raw          = self.expand_inner(false)?;
     let mut out: Vec<u8> = Vec::new();
     let mut cursor       = raw.cursor();
@@ -523,7 +523,7 @@ impl Expander {
     }
     Ok(out.into())
   }
-  pub(crate) fn expand_for_glob(self) -> ShResult<VarStr> {
+  pub(crate) fn expand_for_glob(self) -> ShResult<ShStr> {
     let raw = self.expand_inner(false)?;
     Ok(escape::markers_to_glob_escapes(&raw).into())
   }
@@ -729,7 +729,7 @@ mod tests {
 
   use crate::state::{
     Shed,
-    vars::{ArrIndex, VarFlags, VarKind, VarStr},
+    vars::{ArrIndex, VarFlags, VarKind, ShStr},
   };
   use crate::tests::testutil::{TestGuard, test_input};
 
@@ -777,7 +777,7 @@ mod tests {
   #[test]
   fn word_split_empty_ifs() {
     let _guard = TestGuard::new();
-    set_var!(b"IFS", VarKind::Str(VarStr::default())).unwrap();
+    set_var!(b"IFS", VarKind::Str(ShStr::default())).unwrap();
 
     // Even as expansion output, an empty IFS suppresses all field splitting.
     let raw = format!(
@@ -879,7 +879,7 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"arr",
-        VarKind::arr(["a", "b", "c"].map(VarStr::from)),
+        VarKind::arr(["a", "b", "c"].map(ShStr::from)),
         VarFlags::empty(),
       )
     })
@@ -895,7 +895,7 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"arr",
-        VarKind::arr(["x", "y", "z"].map(VarStr::from)),
+        VarKind::arr(["x", "y", "z"].map(ShStr::from)),
         VarFlags::empty(),
       )
     })
@@ -911,7 +911,7 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"arr",
-        VarKind::arr(["a", "b", "c"].map(VarStr::from)),
+        VarKind::arr(["a", "b", "c"].map(ShStr::from)),
         VarFlags::empty(),
       )
     })
@@ -927,7 +927,7 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"arr",
-        VarKind::arr(["a", "b", "c"].map(VarStr::from)),
+        VarKind::arr(["a", "b", "c"].map(ShStr::from)),
         VarFlags::empty(),
       )
     })

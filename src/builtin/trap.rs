@@ -179,7 +179,7 @@ mod tests {
     for name in &[
       "INT", "QUIT", "TERM", "USR1", "USR2", "ALRM", "CHLD", "WINCH",
     ] {
-      let target = TrapTarget::parse(&crate::state::vars::VarStr::from(*name)).unwrap();
+      let target = TrapTarget::parse(&crate::state::vars::ShStr::from(*name)).unwrap();
       assert_eq!(target.to_string(), *name);
     }
   }

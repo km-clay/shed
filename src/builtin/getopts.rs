@@ -12,7 +12,7 @@ use crate::{
   state::{
     Shed,
     meta::MetaTab,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarFlags, VarKind, ShStr},
   },
   util::{
     self,
@@ -154,7 +154,7 @@ impl GetOpts {
   fn getopts_inner(
     opts_spec: &GetOptsSpec,
     opt_var: &str,
-    argv: &[VarStr],
+    argv: &[ShStr],
     blame: Span,
   ) -> ShResult<()> {
     let Some(cur) = Self::resolve(argv)? else {
@@ -211,7 +211,7 @@ impl GetOpts {
   /// Returns `None` (with `$?` already set to 1) when there are no more
   /// options in `argv`: a `--` terminator, a non-option word, a bare `-`,
   /// or running off the end of the current arg / `argv`.
-  fn resolve(argv: &[VarStr]) -> ShResult<Option<OptCursor>> {
+  fn resolve(argv: &[ShStr]) -> ShResult<Option<OptCursor>> {
     let opt_index = var!(b"OPTIND").to_str_lossy().parse::<usize>().unwrap_or(1);
     // OPTIND is 1-based
     let arr_idx   = opt_index.saturating_sub(1);
@@ -271,7 +271,7 @@ impl GetOpts {
   /// report a missing required argument.
   fn handle_wants_arg(
     cur: &OptCursor,
-    argv: &[VarStr],
+    argv: &[ShStr],
     opt_var: &str,
     opts_spec: &GetOptsSpec,
     blame: Span,
@@ -284,7 +284,7 @@ impl GetOpts {
       // syntax up to here (`-` + flag chars) is single-byte ASCII, so the
       // value begins at byte offset `char_idx + 2` (past `-` and the flag).
       let arg    = &argv[cur.arr_idx];
-      let optarg = VarStr::from(&arg.as_bytes()[cur.char_idx + 2..]);
+      let optarg = ShStr::from(&arg.as_bytes()[cur.char_idx + 2..]);
       set_var!(b"OPTARG", VarKind::string(optarg))?;
       advance_optind(cur.opt_index, 1)?;
     } else if let Some(next_arg) = argv.get(cur.arr_idx + 1) {

@@ -1,6 +1,6 @@
 use crate::{
   readline::{RegisterName, editcmd::CmdFlags},
-  state::vars::VarStr,
+  state::vars::ShStr,
 };
 
 use super::{
@@ -232,7 +232,7 @@ impl EditMode for Emacs {
   fn cursor_style(&self) -> CursorStyle {
     CursorStyle::Beam(false)
   }
-  fn pending_seq(&self) -> Option<VarStr> {
+  fn pending_seq(&self) -> Option<ShStr> {
     None
   }
   fn clamp_cursor(&self) -> bool {

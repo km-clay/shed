@@ -17,7 +17,7 @@ use crate::{
   match_loop, set_var, sherr,
   state::{
     Shed,
-    vars::{VarKind, VarStr},
+    vars::{VarKind, ShStr},
   },
   util::{
     error::{ShErr, ShResult},
@@ -208,7 +208,7 @@ fn expand_rhs(tk: &Tk, op: BinaryOp) -> ShResult<Word> {
   Ok(Word::new(val).with_span(tk.span))
 }
 
-fn expand_regex_operand(span: Option<Span>, bytes: &[u8]) -> ShResult<VarStr> {
+fn expand_regex_operand(span: Option<Span>, bytes: &[u8]) -> ShResult<ShStr> {
   const RE_META: &[u8] = br".*+?()[]{}^$|\";
 
   let     unescaped = escape::unescape_str(bytes);
@@ -235,7 +235,7 @@ fn expand_regex_operand(span: Option<Span>, bytes: &[u8]) -> ShResult<VarStr> {
     Unit::Mark(_) => {}
   });
 
-  Ok(VarStr::from(result))
+  Ok(ShStr::from(result))
 }
 
 /// Evaluate a single unary test (`-OP OPERAND`).
@@ -322,9 +322,9 @@ pub(crate) fn eval_binary(op: &BinaryOp, lhs: &Word, rhs: &Word, extended: bool)
           .map_err(|e| sherr!(SyntaxErr ? rhs.span(), "Invalid regex: {e}"))?;
 
         if let Some(caps) = re.captures(&lhs.to_str_lossy()) {
-          let groups: VecDeque<VarStr> = caps
+          let groups: VecDeque<ShStr> = caps
             .iter()
-            .map(|m| m.map(|mat| VarStr::from(mat.as_str())).unwrap_or_default())
+            .map(|m| m.map(|mat| ShStr::from(mat.as_str())).unwrap_or_default())
             .collect();
           set_var!(b"SHED_REMATCH", VarKind::arr(groups); LOCAL)?;
           Ok(true)
@@ -356,7 +356,7 @@ pub(crate) fn eval_binary(op: &BinaryOp, lhs: &Word, rhs: &Word, extended: bool)
       })
     }
     BinaryOp::File(file_op) => {
-      let mtime = |v: &VarStr| {
+      let mtime = |v: &ShStr| {
         PathBuf::from(v.clone())
           .metadata()
           .and_then(|m| m.modified())

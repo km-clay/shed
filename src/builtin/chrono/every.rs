@@ -6,7 +6,7 @@ use nix::libc;
 use crate::{
   eval::execute,
   opt, sherr, signal,
-  state::{Shed, vars::VarStr},
+  state::{Shed, vars::ShStr},
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -64,13 +64,13 @@ impl Count {
       Self::Exact(n) => Some(n),
     }
   }
-  fn parse_queue(s: &VarStr) -> ShResult<Self> {
+  fn parse_queue(s: &ShStr) -> ShResult<Self> {
     Self::parse(s, "queue")
   }
-  fn parse_retry(s: &VarStr) -> ShResult<Self> {
+  fn parse_retry(s: &ShStr) -> ShResult<Self> {
     Self::parse(s, "retry")
   }
-  fn parse(s: &VarStr, opt: &str) -> ShResult<Self> {
+  fn parse(s: &ShStr, opt: &str) -> ShResult<Self> {
     let n = s
       .parse::<i32>()
       .map_err(|v| sherr!(ParseErr, "invalid {opt} value: '{v}'"))?;

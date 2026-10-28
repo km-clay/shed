@@ -38,7 +38,7 @@ use super::{
     logic::{LogTab, TrapTarget},
     meta::MetaTab,
     terminal::Terminal,
-    vars::{VarKind, VarStr},
+    vars::{VarKind, ShStr},
   },
   status_msg,
   util::{error::ShResult, flog},
@@ -118,7 +118,7 @@ pub(crate) fn print_about() {
 /// Apply an invocation-only short flag (`-c`/`-s`/`-i`/`-l`/`-w`).
 fn apply_invocation_flag<I>(
   ch: char,
-  attached: Option<VarStr>,
+  attached: Option<ShStr>,
   words: &mut std::iter::Peekable<I>,
   cfg: &mut ShedArgs,
 ) -> ShResult<()>
@@ -147,7 +147,7 @@ where
 
 /// Handle a `--long` invocation flag.
 ///
-/// Takes an iterator of [`VarStr`] and [`Span`], and mutates the given [`ShedArgs`] accordingly.
+/// Takes an iterator of [`ShStr`] and [`Span`], and mutates the given [`ShedArgs`] accordingly.
 ///
 /// ### Errors:
 /// Returns an error if the flag is unrecognized or missing a required argument.

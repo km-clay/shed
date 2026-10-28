@@ -1,6 +1,6 @@
 use crate::{
   opt, outln, procio, sherr, socket_msg,
-  state::{Shed, vars::VarStr},
+  state::{Shed, vars::ShStr},
   status_msg, system_msg,
   util::{self, error::ShResult},
 };
@@ -38,7 +38,7 @@ impl super::Builtin for Msg {
       self.get_input(&mut args).map(|s| {
         let mut s = procio::bytes_to_string(s);
         s.truncate(s.trim_end_matches('\n').len());
-        VarStr::from(s)
+        ShStr::from(s)
       })
     } else {
       None
@@ -59,7 +59,7 @@ impl super::Builtin for Msg {
       return util::with_status(0);
     }
 
-    let msg: VarStr = input.unwrap_or_else(|| join_raw_args(arg_vec).content());
+    let msg: ShStr = input.unwrap_or_else(|| join_raw_args(arg_vec).content());
 
     if broadcast {
       // sends to all socket subscribers

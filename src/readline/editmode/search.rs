@@ -1,4 +1,4 @@
-use crate::{readline::RegisterName, state::vars::VarStr, varstr};
+use crate::{readline::RegisterName, state::vars::ShStr, varstr};
 
 use super::{
   CmdReplay, E as KeyEvent, EditMode, LineBuf, ModeReport, SimpleEditor,
@@ -26,7 +26,7 @@ trait SearchMode {
   fn query_handle_key(&mut self, key: KeyEvent) -> Option<EditCmd> {
     self.query_mut().handle_key(key).map(|()| None).ok()?
   }
-  fn pattern(&self) -> VarStr {
+  fn pattern(&self) -> ShStr {
     varstr!("{}", self.query().buf)
   }
   fn clear(&mut self) {
@@ -184,7 +184,7 @@ impl<S: SearchMode> EditMode for S {
   fn as_replay(&self) -> Option<CmdReplay> {
     None
   }
-  fn pending_seq(&self) -> Option<VarStr> {
+  fn pending_seq(&self) -> Option<ShStr> {
     Some(self.pattern())
   }
   fn pending_cursor(&self) -> Option<usize> {

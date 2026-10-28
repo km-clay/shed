@@ -12,7 +12,7 @@ use crate::{
   sherr, shopt,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarFlags, VarKind, ShStr},
   },
   util::{
     self,
@@ -26,7 +26,7 @@ use super::{BuiltinArgs, ShResult, opt::OptSpec};
 
 #[derive(Debug, Clone)]
 enum SpecField {
-  Named { name: VarStr, ty: SpecType },
+  Named { name: ShStr, ty: SpecType },
   Positional(SpecType),
   Skip(SpecType),
 }
@@ -67,11 +67,11 @@ impl SpecField {
       let (name, Some(val)) = strops::split_assignment_raw(&field) else {
         return Err(sherr!(ParseErr ? span, "invalid field spec '{field}' (missing '=')"));
       };
-      let val = VarStr::from(val);
+      let val = ShStr::from(val);
       let name = if name.is_empty() {
         varstr!("{idx}")
       } else {
-        VarStr::from(name)
+        ShStr::from(name)
       };
 
       if !seen.insert(name.clone()) {
@@ -94,7 +94,7 @@ impl SpecField {
     Ok(result)
   }
 
-  fn try_skip(field: &VarStr) -> Option<ShResult<SpecType>> {
+  fn try_skip(field: &ShStr) -> Option<ShResult<SpecType>> {
     field
       .strip_prefix(b"+")
       .map(|rest| SpecType::parse_type(&rest.into()))
@@ -126,14 +126,14 @@ impl SpecField {
       // allows for named fields in a positional spec
       // ignores the name and uses the value
       let (name, val) = strops::split_assignment_raw(field);
-      let val         = val.map(VarStr::from);
+      let val         = val.map(ShStr::from);
 
       let ty = match val {
         Some(ref v) => {
           let name = if name.is_empty() {
             varstr!("{idx}")
           } else {
-            VarStr::from(name)
+            ShStr::from(name)
           };
 
           if !seen.insert(name.clone()) {
@@ -170,10 +170,10 @@ enum SpecType {
 }
 
 impl SpecType {
-  fn parse_type(ty: &VarStr) -> ShResult<Self> {
+  fn parse_type(ty: &ShStr) -> ShResult<Self> {
     if let Some((start, len)) = strops::split_at_unescaped(ty, b"/") {
-      let len_type = VarStr::from(&ty[..start]);
-      let kind     = VarStr::from(&ty[start + len..]);
+      let len_type = ShStr::from(&ty[..start]);
+      let kind     = ShStr::from(&ty[start + len..]);
 
       match kind.as_bytes() {
         b"str" => {
@@ -318,7 +318,7 @@ impl SpecType {
     }
   }
 
-  fn write_field(self, data: VarStr) -> ShResult<VarStr> {
+  fn write_field(self, data: ShStr) -> ShResult<ShStr> {
     match self {
       SpecType::Str(SpecStr::NullTerm) => Self::write_null_term(&data),
       SpecType::Int(spec)              => Self::write_int(spec, &data),
@@ -336,7 +336,7 @@ impl SpecType {
     }
   }
 
-  fn write_pad(self) -> ShResult<VarStr> {
+  fn write_pad(self) -> ShResult<ShStr> {
     let zeros = match self {
       SpecType::Str(SpecStr::NullTerm) => 1,
       SpecType::Int(spec)              => spec.width_bytes(),
@@ -353,23 +353,23 @@ impl SpecType {
       }
     };
 
-    Ok(VarStr::from(vec![0u8; zeros]))
+    Ok(ShStr::from(vec![0u8; zeros]))
   }
 
-  fn write_float(spec: FloatSpec, data: &VarStr) -> ShResult<VarStr> {
+  fn write_float(spec: FloatSpec, data: &ShStr) -> ShResult<ShStr> {
     if spec.decimal() {
-      spec.encode_decimal(data.as_bytes()).map(VarStr::from)
+      spec.encode_decimal(data.as_bytes()).map(ShStr::from)
     } else {
       let sep    = spec.sep();
       let fields = data.split_str(&sep.to_string()).collect_vec();
       let [s, e, m] = fields[..] else {
         return Err(sherr!(ParseErr, "expected 3 fields for float, got {}", fields.len()));
       };
-      spec.encode_triple(s, e, m).map(VarStr::from)
+      spec.encode_triple(s, e, m).map(ShStr::from)
     }
   }
 
-  fn write_int(spec: IntSpec, data: &VarStr) -> ShResult<VarStr> {
+  fn write_int(spec: IntSpec, data: &ShStr) -> ShResult<ShStr> {
     let val = data
       .parse::<i128>()
       .map_err(|e| sherr!(ParseErr, "expected an integer, got '{e}'"))?;
@@ -379,7 +379,7 @@ impl SpecType {
     Ok(spec.encode(val).into())
   }
 
-  fn write_null_term(data: &VarStr) -> ShResult<VarStr> {
+  fn write_null_term(data: &ShStr) -> ShResult<ShStr> {
     if let Some(pos) = data.find_byte(b'\0') {
       return Err(sherr!(ParseErr, "internal NUL byte in string at position {pos}"));
     };
@@ -390,7 +390,7 @@ impl SpecType {
     Ok(out.into())
   }
 
-  fn write_sized(len: SpecLen, data: &VarStr) -> ShResult<VarStr> {
+  fn write_sized(len: SpecLen, data: &ShStr) -> ShResult<ShStr> {
     let limit = *shopt!(core.max_read_limit) as usize;
     match len {
       SpecLen::Static(n) => {
@@ -430,7 +430,7 @@ impl SpecType {
     self,
     reader: &dyn Sink,
     buffer: &mut Vec<u8>,
-  ) -> ShResult<(usize, Option<VarStr>)> {
+  ) -> ShResult<(usize, Option<ShStr>)> {
     match self {
       SpecType::Raw(len)    => Self::read_raw(len, reader, buffer),
       SpecType::Int(spec)   => Self::read_int(spec, reader, buffer),
@@ -440,7 +440,7 @@ impl SpecType {
     }
   }
 
-  fn read_to_end(reader: &dyn Sink, buffer: &mut Vec<u8>) -> ShResult<(usize, Option<VarStr>)> {
+  fn read_to_end(reader: &dyn Sink, buffer: &mut Vec<u8>) -> ShResult<(usize, Option<ShStr>)> {
     let mut got = 0;
 
     loop {
@@ -464,7 +464,7 @@ impl SpecType {
     spec: SpecStr,
     reader: &dyn Sink,
     buffer: &mut Vec<u8>,
-  ) -> ShResult<(usize, Option<VarStr>)> {
+  ) -> ShResult<(usize, Option<ShStr>)> {
     // A fixed-width field is NUL-padded, so it stops at the first NUL.
     // A length prefix is authoritative, so an embedded NUL is data.
     let (consumed, data, padded) = match spec {
@@ -495,7 +495,7 @@ impl SpecType {
     len: SpecLen,
     reader: &dyn Sink,
     buffer: &mut Vec<u8>,
-  ) -> ShResult<(usize, Option<VarStr>)> {
+  ) -> ShResult<(usize, Option<ShStr>)> {
     let Some((consumed, data)) = Self::read_len(len, reader, buffer)? else {
       return Ok((0, None));
     };
@@ -507,7 +507,7 @@ impl SpecType {
     spec: IntSpec,
     reader: &dyn Sink,
     buffer: &mut Vec<u8>,
-  ) -> ShResult<(usize, Option<VarStr>)> {
+  ) -> ShResult<(usize, Option<ShStr>)> {
     let width = spec.width_bytes();
     let Some(got) = Self::read_n(width, reader, buffer)? else {
       return Ok((0, None));
@@ -520,7 +520,7 @@ impl SpecType {
     spec: FloatSpec,
     reader: &dyn Sink,
     buffer: &mut Vec<u8>,
-  ) -> ShResult<(usize, Option<VarStr>)> {
+  ) -> ShResult<(usize, Option<ShStr>)> {
     let width = spec.width();
     let Some(got) = Self::read_n(width, reader, buffer)? else {
       return Ok((0, None));
@@ -565,8 +565,8 @@ impl super::Builtin for Pack {
       (Some(_), Some(_)) => {
         let ar_span : Span   = args.opt_span("array").unwrap();
         let as_span : Span   = args.opt_span("assoc").unwrap();
-        let ar_slice: VarStr = ar_span.slice();
-        let as_slice: VarStr = as_span.slice();
+        let ar_slice: ShStr = ar_span.slice();
+        let as_slice: ShStr = as_span.slice();
 
         Err(sherr!(
             ParseErr @ ar_span,
@@ -579,8 +579,8 @@ impl super::Builtin for Pack {
 }
 
 impl Pack {
-  fn pack(args: &BuiltinArgs, arr_name: VarStr, associative: bool) -> ShResult<()> {
-    let mut array: VecDeque<(Option<VarStr>, VarStr)> = if associative {
+  fn pack(args: &BuiltinArgs, arr_name: ShStr, associative: bool) -> ShResult<()> {
+    let mut array: VecDeque<(Option<ShStr>, ShStr)> = if associative {
       Shed::vars(|v| v.try_get_assoc_items(&arr_name))
         .option_promote(args.opt_span("assoc"))
         .promote_err(args.cmd_span())?
@@ -680,9 +680,9 @@ impl Pack {
           None       => (arg.clone(), false),
         };
 
-        let (name, arg): (Option<VarStr>, VarStr) = match strops::split_assignment_raw(&arg) {
+        let (name, arg): (Option<ShStr>, ShStr) = match strops::split_assignment_raw(&arg) {
           (rhs, Some(lhs)) => {
-            let name: VarStr = rhs.into();
+            let name: ShStr = rhs.into();
             if !seen.insert(name.clone()) {
               return Err(sherr!(ParseErr @ span, "duplicate field name '{name}' in pack"));
             }
@@ -793,8 +793,8 @@ impl super::Builtin for Unpack {
       (Some(_), Some(_)) => {
         let ar_span : Span   = args.opt_span("array").unwrap();
         let as_span : Span   = args.opt_span("assoc").unwrap();
-        let ar_slice: VarStr = ar_span.slice();
-        let as_slice: VarStr = as_span.slice();
+        let ar_slice: ShStr = ar_span.slice();
+        let as_slice: ShStr = as_span.slice();
 
         Err(sherr!(
             ParseErr @ ar_span,
@@ -808,23 +808,23 @@ impl super::Builtin for Unpack {
 
 enum Field {
   Named {
-    name: VarStr,
-    data: VarStr,
+    name: ShStr,
+    data: ShStr,
     span: Option<Span>,
   },
   Positional {
-    data: VarStr,
+    data: ShStr,
   },
 }
 
 impl Field {
-  fn into_named_data(self) -> Option<(VarStr, VarStr, Option<Span>)> {
+  fn into_named_data(self) -> Option<(ShStr, ShStr, Option<Span>)> {
     match self {
       Field::Named { name, data, span } => Some((name, data, span)),
       _ => None,
     }
   }
-  fn into_data(self) -> VarStr {
+  fn into_data(self) -> ShStr {
     match self {
       Field::Named { data, .. }      => data,
       Field::Positional { data, .. } => data,
@@ -833,7 +833,7 @@ impl Field {
 }
 
 impl Unpack {
-  fn unpack(args: &BuiltinArgs, arr_name: VarStr, associative: bool, append: bool) -> ShResult<()> {
+  fn unpack(args: &BuiltinArgs, arr_name: ShStr, associative: bool, append: bool) -> ShResult<()> {
     let     reader  : Arc<dyn Sink> = procio::stdin_sink()?;
     let mut scratch : ScratchGuard  = procio::take_scratch();
     let     buffer  : &mut Vec<u8>  = scratch.buf_mut();

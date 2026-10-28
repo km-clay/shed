@@ -14,7 +14,7 @@ use nix::{
 
 use crate::{
   opt, sherr,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::{
     self,
     error::{ShErr, ShResultExt},
@@ -39,7 +39,7 @@ fn make_dir(path: &Path, mode: stat::mode_t, tolerate_existing: bool) -> Result<
 }
 
 #[expect(clippy::needless_pass_by_value)]
-fn get_mode(mode: VarStr) -> ShResult<stat::mode_t> {
+fn get_mode(mode: ShStr) -> ShResult<stat::mode_t> {
   let spec   = mode.to_str_lossy();
   let digits = spec.strip_prefix("0o").unwrap_or(&spec);
   let octal  = u32::from_str_radix(digits, 8).ok().filter(|&n| n <= 0o7777);
@@ -117,7 +117,7 @@ impl Builtin for MkDir {
             Ok(created) => created,
             Err(e) => {
               let io_err = io::Error::from_raw_os_error(e as i32);
-              let err = handle_mkdir_err(io_err, &VarStr::from(parent)).option_promote(dir.span());
+              let err = handle_mkdir_err(io_err, &ShStr::from(parent)).option_promote(dir.span());
 
               err.print_error();
               status = 1;
@@ -132,7 +132,7 @@ impl Builtin for MkDir {
             && umask_hides_u
             && let Err(e) = std::fs::set_permissions(parent, Permissions::from_mode(ancestor_mode))
           {
-            let err = chmod::handle_err(e, &VarStr::from(parent))
+            let err = chmod::handle_err(e, &ShStr::from(parent))
               .with_note("the parent directory needs `u+wx` to create anything inside it".into())
               .option_promote(dir.span());
 
@@ -173,7 +173,7 @@ impl Builtin for MkDir {
   }
 }
 
-fn handle_mkdir_err(io_err: io::Error, dir: &VarStr) -> ShErr {
+fn handle_mkdir_err(io_err: io::Error, dir: &ShStr) -> ShErr {
   match io_err.kind() {
     EK::AlreadyExists => {
       let path: &Path = dir.as_ref();

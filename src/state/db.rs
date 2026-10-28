@@ -17,7 +17,7 @@ use nix::libc;
 use rusqlite::Connection;
 
 use crate::{
-  state::{paths, vars::VarStr},
+  state::{paths, vars::ShStr},
   util::error::ShResult,
 };
 
@@ -177,7 +177,7 @@ fn legacy_data_db_path() -> Option<PathBuf> {
 
 /// The on-disk path of the history database.
 fn history_db_path() -> PathBuf {
-  let db_path: VarStr = if let Some(var) = try_var!(b"SHED_HISTDB") {
+  let db_path: ShStr = if let Some(var) = try_var!(b"SHED_HISTDB") {
     var
   } else {
     let home = try_var!(b"HOME").unwrap_or_else(|| ".".into());

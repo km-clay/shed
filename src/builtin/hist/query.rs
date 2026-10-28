@@ -13,7 +13,7 @@ use crate::{
   expand::escape,
   readline::{HistEntry, History},
   sherr,
-  state::{Shed, vars::VarStr},
+  state::{Shed, vars::ShStr},
   util::{error::ShResult, strops::TimeReader},
 };
 
@@ -44,19 +44,19 @@ impl WhereBuilder {
 #[derive(Debug, Default, Clone)]
 pub(super) struct HistQuery {
   // 456 bytes by the way lol 8D
-  pub(super) after       : (Option<VarStr>, bool),
-  pub(super) before      : (Option<VarStr>, bool),
-  pub(super) contains    : (Option<VarStr>, bool),
+  pub(super) after       : (Option<ShStr>, bool),
+  pub(super) before      : (Option<ShStr>, bool),
+  pub(super) contains    : (Option<ShStr>, bool),
   pub(super) lines_gt    : (Option<u64>, bool),
   pub(super) lines_lt    : (Option<u64>, bool),
-  pub(super) starts_with : (Option<VarStr>, bool),
-  pub(super) ends_with   : (Option<VarStr>, bool),
-  pub(super) matches     : (Option<VarStr>, bool),
-  pub(super) duration_gt : (Option<VarStr>, bool),
-  pub(super) duration_lt : (Option<VarStr>, bool),
+  pub(super) starts_with : (Option<ShStr>, bool),
+  pub(super) ends_with   : (Option<ShStr>, bool),
+  pub(super) matches     : (Option<ShStr>, bool),
+  pub(super) duration_gt : (Option<ShStr>, bool),
+  pub(super) duration_lt : (Option<ShStr>, bool),
   pub(super) with_status : (Option<i32>, bool),
-  pub(super) with_token  : (Option<VarStr>, bool),
-  pub(super) in_dir      : (Option<VarStr>, bool),
+  pub(super) with_token  : (Option<ShStr>, bool),
+  pub(super) in_dir      : (Option<ShStr>, bool),
   pub(super) limit       : Option<u64>,
   pub(super) specific_ids: Vec<i64>,
   pub(super) no_numbers  : bool,
@@ -215,7 +215,7 @@ impl HistQuery {
   pub(super) fn from_opts(opts: &[Opt]) -> ShResult<Self> {
     let mut new     = Self::new();
     let mut negated = false; // '--not' flag flips this for one argument
-    let     value   = |opt: &Opt| -> Option<VarStr> { opt.value().ok() };
+    let     value   = |opt: &Opt| -> Option<ShStr> { opt.value().ok() };
 
     for opt in opts {
       match opt.key() {

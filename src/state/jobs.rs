@@ -38,7 +38,7 @@ use yansi::Color;
 
 use crate::{
   shopt, signal,
-  state::vars::{VarStr, VarStrSliceExt},
+  state::vars::{ShStr, ShStrSliceExt},
   varstr,
 };
 
@@ -176,7 +176,7 @@ impl JobMember {
       JobMember::Thread(stage_thread) => stage_thread.is_finished(),
     }
   }
-  pub(crate) fn cmd(&self) -> Option<VarStr> {
+  pub(crate) fn cmd(&self) -> Option<ShStr> {
     match self {
       JobMember::Process(child_proc)  => child_proc.cmd(),
       JobMember::Thread(stage_thread) => stage_thread.command.clone(),
@@ -212,7 +212,7 @@ impl WorkerId {
 
 pub(crate) struct StageThread {
   status   : Option<StageStatus>,
-  command  : Option<VarStr>,
+  command  : Option<ShStr>,
   timer    : Option<CmdTimer>,
   notif    : Option<OwnedFd>,
   channels : Vec<Weak<dyn Sink>>,
@@ -246,7 +246,7 @@ impl StageThread {
       killed   : None,
     }
   }
-  pub(crate) fn with_name(mut self, name: Option<VarStr>) -> Self {
+  pub(crate) fn with_name(mut self, name: Option<ShStr>) -> Self {
     self.command = name;
     self
   }
@@ -379,7 +379,7 @@ impl StageThread {
 pub(crate) struct ChildProc {
   pgid   : Pid,
   pid    : Pid,
-  command: Option<VarStr>,
+  command: Option<ShStr>,
   stat   : WtStat,
   timer  : Option<CmdTimer>,
 }
@@ -392,7 +392,7 @@ impl ChildProc {
     pgid: Option<Pid>,
     timer: Option<CmdTimer>,
   ) -> Self {
-    let command = command.map(VarStr::from);
+    let command = command.map(ShStr::from);
     let stat = if kill(pid, None).is_ok() {
       WtStat::StillAlive
     } else {
@@ -413,7 +413,7 @@ impl ChildProc {
   pub(crate) fn pid(&self) -> Pid {
     self.pid
   }
-  pub(crate) fn cmd(&self) -> Option<VarStr> {
+  pub(crate) fn cmd(&self) -> Option<ShStr> {
     self.command.clone()
   }
   pub(crate) fn stat(&self) -> WtStat {
@@ -518,10 +518,10 @@ impl JobStack {
 
 #[derive(Debug)]
 pub(crate) struct JobData {
-  pub table_id: VarStr,
+  pub table_id: ShStr,
   pub notify  : bool,
   pub stats   : Vec<Outcome>,
-  pub cmds    : Vec<VarStr>,
+  pub cmds    : Vec<ShStr>,
   pub display : String,
   pub timer   : Option<CmdTimer>,
 }
@@ -637,7 +637,7 @@ impl Job {
   pub(crate) fn pgid(&self) -> Pid {
     self.pgid
   }
-  pub(crate) fn get_cmds(&self) -> Vec<VarStr> {
+  pub(crate) fn get_cmds(&self) -> Vec<ShStr> {
     self
       .children
       .iter()
@@ -677,7 +677,7 @@ impl Job {
       }),
     }
   }
-  pub(crate) fn get_cmd_line(&self) -> VarStr {
+  pub(crate) fn get_cmd_line(&self) -> ShStr {
     self.get_cmds().join_with(" | ")
   }
   pub(crate) fn set_stats(&mut self, stat: WtStat) {
@@ -823,7 +823,7 @@ impl Job {
       }
     }
   }
-  pub(crate) fn name(&self) -> Option<VarStr> {
+  pub(crate) fn name(&self) -> Option<ShStr> {
     self.children().first().and_then(JobMember::cmd)
   }
   /// Lossy `String` rendering for UI/notification paths (system messages, the

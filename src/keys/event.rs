@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::state::vars::VarStr;
+use crate::state::vars::ShStr;
 use crate::{util, varstr};
 
 // Credit to Rustyline for the design ideas in this module
@@ -14,7 +14,7 @@ use crate::{util, varstr};
 pub(crate) struct KeyEvent(pub KeyCode, pub ModKeys);
 
 impl KeyEvent {
-  pub(crate) fn as_vim_seq(&self) -> VarStr {
+  pub(crate) fn as_vim_seq(&self) -> ShStr {
     let mut seq                   = util::scratch_buf();
     let     KeyEvent(event, mods) = self;
     let mut needs_angle_bracket   = false;
@@ -141,7 +141,7 @@ impl KeyEvent {
     }
 
     if needs_angle_bracket {
-      VarStr::from_slice(b"<").chain(seq.as_slice()).chain(b">")
+      ShStr::from_slice(b"<").chain(seq.as_slice()).chain(b">")
     } else {
       seq.into()
     }
@@ -259,7 +259,7 @@ mod tests {
 
   use super::*;
 
-  fn seq_of(code: KeyCode, mods: ModKeys) -> VarStr {
+  fn seq_of(code: KeyCode, mods: ModKeys) -> ShStr {
     KeyEvent(code, mods).as_vim_seq()
   }
 

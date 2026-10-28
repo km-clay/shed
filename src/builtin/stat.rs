@@ -12,7 +12,7 @@ use crate::{
   errln,
   expand::escape,
   opt, outln, sherr,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::{
     self,
     error::ShResult,
@@ -171,9 +171,9 @@ impl StrFmt for FsFmt {
 
 /// Truncate a string field's body to the specifier's precision (`%.Ns`),
 /// mirroring `printf`. Numeric fields ignore precision.
-fn truncate_to_prec(body: VarStr, field: &FieldParams) -> VarStr {
+fn truncate_to_prec(body: ShStr, field: &FieldParams) -> ShStr {
   match field.precision() {
-    Some(Count::Static(p)) => body.get(..*p).map(VarStr::from).unwrap_or(body),
+    Some(Count::Static(p)) => body.get(..*p).map(ShStr::from).unwrap_or(body),
     _ => body,
   }
 }
@@ -237,7 +237,7 @@ enum FileConv {
 }
 
 struct FileInfo {
-  name: VarStr,
+  name: ShStr,
   st_ino: u64,
   st_nlink: u64,
   st_mode: u32,
@@ -256,7 +256,7 @@ struct FileInfo {
 }
 
 impl FileInfo {
-  fn new(deref: bool, name: VarStr) -> ShResult<Self> {
+  fn new(deref: bool, name: ShStr) -> ShResult<Self> {
     let stat = if deref {
       stat::stat::<Path>(name.as_ref())
     } else {
@@ -589,7 +589,7 @@ enum FsConv {
 
 struct FsInfo {
   /// The operand this was gathered for, which is what `%n` reports.
-  path: VarStr,
+  path: ShStr,
   block_size: u64,
   fundamental_bs: u64,
   total_blks: u64,
@@ -600,14 +600,14 @@ struct FsInfo {
   fs_id: u64,
   name_max: u64,
   fs_type_id: Option<u64>,      // numeric magic; linux only
-  fs_type_name: Option<VarStr>, // human-readable type, if resolvable
+  fs_type_name: Option<ShStr>, // human-readable type, if resolvable
 }
 
 impl FsInfo {
   /// Gather filesystem info for `path`. Numeric fields come from the
   /// portable `statvfs`; the filesystem type is resolved separately since
   /// that part is platform-specific.
-  fn for_path(path: &VarStr) -> nix::Result<Self> {
+  fn for_path(path: &ShStr) -> nix::Result<Self> {
     let v = statvfs::statvfs::<Path>(path.as_ref())?;
     let (fs_type_id, fs_type_name) = fs_type_of(path);
     Ok(Self {
@@ -646,7 +646,7 @@ impl FsInfo {
 
 /// Resolve the filesystem type at `path` into `(numeric magic, human name)`.
 #[cfg(linux_like)]
-fn fs_type_of(path: &VarStr) -> (Option<u64>, Option<VarStr>) {
+fn fs_type_of(path: &ShStr) -> (Option<u64>, Option<ShStr>) {
   match statfs::statfs::<Path>(path.as_ref()) {
     Ok(s) => {
       let ty = s.filesystem_type();
@@ -657,7 +657,7 @@ fn fs_type_of(path: &VarStr) -> (Option<u64>, Option<VarStr>) {
 }
 
 #[cfg(not(linux_like))]
-fn fs_type_of(path: &VarStr) -> (Option<u64>, Option<VarStr>) {
+fn fs_type_of(path: &ShStr) -> (Option<u64>, Option<ShStr>) {
   match statfs::statfs::<Path>(path.as_ref()) {
     Ok(s)  => (None, Some(s.filesystem_type_name().to_string().into())),
     Err(_) => (None, None),

@@ -15,7 +15,7 @@ use crate::{
   sherr, signal,
   state::{
     Shed,
-    vars::{VarKind, VarStr},
+    vars::{VarKind, ShStr},
   },
   util::{
     self,
@@ -48,8 +48,8 @@ impl super::Builtin for Poll {
 
     let revents = args
       .opt_value("revents")
-      .unwrap_or_else(|| VarStr::from("SHED_REVENTS"));
-    let mut revents_arr: Vec<(VarStr, VarStr)> = vec![];
+      .unwrap_or_else(|| ShStr::from("SHED_REVENTS"));
+    let mut revents_arr: Vec<(ShStr, ShStr)> = vec![];
 
     let timeout: i32 = match args.opt_value("timeout") {
       None => -1,
@@ -118,7 +118,7 @@ impl Poll {
 
     Ok((pfd, (logical, sink)))
   }
-  fn fmt_revents(re: libc::c_short) -> Option<VarStr> {
+  fn fmt_revents(re: libc::c_short) -> Option<ShStr> {
     let mut flags = vec![];
 
     if re & libc::POLLIN != 0 {
@@ -203,7 +203,7 @@ impl Poll {
 
     Ok((pfds, meta))
   }
-  fn parse_events(events: VarStr, args: &super::BuiltinArgs) -> ShResult<PollEntries> {
+  fn parse_events(events: ShStr, args: &super::BuiltinArgs) -> ShResult<PollEntries> {
     let mut pfds = vec![];
     let mut meta = vec![];
     let     span = args.opt_span("events").unwrap();

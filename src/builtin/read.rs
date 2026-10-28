@@ -13,7 +13,7 @@ use crate::{
   state::{
     Shed, params,
     terminal::Terminal,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarFlags, VarKind, ShStr},
   },
   util::{
     self,
@@ -423,7 +423,7 @@ fn field_split_vars(input: &[u8], vars: &[Word]) -> ShResult<()> {
     Shed::vars_mut(|v| {
       v.set_var(
         b"REPLY",
-        VarKind::string(VarStr::from(input)),
+        VarKind::string(ShStr::from(input)),
         VarFlags::empty(),
       )
     })?;
@@ -439,7 +439,7 @@ fn field_split_vars(input: &[u8], vars: &[Word]) -> ShResult<()> {
     Shed::vars_mut(|v| {
       v.set_var(
         name,
-        VarKind::string(VarStr::from(value)),
+        VarKind::string(ShStr::from(value)),
         VarFlags::empty(),
       )
     })?;
@@ -457,7 +457,7 @@ fn field_split_vars_quoted(input: &[u8], vars: &[Word]) -> ShResult<()> {
     Shed::vars_mut(|v| {
       v.set_var(
         b"REPLY",
-        VarKind::string(VarStr::from(joined)),
+        VarKind::string(ShStr::from(joined)),
         VarFlags::empty(),
       )
     })?;
@@ -476,7 +476,7 @@ fn field_split_vars_quoted(input: &[u8], vars: &[Word]) -> ShResult<()> {
     Shed::vars_mut(|v| {
       v.set_var(
         name,
-        VarKind::string(VarStr::from(value.unwrap_or_default())),
+        VarKind::string(ShStr::from(value.unwrap_or_default())),
         VarFlags::empty(),
       )
     })?;
@@ -500,7 +500,7 @@ fn field_split_arr(input: &[u8], arr_name: &[u8], quoted: bool) -> ShResult<()> 
   Shed::vars_mut(|v| {
     v.set_var(
       arr_name,
-      VarKind::arr(fields.into_iter().map(VarStr::from)),
+      VarKind::arr(fields.into_iter().map(ShStr::from)),
       VarFlags::empty(),
     )
   })
@@ -595,12 +595,12 @@ impl super::Builtin for ReadKey {
 mod tests {
   use crate::set_var;
   use crate::state::terminal::Terminal;
-  use crate::state::vars::VarStr;
+  use crate::state::vars::ShStr;
   use crate::state::{self, Shed, vars::VarKind};
   use crate::tests::testutil::{TestGuard, test_input};
   use crate::var;
 
-  fn arr(name: &str) -> Vec<VarStr> {
+  fn arr(name: &str) -> Vec<ShStr> {
     Shed::vars(|v| v.try_get_arr_elems(name.as_bytes())).unwrap()
   }
 

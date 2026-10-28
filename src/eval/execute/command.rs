@@ -34,7 +34,7 @@ use crate::{
     params, shopt,
     terminal::Terminal,
     thread::StageResult,
-    vars::VarStr,
+    vars::ShStr,
   },
   util::{
     error::{ShErr, ShResult},
@@ -57,7 +57,7 @@ pub(crate) fn reexec_as_script(
   if classify::is_binary_file(script) {
     return Err(Errno::ENOEXEC);
   }
-  let     interp   = VarStr::from(std::env::current_exe().map_err(|_| Errno::ENOEXEC)?);
+  let     interp   = ShStr::from(std::env::current_exe().map_err(|_| Errno::ENOEXEC)?);
   let     interp   = interp.to_cstring_lossy();
   let mut new_args = vec![interp.clone(), script.to_owned()];
 
@@ -159,14 +159,14 @@ impl super::Dispatcher {
         e.print_error();
         return Ok(());
       }
-      let mut names: HashSet<VarStr> = HashSet::default();
+      let mut names: HashSet<ShStr> = HashSet::default();
       for id in assignments {
         let a = &tree[*id];
         if let NdRule::Assignment { var, .. } = &a.class {
           let name = tree[*var].span.slice();
           let raw  = name.as_bytes();
 
-          let name: VarStr =
+          let name: ShStr =
             params::parse_arr_bracket(raw).map_or_else(|| raw.into(), |(base, _)| base);
 
           if names.insert(name.clone()) {
@@ -217,12 +217,12 @@ impl super::Dispatcher {
 
       let mut exec_file: Option<CString> = None;
       let Err(e) = if let Some(path) = exec_path {
-        let     path   = VarStr::from(path);
+        let     path   = ShStr::from(path);
         let     c_path = path.to_cstring_lossy();
         let mut envp   = exec_args.envp.to_vec();
 
         envp.retain(|e| !e.as_bytes().starts_with(b"_="));
-        let path = VarStr::from([b"_=", path.as_bytes()].concat());
+        let path = ShStr::from([b"_=", path.as_bytes()].concat());
         envp.push(path.to_cstring_lossy());
 
         exec_file = Some(c_path.clone());

@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
-use crate::state::vars::VarStr;
+use crate::state::vars::ShStr;
 
 use super::{
   CmdReplay, CmdState, E, EditMode, K, M, ModeReport, ParseResult, ViParser, common_cmds,
@@ -422,7 +422,7 @@ impl EditMode for ViVisual {
     CursorStyle::Block(false)
   }
 
-  fn pending_seq(&self) -> Option<VarStr> {
+  fn pending_seq(&self) -> Option<ShStr> {
     Some(self.pending_seq.as_str().into())
   }
 

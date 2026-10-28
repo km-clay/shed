@@ -8,7 +8,7 @@ use crate::{
   procio,
   readline::linebuf::edit::RecordPolicy,
   sherr, shopt,
-  state::{SourceId, terminal, vars::VarStr},
+  state::{SourceId, terminal, vars::ShStr},
   status_msg, util,
 };
 
@@ -1573,7 +1573,7 @@ impl super::LineBuf {
   pub(crate) fn clear_pending_search(&mut self) {
     self.pending_search = None;
   }
-  pub(crate) fn update_pending_search(&mut self, new: Option<VarStr>) {
+  pub(crate) fn update_pending_search(&mut self, new: Option<ShStr>) {
     let Some(new) = new else { return };
     self.pending_search = (!new.is_empty()).then_some(new);
   }

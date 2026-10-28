@@ -8,7 +8,7 @@ use crate::{
   state::{
     Shed,
     timers::{StopWatch, TimerStatus, WatchName},
-    vars::VarStr,
+    vars::ShStr,
   },
   sub_command,
   util::{
@@ -64,8 +64,8 @@ impl Builtin for List {
     }
 
     // snapshot under the borrow, render and print outside it
-    let snapshot: Vec<(VarStr, TimerStatus)> = Shed::timers(|t| {
-      std::iter::once((VarStr::from("default"), t.default_timer().status()))
+    let snapshot: Vec<(ShStr, TimerStatus)> = Shed::timers(|t| {
+      std::iter::once((ShStr::from("default"), t.default_timer().status()))
         .chain(
           t.named()
             .map(|(name, timer)| (name.as_var_str().clone(), timer.status())),
@@ -83,7 +83,7 @@ impl Builtin for List {
           .and_then(|f| f.render(&mut strops::dur_delta(status.elapsed()), &mut buf))
           .option_promote(fmt.span())
           .promote_err(args.cmd_span())?;
-        VarStr::from(buf)
+        ShStr::from(buf)
       } else {
         super::fmt_timer_status(&status)
       };
@@ -226,7 +226,7 @@ impl Builtin for Status {
         return Err(e);
       }
 
-      VarStr::from(buf)
+      ShStr::from(buf)
     } else {
       super::fmt_timer_status(&status)
     };

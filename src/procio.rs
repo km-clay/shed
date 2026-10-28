@@ -59,7 +59,7 @@ use crate::{
     meta::MetaTab,
     shopt::ReadLimit,
     terminal::Terminal,
-    vars::{VarFlags, VarKind, VarKindTag, VarName, VarStr},
+    vars::{VarFlags, VarKind, VarKindTag, VarName, ShStr},
   },
   util::{
     self,
@@ -427,7 +427,7 @@ pub(crate) fn pipes_high_nonblocking() -> nix::Result<(OwnedFd, OwnedFd)> {
   Ok((r, w))
 }
 
-fn read_var_ref(cur: &mut SliceCursor, bytes: &[u8]) -> Option<VarStr> {
+fn read_var_ref(cur: &mut SliceCursor, bytes: &[u8]) -> Option<ShStr> {
   let start = cur.pos();
   if !cur.bump_if(|b| b.is_ascii_alphabetic() || b == b'_') {
     return None;
@@ -436,10 +436,10 @@ fn read_var_ref(cur: &mut SliceCursor, bytes: &[u8]) -> Option<VarStr> {
   if cur.bump_if_eq(b'[') && !strops::scan_brackets(cur, 1) {
     return None; // unterminated subscript
   }
-  Some(VarStr::from(&bytes[start..cur.pos()]))
+  Some(ShStr::from(&bytes[start..cur.pos()]))
 }
 
-fn read_brace_var(cur: &mut SliceCursor, bytes: &[u8]) -> Option<VarStr> {
+fn read_brace_var(cur: &mut SliceCursor, bytes: &[u8]) -> Option<ShStr> {
   let var = read_var_ref(cur, bytes)?;
   cur.bump_if_eq(b'}').then_some(var)
 }
@@ -466,7 +466,7 @@ impl ResolvedFd {
 
 #[derive(Debug, Clone)]
 pub(crate) enum FdSlot {
-  Var(VarStr),
+  Var(ShStr),
   Raw(RawFd),
   Word(Tk),
 }
@@ -516,8 +516,8 @@ impl From<RawFd> for FdSlot {
   }
 }
 
-impl From<VarStr> for FdSlot {
-  fn from(var: VarStr) -> Self {
+impl From<ShStr> for FdSlot {
+  fn from(var: ShStr) -> Self {
     FdSlot::Var(var)
   }
 }
@@ -544,7 +544,7 @@ impl RedirBldr {
       ..self
     }
   }
-  pub(crate) fn with_fd_var(self, var: VarStr) -> Self {
+  pub(crate) fn with_fd_var(self, var: ShStr) -> Self {
     Self {
       fd: Some(FdSlot::Var(var)),
       ..self
@@ -592,7 +592,7 @@ impl RedirBldr {
       RedirTarget::Fd(src_fd) if class.is_dup_op() => Ok(RedirSpec::dup(src_fd, fd, class)),
       RedirTarget::HereDoc { body, flags } => {
         // Strip leading tabs per line BEFORE expansion (POSIX order).
-        let buf: VarStr = if flags.contains(TkFlags::HERESTRING) {
+        let buf: ShStr = if flags.contains(TkFlags::HERESTRING) {
           // Raw word; expanded and newline-terminated at redirection time.
           body
         } else if flags.contains(TkFlags::TAB_HEREDOC) {
@@ -638,7 +638,7 @@ impl RedirBldr {
     // throaway macro for reading variable names in '>@var' redirs
     macro_rules! read_name {
       ($ty:path) => {
-        let name = VarStr::from(&bytes[cur.pos()..]);
+        let name = ShStr::from(&bytes[cur.pos()..]);
         if name.is_empty() {
           return Err(sherr!(ParseErr, "expected a variable name after '@' in redirection"));
         }
@@ -848,9 +848,9 @@ impl RedirType {
 pub(super) enum RedirTarget {
   Path(Tk),
   Fd(FdSlot),
-  Var(VarStr),
+  Var(ShStr),
   Close,
-  HereDoc { body: VarStr, flags: TkFlags },
+  HereDoc { body: ShStr, flags: TkFlags },
 }
 
 /// The final representation of a redirection.
@@ -865,7 +865,7 @@ pub(super) enum RedirSpec {
   },
   Var {
     fd  : FdSlot,
-    name: VarStr,
+    name: ShStr,
     mode: RedirType,
   },
   Dup {
@@ -878,13 +878,13 @@ pub(super) enum RedirSpec {
   },
   Buffer {
     fd   : FdSlot,
-    buf  : VarStr,
+    buf  : ShStr,
     flags: TkFlags,
   },
 }
 
 impl RedirSpec {
-  pub(crate) fn var(fd: FdSlot, name: VarStr, mode: RedirType) -> Self {
+  pub(crate) fn var(fd: FdSlot, name: ShStr, mode: RedirType) -> Self {
     Self::Var { fd, name, mode }
   }
   pub(crate) fn file(fd: FdSlot, path: Tk, mode: RedirType) -> Self {
@@ -898,7 +898,7 @@ impl RedirSpec {
   }
   /// The span of the redirection operator, if this spec carries one. Used to
   /// point errors at the offending redirect.
-  pub(crate) fn buffer(fd: FdSlot, buf: VarStr, flags: TkFlags) -> Self {
+  pub(crate) fn buffer(fd: FdSlot, buf: ShStr, flags: TkFlags) -> Self {
     Self::Buffer { fd, buf, flags }
   }
   /// The descriptor this redirection installs onto, allocating one for a
@@ -945,7 +945,7 @@ impl RedirSpec {
           let content = if matches!(kind, RedirType::AppendVar) {
             Shed::vars(|v| v.resolve_words(&vn).unwrap_or_default().as_one_word()).content()
           } else {
-            VarStr::default()
+            ShStr::default()
           };
 
           if Shed::meta(MetaTab::redir_forks) {
@@ -2237,7 +2237,7 @@ thread_local! {
   /// Captures made by a pipeline stage running in a worker thread, returned to
   /// the parent so they land in its variable table rather than the worker's.
   /// `None` in the shell's own thread, where the commit already lands correctly.
-  static STAGE_VAR_WRITES: RefCell<Option<Vec<(VarName, VarStr)>>> =
+  static STAGE_VAR_WRITES: RefCell<Option<Vec<(VarName, ShStr)>>> =
     const { RefCell::new(None) };
 }
 
@@ -2245,11 +2245,11 @@ pub(crate) fn arm_stage_var_writes() {
   STAGE_VAR_WRITES.with(|w| *w.borrow_mut() = Some(Vec::new()));
 }
 
-pub(crate) fn take_stage_var_writes() -> Vec<(VarName, VarStr)> {
+pub(crate) fn take_stage_var_writes() -> Vec<(VarName, ShStr)> {
   STAGE_VAR_WRITES.with(|w| w.borrow_mut().take().unwrap_or_default())
 }
 
-pub(crate) fn apply_stage_var_writes(writes: Vec<(VarName, VarStr)>) {
+pub(crate) fn apply_stage_var_writes(writes: Vec<(VarName, ShStr)>) {
   for (name, val) in writes {
     commit_var(&name, val.as_bytes()).unwrap_or_else(|e| {
       let name = name.name();
@@ -2264,13 +2264,13 @@ pub(crate) fn apply_stage_var_writes(writes: Vec<(VarName, VarStr)>) {
 /// handled here rather than during the scan. Splitting and globbing are off: a
 /// target has to resolve to exactly one name, and a `*` in a name would
 /// otherwise be matched against the filesystem.
-fn expand_var_target(raw: &VarStr) -> ShResult<VarName> {
+fn expand_var_target(raw: &ShStr) -> ShResult<VarName> {
   let expanded: Vec<u8> = Expander::from_raw(raw.as_bytes(), TkFlags::empty())
     .no_glob()
     .no_split()
     .expand_no_split()?
     .into();
-  let expanded = VarStr::from(expanded);
+  let expanded = ShStr::from(expanded);
 
   let base = expanded
     .as_bytes()
@@ -2293,7 +2293,7 @@ fn expand_var_target(raw: &VarStr) -> ShResult<VarName> {
 }
 
 fn commit_var(var_name: &VarName, bytes: &[u8]) -> ShResult<()> {
-  let val = VarStr::from(bytes);
+  let val = ShStr::from(bytes);
   let name = var_name.name();
 
   STAGE_VAR_WRITES.with(|w| {
@@ -2831,8 +2831,8 @@ pub(crate) fn write_all_to_fd_checked(fd: BorrowedFd, bytes: &[u8]) -> ShResult<
 pub(super) fn capture_command(
   cmd: &[u8],
   stdin: Option<&[u8]>,
-  name: Option<&VarStr>,
-) -> ShResult<VarStr> {
+  name: Option<&ShStr>,
+) -> ShResult<ShStr> {
   let (rpipe, wpipe) = OsPipe::pipes()?;
   let stdin_pipe = if stdin.is_some() {
     Some(OsPipe::pipes()?)
@@ -2959,7 +2959,7 @@ fn expand_fd(word: &Tk) -> ShResult<Option<RawFd>> {
   Ok(Some(from))
 }
 /// Open a file for redirection, respecting the `noclobber` shell option for output redirections.
-pub(super) fn open_redir_file(class: RedirType, path: &VarStr) -> ShResult<OwnedFd> {
+pub(super) fn open_redir_file(class: RedirType, path: &ShStr) -> ShResult<OwnedFd> {
   let file: OwnedFd = get_redir_file(class, path)?.into();
   let file          = move_high(file)?;
   Ok(file)

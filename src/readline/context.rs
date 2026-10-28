@@ -40,7 +40,7 @@ use crate::{
     Shed, cmd,
     meta::UtilKind,
     params, paths,
-    vars::{ShellParam, VarStr},
+    vars::{ShellParam, ShStr},
   },
   util::strops::{self, QuoteState},
 };
@@ -83,7 +83,7 @@ pub(super) fn get_ex_context_tokens(input: &str) -> Vec<CtxTk> {
 
 /// A command, backtick, or process substitution found nested inside a word.
 pub(crate) enum NestedSub {
-  Cmd(Span, VarStr),
+  Cmd(Span, ShStr),
   Proc(Span),
 }
 
@@ -413,7 +413,7 @@ impl CtxTkRule {
 #[derive(Debug, Clone)]
 pub(super) struct CtxTk {
   span      : Span,
-  bytes     : VarStr,
+  bytes     : ShStr,
   class     : CtxTkRule,
   sub_tokens: Vec<CtxTk>,
 }
@@ -434,7 +434,7 @@ impl CtxTk {
   pub(super) fn as_bytes(&self) -> &[u8] {
     self.bytes.as_bytes()
   }
-  pub(super) fn slice(&self) -> &VarStr {
+  pub(super) fn slice(&self) -> &ShStr {
     &self.bytes
   }
   pub(super) fn class(&self) -> &CtxTkRule {

@@ -15,7 +15,7 @@ use crate::{
     Shed,
     meta::{MetaTab, Utility},
     paths,
-    vars::VarStr,
+    vars::ShStr,
   },
   util::strops::{self},
   var,
@@ -24,7 +24,7 @@ use crate::{
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
 pub(crate) fn lookup_cmd(cmd: &[u8]) -> Option<PathBuf> {
   if cmd.contains(&b'/') {
-    let p = PathBuf::from(VarStr::from(cmd));
+    let p = PathBuf::from(ShStr::from(cmd));
     return p.is_file().then_some(p);
   }
   let path = Shed::meta_mut(|m| {
@@ -69,12 +69,12 @@ pub(crate) fn try_hash() {
   }
 }
 
-pub(crate) fn list_util_names() -> HashSet<VarStr> {
+pub(crate) fn list_util_names() -> HashSet<ShStr> {
   let mut cmd_names = HashSet::default();
   let path_cmds = super::meta::MetaTab::get_cmds_in_path()
     .into_iter()
     .map(|u| u.name());
-  let builtin_names = BUILTIN_NAMES.iter().map(|n| VarStr::from(*n));
+  let builtin_names = BUILTIN_NAMES.iter().map(|n| ShStr::from(*n));
   let func_names    = Shed::logic(|l| l.funcs().keys().cloned().collect_vec());
   let aliases       = Shed::logic(|l| l.aliases().keys().cloned().collect_vec());
 
@@ -91,14 +91,14 @@ pub(crate) fn list_util_names() -> HashSet<VarStr> {
 /// # Panics
 /// This calls [`list_util_names()`], which calls [`Shed::meta()`] internally.
 /// Calling this from inside of a [`Shed::meta()`] closure is a `RefCell` panic.
-pub(crate) fn check_typo(cmd: &[u8]) -> Vec<VarStr> {
+pub(crate) fn check_typo(cmd: &[u8]) -> Vec<ShStr> {
   check_typo_against(cmd, list_util_names())
 }
 
 pub(crate) fn check_typo_against(
   cmd: &[u8],
-  cand: impl IntoIterator<Item = VarStr>,
-) -> Vec<VarStr> {
+  cand: impl IntoIterator<Item = ShStr>,
+) -> Vec<ShStr> {
   let max_edits = (cmd.len() / 3).clamp(1, 2);
   let max_dist  = max_edits * strops::EDIT_WEIGHT;
 

@@ -6,8 +6,8 @@ use crate::{
     lex::LexFlags,
     parse::{ParseFlags, ParsedSrc},
   },
-  state::vars::VarStr,
-  util::{pos::Pos, strops::VarStrDisplay},
+  state::vars::ShStr,
+  util::{pos::Pos, strops::ShStrDisplay},
 };
 
 use super::{
@@ -116,8 +116,8 @@ pub(crate) struct Edit {
   old_cursor: Pos,
   new_cursor: Pos,
   at        : Pos,
-  removed   : VarStr,
-  inserted  : VarStr,
+  removed   : ShStr,
+  inserted  : ShStr,
 }
 
 impl Edit {
@@ -161,8 +161,8 @@ impl Edit {
 
 pub(super) struct Diff {
   start   : Pos,
-  removed : VarStr,
-  inserted: VarStr,
+  removed : ShStr,
+  inserted: ShStr,
 }
 
 impl Diff {
@@ -184,8 +184,8 @@ impl Diff {
         None => {
           return Self {
             start   : Pos::default(),
-            removed : VarStr::default(),
-            inserted: VarStr::default(),
+            removed : ShStr::default(),
+            inserted: ShStr::default(),
           };
         } // identical
         _ => {} // >1 differing rows: fall through to the flat diff
@@ -210,8 +210,8 @@ impl Diff {
     while s < smax && ag[ag.len() - 1 - s] == bg[bg.len() - 1 - s] {
       s += 1;
     }
-    let     removed  = VarStr::from_slices(ag[p..ag.len() - s].iter());
-    let     inserted = VarStr::from_slices(bg[p..bg.len() - s].iter());
+    let     removed  = ShStr::from_slices(ag[p..ag.len() - s].iter());
+    let     inserted = ShStr::from_slices(bg[p..bg.len() - s].iter());
     let mut row      = 0;
     let mut col      = 0;
     for g in &ag[..p] {
@@ -244,8 +244,8 @@ impl Diff {
     while s < smax && bg[bg.len() - 1 - s] == ag[ag.len() - 1 - s] {
       s += 1;
     }
-    let removed : VarStr = Line(bg[p..bg.len() - s].to_vec()).to_var_str();
-    let inserted: VarStr = Line(ag[p..ag.len() - s].to_vec()).to_var_str();
+    let removed : ShStr = Line(bg[p..bg.len() - s].to_vec()).to_var_str();
+    let inserted: ShStr = Line(ag[p..ag.len() - s].to_vec()).to_var_str();
     Self {
       start: Pos { row, col: p },
       removed,

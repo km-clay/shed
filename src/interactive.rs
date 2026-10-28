@@ -40,7 +40,7 @@ use crate::{
     meta::MetaTab,
     params, rc,
     terminal::{CursorCtl, TermGuard, Terminal},
-    vars::VarStr,
+    vars::ShStr,
   },
   status_msg, try_var,
   util::{
@@ -57,7 +57,7 @@ thread_local! {
 }
 
 /// Return a string that identifies the command being submitted
-fn get_repl_entry_name() -> VarStr {
+fn get_repl_entry_name() -> ShStr {
   let id = REPL_ENTRIES.with(|c| c.fetch_add(1, Ordering::SeqCst));
   varstr!("repl_entry #{id}")
 }
@@ -684,7 +684,7 @@ pub(crate) enum Redraw {
 pub(crate) fn run_prompt_command(
   input: String,
   clear_prompt: Option<Redraw>,
-  source: Option<VarStr>,
+  source: Option<ShStr>,
 ) -> ShResult<LoopAction> {
   exec_term!(TermCtl::Osc(ExecStart)).ok();
 

@@ -62,7 +62,7 @@ impl<T: ValueBytes + ?Sized> ValueBytes for &T {
   }
 }
 
-impl ValueBytes for VarStr {
+impl ValueBytes for ShStr {
   fn value_bytes(&self) -> Vec<u8> {
     self.as_bytes().to_vec()
   }
@@ -124,7 +124,7 @@ fn join_lines(mut lines: Vec<Vec<u8>>) -> Vec<u8> {
   out
 }
 
-pub(crate) fn serialize_var(name: &[u8], var: &Var) -> Option<VarStr> {
+pub(crate) fn serialize_var(name: &[u8], var: &Var) -> Option<ShStr> {
   let Var { flags, kind } = var;
 
   if let VarKind::Magic(_) = kind {
@@ -363,11 +363,11 @@ pub(crate) enum ArrIndex {
   ArgCount,
   AllJoined,
   AllSplit,
-  Key(VarStr),
+  Key(ShStr),
 
   /// Unresolved index, parsed depending on whether we are targeting an
   /// indexed array or an associative array
-  Raw(VarStr),
+  Raw(ShStr),
 }
 
 impl ArrIndex {
@@ -378,7 +378,7 @@ impl ArrIndex {
   pub(crate) fn parse(s: &str, allow_side_effects: bool) -> ShResult<Self> {
     let input    = SegStream::from(s);
     let expanded = var::expand_raw_inner(None, &mut input.cursor(), allow_side_effects, false)?;
-    let s        = VarStr::from(expanded.as_bytes());
+    let s        = ShStr::from(expanded.as_bytes());
 
     match s.as_bytes() {
       b"@" => Ok(Self::AllSplit),
@@ -388,7 +388,7 @@ impl ArrIndex {
         && !s[1..].is_empty()
         && s[1..].chars().all(|c| c.is_ascii_digit()) =>
       {
-        let idx = VarStr::from(&s[1..]);
+        let idx = ShStr::from(&s[1..]);
         let idx = idx.parse::<usize>().unwrap();
         Ok(Self::FromBack(idx))
       }
@@ -434,14 +434,14 @@ impl ArrIndex {
 /// causing re-entrant borrows.
 #[derive(Clone, Debug)]
 pub(crate) struct VarName {
-  name       : VarStr,
+  name       : ShStr,
   index      : Option<ArrIndex>,
   slice_start: Option<usize>,
   slice_len  : Option<usize>,
 }
 
 impl VarName {
-  fn plain(name: VarStr) -> Self {
+  fn plain(name: ShStr) -> Self {
     Self {
       name,
       index: None,
@@ -483,7 +483,7 @@ impl VarName {
         .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_');
 
       if next_is_name {
-        return Ok((Self::plain(VarStr::default()), 0));
+        return Ok((Self::plain(ShStr::default()), 0));
       }
 
       cursor.bump();
@@ -644,7 +644,7 @@ impl VarName {
       .map(|(varname, _)| varname)
   }
 
-  pub(crate) fn name(&self) -> VarStr {
+  pub(crate) fn name(&self) -> ShStr {
     self.name.clone()
   }
   pub(crate) fn index(&self) -> Option<&ArrIndex> {
@@ -678,16 +678,16 @@ impl VarName {
 }
 
 #[derive(Clone)]
-pub(crate) struct MagicVar(Arc<dyn Fn() -> Option<VarStr> + Send + Sync>);
+pub(crate) struct MagicVar(Arc<dyn Fn() -> Option<ShStr> + Send + Sync>);
 
-impl<F: Fn() -> Option<VarStr> + 'static + Send + Sync> From<F> for MagicVar {
+impl<F: Fn() -> Option<ShStr> + 'static + Send + Sync> From<F> for MagicVar {
   fn from(value: F) -> Self {
     Self(Arc::new(value))
   }
 }
 
 impl Deref for MagicVar {
-  type Target = dyn Fn() -> Option<VarStr>;
+  type Target = dyn Fn() -> Option<ShStr>;
   fn deref(&self) -> &Self::Target {
     &*self.0
   }
@@ -699,12 +699,12 @@ impl Debug for MagicVar {
   }
 }
 
-pub(crate) trait VarStrSliceExt {
-  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> VarStr;
+pub(crate) trait ShStrSliceExt {
+  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> ShStr;
 }
 
-impl VarStrSliceExt for [VarStr] {
-  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> VarStr {
+impl ShStrSliceExt for [ShStr] {
+  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> ShStr {
     let sep = sep.as_ref();
 
     let mut out  = vec![];
@@ -716,12 +716,12 @@ impl VarStrSliceExt for [VarStr] {
         out.extend_from_slice(v.as_bytes());
       }
     }
-    VarStr::from(out)
+    ShStr::from(out)
   }
 }
 
-impl VarStrSliceExt for [Word] {
-  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> VarStr {
+impl ShStrSliceExt for [Word] {
+  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> ShStr {
     let sep = sep.as_ref();
 
     let mut out  = vec![];
@@ -733,12 +733,12 @@ impl VarStrSliceExt for [Word] {
         out.extend_from_slice(v.as_bytes());
       }
     }
-    VarStr::from(out)
+    ShStr::from(out)
   }
 }
 
-impl VarStrSliceExt for [&VarStr] {
-  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> VarStr {
+impl ShStrSliceExt for [&ShStr] {
+  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> ShStr {
     let sep = sep.as_ref();
 
     let mut out  = vec![];
@@ -750,22 +750,22 @@ impl VarStrSliceExt for [&VarStr] {
         out.extend_from_slice(v.as_bytes());
       }
     }
-    VarStr::from(out)
+    ShStr::from(out)
   }
 }
 
 /// shed's internal string type. Basically just a very fancy `&[u8]`. Used mainly when you need
 /// ownership of a byte slice that doesn't necessarily allocate like `Vec<u8>` would.
 ///
-/// `VarStr` is immutable, unlike [`String`].
+/// `ShStr` is immutable, unlike [`String`].
 ///
 /// It is a wrapper around [`hipstr::HipByt`], which is itself a shared-ownership byte sequence.
 /// It does not have the same UTF-8 guarantees as [`String`] and [`str`], which is necessary to preserve
 /// exact byte structure instead of mangling with functions like `to_string_lossy()`.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
-pub(crate) struct VarStr(HipByt<'static>);
+pub(crate) struct ShStr(HipByt<'static>);
 
-impl VarStr {
+impl ShStr {
   pub(crate) fn as_bytes(&self) -> &[u8] {
     &self.0
   }
@@ -794,9 +794,9 @@ impl VarStr {
 
   /// Wrapper method for [`FromStr::from_str`]
   ///
-  /// Fails if the `VarStr` is invalid UTF-8, or the parse fails.
-  /// On failure, returns a clone of the original `VarStr` for error reporting.
-  pub(crate) fn parse<T: FromStr>(&self) -> Result<T, VarStr> {
+  /// Fails if the `ShStr` is invalid UTF-8, or the parse fails.
+  /// On failure, returns a clone of the original `ShStr` for error reporting.
+  pub(crate) fn parse<T: FromStr>(&self) -> Result<T, ShStr> {
     self
       .to_str()
       .ok_or_else(|| self.clone())?
@@ -857,20 +857,20 @@ impl VarStr {
   }
 }
 
-impl Debug for VarStr {
+impl Debug for ShStr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "VarStr({:?})", self.to_str_lossy())
+    write!(f, "ShStr({:?})", self.to_str_lossy())
   }
 }
 
-impl Deref for VarStr {
+impl Deref for ShStr {
   type Target = [u8];
   fn deref(&self) -> &Self::Target {
     &self.0
   }
 }
 
-impl ToSql for VarStr {
+impl ToSql for ShStr {
   fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
     // Bind valid UTF-8 as TEXT so callers reading columns back as `String`
     // keep working; fall back to BLOB only when the bytes aren't UTF-8.
@@ -881,10 +881,10 @@ impl ToSql for VarStr {
   }
 }
 
-impl FromSql for VarStr {
+impl FromSql for ShStr {
   fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
     match value {
-      // `ToSql` binds values as BLOBs (VarStr may hold non-UTF-8 bytes), but
+      // `ToSql` binds values as BLOBs (ShStr may hold non-UTF-8 bytes), but
       // accept TEXT too so rows written by older, UTF-8-only builds still read.
       rusqlite::types::ValueRef::Text(s) | rusqlite::types::ValueRef::Blob(s) => {
         Ok(Self(HipByt::from(s)))
@@ -894,7 +894,7 @@ impl FromSql for VarStr {
   }
 }
 
-impl NixPath for VarStr {
+impl NixPath for ShStr {
   fn is_empty(&self) -> bool {
     self.0.is_empty()
   }
@@ -914,19 +914,19 @@ impl NixPath for VarStr {
   }
 }
 
-impl Borrow<[u8]> for VarStr {
+impl Borrow<[u8]> for ShStr {
   fn borrow(&self) -> &[u8] {
     self.as_bytes()
   }
 }
 
-impl From<SmallVec<[u8; 24]>> for VarStr {
+impl From<SmallVec<[u8; 24]>> for ShStr {
   fn from(value: SmallVec<[u8; 24]>) -> Self {
     Self(HipByt::from(value.as_slice()))
   }
 }
 
-impl From<char> for VarStr {
+impl From<char> for ShStr {
   fn from(value: char) -> Self {
     let mut buf = [0u8; 4];
     let s       = value.encode_utf8(&mut buf);
@@ -934,43 +934,43 @@ impl From<char> for VarStr {
   }
 }
 
-impl From<OsString> for VarStr {
+impl From<OsString> for ShStr {
   fn from(value: OsString) -> Self {
     Self(HipByt::from(value.as_bytes()))
   }
 }
 
-impl From<VarStr> for PathBuf {
-  fn from(value: VarStr) -> Self {
+impl From<ShStr> for PathBuf {
+  fn from(value: ShStr) -> Self {
     PathBuf::from(OsStr::from_bytes(value.as_bytes()))
   }
 }
 
-impl From<PathBuf> for VarStr {
+impl From<PathBuf> for ShStr {
   fn from(value: PathBuf) -> Self {
     Self(HipByt::from(value.as_os_str().as_bytes()))
   }
 }
 
-impl From<&Path> for VarStr {
+impl From<&Path> for ShStr {
   fn from(value: &Path) -> Self {
     Self(HipByt::from(value.as_os_str().as_bytes()))
   }
 }
 
-impl From<Vec<u8>> for VarStr {
+impl From<Vec<u8>> for ShStr {
   fn from(value: Vec<u8>) -> Self {
     Self(HipByt::from(value))
   }
 }
 
-impl From<&[u8]> for VarStr {
+impl From<&[u8]> for ShStr {
   fn from(value: &[u8]) -> Self {
     Self(HipByt::from(value))
   }
 }
 
-impl FromIterator<char> for VarStr {
+impl FromIterator<char> for ShStr {
   fn from_iter<T: IntoIterator<Item = char>>(iter: T) -> Self {
     let mut builder = SmolStrBuilder::new();
     for ch in iter {
@@ -980,17 +980,17 @@ impl FromIterator<char> for VarStr {
   }
 }
 
-impl From<Var> for VarStr {
+impl From<Var> for ShStr {
   fn from(value: Var) -> Self {
     match value.into_kind() {
       VarKind::Str(vstr) => vstr,
       VarKind::Int(n)    => varstr!("{n}"),
-      other              => VarStr::from(other.to_string()),
+      other              => ShStr::from(other.to_string()),
     }
   }
 }
 
-impl From<&Var> for VarStr {
+impl From<&Var> for ShStr {
   fn from(value: &Var) -> Self {
     let is_scalar = matches!(value.kind(), VarKind::Str(_) | VarKind::Int(_));
     if is_scalar {
@@ -1006,16 +1006,16 @@ impl From<&Var> for VarStr {
   }
 }
 
-impl From<VarStr> for Vec<u8> {
-  fn from(value: VarStr) -> Self {
+impl From<ShStr> for Vec<u8> {
+  fn from(value: ShStr) -> Self {
     value.as_bytes().to_vec()
   }
 }
 
 macro_rules! impl_varstr_from {
   ($($t:ty),*) => {
-    $(impl From<$t> for VarStr {
-      fn from(value: $t) -> VarStr {
+    $(impl From<$t> for ShStr {
+      fn from(value: $t) -> ShStr {
         $crate::varstr!("{value}")
       }
     })*
@@ -1024,82 +1024,82 @@ macro_rules! impl_varstr_from {
 
 impl_varstr_from!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 
-impl AsRef<std::ffi::OsStr> for VarStr {
+impl AsRef<std::ffi::OsStr> for ShStr {
   fn as_ref(&self) -> &std::ffi::OsStr {
     std::ffi::OsStr::from_bytes(self.as_bytes())
   }
 }
 
-impl AsRef<Path> for VarStr {
+impl AsRef<Path> for ShStr {
   fn as_ref(&self) -> &Path {
     Path::new(OsStr::from_bytes(self.as_bytes()))
   }
 }
 
-impl AsRef<[u8]> for VarStr {
+impl AsRef<[u8]> for ShStr {
   fn as_ref(&self) -> &[u8] {
     self.as_bytes()
   }
 }
 
-impl From<VarStr> for Rc<str> {
-  fn from(value: VarStr) -> Self {
+impl From<ShStr> for Rc<str> {
+  fn from(value: ShStr) -> Self {
     Rc::from(value.to_str_lossy().as_ref())
   }
 }
 
-impl PartialEq<str> for VarStr {
+impl PartialEq<str> for ShStr {
   fn eq(&self, other: &str) -> bool {
     self.0 == other.as_bytes()
   }
 }
 
-impl PartialEq<&str> for VarStr {
+impl PartialEq<&str> for ShStr {
   fn eq(&self, other: &&str) -> bool {
     self.0 == other.as_bytes()
   }
 }
 
-impl PartialEq<String> for VarStr {
+impl PartialEq<String> for ShStr {
   fn eq(&self, other: &String) -> bool {
     self.0 == other.as_bytes()
   }
 }
 
-impl Display for VarStr {
+impl Display for ShStr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     Display::fmt(&self.0.to_str_lossy(), f)
   }
 }
 
-impl From<&mut str> for VarStr {
+impl From<&mut str> for ShStr {
   fn from(s: &mut str) -> Self {
     Self(HipByt::from(s.as_bytes()))
   }
 }
 
-impl From<&str> for VarStr {
+impl From<&str> for ShStr {
   fn from(s: &str) -> Self {
     Self(HipByt::from(s.as_bytes()))
   }
 }
-impl From<String> for VarStr {
+impl From<String> for ShStr {
   fn from(s: String) -> Self {
     // Owning: reuse the String's allocation instead of copying.
     Self(HipByt::from(s.into_bytes()))
   }
 }
-impl From<&String> for VarStr {
+impl From<&String> for ShStr {
   fn from(s: &String) -> Self {
     Self(HipByt::from(s.as_bytes()))
   }
 }
-impl From<SmolStr> for VarStr {
+impl From<SmolStr> for ShStr {
   fn from(s: SmolStr) -> Self {
     Self(HipByt::from(s.as_bytes()))
   }
 }
-impl From<Cow<'_, str>> for VarStr {
+impl From<Cow<'_, str>> for ShStr {
   fn from(s: Cow<'_, str>) -> Self {
     Self(HipByt::from(s.as_bytes()))
   }
@@ -1107,10 +1107,10 @@ impl From<Cow<'_, str>> for VarStr {
 
 #[derive(Clone, Debug)]
 pub(crate) enum VarKind {
-  Str(VarStr),
+  Str(ShStr),
   Int(i32),
-  Arr(VecDeque<VarStr>),
-  AssocArr(Vec<(VarStr, VarStr)>),
+  Arr(VecDeque<ShStr>),
+  AssocArr(Vec<(ShStr, ShStr)>),
 
   /// A "magic" variable. Lazily evaluated on access by calling the wrapped function, which can return `None`
   /// It wraps an `Arc<dyn Fn() -> Option<String>>`
@@ -1127,7 +1127,7 @@ pub(crate) enum VarKind {
 
 impl Default for VarKind {
   fn default() -> Self {
-    Self::Str(VarStr::default())
+    Self::Str(ShStr::default())
   }
 }
 
@@ -1189,16 +1189,16 @@ impl VarKind {
     Self::arr_from_raw(raw).unwrap_or_else(|_| Self::Str(raw.into()))
   }
 
-  pub(crate) fn string(raw: VarStr) -> Self {
+  pub(crate) fn string(raw: ShStr) -> Self {
     Self::Str(raw)
   }
 
-  pub(crate) fn arr<I: IntoIterator<Item = VarStr>>(iter: I) -> Self {
-    let vec: VecDeque<VarStr> = iter.into_iter().collect();
+  pub(crate) fn arr<I: IntoIterator<Item = ShStr>>(iter: I) -> Self {
+    let vec: VecDeque<ShStr> = iter.into_iter().collect();
     Self::Arr(vec)
   }
 
-  pub(crate) fn assoc_arr<I: IntoIterator<Item = (VarStr, VarStr)>>(iter: I) -> Self {
+  pub(crate) fn assoc_arr<I: IntoIterator<Item = (ShStr, ShStr)>>(iter: I) -> Self {
     let pairs = iter.into_iter().collect();
     Self::AssocArr(pairs)
   }
@@ -1341,7 +1341,7 @@ impl Default for Var {
   fn default() -> Self {
     Self {
       flags: VarFlags::default(),
-      kind : VarKind::Str(VarStr::default()),
+      kind : VarKind::Str(ShStr::default()),
     }
   }
 }
@@ -1384,7 +1384,7 @@ impl Display for Var {
 
 impl From<Vec<String>> for Var {
   fn from(value: Vec<String>) -> Self {
-    let arr = value.into_iter().map(VarStr::from).collect();
+    let arr = value.into_iter().map(ShStr::from).collect();
     Self::new(VarKind::Arr(arr), VarFlags::empty())
   }
 }
@@ -1402,13 +1402,13 @@ impl From<Vec<Candidate>> for Var {
 impl From<&[String]> for Var {
   fn from(value: &[String]) -> Self {
     let mut new = VecDeque::new();
-    new.extend(value.iter().map(VarStr::from));
+    new.extend(value.iter().map(ShStr::from));
     Self::new(VarKind::Arr(new), VarFlags::empty())
   }
 }
 
-impl From<VarStr> for Var {
-  fn from(value: VarStr) -> Self {
+impl From<ShStr> for Var {
+  fn from(value: ShStr) -> Self {
     Self::new(VarKind::Str(value), VarFlags::empty())
   }
 }
@@ -1472,9 +1472,9 @@ impl Deref for DeferredAst {
 
 #[derive(Default, Clone, Debug)]
 pub(crate) struct VarTab {
-  vars   : HashMap<VarStr, Var>,
-  params : HashMap<ShellParam, VarStr>,
-  sh_argv: VecDeque<VarStr>, /* Using a VecDeque makes the implementation of `shift` straightforward */
+  vars   : HashMap<ShStr, Var>,
+  params : HashMap<ShellParam, ShStr>,
+  sh_argv: VecDeque<ShStr>, /* Using a VecDeque makes the implementation of `shift` straightforward */
 
   kind: ScopeKind,
   deferred_cmds: Vec<DeferredAst>,
@@ -1513,14 +1513,14 @@ impl VarTab {
   pub(crate) fn is_function(&self) -> bool {
     matches!(self.kind, ScopeKind::Function)
   }
-  fn init_params() -> HashMap<ShellParam, VarStr> {
+  fn init_params() -> HashMap<ShellParam, ShStr> {
     let mut params = HashMap::default();
     params.insert(ShellParam::ArgCount, "0".into()); // Number of positional parameters
     params.insert(ShellParam::ShPid, Pid::this().to_string().into()); // PID of the shell
-    params.insert(ShellParam::LastJob, VarStr::default()); // PID of the last background job (if any)
+    params.insert(ShellParam::LastJob, ShStr::default()); // PID of the last background job (if any)
     params
   }
-  fn init_sh_vars() -> HashMap<VarStr, Var> {
+  fn init_sh_vars() -> HashMap<ShStr, Var> {
     let mut vars = HashMap::default();
     vars.insert("COMP_WORDBREAKS".into(), " \t\n\"'@><=;|&(:".into());
     vars.insert("OPTIND".into(), "1".into());
@@ -1533,9 +1533,9 @@ impl VarTab {
     }
     vars
   }
-  fn init_env() -> Vec<(VarStr, Var)> {
+  fn init_env() -> Vec<(ShStr, Var)> {
     let pathbuf_to_string =
-      |pb: Result<PathBuf, std::io::Error>| -> VarStr {
+      |pb: Result<PathBuf, std::io::Error>| -> ShStr {
         pb.unwrap_or_default().into()
       };
 
@@ -1567,7 +1567,7 @@ impl VarTab {
     // Inherit OS env. Subsequent steps either insert-if-missing (user-set
     // vars like HOME/USER) or are unconditionally overridden for
     // shed-controlled vars like UID/PPID/PWD.
-    let mut env: HashMap<VarStr, VarStr> = std::env::vars_os()
+    let mut env: HashMap<ShStr, ShStr> = std::env::vars_os()
       .map(|(k, v)| (k.as_bytes().into(), v.as_bytes().into()))
       .collect();
 
@@ -1642,7 +1642,7 @@ impl VarTab {
     let     umask     = stat::umask(orig);
     let mut umask_var = Var::env_var(&format!("{umask:04o}"));
     let underline = Var::new(
-      VarKind::Str(VarStr::from(
+      VarKind::Str(ShStr::from(
         std::env::args_os().next().unwrap_or_default().into_vec(),
       )),
       VarFlags::EXPORT,
@@ -1672,7 +1672,7 @@ impl VarTab {
     }
   }
   pub(crate) fn init_sh_argv(&mut self) {
-    self.extend_args(std::env::args_os().map(|a| VarStr::from(a.into_vec())));
+    self.extend_args(std::env::args_os().map(|a| ShStr::from(a.into_vec())));
   }
   pub(crate) fn defer_cmd(&mut self, ast: Ast, ctx: LabelBuilder) {
     self.deferred_cmds.push(DeferredAst { ast, ctx });
@@ -1683,30 +1683,30 @@ impl VarTab {
   pub(crate) fn has_deferred_cmds(&self) -> bool {
     !self.deferred_cmds.is_empty()
   }
-  pub(crate) fn sh_argv(&self) -> &VecDeque<VarStr> {
+  pub(crate) fn sh_argv(&self) -> &VecDeque<ShStr> {
     &self.sh_argv
   }
-  pub(crate) fn sh_argv_mut(&mut self) -> &mut VecDeque<VarStr> {
+  pub(crate) fn sh_argv_mut(&mut self) -> &mut VecDeque<ShStr> {
     &mut self.sh_argv
   }
   pub(crate) fn clear_pos_args(&mut self) {
     self.sh_argv.truncate(1);
   }
-  pub(crate) fn extend_args(&mut self, args: impl IntoIterator<Item = VarStr>) {
+  pub(crate) fn extend_args(&mut self, args: impl IntoIterator<Item = ShStr>) {
     self.sh_argv.extend(args);
   }
   /// Push an arg to the back of the arg deque
-  pub(crate) fn bpush_arg(&mut self, arg: VarStr) {
+  pub(crate) fn bpush_arg(&mut self, arg: ShStr) {
     self.sh_argv.push_back(arg);
   }
   /// Pop an arg from the front of the arg deque
-  pub(crate) fn fpop_arg(&mut self) -> Option<VarStr> {
+  pub(crate) fn fpop_arg(&mut self) -> Option<ShStr> {
     self.sh_argv.pop_front()
   }
-  pub(crate) fn vars(&self) -> &HashMap<VarStr, Var> {
+  pub(crate) fn vars(&self) -> &HashMap<ShStr, Var> {
     &self.vars
   }
-  pub(crate) fn vars_mut(&mut self) -> &mut HashMap<VarStr, Var> {
+  pub(crate) fn vars_mut(&mut self) -> &mut HashMap<ShStr, Var> {
     &mut self.vars
   }
   /// Clear the export attribute (`export -n`), leaving the variable's value
@@ -1719,13 +1719,13 @@ impl VarTab {
       Shed::meta_mut(MetaTab::clear_envp);
     }
   }
-  pub(crate) fn try_get_local(&self, var_name: &[u8]) -> Option<VarStr> {
+  pub(crate) fn try_get_local(&self, var_name: &[u8]) -> Option<ShStr> {
     // A declared-but-unset variable is present in the scope (so it shadows
     // outer scopes and keeps later assignments local) but has no value: it
     // reads as unset for `${x-}`/`${x+}` etc
     match self.vars.get(var_name) {
       Some(var) if matches!(var.kind(), VarKind::Unset) => None,
-      other => other.map(VarStr::from),
+      other => other.map(ShStr::from),
     }
   }
   pub(crate) fn try_take_local(&mut self, var_name: &[u8]) -> ShResult<Option<Var>> {
@@ -1750,7 +1750,7 @@ impl VarTab {
   pub(crate) fn get_var_flags(&self, var_name: &[u8]) -> Option<VarFlags> {
     self.vars.get(var_name).map(|var| var.flags)
   }
-  pub(crate) fn try_take_param(&mut self, param: ShellParam) -> Option<VarStr> {
+  pub(crate) fn try_take_param(&mut self, param: ShellParam) -> Option<ShStr> {
     self.params.get_mut(&param).map(std::mem::take)
   }
   pub(crate) fn try_take_var(&mut self, var_name: &[u8]) -> ShResult<Option<Var>> {
@@ -1769,7 +1769,7 @@ impl VarTab {
   pub(crate) fn unset_var(&mut self, var_name: &[u8]) -> ShResult<()> {
     self.try_take_var(var_name).map(|_| ())
   }
-  pub(crate) fn set_index(&mut self, var_name: &[u8], idx: ArrIndex, val: VarStr) -> ShResult<()> {
+  pub(crate) fn set_index(&mut self, var_name: &[u8], idx: ArrIndex, val: ShStr) -> ShResult<()> {
     // 'idx' must already be resolved at this point
     if self.var_exists(var_name)
       && let Some(var) = self.vars_mut().get_mut(var_name)
@@ -1793,7 +1793,7 @@ impl VarTab {
           };
 
           if idx >= items.len() {
-            items.resize(idx + 1, VarStr::default());
+            items.resize(idx + 1, ShStr::default());
           }
           items[idx] = val;
           return Ok(());
@@ -1825,8 +1825,8 @@ impl VarTab {
 
     let kind = match idx {
       ArrIndex::Literal(n) => {
-        let mut items: VecDeque<VarStr> = VecDeque::with_capacity(n + 1);
-        items.resize(n, VarStr::default());
+        let mut items: VecDeque<ShStr> = VecDeque::with_capacity(n + 1);
+        items.resize(n, ShStr::default());
         items.push_back(val);
         VarKind::Arr(items)
       }
@@ -1882,7 +1882,7 @@ impl VarTab {
     // zero-validation insertion of variables
     self.vars.insert(name.into(), var);
   }
-  pub(crate) fn params(&self) -> &HashMap<ShellParam, VarStr> {
+  pub(crate) fn params(&self) -> &HashMap<ShellParam, ShStr> {
     &self.params
   }
   pub(crate) fn set_var(&mut self, var_name: &[u8], val: VarKind, flags: VarFlags) -> ShResult<()> {
@@ -1935,13 +1935,13 @@ impl VarTab {
     }
     self.vars.contains_key(var_name)
   }
-  pub(crate) fn pos_args(&self) -> impl Iterator<Item = &VarStr> {
+  pub(crate) fn pos_args(&self) -> impl Iterator<Item = &ShStr> {
     self.sh_argv.iter().skip(1)
   }
-  pub(crate) fn set_param(&mut self, param: ShellParam, val: &VarStr) {
+  pub(crate) fn set_param(&mut self, param: ShellParam, val: &ShStr) {
     self.params.insert(param, val.clone());
   }
-  pub(crate) fn try_get_param(&self, param: ShellParam) -> Option<VarStr> {
+  pub(crate) fn try_get_param(&self, param: ShellParam) -> Option<ShStr> {
     match param {
       ShellParam::Pos(n) => self.sh_argv().get(n).cloned(),
       ShellParam::ArgCount => {
@@ -1951,7 +1951,7 @@ impl VarTab {
       ShellParam::AllArgsStr => {
         let ifs = params::get_separator();
         (!self.sh_argv.is_empty()).then(|| {
-          self.pos_args().fold(VarStr::default(), |mut acc, arg| {
+          self.pos_args().fold(ShStr::default(), |mut acc, arg| {
             if acc.is_empty() {
               acc = arg.clone();
             } else {
@@ -1970,16 +1970,16 @@ impl VarTab {
 
 // magic variable functions
 
-fn get_status_str() -> Option<VarStr> {
+fn get_status_str() -> Option<ShStr> {
   let status = Shed::get_status();
   Some(varstr!("{status}"))
 }
-fn get_seconds() -> Option<VarStr> {
+fn get_seconds() -> Option<ShStr> {
   let shell_time = Shed::meta(MetaTab::shell_time);
   let secs       = Instant::now().duration_since(shell_time).as_secs();
   Some(varstr!("{secs}"))
 }
-fn get_epoch_realtime() -> Option<VarStr> {
+fn get_epoch_realtime() -> Option<ShStr> {
   let epoch = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
     .unwrap_or(Duration::from_secs(0))
@@ -1987,7 +1987,7 @@ fn get_epoch_realtime() -> Option<VarStr> {
   Some(varstr!("{epoch:.6}"))
 }
 
-fn get_epoch_seconds() -> Option<VarStr> {
+fn get_epoch_seconds() -> Option<ShStr> {
   let epoch = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
     .unwrap_or(Duration::from_secs(0))
@@ -1995,22 +1995,22 @@ fn get_epoch_seconds() -> Option<VarStr> {
   Some(varstr!("{epoch}"))
 }
 
-fn get_random() -> Option<VarStr> {
+fn get_random() -> Option<ShStr> {
   let random = random::random_range(0..32768);
   Some(varstr!("{random}"))
 }
 
-fn get_lines() -> Option<VarStr> {
+fn get_lines() -> Option<ShStr> {
   let rows = Shed::term(Terminal::t_rows);
   Some(varstr!("{rows}"))
 }
 
-fn get_columns() -> Option<VarStr> {
+fn get_columns() -> Option<ShStr> {
   let cols = Shed::term(Terminal::t_cols);
   Some(varstr!("{cols}"))
 }
 
-fn get_set_flags() -> Option<VarStr> {
+fn get_set_flags() -> Option<ShStr> {
   let mut set_opts = util::scratch_buf();
   Shed::shopts(|o| {
     if o.set.allexport {
@@ -2218,21 +2218,21 @@ mod set_index_tests {
     tab
       .set_var(
         name.as_bytes(),
-        VarKind::Arr(items.into_iter().map(VarStr::from).collect()),
+        VarKind::Arr(items.into_iter().map(ShStr::from).collect()),
         VarFlags::empty(),
       )
       .unwrap();
     tab
   }
 
-  fn arr_items(tab: &VarTab, name: &str) -> Vec<VarStr> {
+  fn arr_items(tab: &VarTab, name: &str) -> Vec<ShStr> {
     match tab.vars.get(name.as_bytes()).map(super::Var::kind) {
       Some(VarKind::Arr(items)) => items.iter().cloned().collect(),
       other => panic!("expected Arr for {name}, got {other:?}"),
     }
   }
 
-  fn assoc_items(tab: &VarTab, name: &str) -> Vec<(VarStr, VarStr)> {
+  fn assoc_items(tab: &VarTab, name: &str) -> Vec<(ShStr, ShStr)> {
     match tab.vars.get(name.as_bytes()).map(super::Var::kind) {
       Some(VarKind::AssocArr(items)) => items.clone(),
       other => panic!("expected AssocArr for {name}, got {other:?}"),
@@ -2370,7 +2370,7 @@ mod set_index_tests {
       .unwrap();
     assert_eq!(
       assoc_items(&tab, "fresh"),
-      vec![(VarStr::from("k"), VarStr::from("v"))]
+      vec![(ShStr::from("k"), ShStr::from("v"))]
     );
   }
 

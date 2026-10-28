@@ -14,7 +14,7 @@ use crate::{
     Shed,
     scopes::ScopeStack,
     shopt::ShOptSet,
-    vars::{ValueBytes, VarKind, VarStrSliceExt},
+    vars::{ValueBytes, VarKind, ShStrSliceExt},
   },
   util::{
     self,
@@ -461,7 +461,7 @@ mod tests {
   // ===================== Set::execute =====================
 
   mod execute {
-    use crate::state::vars::VarStr;
+    use crate::state::vars::ShStr;
     use crate::state::{self, Shed};
     use crate::tests::testutil::{TestGuard, test_input};
 
@@ -689,7 +689,7 @@ mod tests {
     fn positional_args_replace_argv() {
       let _g = TestGuard::new();
       test_input("set -- one two three").unwrap();
-      let args: Vec<VarStr> = Shed::vars(|v| v.sh_argv().clone().into_iter().skip(1).collect());
+      let args: Vec<ShStr> = Shed::vars(|v| v.sh_argv().clone().into_iter().skip(1).collect());
       assert_eq!(args, vec!["one", "two", "three"]);
     }
 
@@ -698,7 +698,7 @@ mod tests {
       // Without `--`, positional non-polarity args still get pushed.
       let _g = TestGuard::new();
       test_input("set foo bar").unwrap();
-      let args: Vec<VarStr> = Shed::vars(|v| v.sh_argv().clone().into_iter().skip(1).collect());
+      let args: Vec<ShStr> = Shed::vars(|v| v.sh_argv().clone().into_iter().skip(1).collect());
       assert_eq!(args, vec!["foo", "bar"]);
     }
 
@@ -707,7 +707,7 @@ mod tests {
       let _g = TestGuard::new();
       test_input("set -- a b c").unwrap();
       test_input("set --").unwrap();
-      let args: Vec<VarStr> = Shed::vars(|v| v.sh_argv().clone().into_iter().skip(1).collect());
+      let args: Vec<ShStr> = Shed::vars(|v| v.sh_argv().clone().into_iter().skip(1).collect());
       assert_eq!(args, Vec::<String>::new());
     }
 
@@ -739,7 +739,7 @@ mod tests {
       let _g = TestGuard::new();
       test_input("set -e -- foo bar").unwrap();
       assert!(Shed::shopts(|o| o.set.errexit));
-      let args: Vec<VarStr> = Shed::vars(|v| v.sh_argv().clone().into_iter().skip(1).collect());
+      let args: Vec<ShStr> = Shed::vars(|v| v.sh_argv().clone().into_iter().skip(1).collect());
       assert_eq!(args, vec!["foo", "bar"]);
     }
 

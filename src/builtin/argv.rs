@@ -1,6 +1,6 @@
 use itertools::Itertools;
 
-use crate::{eval::lex::Span, expand::Word, state::vars::VarStr};
+use crate::{eval::lex::Span, expand::Word, state::vars::ShStr};
 
 use super::opt::{Arg, Opt};
 
@@ -27,7 +27,7 @@ impl BuiltinArgs {
   pub(crate) fn cmd_span(&self) -> Span {
     self.cmd.span().expect("should always have a span")
   }
-  pub(crate) fn cmd_name(&self) -> VarStr {
+  pub(crate) fn cmd_name(&self) -> ShStr {
     self.cmd.content()
   }
 
@@ -61,7 +61,7 @@ impl BuiltinArgs {
     self.options().any(|o| o.key() == key)
   }
   /// Get the value of an option with the given key, if it exists.
-  pub(crate) fn opt_value(&self, key: &str) -> Option<VarStr> {
+  pub(crate) fn opt_value(&self, key: &str) -> Option<ShStr> {
     self.options().find_map(|o| {
       let opt_key = o.key();
       (opt_key == key).then(|| o.value().ok()).flatten()
@@ -79,7 +79,7 @@ impl BuiltinArgs {
     self.argv.iter().all(|word| !matches!(word, Arg::Opt(_)))
   }
   /// Take the arguments and options from the builtin, leaving `argv` empty.
-  /// Splits `argv` into a vector of `(VarStr, Span)` for arguments and a vector of `Opt` for options.
+  /// Splits `argv` into a vector of `(ShStr, Span)` for arguments and a vector of `Opt` for options.
   pub(crate) fn take_argv(&mut self) -> (Vec<Word>, Vec<Opt>) {
     self
       .argv

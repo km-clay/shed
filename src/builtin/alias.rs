@@ -7,7 +7,7 @@
 use bstr::ByteSlice;
 
 use crate::{
-  opt, sherr, state::{Shed, vars::{self, VarStr}}, util::{self, error::ShResult, strops}
+  opt, sherr, state::{Shed, vars::{self, ShStr}}, util::{self, error::ShResult, strops}
 };
 
 use super::opt::OptSpec;
@@ -123,7 +123,7 @@ impl super::Builtin for ExCmd {
         match Shed::logic(|l| l.get_ex_alias(name)) {
           Some(_) if remove => Shed::logic_mut(|l| l.remove_ex_alias(name)),
           Some(alias)       => outln_bytes(&vars::display_as_var(name.as_bytes(), alias.body())),
-          None => return Err(sherr!(SyntaxErr ? word.span(), "Unknown ex command alias '{}'", VarStr::from(name))),
+          None => return Err(sherr!(SyntaxErr ? word.span(), "Unknown ex command alias '{}'", ShStr::from(name))),
         }
       }
     }

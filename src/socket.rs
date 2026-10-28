@@ -36,7 +36,7 @@ use crate::{
     Shed,
     jobs::Job,
     paths,
-    vars::{VarFlags, VarKind, VarStr, VarStrSliceExt},
+    vars::{VarFlags, VarKind, ShStr, ShStrSliceExt},
   },
   status_msg, system_msg, try_var,
   util::{
@@ -154,8 +154,8 @@ impl StatusHeader {
 #[derive(Debug)]
 pub(crate) enum QueryHeader {
   Cwd,
-  GetVar(VarStr),
-  SetVar(VarStr, VarStr, VarFlags),
+  GetVar(ShStr),
+  SetVar(ShStr, ShStr, VarFlags),
   Status(Vec<StatusHeader>),
 }
 
@@ -243,7 +243,7 @@ impl QueryHeader {
 #[derive(Debug)]
 pub(crate) enum PrivateHeader {
   /// Used for reporting errors from child processes.
-  PostError(VarStr),
+  PostError(ShStr),
 }
 
 /// Possible headers for the `line` socket query
@@ -261,10 +261,10 @@ pub(crate) enum LineHeader {
 pub(crate) enum SocketRequest {
   /// Posts a system message. System messages appear above the prompt, the same way that job status notifications do.
   /// Useful for important information.
-  PostSystemMessage(VarStr),
+  PostSystemMessage(ShStr),
   /// Posts a status message. Status messages appear under the prompt, and are short lived. Will only survive redraws for a few seconds.
   /// Useful for quick notifications.
-  PostStatusMessage(VarStr),
+  PostStatusMessage(ShStr),
 
   /// Requests information from the shell. The shell will respond with a `SocketResponse` containing the requested information, or an error if the query was invalid.
   Query(QueryHeader),
@@ -276,7 +276,7 @@ pub(crate) enum SocketRequest {
   RefreshPrompt,
 
   LineGet(LineHeader),
-  LineSet(LineHeader, VarStr),
+  LineSet(LineHeader, ShStr),
   LineSendKeys(Vec<KeyEvent>),
 
   /// Namespace used by internal async stuff.
@@ -611,13 +611,13 @@ fn handle_status_query(
   headers: Vec<StatusHeader>,
   conn: &UnixStream,
 ) -> ShResult<Option<ReadlineEvent>> {
-  let mut responses: Vec<VarStr> = vec![];
+  let mut responses: Vec<ShStr> = vec![];
   for header in headers {
     match header {
       StatusHeader::ExitCode => responses.push(varstr!("{}", Shed::get_status())),
       StatusHeader::CommandName => {
         let Some(name) = Shed::meta(|m| m.last_job().and_then(Job::name)) else {
-          responses.push(VarStr::default());
+          responses.push(ShStr::default());
           continue;
         };
 
@@ -625,7 +625,7 @@ fn handle_status_query(
       }
       StatusHeader::Runtime => {
         let Some(dur) = Shed::meta(|m| m.get_time().map(|d| d.as_millis())) else {
-          responses.push(VarStr::default());
+          responses.push(ShStr::default());
           continue;
         };
         responses.push(varstr!("{dur}"));
@@ -640,14 +640,14 @@ fn handle_status_query(
           })
         });
         let Some(job) = job else {
-          responses.push(VarStr::default());
+          responses.push(ShStr::default());
           continue;
         };
         responses.push(job);
       }
       StatusHeader::Pgid => {
         let Some(job) = Shed::meta(|m| m.last_job().map(|j| varstr!("{}", j.pgid()))) else {
-          responses.push(VarStr::default());
+          responses.push(ShStr::default());
           continue;
         };
         responses.push(job);
@@ -715,7 +715,7 @@ fn handle_line_get(header: &LineHeader, conn: &UnixStream, readline: &mut ShedLi
 
 fn handle_line_set(
   header: &LineHeader,
-  value: &VarStr,
+  value: &ShStr,
   conn: &UnixStream,
   readline: &mut ShedLine,
 ) {

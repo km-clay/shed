@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use crate::mode;
 use crate::state::terminal::CursorStyle;
-use crate::state::vars::VarStr;
+use crate::state::vars::ShStr;
 use crate::util::error::{ShErr, ShResult};
 
 use super::{
@@ -136,7 +136,7 @@ pub(crate) trait EditMode {
   fn is_repeatable(&self) -> bool;
   fn as_replay(&self) -> Option<CmdReplay>;
   fn cursor_style(&self) -> CursorStyle;
-  fn pending_seq(&self) -> Option<VarStr>;
+  fn pending_seq(&self) -> Option<ShStr>;
   fn pending_cursor(&self) -> Option<usize> {
     None
   }

@@ -441,7 +441,7 @@ mod open_help_tests {
   use crate::set_var;
   use crate::state::Shed;
   use crate::state::terminal::Terminal;
-  use crate::state::vars::{VarFlags, VarKind, VarStr};
+  use crate::state::vars::{VarFlags, VarKind, ShStr};
   use crate::tests::testutil::TestGuard;
 
   const SAMPLE: &str =
@@ -592,7 +592,7 @@ mod open_help_tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"SHED_HPATH",
-        VarKind::Str(VarStr::default()),
+        VarKind::Str(ShStr::default()),
         VarFlags::EXPORT,
       )
     })
@@ -640,7 +640,7 @@ mod open_help_tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"SHED_HPATH",
-        VarKind::Str(VarStr::default()),
+        VarKind::Str(ShStr::default()),
         VarFlags::EXPORT,
       )
     })
@@ -659,7 +659,7 @@ mod open_help_tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"SHED_HPATH",
-        VarKind::Str(VarStr::default()),
+        VarKind::Str(ShStr::default()),
         VarFlags::EXPORT,
       )
     })
@@ -676,7 +676,7 @@ mod open_help_tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"SHED_HPATH",
-        VarKind::Str(VarStr::default()),
+        VarKind::Str(ShStr::default()),
         VarFlags::EXPORT,
       )
     })
@@ -736,7 +736,7 @@ mod open_help_tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"SHED_HPATH",
-        VarKind::Str(VarStr::default()),
+        VarKind::Str(ShStr::default()),
         VarFlags::EXPORT,
       )
     })
@@ -830,7 +830,7 @@ mod help_execute_tests {
 #[cfg(test)]
 mod get_all_tags_tests {
   use super::*;
-  use crate::state::vars::{VarFlags, VarKind, VarStr};
+  use crate::state::vars::{VarFlags, VarKind, ShStr};
   use crate::tests::testutil::TestGuard;
 
   #[test]
@@ -840,7 +840,7 @@ mod get_all_tags_tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"SHED_HPATH",
-        VarKind::Str(VarStr::default()),
+        VarKind::Str(ShStr::default()),
         VarFlags::EXPORT,
       )
       .unwrap();

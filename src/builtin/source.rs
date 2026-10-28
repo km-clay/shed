@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::{
   sherr,
-  state::{Shed, meta::MetaTab, rc, vars::VarStr},
+  state::{Shed, meta::MetaTab, rc, vars::ShStr},
   util::error::{ShErrKind, ShResult},
 };
 
@@ -36,7 +36,7 @@ impl super::Builtin for Source {
       ));
     }
 
-    let extra: Vec<VarStr> = arg_iter.map(|arg| arg.content()).collect();
+    let extra: Vec<ShStr> = arg_iter.map(|arg| arg.content()).collect();
     let saved_argv = (!extra.is_empty()).then(|| {
       Shed::vars_mut(|v| {
         let scope = v.cur_scope_mut();

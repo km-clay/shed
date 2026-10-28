@@ -4,7 +4,7 @@ use crate::{
   eval::lex::Span,
   expand::{stream::SegStream, var},
   match_loop,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::{
     self,
     strops::{ByteCursor, QuoteState, SliceCursor},
@@ -20,7 +20,7 @@ fn has_braces(span: Option<Span>, s: &[u8]) -> bool {
     return false;
   }
   let s = var::expand_raw(span, &mut SegStream::from_slice(s).cursor())
-    .map_or_else(|_| VarStr::from(s), |sg| sg.content());
+    .map_or_else(|_| ShStr::from(s), |sg| sg.content());
   let mut bytes           = SliceCursor::new(&s);
   let mut depth           = 0;
   let mut found_open      = false;
@@ -62,11 +62,11 @@ fn has_braces(span: Option<Span>, s: &[u8]) -> bool {
 
 /// Expand braces in a string, zsh-style: one level per call, loop until  done.
 /// Returns a Vec of expanded strings.
-pub(super) fn expand_braces_full(span: Option<Span>, input: &[u8]) -> Vec<VarStr> {
+pub(super) fn expand_braces_full(span: Option<Span>, input: &[u8]) -> Vec<ShStr> {
   if !input.contains(&b'{') {
     return vec![input.into()];
   }
-  let mut results = vec![VarStr::from(input)];
+  let mut results = vec![ShStr::from(input)];
 
   // Keep expanding until no results contain braces
   loop {
@@ -94,19 +94,19 @@ pub(super) fn expand_braces_full(span: Option<Span>, input: &[u8]) -> Vec<VarStr
   results
 }
 
-fn concat_parts(prefix: &VarStr, part: &VarStr, suffix: &VarStr) -> VarStr {
+fn concat_parts(prefix: &ShStr, part: &ShStr, suffix: &ShStr) -> ShStr {
   let mut result = Vec::with_capacity(prefix.len() + part.len() + suffix.len());
   result.extend_from_slice(prefix.as_bytes());
   result.extend_from_slice(part.as_bytes());
   result.extend_from_slice(suffix.as_bytes());
-  VarStr::from(result)
+  ShStr::from(result)
 }
 
 #[expect(clippy::doc_link_with_quotes)]
 /// Expand the first (outermost) brace expression in a word.
 /// "pre{a,b}post" -> ["preapost", "prebpost"]
 /// "pre{1..3}post" -> ["pre1post", "pre2post", "pre3post"]
-fn expand_one_brace(word: &[u8]) -> Vec<VarStr> {
+fn expand_one_brace(word: &[u8]) -> Vec<ShStr> {
   let Some((prefix, inner, suffix)) = get_brace_parts(word) else {
     return vec![word.into()]; // No valid braces
   };
@@ -129,13 +129,13 @@ fn expand_one_brace(word: &[u8]) -> Vec<VarStr> {
 
   parts
     .into_iter()
-    .map(|p| VarStr::from_slices([&prefix, &p, &suffix].iter()))
+    .map(|p| ShStr::from_slices([&prefix, &p, &suffix].iter()))
     .collect()
 }
 
 /// Extract prefix, inner, and suffix from a brace expression.
 /// "pre{a,b}post" -> Some(("pre", "a,b", "post"))
-fn get_brace_parts(word: &[u8]) -> Option<(VarStr, VarStr, VarStr)> {
+fn get_brace_parts(word: &[u8]) -> Option<(ShStr, ShStr, ShStr)> {
   let mut bytes    = word.iter().copied().peekable();
   let mut prefix   = util::scratch_buf();
   let mut qt_state = QuoteState::default();
@@ -201,7 +201,7 @@ fn get_brace_parts(word: &[u8]) -> Option<(VarStr, VarStr, VarStr)> {
   }
 
   // Collect suffix
-  let suffix: VarStr = bytes.collect::<Vec<_>>().into();
+  let suffix: ShStr = bytes.collect::<Vec<_>>().into();
 
   Some((prefix.as_slice().into(), inner.as_slice().into(), suffix))
 }
@@ -210,7 +210,7 @@ fn get_brace_parts(word: &[u8]) -> Option<(VarStr, VarStr, VarStr)> {
 /// Split brace inner content on top-level commas.
 /// "a,b,c" -> ["a", "b", "c"]
 /// "a,{b,c},d" -> ["a", "{b,c}", "d"]
-fn split_brace_inner(inner: &[u8]) -> Vec<VarStr> {
+fn split_brace_inner(inner: &[u8]) -> Vec<ShStr> {
   let mut parts    = Vec::new();
   let mut current  = util::scratch_buf();
   let mut bytes    = inner.iter().copied().peekable();
@@ -251,7 +251,7 @@ fn split_brace_inner(inner: &[u8]) -> Vec<VarStr> {
 }
 
 /// Try to expand a range like "1..5" or "a..z" or "1..10..2"
-fn try_expand_range(inner: &[u8]) -> Option<Vec<VarStr>> {
+fn try_expand_range(inner: &[u8]) -> Option<Vec<ShStr>> {
   // Look for ".." pattern
   let parts: Vec<&[u8]> = inner.split_str("..").collect();
 
@@ -274,7 +274,7 @@ fn try_expand_range(inner: &[u8]) -> Option<Vec<VarStr>> {
   }
 }
 
-fn expand_range(start: &[u8], end: &[u8], step: usize) -> Option<Vec<VarStr>> {
+fn expand_range(start: &[u8], end: &[u8], step: usize) -> Option<Vec<ShStr>> {
   // Try character range first
   if is_alpha_range_bound(start) && is_alpha_range_bound(end) {
     let start_char = start.chars().next()? as u8;
@@ -287,7 +287,7 @@ fn expand_range(start: &[u8], end: &[u8], step: usize) -> Option<Vec<VarStr>> {
       (start_char, end_char)
     };
 
-    let chars: Vec<VarStr> = (lo..=hi)
+    let chars: Vec<ShStr> = (lo..=hi)
       .step_by(step)
       .map(|c| ([c].as_slice()).into())
       .collect();
@@ -315,7 +315,7 @@ fn expand_range(start: &[u8], end: &[u8], step: usize) -> Option<Vec<VarStr>> {
       (start_num, end_num)
     };
 
-    let nums: Vec<VarStr> = (lo..=hi)
+    let nums: Vec<ShStr> = (lo..=hi)
       .step_by(step)
       .map(|n| {
         if needs_padding {
@@ -422,7 +422,7 @@ mod tests {
 
   // ===================== try_expand_range / expand_range =====================
 
-  fn try_expand_range(s: &str) -> Option<Vec<VarStr>> {
+  fn try_expand_range(s: &str) -> Option<Vec<ShStr>> {
     super::try_expand_range(s.as_bytes())
   }
   #[test]

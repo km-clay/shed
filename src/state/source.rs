@@ -1,4 +1,4 @@
-use crate::{HashMap, eval::lex::Span, state::vars::VarStr};
+use crate::{HashMap, eval::lex::Span, state::vars::ShStr};
 use std::{
   cell::RefCell,
   fmt::Display,
@@ -146,8 +146,8 @@ impl Deref for SourceHandle {
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub(crate) struct Source {
-  name   : Option<VarStr>,
-  content: VarStr,
+  name   : Option<ShStr>,
+  content: ShStr,
 }
 
 #[derive(Default)]
@@ -163,7 +163,7 @@ impl SourceRegistry {
     self.sources.get(&id).and_then(Weak::upgrade)
   }
 
-  fn register(&mut self, name: Option<VarStr>, src: VarStr) -> SourceHandle {
+  fn register(&mut self, name: Option<ShStr>, src: ShStr) -> SourceHandle {
     let id     = SourceId(SRC_GENERATION.fetch_add(1, Ordering::AcqRel));
 
     let source = Arc::new(Source { name, content: src });
@@ -173,18 +173,18 @@ impl SourceRegistry {
   }
 }
 
-pub(crate) fn register_source<T: Into<VarStr>>(src: T) -> SourceHandle {
+pub(crate) fn register_source<T: Into<ShStr>>(src: T) -> SourceHandle {
   SOURCES.write().unwrap().register(None, src.into())
 }
 
-pub(crate) fn register_named_source<T: Into<VarStr>>(name: T, src: T) -> SourceHandle {
+pub(crate) fn register_named_source<T: Into<ShStr>>(name: T, src: T) -> SourceHandle {
   SOURCES
     .write()
     .unwrap()
     .register(Some(name.into()), src.into())
 }
 
-pub(crate) fn get_source(id: SourceId) -> Option<VarStr> {
+pub(crate) fn get_source(id: SourceId) -> Option<ShStr> {
   SOURCES
     .read()
     .unwrap()
@@ -192,7 +192,7 @@ pub(crate) fn get_source(id: SourceId) -> Option<VarStr> {
     .map(|s| s.content.clone())
 }
 
-pub(crate) fn get_source_name(id: SourceId) -> Option<VarStr> {
+pub(crate) fn get_source_name(id: SourceId) -> Option<ShStr> {
   SOURCES
     .read()
     .unwrap()
@@ -200,7 +200,7 @@ pub(crate) fn get_source_name(id: SourceId) -> Option<VarStr> {
     .and_then(|s| s.name.clone())
 }
 
-pub(crate) fn slice_source(span: Span) -> Option<VarStr> {
+pub(crate) fn slice_source(span: Span) -> Option<ShStr> {
   let start = span.start();
   let end   = span.end();
   let id    = span.source();

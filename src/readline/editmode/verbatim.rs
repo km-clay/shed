@@ -1,4 +1,4 @@
-use crate::state::vars::VarStr;
+use crate::state::vars::ShStr;
 
 use super::{
   CmdReplay, E, EditMode, K, ModeReport, common_cmds,
@@ -56,7 +56,7 @@ impl EditMode for ViVerbatim {
   fn cursor_style(&self) -> CursorStyle {
     CursorStyle::Underline(true)
   }
-  fn pending_seq(&self) -> Option<VarStr> {
+  fn pending_seq(&self) -> Option<ShStr> {
     None
   }
   fn clamp_cursor(&self) -> bool {

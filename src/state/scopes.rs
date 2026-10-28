@@ -19,7 +19,7 @@ use super::{
 use crate::expand::Words;
 use crate::{
   HashMap,
-  state::vars::{VarStr, VarStrSliceExt},
+  state::vars::{ShStr, ShStrSliceExt},
 };
 use crate::{shopt, varstr};
 
@@ -39,9 +39,9 @@ pub(crate) struct ScopeStack {
   depth : u32,
 
   /// Global parameters such as $!, $$, etc
-  global_params: HashMap<ShellParam, VarStr>,
+  global_params: HashMap<ShellParam, ShStr>,
 
-  launch_env: OnceCell<HashMap<VarStr, Var>>,
+  launch_env: OnceCell<HashMap<ShStr, Var>>,
 }
 
 impl ScopeStack {
@@ -55,11 +55,11 @@ impl ScopeStack {
     new.scopes.push(frame);
     let shell_name = std::env::args_os()
       .next()
-      .map_or_else(|| VarStr::from("shed"), |a| VarStr::from(a.into_vec()));
+      .map_or_else(|| ShStr::from("shed"), |a| ShStr::from(a.into_vec()));
     new.global_params.insert(ShellParam::ShellName, shell_name);
     new
   }
-  pub(crate) fn descend(&mut self, argv: Option<Vec<VarStr>>) {
+  pub(crate) fn descend(&mut self, argv: Option<Vec<ShStr>>) {
     let mut new_vars = VarTab::bare();
     if let Some(argv) = argv {
       new_vars.extend_args(argv);
@@ -67,13 +67,13 @@ impl ScopeStack {
     self.scopes.push(new_vars);
     self.depth += 1;
   }
-  pub(crate) fn descend_with_ceiling(&mut self, argv: Option<Vec<VarStr>>) {
+  pub(crate) fn descend_with_ceiling(&mut self, argv: Option<Vec<ShStr>>) {
     self.descend(argv);
     if let Some(scope) = self.scopes.last_mut() {
       scope.set_kind(vars::ScopeKind::Ceiling);
     }
   }
-  pub(crate) fn descend_into_function(&mut self, argv: Option<Vec<VarStr>>) {
+  pub(crate) fn descend_into_function(&mut self, argv: Option<Vec<ShStr>>) {
     self.descend(argv);
     if let Some(scope) = self.scopes.last_mut() {
       scope.set_kind(vars::ScopeKind::Function);
@@ -83,7 +83,7 @@ impl ScopeStack {
   ///
   /// Unsets all global variables that are not managed by the shell, and then restores
   /// the env vars inherited by the shell so that critical vars like `PATH` and `HOME` are not unset
-  pub(super) fn forget_userspace_globals(&mut self, exclude: &[VarStr]) {
+  pub(super) fn forget_userspace_globals(&mut self, exclude: &[ShStr]) {
     let Some(scope) = self.scopes.first_mut() else {
       return;
     };
@@ -132,7 +132,7 @@ impl ScopeStack {
   pub(crate) fn cur_scope_mut(&mut self) -> &mut VarTab {
     self.scopes.last_mut().unwrap()
   }
-  pub(crate) fn sh_argv(&self) -> &VecDeque<VarStr> {
+  pub(crate) fn sh_argv(&self) -> &VecDeque<ShStr> {
     for scope in self.scopes_rev() {
       let argv = scope.sh_argv();
       if !argv.is_empty() {
@@ -196,7 +196,7 @@ impl ScopeStack {
     }
     false
   }
-  pub(crate) fn flatten_vars(&self) -> HashMap<VarStr, Var> {
+  pub(crate) fn flatten_vars(&self) -> HashMap<ShStr, Var> {
     let scope_vars = self
       .scopes_iter()
       .flat_map(VarTab::vars)
@@ -399,7 +399,7 @@ impl ScopeStack {
     &mut self,
     var_name: &[u8],
     idx: ArrIndex,
-    val: VarStr,
+    val: ShStr,
     flags: VarFlags,
   ) -> ShResult<()> {
     if flags.contains(VarFlags::LOCAL) || self.writes_are_local() {
@@ -456,7 +456,7 @@ impl ScopeStack {
     };
     scope.set_var(var_name, val, flags)
   }
-  pub(crate) fn try_get_arr_elems(&self, var_name: &[u8]) -> ShResult<Vec<VarStr>> {
+  pub(crate) fn try_get_arr_elems(&self, var_name: &[u8]) -> ShResult<Vec<ShStr>> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)
@@ -473,7 +473,7 @@ impl ScopeStack {
     }
     Err(sherr!(ExecFail, "Variable '{}' not found", var_name.to_str_lossy()))
   }
-  pub(crate) fn try_get_assoc_items(&self, var_name: &[u8]) -> ShResult<Vec<(VarStr, VarStr)>> {
+  pub(crate) fn try_get_assoc_items(&self, var_name: &[u8]) -> ShResult<Vec<(ShStr, ShStr)>> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)
@@ -490,10 +490,10 @@ impl ScopeStack {
     }
     Err(sherr!(ExecFail, "Variable '{}' not found", var_name.to_str_lossy()))
   }
-  pub(crate) fn get_arr_elems(&self, var_name: &[u8]) -> Vec<VarStr> {
+  pub(crate) fn get_arr_elems(&self, var_name: &[u8]) -> Vec<ShStr> {
     self.try_get_arr_elems(var_name).unwrap_or_default()
   }
-  pub(crate) fn get_assoc_mut(&mut self, var_name: &[u8]) -> ShResult<&mut Vec<(VarStr, VarStr)>> {
+  pub(crate) fn get_assoc_mut(&mut self, var_name: &[u8]) -> ShResult<&mut Vec<(ShStr, ShStr)>> {
     if self.try_get_assoc_mut(var_name).is_err() {
       self
         .set_var(var_name, VarKind::assoc_arr(vec![]), VarFlags::empty())
@@ -504,7 +504,7 @@ impl ScopeStack {
   pub(crate) fn try_get_assoc_mut(
     &mut self,
     var_name: &[u8],
-  ) -> ShResult<&mut Vec<(VarStr, VarStr)>> {
+  ) -> ShResult<&mut Vec<(ShStr, ShStr)>> {
     for scope in self.scopes_rev_mut() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars_mut().get_mut(var_name)
@@ -522,7 +522,7 @@ impl ScopeStack {
     }
     Err(sherr!(ExecFail, "Variable '{}' not found", var_name.to_str_lossy()))
   }
-  pub(crate) fn get_arr_mut(&mut self, var_name: &[u8]) -> ShResult<&mut VecDeque<VarStr>> {
+  pub(crate) fn get_arr_mut(&mut self, var_name: &[u8]) -> ShResult<&mut VecDeque<ShStr>> {
     if !self.var_exists(var_name) {
       self
         .set_var(var_name, VarKind::arr(vec![]), VarFlags::empty())
@@ -530,7 +530,7 @@ impl ScopeStack {
     }
     self.try_get_arr_mut(var_name)
   }
-  pub(crate) fn try_get_arr_mut(&mut self, var_name: &[u8]) -> ShResult<&mut VecDeque<VarStr>> {
+  pub(crate) fn try_get_arr_mut(&mut self, var_name: &[u8]) -> ShResult<&mut VecDeque<ShStr>> {
     for scope in self.scopes_rev_mut() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars_mut().get_mut(var_name)
@@ -548,14 +548,14 @@ impl ScopeStack {
     }
     Err(sherr!(ExecFail, "Variable '{}' not found", var_name.to_str_lossy()))
   }
-  pub(crate) fn index_var(&self, var_name: &[u8], idx: &ArrIndex) -> ShResult<VarStr> {
+  pub(crate) fn index_var(&self, var_name: &[u8], idx: &ArrIndex) -> ShResult<ShStr> {
     self.index_var_sliced(var_name, idx, None, None)
   }
   pub(crate) fn take_index_var(
     &mut self,
     var_name: &[u8],
     idx: &ArrIndex,
-  ) -> ShResult<Option<VarStr>> {
+  ) -> ShResult<Option<ShStr>> {
     for scope in self.bounded_scopes_rev_mut() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars_mut().get_mut(var_name)
@@ -613,7 +613,7 @@ impl ScopeStack {
     idx: &ArrIndex,
     slice_start: Option<usize>,
     slice_len: Option<usize>,
-  ) -> ShResult<VarStr> {
+  ) -> ShResult<ShStr> {
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name)
         && let Some(var) = scope.vars().get(var_name)
@@ -681,7 +681,7 @@ impl ScopeStack {
                 .next()
                 .unwrap_or(' ')
                 .to_string();
-              let values: Vec<&VarStr> = items.iter().map(|(_, v)| v).collect();
+              let values: Vec<&ShStr> = items.iter().map(|(_, v)| v).collect();
               return Ok(values.join_with(&ifs));
             }
             ArrIndex::ArgCount => {
@@ -693,7 +693,7 @@ impl ScopeStack {
                   return Ok(v.clone());
                 }
               }
-              return Ok(VarStr::default());
+              return Ok(ShStr::default());
             }
             _ => unreachable!("resolve_for guarantees Key/AllSplit/AllJoined/ArgCount on AssocArr"),
           },
@@ -703,17 +703,17 @@ impl ScopeStack {
         }
       }
     }
-    Ok(VarStr::default())
+    Ok(ShStr::default())
   }
 
-  pub(crate) fn get_array_keys(&self, var_name: &[u8]) -> ShResult<VarStr> {
+  pub(crate) fn get_array_keys(&self, var_name: &[u8]) -> ShResult<ShStr> {
     let get_sep = || self
               .try_get_var(b"IFS")
               .unwrap_or_else(|| " \t\n".into())
               .chars()
               .next()
-              .map(VarStr::from)
-              .unwrap_or_else(|| VarStr::from(' '));
+              .map(ShStr::from)
+              .unwrap_or_else(|| ShStr::from(' '));
 
     for scope in self.scopes_rev() {
       if scope.var_exists(var_name)
@@ -721,13 +721,13 @@ impl ScopeStack {
       {
         match var.kind() {
           VarKind::Arr(items) => {
-            let indices: Vec<VarStr> = (0..items.len()).map(|i| i.to_string().into()).collect();
+            let indices: Vec<ShStr> = (0..items.len()).map(|i| i.to_string().into()).collect();
             let sep = get_sep();
 
             return Ok(indices.join_with(&sep));
           }
           VarKind::AssocArr(items) => {
-            let keys: Vec<&VarStr> = items.iter().map(|(k, _)| k).collect();
+            let keys: Vec<&ShStr> = items.iter().map(|(k, _)| k).collect();
             let sep = self
               .try_get_var(b"IFS")
               .unwrap_or_else(|| " \t\n".into())
@@ -744,7 +744,7 @@ impl ScopeStack {
         }
       }
     }
-    Ok(VarStr::default())
+    Ok(ShStr::default())
   }
 
   pub(crate) fn bounded_scopes_rev(&self) -> impl Iterator<Item = &VarTab> {
@@ -781,7 +781,7 @@ impl ScopeStack {
     self.scopes.iter()
   }
 
-  pub(crate) fn try_get_var(&self, var_name: &[u8]) -> Option<VarStr> {
+  pub(crate) fn try_get_var(&self, var_name: &[u8]) -> Option<ShStr> {
     if let Ok(param) = var_name.to_str_lossy().parse::<ShellParam>() {
       return self.try_get_param(param);
     }
@@ -838,7 +838,7 @@ impl ScopeStack {
     }
     false
   }
-  fn resolve_var(&self, var: &VarName) -> Option<VarStr> {
+  fn resolve_var(&self, var: &VarName) -> Option<ShStr> {
     let name = var.name();
 
     if let Some(idx) = var.index() {
@@ -934,15 +934,15 @@ impl ScopeStack {
   pub(crate) fn try_take_var_kind(&mut self, var_name: &[u8]) -> ShResult<Option<VarKind>> {
     Ok(self.try_take_var(var_name)?.map(Var::into_kind))
   }
-  pub(crate) fn take_var(&mut self, var_name: &[u8]) -> ShResult<VarStr> {
+  pub(crate) fn take_var(&mut self, var_name: &[u8]) -> ShResult<ShStr> {
     Ok(
       self
         .try_take_var(var_name)?
-        .map(VarStr::from)
+        .map(ShStr::from)
         .unwrap_or_default(),
     )
   }
-  pub(crate) fn get_var(&self, var_name: &[u8]) -> VarStr {
+  pub(crate) fn get_var(&self, var_name: &[u8]) -> ShStr {
     self.try_get_var(var_name).unwrap_or_default()
   }
   pub(crate) fn get_var_meta(&self, var_name: &[u8]) -> Var {
@@ -987,7 +987,7 @@ impl ScopeStack {
     }
     None
   }
-  pub(crate) fn all_vars(&self) -> HashMap<VarStr, Var> {
+  pub(crate) fn all_vars(&self) -> HashMap<ShStr, Var> {
     let mut vars = HashMap::default();
     for scope in &self.scopes {
       for (k, v) in scope.vars() {
@@ -1012,7 +1012,7 @@ impl ScopeStack {
     }
     None
   }
-  pub(crate) fn try_get_param(&self, param: ShellParam) -> Option<VarStr> {
+  pub(crate) fn try_get_param(&self, param: ShellParam) -> Option<ShStr> {
     if param.is_global()
       && let Some(val) = self.global_params.get(&param)
     {
@@ -1034,7 +1034,7 @@ impl ScopeStack {
 
     None
   }
-  pub(crate) fn try_take_param(&mut self, param: ShellParam) -> ShResult<Option<VarStr>> {
+  pub(crate) fn try_take_param(&mut self, param: ShellParam) -> ShResult<Option<ShStr>> {
     if param.is_global() && self.global_params.contains_key(&param) {
       return Err(sherr!(ExecFail, "Cannot take global shell parameter '{param}'"));
     }
@@ -1054,11 +1054,11 @@ impl ScopeStack {
 
     Ok(None)
   }
-  pub(crate) fn get_param(&self, param: ShellParam) -> VarStr {
+  pub(crate) fn get_param(&self, param: ShellParam) -> ShStr {
     self.try_get_param(param).unwrap_or_default()
   }
   /// Set a shell parameter
-  pub(crate) fn set_param(&mut self, param: ShellParam, val: VarStr) {
+  pub(crate) fn set_param(&mut self, param: ShellParam, val: ShStr) {
     match param {
       ShellParam::ShPid | ShellParam::LastJob | ShellParam::ShellName => {
         self.global_params.insert(param, val);
@@ -1092,7 +1092,7 @@ mod index_var_sliced_tests {
   }
 
   fn set_assoc(name: &str, pairs: &[(&str, &str)]) {
-    let vec: Vec<(VarStr, VarStr)> = pairs
+    let vec: Vec<(ShStr, ShStr)> = pairs
       .iter()
       .map(|(k, v)| ((*k).into(), (*v).into()))
       .collect();
@@ -1114,7 +1114,7 @@ mod index_var_sliced_tests {
     idx: &ArrIndex,
     slice_start: Option<usize>,
     slice_len: Option<usize>,
-  ) -> ShResult<VarStr> {
+  ) -> ShResult<ShStr> {
     Shed::vars(|v| v.index_var_sliced(name.as_bytes(), idx, slice_start, slice_len))
   }
 
@@ -1306,7 +1306,7 @@ mod get_array_keys_tests {
   }
 
   fn set_assoc(name: &str, pairs: &[(&str, &str)]) {
-    let vec: Vec<(VarStr, VarStr)> = pairs
+    let vec: Vec<(ShStr, ShStr)> = pairs
       .iter()
       .map(|(k, v)| ((*k).into(), (*v).into()))
       .collect();
@@ -1323,7 +1323,7 @@ mod get_array_keys_tests {
     });
   }
 
-  fn get_keys(name: &str, _joined: bool) -> ShResult<VarStr> {
+  fn get_keys(name: &str, _joined: bool) -> ShResult<ShStr> {
     Shed::vars(|v| v.get_array_keys(name.as_bytes()))
   }
 

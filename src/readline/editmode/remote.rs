@@ -1,4 +1,4 @@
-use crate::state::vars::VarStr;
+use crate::state::vars::ShStr;
 
 use super::{
   CmdReplay, E as KeyEvent, EditCmd, EditMode, ModeReport, Shed, state::terminal::CursorStyle,
@@ -24,7 +24,7 @@ impl EditMode for RemoteMode {
     CursorStyle::Beam(false)
   }
 
-  fn pending_seq(&self) -> Option<VarStr> {
+  fn pending_seq(&self) -> Option<ShStr> {
     None
   }
 

@@ -7,7 +7,7 @@ use crate::{
   match_loop, sherr, shopt,
   state::{
     Shed, params,
-    vars::{VarName, VarStr},
+    vars::{VarName, ShStr},
   },
   try_var,
   util::{error::ShResult, strops::QuoteState},
@@ -55,7 +55,7 @@ pub(crate) fn expand_raw_inner(
         continue;
       }
 
-      let (home, expanded): (VarStr, bool) = if username.is_empty() {
+      let (home, expanded): (ShStr, bool) = if username.is_empty() {
         // standard '~' expansion
         (var!(b"HOME"), true)
       } else if let Ok(Some(user)) = User::from_name(&username) {
@@ -212,7 +212,7 @@ pub(crate) fn expand_var(
         return Ok(words_seg(&fields));
       }
 
-      let parameter = VarStr::from(b as char);
+      let parameter = ShStr::from(b as char);
       let val = var!(&parameter);
 
       return Ok(val.into());
@@ -334,7 +334,7 @@ mod tests {
     pub(super) const DUB_QUOTE: char = '\u{fdd0}';
   }
   use crate::state::vars::VarKind;
-  use crate::state::vars::VarStr;
+  use crate::state::vars::ShStr;
   use crate::tests::testutil::TestGuard;
 
   // ===================== Variable Expansion (TestGuard) =====================
@@ -516,7 +516,7 @@ mod tests {
 
   /// Helper: drive the full expansion pipeline (`unescape_str` → `expand_raw` →
   /// `split_words` → `expand_glob` → strip ESCAPE) on a raw shell word.
-  fn expand_words_in(dir: &std::path::Path, raw: &str) -> Vec<VarStr> {
+  fn expand_words_in(dir: &std::path::Path, raw: &str) -> Vec<ShStr> {
     use crate::eval::lex::TkFlags;
     use crate::expand::Expander;
 

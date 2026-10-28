@@ -2,7 +2,7 @@ use std::{env, fs};
 
 use crate::{
   procio, sherr,
-  state::{paths, vars::VarStr},
+  state::{paths, vars::ShStr},
   try_var,
   util::{self, error::ShResult},
 };
@@ -36,7 +36,7 @@ impl super::Builtin for Pwd {
       return Err(sherr!(ParseErr @ args.span(), "pwd: too many arguments").with_code(2));
     }
 
-    let dir: Option<VarStr> = if logical {
+    let dir: Option<ShStr> = if logical {
       try_var!(b"PWD")
         .filter(|p| is_same_dir_as_cwd(p.as_bytes()))
         .or_else(|| physical_cwd().map(|p| paths::path_to_varstr(&p)))

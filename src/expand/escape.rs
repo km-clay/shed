@@ -14,7 +14,7 @@ use crate::{
     var,
   },
   match_loop, sherr,
-  state::vars::VarStr,
+  state::vars::ShStr,
   try_var,
   util::{
     self,
@@ -401,7 +401,7 @@ fn read_dub_quote(stream: &mut SegCursor, out: &mut SegStream) {
   });
 }
 
-pub(crate) fn expand_ansi_c(s: &[u8]) -> VarStr {
+pub(crate) fn expand_ansi_c(s: &[u8]) -> ShStr {
   let     input = SegStream::from_slice(s);
   let mut out   = SegStream::default();
   expand_ansi_c_stream(&mut input.cursor(), &mut out, None);
@@ -807,7 +807,7 @@ pub(crate) fn shell_quote_fmt<W: io::Write>(s: &[u8], f: &mut W) -> io::Result<(
 }
 
 /// Quotes a string such that it can be round-tripped as shell syntax
-pub(crate) fn shell_quote(s: &[u8]) -> VarStr {
+pub(crate) fn shell_quote(s: &[u8]) -> ShStr {
   quote(s, shell_quote_fmt)
 }
 
@@ -830,7 +830,7 @@ fn push_ansi_c_escaped<T: io::Write>(out: &mut T, b: u8) -> io::Result<()> {
 }
 
 /// Quotes an xtrace argument
-pub(crate) fn xtrace_quote(s: &[u8]) -> VarStr {
+pub(crate) fn xtrace_quote(s: &[u8]) -> ShStr {
   quote(s, xtrace_quote_fmt)
 }
 
@@ -838,7 +838,7 @@ pub(crate) fn xtrace_quote(s: &[u8]) -> VarStr {
 fn quote<S: AsRef<[u8]>, F: Fn(&[u8], &mut SmallVec<[u8; 24]>) -> io::Result<()>>(
   s: S,
   f: F,
-) -> VarStr {
+) -> ShStr {
   let     s_str  = s.as_ref();
   let mut result = util::scratch_buf();
   f(s_str, &mut result).unwrap();

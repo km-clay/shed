@@ -16,7 +16,7 @@ use crate::{
   state::{
     Shed,
     scopes::ScopeStack,
-    vars::{ArrIndex, ShellParam, VarKind, VarName, VarStr},
+    vars::{ArrIndex, ShellParam, VarKind, VarName, ShStr},
   },
   util::error::ShResult,
   var, varstr,
@@ -46,8 +46,8 @@ pub(crate) enum ParamExp {
   ReplaceAllMatches(SegStream, SegStream), // //search/replace
   ReplacePrefix(SegStream, SegStream),     // #search/replace
   ReplaceSuffix(SegStream, SegStream),     // %search/replace
-  VarNamesWithPrefix(VarStr),              // !prefix@ || !prefix*
-  ExpandInnerVar(VarStr),                  // !var
+  VarNamesWithPrefix(ShStr),              // !prefix@ || !prefix*
+  ExpandInnerVar(ShStr),                  // !var
 }
 
 /// Parse a parameter expansion
@@ -86,7 +86,7 @@ pub(crate) fn parse_param_exp(body: &SegStream) -> ShResult<ParamExp> {
 
   // Handle indirect var expansion: ${!var}
   if lead.first() == Some(&b'!') {
-    let var = VarStr::from(&lead[1..]);
+    let var = ShStr::from(&lead[1..]);
     if var.ends_with(b"]") && (var.contains_slice(b"[@]") || var.contains_slice(b"[*]")) {
       return Ok(PE::ExpandInnerVar(var));
     }
@@ -207,7 +207,7 @@ fn align_slice(start: Num, len: Option<Num>, n: Num) -> ShResult<(usize, usize)>
   Ok((start as usize, (end - start) as usize))
 }
 
-fn slice_chars(value: &VarStr, start: Num, len: Option<Num>) -> ShResult<VarStr> {
+fn slice_chars(value: &ShStr, start: Num, len: Option<Num>) -> ShResult<ShStr> {
   let bytes = value.as_bytes();
   let starts = bytes.char_indices().map(|(s, _, _)| s).collect_vec();
   let (skip, take) = align_slice(start, len, starts.len() as Num)?;
@@ -294,7 +294,7 @@ fn trim_param(
       }
     };
 
-    VarStr::from(&word[range])
+    ShStr::from(&word[range])
   });
 
   Ok(var::emit_words(parsed, &trimmed))
@@ -311,7 +311,7 @@ enum ReplaceMode {
 #[derive(Debug, Clone)]
 struct ReplaceSpec {
   pat: Rc<Pattern>,
-  replace: VarStr,
+  replace: ShStr,
 }
 
 impl ReplaceSpec {
@@ -339,7 +339,7 @@ impl ReplaceSpec {
   }
 }
 
-fn replace_in(haystack: &VarStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option<VarStr> {
+fn replace_in(haystack: &ShStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option<ShStr> {
   let ReplaceSpec { pat, replace } = spec;
 
   match mode {
@@ -351,7 +351,7 @@ fn replace_in(haystack: &VarStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option
       out.extend_from_slice(&replace);
       out.extend_from_slice(&haystack[end..]);
 
-      Some(VarStr::from(out))
+      Some(ShStr::from(out))
     }
     ReplaceMode::All => {
       let mut out = Vec::new();
@@ -369,7 +369,7 @@ fn replace_in(haystack: &VarStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option
 
       hit.then(|| {
         out.extend_from_slice(&haystack[last..]);
-        VarStr::from(out)
+        ShStr::from(out)
       })
     }
     ReplaceMode::Prefix => {
@@ -555,7 +555,7 @@ pub(crate) fn perform_param_expansion(
           let expanded =
             var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
           if allow_side_effects {
-            let stored = VarStr::from(expanded.as_bytes());
+            let stored = ShStr::from(expanded.as_bytes());
             set_var!(&parsed.name(), VarKind::string(stored))?;
           }
           Ok(expanded)
@@ -568,7 +568,7 @@ pub(crate) fn perform_param_expansion(
         let expanded =
           var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
         if allow_side_effects {
-          let stored = VarStr::from(expanded.as_bytes());
+          let stored = ShStr::from(expanded.as_bytes());
           set_var!(&parsed.name(), VarKind::string(stored))?;
         }
         Ok(expanded)
@@ -690,9 +690,9 @@ mod tests {
     parse_param_exp(&SegStream::from(val)).unwrap()
   }
 
-  fn test_param_expansion(val: &str) -> ShResult<VarStr> {
+  fn test_param_expansion(val: &str) -> ShResult<ShStr> {
     perform_param_expansion(None, &SegStream::from(val), true)
-      .map(|s| VarStr::from(s.as_bytes()))
+      .map(|s| ShStr::from(s.as_bytes()))
   }
 
   // ===================== ParamExp parsing =====================
@@ -904,7 +904,7 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"EMPTY",
-        VarKind::string(VarStr::default()),
+        VarKind::string(ShStr::default()),
         VarFlags::empty(),
       )
     })
@@ -929,7 +929,7 @@ mod tests {
     Shed::vars_mut(|v| {
       v.set_var(
         b"EMPTY",
-        VarKind::string(VarStr::default()),
+        VarKind::string(ShStr::default()),
         VarFlags::empty(),
       )
     })

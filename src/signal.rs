@@ -39,7 +39,7 @@ use super::{
 
 use crate::{
   HashMap, procio,
-  state::{jobs::Outcome, vars::VarStr},
+  state::{jobs::Outcome, vars::ShStr},
   varstr,
 };
 
@@ -567,13 +567,13 @@ pub(crate) fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
     _ => "1".into(),
   });
 
-  let children: Vec<(VarStr, VarStr)> = cmds.into_iter().zip(status_strs).collect();
+  let children: Vec<(ShStr, ShStr)> = cmds.into_iter().zip(status_strs).collect();
   let last_status = children.last().map(|c| c.1.clone()).unwrap_or_default();
   let cmd_count   = children.len();
 
   // now run our post job autocmds
   // with these variables set
-  let post_job_vars: HashMap<VarStr, Var> = [
+  let post_job_vars: HashMap<ShStr, Var> = [
     (
       "CHILDREN".into(),
       Var::new(VarKind::assoc_arr(children), VarFlags::empty()),

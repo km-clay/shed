@@ -4,7 +4,7 @@ use crate::{
   opt,
   procio::{self, Sink, SinkIo},
   sherr,
-  state::{params, vars::VarStr},
+  state::{params, vars::ShStr},
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -198,7 +198,7 @@ impl super::Builtin for WriteInt {
 }
 
 impl WriteInt {
-  fn encode_into(out: &mut SinkIo, spec: IntSpec, raw: &VarStr) -> ShResult<()> {
+  fn encode_into(out: &mut SinkIo, spec: IntSpec, raw: &ShStr) -> ShResult<()> {
     let text = raw.to_str_lossy();
     let val = <i128>::parse_radix(text.trim())
       .or_else(|| <u128>::parse_radix(text.trim()).map(|u| u as i128))

@@ -7,7 +7,7 @@ use crate::{
   eval::lex::{Span, Tk},
   expand::Word,
   sherr,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::error::ShResult,
   varstr,
 };
@@ -31,7 +31,7 @@ impl std::fmt::Debug for Arg {
 /// The result of parsing a builtin's command line.
 pub(crate) struct Parsed {
   pub words: Vec<Arg>,    // the parsed arguments and options
-  pub trace: Vec<VarStr>, // the flat word list used for `set -x` tracing
+  pub trace: Vec<ShStr>, // the flat word list used for `set -x` tracing
 }
 
 impl From<Vec<Word>> for Parsed {
@@ -45,7 +45,7 @@ impl From<Vec<Word>> for Parsed {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Opt {
-  key : VarStr,
+  key : ShStr,
   span: Span,
   args: Vec<Word>,
 }
@@ -60,7 +60,7 @@ impl Opt {
   pub(crate) fn key(&self) -> &str {
     self.key.to_str().unwrap_or_default()
   }
-  pub(crate) fn value(&self) -> ShResult<VarStr> {
+  pub(crate) fn value(&self) -> ShResult<ShStr> {
     if self.args.len() == 1 {
       Ok(self.args[0].content())
     } else {
@@ -96,8 +96,8 @@ impl Display for Opt {
 #[derive(Default, Debug)]
 pub(crate) struct OptSpec {
   short: Option<u8>,     // form like '-a'
-  long : Option<VarStr>, // form like '--arg'
-  key  : VarStr,         // internal name used for matching
+  long : Option<ShStr>, // form like '--arg'
+  key  : ShStr,         // internal name used for matching
   argc : usize,          // number of arguments the option takes
 }
 
@@ -388,7 +388,7 @@ pub(crate) fn scan_options<I, F>(
   classify: impl Fn(char) -> Role<F>,
   mut set_flag: impl FnMut(bool, F) -> ShResult<()>,
   mut long_opt: impl FnMut(bool, Option<&str>) -> ShResult<()>,
-  mut invocation: impl FnMut(char, Option<VarStr>, &mut Peekable<I>) -> ShResult<()>,
+  mut invocation: impl FnMut(char, Option<ShStr>, &mut Peekable<I>) -> ShResult<()>,
   strict: bool,
 ) -> ShResult<ScanOutcome>
 where
@@ -427,7 +427,7 @@ where
         Role::InvocationArg => {
           // getopt rule: leftover cluster chars are this option's argument.
           let attached: String = cluster.by_ref().collect();
-          let attached         = (!attached.is_empty()).then(|| VarStr::from(attached));
+          let attached         = (!attached.is_empty()).then(|| ShStr::from(attached));
           invocation(ch, attached, words)?;
           break; // an arg-taking option ends the cluster
         }

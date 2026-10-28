@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::{
-  HashSet, eval::lex::{LexFlags, LexStream, Tk, TkFlags}, keys::{KeyCode, KeyEvent, ModKeys}, shopt, state::{self, Shed, SourceHandle, vars::VarStr},
+  HashSet, eval::lex::{LexFlags, LexStream, Tk, TkFlags}, keys::{KeyCode, KeyEvent, ModKeys}, shopt, state::{self, Shed, SourceHandle, vars::ShStr},
 };
 
 struct AliasExpander {
@@ -19,7 +19,7 @@ impl AliasExpander {
 
   fn expand(mut self) -> (String, Option<usize>) {
     let mut cursor                  = 0;
-    let mut active: HashSet<VarStr> = HashSet::default();
+    let mut active: HashSet<ShStr> = HashSet::default();
 
     let mut input_handle            = state::register_source(self.input.as_str());
     let mut tokens                  = Self::lex_tokens(&input_handle);

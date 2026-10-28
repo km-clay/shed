@@ -4,7 +4,7 @@ use serde_json::{Map, Value};
 use crate::{
   expand::escape,
   opt, outln, sherr,
-  state::vars::{VarStr, VarStrSliceExt},
+  state::vars::{ShStr, ShStrSliceExt},
   util::{self, error::ShResult},
   varstr,
 };
@@ -116,7 +116,7 @@ impl Builtin for ZdList {
 }
 
 impl ZdList {
-  fn fmt_entries(rows: &[DirStat]) -> VarStr {
+  fn fmt_entries(rows: &[DirStat]) -> ShStr {
     // no format specified, use tab-separated values
     let mut entries = vec![];
 
@@ -145,7 +145,7 @@ impl ZdList {
     entries.join_with("\n")
   }
 
-  fn fmt_entries_json(rows: &[DirStat]) -> VarStr {
+  fn fmt_entries_json(rows: &[DirStat]) -> ShStr {
     // JSON formatted output
     let mut entries = vec![];
 
@@ -173,7 +173,7 @@ impl ZdList {
     serde_json::to_string_pretty(&json_arr).unwrap().into()
   }
 
-  fn fmt_entries_quoted(rows: &[DirStat]) -> VarStr {
+  fn fmt_entries_quoted(rows: &[DirStat]) -> ShStr {
     // SQR serialization
     let mut entries = vec![];
 

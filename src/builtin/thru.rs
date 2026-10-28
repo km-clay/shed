@@ -10,7 +10,7 @@ use crate::{
   opt,
   procio::{self, OsSink, RedirSpec, RedirType, Sink},
   sherr, signal,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::{
     self,
     error::{ShErr, ShResult},
@@ -21,14 +21,14 @@ struct ThruOpts {
   count : bool,
   once  : bool,
   append: bool,
-  tee   : Vec<VarStr>,
+  tee   : Vec<ShStr>,
   take  : Option<usize>,
   skip  : Option<usize>,
   from  : Option<u8>,
   until : Option<u8>,
 }
 
-fn open_tee_dest(dest: VarStr, append: bool) -> Result<Arc<dyn Sink>, (VarStr, ShErr)> {
+fn open_tee_dest(dest: ShStr, append: bool) -> Result<Arc<dyn Sink>, (ShStr, ShErr)> {
   match (dest.strip_prefix(b"@"), append) {
     (Some(var), _) => {
       let mode = if append {

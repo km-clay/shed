@@ -5,7 +5,7 @@ use crate::{
   sherr,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarFlags, VarKind, ShStr},
   },
   util::{self, error::ShResultExt},
 };
@@ -30,7 +30,7 @@ impl Default for ReadLimit {
 }
 
 impl ReadLimit {
-  fn at_most(arg: &VarStr) -> ShResult<Self> {
+  fn at_most(arg: &ShStr) -> ShResult<Self> {
     let n = arg
       .to_str_lossy()
       .parse::<usize>()
@@ -40,7 +40,7 @@ impl ReadLimit {
     }
     Ok(Self::AtMost(n))
   }
-  fn exactly(arg: &VarStr) -> ShResult<Self> {
+  fn exactly(arg: &ShStr) -> ShResult<Self> {
     let n = arg
       .to_str_lossy()
       .parse::<usize>()
@@ -59,7 +59,7 @@ impl ReadLimit {
 }
 
 fn emit(
-  vals: impl Iterator<Item = VarStr>,
+  vals: impl Iterator<Item = ShStr>,
   writer: &mut SinkIo,
   args: &BuiltinArgs,
 ) -> ShResult<()> {

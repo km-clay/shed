@@ -1,6 +1,6 @@
 use bstr::ByteSlice;
 
-use crate::{HashSet, out, procio, state::vars::VarStr, util::strops::ByteSet};
+use crate::{HashSet, out, procio, state::vars::ShStr, util::strops::ByteSet};
 
 use super::{Builtin, BuiltinArgs, ShResult, argv, mod_opt::OptSpec, opt, util};
 
@@ -64,9 +64,9 @@ impl Builtin for Trim {
       .chain(shared.iter())
       .all(|s| s.is_ascii());
 
-    let join = |spec: Option<VarStr>| -> VarStr {
+    let join = |spec: Option<ShStr>| -> ShStr {
       match (spec, shared.as_ref()) {
-        (None, None)         => VarStr::from(" \t\n\r"),
+        (None, None)         => ShStr::from(" \t\n\r"),
         (Some(spec), None)   => spec,
         (None, Some(shared)) => shared.clone(),
         (Some(mut spec), Some(shared)) => {
@@ -89,9 +89,9 @@ impl Builtin for Trim {
 
 impl Trim {
   fn trim(
-    string: &VarStr,
-    end_matches: Option<VarStr>,
-    start_matches: Option<VarStr>,
+    string: &ShStr,
+    end_matches: Option<ShStr>,
+    start_matches: Option<ShStr>,
   ) -> ShResult<()> {
     let     input         = string.to_string();
     let     end_matches   = end_matches.map(|s| s.to_string());
@@ -114,9 +114,9 @@ impl Trim {
     util::with_status(0)
   }
   fn trim_raw(
-    string: &VarStr,
-    end_matches: Option<VarStr>,
-    start_matches: Option<VarStr>,
+    string: &ShStr,
+    end_matches: Option<ShStr>,
+    start_matches: Option<ShStr>,
   ) -> ShResult<()> {
     let mut out = string.as_bytes();
 

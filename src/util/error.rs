@@ -14,7 +14,7 @@ use crate::{
   eval::lex::Span,
   procio::{self, RedirGuard},
   sherr, shopt,
-  state::{SourceId, get_source, get_source_name, vars::VarStr},
+  state::{SourceId, get_source, get_source_name, vars::ShStr},
   util::random,
   varstr,
 };
@@ -224,8 +224,8 @@ impl<T> ShResultExt for Result<T, ShErr> {
 
 #[derive(Clone)]
 pub(crate) enum LabelMsg {
-  Eager(VarStr),
-  Lazy(Arc<dyn Fn() -> VarStr + Send + Sync>),
+  Eager(ShStr),
+  Lazy(Arc<dyn Fn() -> ShStr + Send + Sync>),
 }
 
 impl Display for LabelMsg {
@@ -248,33 +248,33 @@ impl Debug for LabelMsg {
 
 impl LabelMsg {
   #[cfg(test)]
-  fn get(self) -> VarStr {
+  fn get(self) -> ShStr {
     match self {
       LabelMsg::Eager(msg) => msg,
       LabelMsg::Lazy(f)    => f(),
     }
   }
 
-  pub(crate) fn lazy(f: impl Fn() -> VarStr + 'static + Send + Sync) -> Self {
+  pub(crate) fn lazy(f: impl Fn() -> ShStr + 'static + Send + Sync) -> Self {
     LabelMsg::Lazy(Arc::new(f))
   }
 }
 
-impl From<VarStr> for LabelMsg {
-  fn from(msg: VarStr) -> Self {
+impl From<ShStr> for LabelMsg {
+  fn from(msg: ShStr) -> Self {
     LabelMsg::Eager(msg)
   }
 }
 
-impl From<Arc<dyn Fn() -> VarStr + Send + Sync>> for LabelMsg {
-  fn from(msg: Arc<dyn Fn() -> VarStr + Send + Sync>) -> Self {
+impl From<Arc<dyn Fn() -> ShStr + Send + Sync>> for LabelMsg {
+  fn from(msg: Arc<dyn Fn() -> ShStr + Send + Sync>) -> Self {
     LabelMsg::Lazy(msg)
   }
 }
 
 impl From<&str> for LabelMsg {
   fn from(msg: &str) -> Self {
-    LabelMsg::Eager(VarStr::from(msg))
+    LabelMsg::Eager(ShStr::from(msg))
   }
 }
 
@@ -385,7 +385,7 @@ pub(crate) struct ShErr {
   kind    : ShErrKind,
   src_span: Option<StrongSpan>,
   labels  : Vec<LabelBuilder>,
-  notes   : Vec<VarStr>,
+  notes   : Vec<ShStr>,
   code    : Option<i32>,
 
   /// Set by redirection errors in certain contexts.
@@ -413,7 +413,7 @@ impl ShErr {
       io_guards: vec![],
     }
   }
-  pub(crate) fn simple(kind: ShErrKind, msg: VarStr) -> Self {
+  pub(crate) fn simple(kind: ShErrKind, msg: ShStr) -> Self {
     Self {
       kind,
       src_span: None,
@@ -555,12 +555,12 @@ impl ShErr {
     }
     self
   }
-  pub(crate) fn at(kind: ShErrKind, span: Span, msg: VarStr) -> Self {
+  pub(crate) fn at(kind: ShErrKind, span: Span, msg: ShStr) -> Self {
     let color = last_color();
     let label = LabelBuilder::new(span).with_message(msg).with_color(color);
     Self::new(kind, span).with_label(label)
   }
-  pub(crate) fn labeled(self, span: Span, msg: VarStr) -> Self {
+  pub(crate) fn labeled(self, span: Span, msg: ShStr) -> Self {
     let color = last_color();
     let label = LabelBuilder::new(span).with_message(msg).with_color(color);
     self.with_label(label)
@@ -595,11 +595,11 @@ impl ShErr {
     self.labels.extend(ctx.cloned());
     self
   }
-  pub(crate) fn with_note(mut self, note: VarStr) -> Self {
+  pub(crate) fn with_note(mut self, note: ShStr) -> Self {
     self.notes.push(note);
     self
   }
-  pub(crate) fn with_suggestions(self, suggestions: &[VarStr]) -> Self {
+  pub(crate) fn with_suggestions(self, suggestions: &[ShStr]) -> Self {
     if suggestions.is_empty() {
       return self;
     }
@@ -759,7 +759,7 @@ impl From<Errno> for ShErr {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum ShErrKind {
   IoErr(std::io::ErrorKind),
-  Custom(VarStr, i32), // message, error code
+  Custom(ShStr, i32), // message, error code
   InvalidOpt,
   SyntaxErr,
   ParseErr,
@@ -785,7 +785,7 @@ pub(crate) enum ShErrKind {
   /// Created by the `break` builtin
   LoopBreak(i32),
   /// Created by the `raise` builtin
-  Raised(Option<VarStr>, i32),
+  Raised(Option<ShStr>, i32),
   /// Created by non-zero exit status when `errexit` is set
   ErrInterrupt,
   /// Created by `SIGINT` in scripts or `Ctrl+C` in interactive mode

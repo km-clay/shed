@@ -18,7 +18,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::defer;
 use crate::readline::editmode::ExNdRule;
-use crate::util::strops::VarStrDisplay;
+use crate::util::strops::ShStrDisplay;
 use crate::util::ui::Justify;
 use crate::{
   autocmd, builtin, eval, exec_term, expand,
@@ -34,7 +34,7 @@ use crate::{
     params,
     shopt::CompleteStyle,
     terminal::{Scroll, SyncOutputGuard, TermCtl, Terminal},
-    vars::{Var, VarFlags, VarKind, VarStr},
+    vars::{Var, VarFlags, VarKind, ShStr},
   },
   status_msg, system_msg, try_var,
   util::{self, error::ShResult, ui},
@@ -433,7 +433,7 @@ impl MacroRecord {
   pub(crate) fn start_recording(&mut self, reg: RegisterName) {
     *self = MacroRecord::Recording(reg, vec![]);
   }
-  pub(crate) fn status(&self) -> Option<VarStr> {
+  pub(crate) fn status(&self) -> Option<ShStr> {
     match self {
       MacroRecord::Recording(reg, _) => {
         let name = reg.display()?;
@@ -743,7 +743,7 @@ impl ShedLine {
       v.set_var(b"EDITOR_LINE", VarKind::Int(1), VarFlags::READONLY)?;
       v.set_var(
         b"EDITOR_FILE",
-        VarKind::string(VarStr::default()),
+        VarKind::string(ShStr::default()),
         VarFlags::READONLY,
       )
     })?;
@@ -1254,9 +1254,9 @@ impl ShedLine {
         let candidates     = comp.all_candidates();
         let num_candidates = candidates.len();
 
-        let cand_vec: Vec<(VarStr, VarStr)> =
+        let cand_vec: Vec<(ShStr, ShStr)> =
           candidates.into_iter().fold(vec![], |mut acc, cand| {
-            let desc = cand.desc().map(VarStr::from).unwrap_or_default();
+            let desc = cand.desc().map(ShStr::from).unwrap_or_default();
             let name = cand.content().to_var_str();
             acc.push((name, desc));
             acc

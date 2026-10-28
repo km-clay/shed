@@ -16,7 +16,7 @@ use crate::{
   procio::{self, OsSink, Sink, SinkIo, SinkLines},
   readline::EditorCore,
   sherr, signal,
-  state::vars::{VarStr, VarStrSliceExt},
+  state::vars::{ShStr, ShStrSliceExt},
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -35,9 +35,9 @@ bitflags! {
 struct ViceProg {
   cmds      : Vec<ViceCmd>,
   sep       : Option<Vec<KeyEvent>>,
-  delim     : VarStr,
+  delim     : ShStr,
   flags     : ViceFlags,
-  backup_ext: Option<VarStr>,
+  backup_ext: Option<ShStr>,
 }
 
 impl ViceProg {
@@ -139,7 +139,7 @@ impl Vice {
     core: &mut EditorCore,
     prog: &ViceProg,
     cmds: Vec<ViceCmd>,
-    fields: &mut Vec<VarStr>,
+    fields: &mut Vec<ShStr>,
     spent_cmds: &mut Vec<ViceCmd>,
   ) -> ShResult<()> {
     for cmd in cmds {
@@ -154,7 +154,7 @@ impl Vice {
             return Ok(());
           }
 
-          let field: VarStr = if let Some(sel) = core.selection() {
+          let field: ShStr = if let Some(sel) = core.selection() {
             log::debug!("Vice: selection found: {sel:?}");
             sel.into()
           } else {
@@ -212,7 +212,7 @@ impl Vice {
 
   /// Run the program against the current buffer and render one output record:
   /// the cut fields joined by the delimiter, or the whole buffer if no `-c`.
-  fn render(core: &mut EditorCore, prog: &ViceProg) -> ShResult<VarStr> {
+  fn render(core: &mut EditorCore, prog: &ViceProg) -> ShResult<ShStr> {
     let mut fields     = vec![];
     let mut spent_cmds = vec![];
     Self::exec_cmds(core, prog, prog.cmds.clone(), &mut fields, &mut spent_cmds)?;
@@ -220,7 +220,7 @@ impl Vice {
     Ok(if !fields.is_empty() {
       fields.join_with(&prog.delim) // captured fields, kept even on abort
     } else if core.editor.search_failed() {
-      VarStr::default() // aborted before capturing anything
+      ShStr::default() // aborted before capturing anything
     } else {
       core.text().into() // no -c: pass the whole buffer through
     })
@@ -318,7 +318,7 @@ impl Vice {
 
   /// Atomically write `output` back to `file`, preserving permissions and
   /// copying a backup first when `backup_ext` is set.
-  fn write_inplace(file: &str, output: &[u8], backup_ext: Option<&VarStr>) -> ShResult<()> {
+  fn write_inplace(file: &str, output: &[u8], backup_ext: Option<&ShStr>) -> ShResult<()> {
     if let Some(ext) = backup_ext {
       let ext   = ext.to_str_lossy();
       let slice = ext.strip_prefix('.').unwrap_or(&ext);

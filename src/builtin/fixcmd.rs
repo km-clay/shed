@@ -16,7 +16,7 @@ use crate::{
   match_loop,
   readline::{HistEntry, History, MAIN_HIST_TABLE_NAME},
   sherr,
-  state::{self, Shed, db, meta::MetaTab, vars::VarStr},
+  state::{self, Shed, db, meta::MetaTab, vars::ShStr},
   try_var,
   util::{
     self,
@@ -36,7 +36,7 @@ bitflags! {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RangeArg {
   Number(i32),
-  Prefix(VarStr),
+  Prefix(ShStr),
 }
 
 impl Default for RangeArg {
@@ -55,8 +55,8 @@ enum FixMode {
 
 #[derive(Debug, Default)]
 pub(super) struct FixCmdOpts {
-  editor    : Option<VarStr>,
-  replace   : Option<(VarStr, VarStr)>,
+  editor    : Option<ShStr>,
+  replace   : Option<(ShStr, ShStr)>,
   first     : Option<RangeArg>,
   last      : Option<RangeArg>,
   mode      : FixMode,
@@ -361,7 +361,7 @@ mod tests {
       .collect()
   }
 
-  fn parse(input: &SourceHandle) -> (Vec<(VarStr, Span)>, FixCmdOpts) {
+  fn parse(input: &SourceHandle) -> (Vec<(ShStr, Span)>, FixCmdOpts) {
     let tks = lex_fc(input);
     parse_fc_args(&tks)
       .map(|(w, o)| {
@@ -669,7 +669,7 @@ mod tests {
   }
 
   fn fc_opts(
-    editor: Option<VarStr>,
+    editor: Option<ShStr>,
     first: Option<RangeArg>,
     last: Option<RangeArg>,
   ) -> FixCmdOpts {

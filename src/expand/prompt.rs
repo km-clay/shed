@@ -6,7 +6,7 @@ use crate::{
   defer,
   expand::{escape, subshell, var},
   match_loop, shopt, shopt_mut,
-  state::{Shed, jobs::Outcome, paths, vars::VarStr},
+  state::{Shed, jobs::Outcome, paths, vars::ShStr},
   status_msg,
   util::{
     self,
@@ -22,10 +22,10 @@ use smol_str::format_smolstr;
 #[derive(Debug)]
 pub(crate) enum PromptTk {
   AsciiOct(i32),
-  Text(VarStr),
-  AnsiSeq(VarStr),
-  Color(VarStr),    // plain english color descriptions
-  Function(VarStr), // Expands to the output of any defined shell function
+  Text(ShStr),
+  AnsiSeq(ShStr),
+  Color(ShStr),    // plain english color descriptions
+  Function(ShStr), // Expands to the output of any defined shell function
   RuntimeMillis,
   RuntimeFormatted,
   Pwd,

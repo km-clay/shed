@@ -26,7 +26,7 @@ use crate::{
     logic::TrapTarget,
     meta::{CmdTimer, MetaTab},
     terminal::Terminal,
-    vars::{ShellParam, VarKind, VarStr},
+    vars::{ShellParam, VarKind, ShStr},
   },
   util::{
     self,
@@ -63,7 +63,7 @@ pub(crate) use control::dispatch_deferred_cmd;
 thread_local! {
   // Last expanded word of the most recently expanded argv, the raw material for
   // `$_`. Written by `prepare_argv_with`, consumed by `commit_underscore`.
-  static LAST_ARG: RefCell<Option<VarStr>> = const { RefCell::new(None) };
+  static LAST_ARG: RefCell<Option<ShStr>> = const { RefCell::new(None) };
   static SUPPRESS_UNDERSCORE: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -124,7 +124,7 @@ pub(crate) fn exit_with(code: i32) {
 }
 
 /// Stash the last expanded word so a later `commit_underscore` can promote it to `$_`.
-pub(crate) fn record_last_arg(arg: Option<VarStr>) {
+pub(crate) fn record_last_arg(arg: Option<ShStr>) {
   LAST_ARG.with(|l| *l.borrow_mut() = arg);
 }
 
@@ -209,21 +209,21 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
   // $0 value
   let name = args.first().cloned().map_or_else(
     || state::paths::get_exe_path().unwrap_or_else(|| "shed".into()),
-    VarStr::from,
+    ShStr::from,
   );
 
   // span source for error reporting
   let source_name = args
     .first()
     .cloned()
-    .map_or_else(|| "<shed -c>".into(), VarStr::from);
+    .map_or_else(|| "<shed -c>".into(), ShStr::from);
 
   Shed::vars_mut(|v| {
     v.set_param(ShellParam::ShellName, name.clone()); // $0
     let scope = v.cur_scope_mut();
     scope.sh_argv_mut().clear();
 
-    let args = args.into_iter().map(VarStr::from);
+    let args = args.into_iter().map(ShStr::from);
 
     scope.extend_args(args);
   });
@@ -274,13 +274,13 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
 ///
 /// Used in the main loop and other places that are guaranteed to be interacting with a tty somehow.
 /// This controls whether or not the shell passes terminal control to child processes.
-pub(crate) fn exec_int(input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
+pub(crate) fn exec_int(input: ShStr, source_name: Option<ShStr>) -> ShResult<()> {
   let _guard = Shed::term_mut(|t| t.interactive_guard(true));
   exec_input(input, source_name)
 }
 
 /// Execute non-interactively
-pub(crate) fn exec_nonint(input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
+pub(crate) fn exec_nonint(input: ShStr, source_name: Option<ShStr>) -> ShResult<()> {
   let _guard = Shed::term_mut(|t| t.interactive_guard(false));
   exec_input(input, source_name)
 }
@@ -289,7 +289,7 @@ pub(crate) fn exec_nonint(input: VarStr, source_name: Option<VarStr>) -> ShResul
 ///
 /// This should only be called directly if you wish to inherit
 /// the caller's interactive status.
-pub(crate) fn exec_input(mut input: VarStr, source_name: Option<VarStr>) -> ShResult<()> {
+pub(crate) fn exec_input(mut input: ShStr, source_name: Option<ShStr>) -> ShResult<()> {
   let interactive = Shed::term(Terminal::interactive);
 
   if !interactive || !Shed::shopts(|o| o.prompt.expand_aliases) {
@@ -317,14 +317,14 @@ pub(crate) fn exec_input(mut input: VarStr, source_name: Option<VarStr>) -> ShRe
 }
 
 pub(crate) struct Dispatcher {
-  source_name  : VarStr,
+  source_name  : ShStr,
   pub job_stack: JobStack,
   timer_stack  : Vec<Option<CmdTimer>>,
   fg_job       : bool,
 }
 
 impl Dispatcher {
-  pub(crate) fn new(source_name: VarStr) -> Self {
+  pub(crate) fn new(source_name: ShStr) -> Self {
     Self {
       source_name,
       job_stack: JobStack::new(),
@@ -443,7 +443,7 @@ impl Dispatcher {
       Self::exec_arith(tree, node)
     } else if classify::can_autocd(cmd) {
       // autocd
-      let cd_call = VarStr::from_slice(b"cd ").chain(cmd.span.slice());
+      let cd_call = ShStr::from_slice(b"cd ").chain(cmd.span.slice());
       exec_input(cd_call, Some(self.source_name.clone()))
     } else {
       // normal external

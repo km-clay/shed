@@ -11,7 +11,7 @@ use chrono::{
 
 use crate::{
   sherr,
-  state::vars::{VarStr, VarStrSliceExt},
+  state::vars::{ShStr, ShStrSliceExt},
   util::{Direction, error::ShResult},
   varstr,
 };
@@ -63,11 +63,11 @@ const UTF8_CONTINUATION: RangeInclusive<u8> = 0x80..=0xBF;
 /// (`%N`, `%Q`, ...), and its `Display` impl signals that by failing, which
 /// `to_string()` turns into a panic. bash emits unknown specifiers literally,
 /// so escape anything chrono can't parse into a `%%` sequence first.
-fn escape_unknown_specs(format: &[u8]) -> VarStr {
+fn escape_unknown_specs(format: &[u8]) -> ShStr {
   use chrono::format::{Item, StrftimeItems};
 
   let mut cursor = SliceCursor::new(format.as_bytes());
-  let mut out    = VarStr::with_capacity(format.len());
+  let mut out    = ShStr::with_capacity(format.len());
 
   while let Some(b) = cursor.peek_byte() {
     if b != b'%' {
@@ -97,7 +97,7 @@ fn escape_unknown_specs(format: &[u8]) -> VarStr {
 
 /// Parse a parenthesised strftime sub-format and its trailing `T`, as in
 /// `printf`'s `%(%Y-%m-%d)T`. The cursor starts just past the `(`.
-pub(crate) fn parse_paren_strftime(cur: &mut SliceCursor) -> ShResult<VarStr> {
+pub(crate) fn parse_paren_strftime(cur: &mut SliceCursor) -> ShResult<ShStr> {
   let mut fmt = Vec::new();
   loop {
     match cur.next_byte() {
@@ -114,7 +114,7 @@ pub(crate) fn parse_paren_strftime(cur: &mut SliceCursor) -> ShResult<VarStr> {
   }
 
   match cur.next_byte() {
-    Some(b'T') => Ok(VarStr::from(fmt.as_slice())),
+    Some(b'T') => Ok(ShStr::from(fmt.as_slice())),
     Some(other) => Err(sherr!(
       ParseErr,
       "expected 'T' after strftime format, got '{}'",
@@ -132,14 +132,14 @@ pub(crate) fn dur_delta(duration: Duration) -> TimeDelta {
 ///
 /// Tolerates specifiers chrono does not implement, and reports a genuine
 /// formatting failure instead of panicking the way `to_string()` does.
-pub(crate) fn strftime<Tz: TimeZone>(dt: &DateTime<Tz>, format: &[u8]) -> ShResult<VarStr>
+pub(crate) fn strftime<Tz: TimeZone>(dt: &DateTime<Tz>, format: &[u8]) -> ShResult<ShStr>
 where
   Tz::Offset: std::fmt::Display,
 {
   Ok(varstr!("{}", dt.format(&escape_unknown_specs(format).to_str_lossy())))
 }
 
-pub(crate) fn format_time(delta: TimeDelta, show_subsecond: bool) -> Option<VarStr> {
+pub(crate) fn format_time(delta: TimeDelta, show_subsecond: bool) -> Option<ShStr> {
   const ETERNITY: u128 = f32::INFINITY as u128;
   let show_subsecond = show_subsecond && delta.num_seconds().abs() < 60;
   let signed =
@@ -213,8 +213,8 @@ pub(crate) fn format_time(delta: TimeDelta, show_subsecond: bool) -> Option<VarS
   }
 
   // Format the result
-  let mut result: Vec<VarStr> = Vec::new();
-  let     show_subsecond      = |res: &[VarStr]| show_subsecond || res.is_empty();
+  let mut result: Vec<ShStr> = Vec::new();
+  let     show_subsecond      = |res: &[ShStr]| show_subsecond || res.is_empty();
 
   if eternities > 0 {
     let mut string = varstr!("{eternities} eternit");
@@ -372,10 +372,10 @@ pub(crate) fn parse_size(s: &str) -> ShResult<u64> {
   }
 }
 
-pub(crate) fn human_size(bytes: u64) -> VarStr {
+pub(crate) fn human_size(bytes: u64) -> ShStr {
   let mut out = String::new();
   format_size(bytes, &mut out).unwrap();
-  VarStr::from(out)
+  ShStr::from(out)
 }
 
 pub(crate) fn format_size(bytes: u64, buf: &mut impl std::fmt::Write) -> std::fmt::Result {
@@ -577,7 +577,7 @@ fn local_to_utc(ndt: NaiveDateTime) -> ShResult<DateTime<Utc>> {
 #[derive(Clone)]
 enum TimeTk {
   Num(f64),
-  Word(VarStr),
+  Word(ShStr),
   Epoch(DateTime<Utc>),
   Clock(NaiveTime),
   Date(NaiveDate),
@@ -762,7 +762,7 @@ impl<'a> TimeReader<'a> {
     self.pending = 0;
   }
 
-  fn read_word(&mut self, word: &VarStr) -> ShResult<()> {
+  fn read_word(&mut self, word: &ShStr) -> ShResult<()> {
     if let Some(month) = Self::month_num(word) {
       return self.read_named_date(word, month);
     }
@@ -777,7 +777,7 @@ impl<'a> TimeReader<'a> {
     Ok(())
   }
 
-  fn read_named_date(&mut self, word: &VarStr, month: u32) -> ShResult<()> {
+  fn read_named_date(&mut self, word: &ShStr, month: u32) -> ShResult<()> {
     let Some(TimeTk::Num(day)) = self.next_tk() else {
       return Err(sherr!(ParseErr, "expected a day after '{word}'"));
     };
@@ -795,7 +795,7 @@ impl<'a> TimeReader<'a> {
     Ok(())
   }
 
-  fn keyword_anchor(&mut self, word: &VarStr, upcoming: bool) -> ShResult<Option<DateTime<Utc>>> {
+  fn keyword_anchor(&mut self, word: &ShStr, upcoming: bool) -> ShResult<Option<DateTime<Utc>>> {
     let today = Local::now().date_naive();
     let midnight =
       |d: NaiveDate| -> ShResult<DateTime<Utc>> { local_to_utc(d.and_hms_opt(0, 0, 0).unwrap()) };
@@ -842,7 +842,7 @@ impl<'a> TimeReader<'a> {
     Ok(Some(when))
   }
 
-  fn month_num(word: &VarStr) -> Option<u32> {
+  fn month_num(word: &ShStr) -> Option<u32> {
     Some(match word.as_bytes() {
       b"jan" | b"january"  => 1,
       b"feb" | b"february" => 2,
@@ -860,14 +860,14 @@ impl<'a> TimeReader<'a> {
     })
   }
 
-  fn direction(word: &VarStr) -> Option<Direction> {
+  fn direction(word: &ShStr) -> Option<Direction> {
     match word.as_bytes() {
       b"after" | b"since" | b"from"          => Some(Direction::Forward),
       b"ago" | b"before" | b"til" | b"until" => Some(Direction::Backward),
       _ => None,
     }
   }
-  fn unit_micros(unit: &VarStr) -> Option<i64> {
+  fn unit_micros(unit: &ShStr) -> Option<i64> {
     const MICROS: i64 = 1;
     const MILLIS: i64 = 1000 * MICROS;
     const SECOND: i64 = 1000 * MILLIS;

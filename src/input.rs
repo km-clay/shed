@@ -17,7 +17,7 @@ use crate::{
   signal::QUIT_CODE,
   state::{
     Shed, paths,
-    vars::{ShellParam, VarStr},
+    vars::{ShellParam, ShStr},
   },
   status_msg,
   util::error::ShResult,
@@ -105,7 +105,7 @@ pub(crate) fn exec_stdin(commands: String, args: Vec<String>) -> ShResult<()> {
     let scope = v.cur_scope_mut();
 
     scope.clear_pos_args();
-    scope.extend_args(args.into_iter().map(VarStr::from));
+    scope.extend_args(args.into_iter().map(ShStr::from));
   });
 
   let res = execute::exec_nonint(commands.into(), None);
@@ -154,9 +154,9 @@ pub(crate) fn run_script<P: AsRef<Path>>(
   path: P,
   args: Vec<String>,
 ) -> ShResult<()> {
-  let path_str: VarStr = path.as_ref().as_os_str().as_bytes().into();
+  let path_str: ShStr = path.as_ref().as_os_str().as_bytes().into();
 
-  let args = std::iter::once(path_str.clone()).chain(args.into_iter().map(VarStr::from));
+  let args = std::iter::once(path_str.clone()).chain(args.into_iter().map(ShStr::from));
 
   Shed::vars_mut(|v| {
     v.set_param(ShellParam::ShellName, path_str);

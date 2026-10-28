@@ -37,12 +37,12 @@ use crate::{
   sherr, shopt, signal,
   state::{
     ForkKind, Shed,
-    vars::{VarKind, VarStr},
+    vars::{VarKind, ShStr},
   },
   util::{
     self,
     error::{ShErr, ShErrKind, ShResult, ShResultExt},
-    strops::VarStrDisplay,
+    strops::ShStrDisplay,
   },
   varstr,
 };
@@ -128,7 +128,7 @@ fn connect_abstract(_name: &str) -> io::Result<OwnedFd> {
 }
 
 enum TcpHost {
-  Hostname(VarStr),
+  Hostname(ShStr),
   IpAddr(IpAddr),
 }
 
@@ -158,7 +158,7 @@ impl TcpSocket {
 
 enum UnixAddr {
   Path(PathBuf),
-  Abstract(VarStr),
+  Abstract(ShStr),
 }
 
 impl UnixAddr {
@@ -267,7 +267,7 @@ impl SockTarget {
 
 struct SockOpts {
   target : SockTarget,
-  fd_var : Option<VarStr>,
+  fd_var : Option<ShStr>,
   oneshot: bool,
 }
 
@@ -347,7 +347,7 @@ impl SockOpts {
 fn install_socket_fd(
   owned: OwnedFd,
   target_fd: Option<RawFd>,
-  var_name: Option<VarStr>,
+  var_name: Option<ShStr>,
   default_var: &str,
 ) -> ShResult<()> {
   let staged              = procio::move_high(owned)?;
@@ -438,11 +438,11 @@ impl Accept {
     };
     Ok(unsafe { OwnedFd::from_raw_fd(conn) })
   }
-  fn bind_mode(listen: RawFd, target_fd: Option<RawFd>, var_name: Option<VarStr>) -> ShResult<()> {
+  fn bind_mode(listen: RawFd, target_fd: Option<RawFd>, var_name: Option<ShStr>) -> ShResult<()> {
     let conn = Self::accept_conn(listen)?;
     install_socket_fd(conn, target_fd, var_name, "SHED_ACCEPT")
   }
-  fn serve_mode(span: Span, listen: RawFd, handler: VarStr) -> ShResult<()> {
+  fn serve_mode(span: Span, listen: RawFd, handler: ShStr) -> ShResult<()> {
     let conn = Self::accept_conn(listen)?;
 
     match execute::traced_fork(span, ForkKind::Builtin)? {

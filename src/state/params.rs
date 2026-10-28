@@ -7,7 +7,7 @@ use crate::{
   HashMap,
   eval::lex::TkFlags,
   expand::Expander,
-  state::{Shed, meta::MetaTab, vars::VarStr},
+  state::{Shed, meta::MetaTab, vars::ShStr},
   try_var,
   util::{
     self, guards,
@@ -28,7 +28,7 @@ use super::{
 };
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
-pub(crate) fn parse_arr_bracket(var_name: &[u8]) -> Option<(VarStr, VarStr)> {
+pub(crate) fn parse_arr_bracket(var_name: &[u8]) -> Option<(ShStr, ShStr)> {
   if !var_name.contains(&b'[') {
     return None;
   }
@@ -125,11 +125,11 @@ pub(crate) fn expand_arr_index(idx_raw: &[u8], allow_side_effects: bool) -> ShRe
 pub(crate) fn with_vars<F, H, V, T>(vars: H, f: F) -> T
 where
   F: FnOnce() -> T,
-  H: IntoIterator<Item = (VarStr, V)>,
+  H: IntoIterator<Item = (ShStr, V)>,
   V: Into<Var>,
 {
-  let vars: HashMap<VarStr, V> = vars.into_iter().collect();
-  let restores: Vec<(VarStr, Option<(VarKind, VarFlags)>)> = vars
+  let vars: HashMap<ShStr, V> = vars.into_iter().collect();
+  let restores: Vec<(ShStr, Option<(VarKind, VarFlags)>)> = vars
     .keys()
     .map(|k| {
       let prev = Shed::vars(|v| {
@@ -165,14 +165,14 @@ where
   f()
 }
 
-pub(crate) fn get_comp_wordbreaks() -> VarStr {
+pub(crate) fn get_comp_wordbreaks() -> ShStr {
   try_var!(b"COMP_WORDBREAKS").unwrap_or_else(|| "\"'><;|=&(:".into())
 }
 
 /// Get the first char of IFS
 ///
 /// Used mainly for joining strings
-pub(crate) fn get_separator() -> VarStr {
+pub(crate) fn get_separator() -> ShStr {
   let separators = get_separators();
   separators
     .to_str_lossy()
@@ -185,11 +185,11 @@ pub(crate) fn get_separator() -> VarStr {
 /// Get the entire IFS variable
 ///
 /// Used mainly for splitting strings
-pub(crate) fn get_separators() -> VarStr {
+pub(crate) fn get_separators() -> ShStr {
   try_var!(b"IFS").unwrap_or_else(|| " \t\n".into())
 }
 
-pub(crate) fn get_ps4() -> VarStr {
+pub(crate) fn get_ps4() -> ShStr {
   try_var!(b"PS4")
     .and_then(|ps4| {
       Expander::from_raw(&ps4, TkFlags::empty())
@@ -199,7 +199,7 @@ pub(crate) fn get_ps4() -> VarStr {
     .unwrap_or_else(|| varstr!("+ "))
 }
 
-pub(crate) fn get_time_fmt() -> VarStr {
+pub(crate) fn get_time_fmt() -> ShStr {
   try_var!(b"TIMEFMT").unwrap_or_else(|| "\nreal\t%*E\nuser\t%*U\nsys\t%*S".into())
 }
 
@@ -292,7 +292,7 @@ pub(crate) fn get_default_path() -> Option<String> {
   }
 }
 
-pub(crate) fn get_exec_wrappers() -> Vec<VarStr> {
+pub(crate) fn get_exec_wrappers() -> Vec<ShStr> {
   let mut wrappers = vec![
     "sudo".into(),
     "doas".into(),
@@ -363,11 +363,11 @@ mod set_ver_info_tests {
     let kind = Shed::vars(|v| v.try_get_var_kind(b"SHED_VER_INFO"));
     match kind {
       Some(VarKind::AssocArr(items)) => {
-        let keys: crate::HashSet<&VarStr> = items.iter().map(|(k, _)| k).collect();
+        let keys: crate::HashSet<&ShStr> = items.iter().map(|(k, _)| k).collect();
         assert_eq!(keys.len(), 5, "got: {keys:?}");
         for expected in ["major", "minor", "patch", "arch", "os"] {
           assert!(
-            keys.contains(&VarStr::from(expected)),
+            keys.contains(&ShStr::from(expected)),
             "missing key {expected}, got: {keys:?}"
           );
         }

@@ -9,7 +9,7 @@ use crate::{
   procio,
   readline::linebuf::MotionKind,
   sherr,
-  state::{Shed, cmd, meta::UtilKind, vars::VarStr},
+  state::{Shed, cmd, meta::UtilKind, vars::ShStr},
   status_msg, try_var,
   util::{self, error::ShErr},
 };
@@ -423,7 +423,7 @@ impl Register {
         C::Span(a) | C::Line(a) | C::Block(a),
         C::Macro(b),
       ) => {
-        let rendered: VarStr = b
+        let rendered: ShStr = b
           .iter()
           .fold(util::scratch_buf(), |mut buf, key| {
             buf.extend_from_slice(key.as_vim_seq().as_bytes());

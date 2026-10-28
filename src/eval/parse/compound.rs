@@ -7,7 +7,7 @@ use shed_macros::styled_format;
 use crate::{
   eval::parse::ast::NodeId,
   procio::RedirSpec,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::{self, error},
 };
 
@@ -53,7 +53,7 @@ impl ParseStream {
     extend_span!(span, self.tree.span_for(body));
 
     let ctx = error::get_context(
-      VarStr::from(styled_format!(
+      ShStr::from(styled_format!(
         "in function '{}' defined here",
         name.slice()
       )),
@@ -812,7 +812,7 @@ impl ParseStream {
       try_tk_span
     };
     let ctx = error::get_context(
-      VarStr::from(styled_format!("in '{}' block defined here", "try")),
+      ShStr::from(styled_format!("in '{}' block defined here", "try")),
       try_span,
     );
 
@@ -934,7 +934,7 @@ impl ParseStream {
     extend_span!(span, self.tree.span_for(body));
 
     let ctx = error::get_context(
-      VarStr::from(styled_format!("in '{}' block defined here", "defer")),
+      ShStr::from(styled_format!("in '{}' block defined here", "defer")),
       defer_span,
     );
 

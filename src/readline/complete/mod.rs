@@ -1,7 +1,7 @@
 use crate::{
   HashSet,
   expand::glob::{self, GlobOpts},
-  state::{paths, vars::VarStr},
+  state::{paths, vars::ShStr},
   varstr,
 };
 use std::{
@@ -79,9 +79,9 @@ bitflags! {
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct CompOpts {
-  pub func     : Option<VarStr>,
-  pub wordlist : Option<Vec<VarStr>>,
-  pub action   : Option<VarStr>,
+  pub func     : Option<ShStr>,
+  pub wordlist : Option<Vec<ShStr>>,
+  pub action   : Option<ShStr>,
   pub flags    : CompFlags,
   pub opt_flags: CompOptFlags,
 }
@@ -365,14 +365,14 @@ impl From<Cow<'_, str>> for Candidate {
   }
 }
 
-impl From<VarStr> for Candidate {
-  fn from(value: VarStr) -> Self {
+impl From<ShStr> for Candidate {
+  fn from(value: ShStr) -> Self {
     Self::new(value.to_str_lossy().into_owned(), 0, None, None)
   }
 }
 
-impl From<&VarStr> for Candidate {
-  fn from(value: &VarStr) -> Self {
+impl From<&ShStr> for Candidate {
+  fn from(value: &ShStr) -> Self {
     Self::new(value.to_str_lossy().into_owned(), 0, None, None)
   }
 }
@@ -477,7 +477,7 @@ impl Candidate {
   pub(crate) fn as_str(&self) -> &str {
     &self.content
   }
-  pub(crate) fn with_desc(mut self, desc: &VarStr) -> Self {
+  pub(crate) fn with_desc(mut self, desc: &ShStr) -> Self {
     self.desc = Some(desc.to_str_lossy().into_owned());
     self
   }
@@ -590,7 +590,7 @@ pub(crate) fn complete_vars(start: &str) -> Vec<Candidate> {
       .keys()
       .map(|s| {
         if let Some(val) = try_var!(s) {
-          let desc: VarStr = val
+          let desc: ShStr = val
             .to_str_lossy()
             .escape_debug()
             .collect::<String>()
@@ -731,7 +731,7 @@ fn is_char_boundary(bytes: &[u8], i: usize) -> bool {
 /// derived suffix. Tries an exact `strip_prefix(expanded)` first for the
 /// common no-expansion / escape-bearing case; falls back to a common-suffix
 /// splice for `~`/`$VAR` structural prefixes and case-insensitive matches.
-fn splice_literal_prefix(literal: &str, expanded: &str, candidate: &str) -> VarStr {
+fn splice_literal_prefix(literal: &str, expanded: &str, candidate: &str) -> ShStr {
   if let Some(rest) = candidate.strip_prefix(expanded) {
     let rest_escaped = escape::escape_str(rest);
     return varstr!("{literal}{rest_escaped}");
@@ -808,10 +808,10 @@ fn complete_path(path: &str, cursor_pos: usize) -> Vec<Candidate> {
     .collect()
 }
 
-fn file_desc<P: AsRef<Path>>(path: P) -> VarStr {
+fn file_desc<P: AsRef<Path>>(path: P) -> ShStr {
   let path = path.as_ref();
   let Ok(meta) = path.metadata() else {
-    return VarStr::default();
+    return ShStr::default();
   };
   let kind = if meta.is_dir() {
     "dir"
@@ -855,15 +855,15 @@ pub(crate) enum CompSpecResult {
 #[derive(Default, Debug, Clone)]
 pub(crate) struct BashCompSpec {
   /// -F: The name of a function to generate the possible completions.
-  pub function: Option<VarStr>,
+  pub function: Option<ShStr>,
   /// -W: The list of words
-  pub wordlist: Option<Vec<VarStr>>,
+  pub wordlist: Option<Vec<ShStr>>,
 
   pub targets: CompFlags,
 
   pub flags : CompOptFlags,
   /// The original command
-  pub source: VarStr,
+  pub source: ShStr,
 }
 
 #[allow(dead_code)]
@@ -871,15 +871,15 @@ impl BashCompSpec {
   pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub(crate) fn with_func(mut self, func: VarStr) -> Self {
+  pub(crate) fn with_func(mut self, func: ShStr) -> Self {
     self.function = Some(func);
     self
   }
-  pub(crate) fn with_wordlist(mut self, wordlist: Vec<VarStr>) -> Self {
+  pub(crate) fn with_wordlist(mut self, wordlist: Vec<ShStr>) -> Self {
     self.wordlist = Some(wordlist);
     self
   }
-  pub(crate) fn with_source(mut self, source: VarStr) -> Self {
+  pub(crate) fn with_source(mut self, source: ShStr) -> Self {
     self.source = source;
     self
   }
@@ -935,7 +935,7 @@ impl BashCompSpec {
       wordlist,
       targets: flags,
       flags: opt_flags,
-      source: VarStr::default(),
+      source: ShStr::default(),
     }
   }
   pub(crate) fn exec_comp_func(&self, ctx: &CompContext) -> ShResult<Vec<Candidate>> {

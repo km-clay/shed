@@ -6,7 +6,7 @@ use crate::{
     Shed, cmd,
     logic::ShFunc,
     meta::UtilKind,
-    vars::{Var, VarKind, VarStr},
+    vars::{Var, VarKind, ShStr},
   },
   util::{self, error::ShResult},
 };
@@ -78,7 +78,7 @@ impl Type {
     }
     util::with_status(status)
   }
-  fn display_alias(arg: &VarStr, short: bool) {
+  fn display_alias(arg: &ShStr, short: bool) {
     let alias       = Shed::logic(|v| v.get_alias(arg)).unwrap();
     let (line, col) = alias.source().line_and_col().unwrap_or((0, 0));
     let name        = alias.source().name();
@@ -93,7 +93,7 @@ impl Type {
       );
     }
   }
-  fn display_func(arg: &VarStr, short: bool) {
+  fn display_func(arg: &ShStr, short: bool) {
     let func = Shed::logic(|v| v.get_func(arg)).unwrap();
     match func {
       ShFunc::Autoload(src) => {
@@ -123,28 +123,28 @@ impl Type {
       }
     }
   }
-  fn display_builtin(arg: &VarStr, short: bool) {
+  fn display_builtin(arg: &ShStr, short: bool) {
     if short {
       outln!("builtin");
     } else {
       outln!("{arg} is a shell builtin");
     }
   }
-  fn display_external(arg: &VarStr, path: &std::path::Path, short: bool) {
+  fn display_external(arg: &ShStr, path: &std::path::Path, short: bool) {
     if short {
       outln!("external");
     } else {
       outln!("{arg} is {}", path.display());
     }
   }
-  fn display_keyword(arg: &VarStr, short: bool) {
+  fn display_keyword(arg: &ShStr, short: bool) {
     if short {
       outln!("keyword");
     } else {
       outln!("{arg} is a shell keyword");
     }
   }
-  fn display_variable(arg: &VarStr, var: &Var, short: bool) {
+  fn display_variable(arg: &ShStr, var: &Var, short: bool) {
     if short {
       match var.kind() {
         VarKind::Str(_)      => outln!("string"),

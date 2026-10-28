@@ -11,7 +11,7 @@ use crate::{
   out, outln,
   readline::{BashCompSpec, Candidate, CompContext, CompFlags, CompOptFlags, CompOpts, CompSpec},
   sherr,
-  state::vars::{VarStr, VarStrSliceExt},
+  state::vars::{ShStr, ShStrSliceExt},
   state::{Shed, vars::VarKind},
   util,
 };
@@ -172,12 +172,12 @@ impl super::Builtin for CompGen {
 }
 
 struct CompaddOpts {
-  prefix   : Option<VarStr>,
-  suffix   : Option<VarStr>,
-  desc_arr : Option<VarStr>,
-  cand_arr : Option<VarStr>,
-  assoc_arr: Option<VarStr>,
-  desc     : Option<VarStr>,
+  prefix   : Option<ShStr>,
+  suffix   : Option<ShStr>,
+  desc_arr : Option<ShStr>,
+  cand_arr : Option<ShStr>,
+  assoc_arr: Option<ShStr>,
+  desc     : Option<ShStr>,
 }
 
 impl CompaddOpts {
@@ -208,7 +208,7 @@ impl super::Builtin for Compadd {
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let opts = CompaddOpts::from_args(&args);
 
-    let make_candidate = |cand: VarStr| -> Candidate {
+    let make_candidate = |cand: ShStr| -> Candidate {
       let a = cand.to_str_lossy();
       match (&opts.prefix, &opts.suffix) {
         (Some(p), Some(s)) => format!("{p}{a}{s}").into(),
@@ -275,8 +275,8 @@ impl super::Builtin for Compadd {
   }
 }
 
-fn build_source(args: &BuiltinArgs) -> VarStr {
-  let mut parts: Vec<VarStr> = vec!["complete".into()];
+fn build_source(args: &BuiltinArgs) -> ShStr {
+  let mut parts: Vec<ShStr> = vec!["complete".into()];
   for opt in args.options() {
     // the flag as written (e.g. `-W`), followed by its argument words
     parts.push(opt.span().slice());
@@ -302,7 +302,7 @@ pub(super) fn get_comp_opts<'a>(opts: impl Iterator<Item = &'a Opt>) -> ShResult
           opt
             .value()?
             .split(u8::is_ascii_whitespace)
-            .map(VarStr::from)
+            .map(ShStr::from)
             .collect(),
         );
       }

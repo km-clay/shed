@@ -5,7 +5,7 @@ use crate::{
   procio, sherr,
   state::{
     Shed, params,
-    vars::{VarFlags, VarKind, VarStr},
+    vars::{VarFlags, VarKind, ShStr},
   },
   util::{
     error::ShResultExt,
@@ -16,8 +16,8 @@ use crate::{
 use super::{Builtin, BuiltinArgs, ShResult, argv, mod_opt::OptSpec, opt, util};
 
 enum SplitPolicy {
-  Ifs(VarStr),
-  Delimiter(VarStr),
+  Ifs(ShStr),
+  Delimiter(ShStr),
   Set(Box<ByteSet>),
 }
 
@@ -61,15 +61,15 @@ impl SplitPolicy {
 }
 
 enum SplitKind {
-  Separator(VarStr),
-  Array(VarStr),
+  Separator(ShStr),
+  Array(ShStr),
   Quoted,
   NullSep,
 }
 
 impl Default for SplitKind {
   fn default() -> Self {
-    SplitKind::Separator(VarStr::from("\n"))
+    SplitKind::Separator(ShStr::from("\n"))
   }
 }
 
@@ -139,24 +139,24 @@ impl Builtin for Split {
 
     let input = self.get_input(&mut args).map_or_else(
       || argv::join_raw_arg_iter(args.arguments()).content(),
-      VarStr::from,
+      ShStr::from,
     );
 
-    let mut parts: Vec<VarStr> = match s_policy {
+    let mut parts: Vec<ShStr> = match s_policy {
       SplitPolicy::Delimiter(pat) => strops::split_all_with(
         &input,
         |s| strops::split_at_pat_with(s, &pat, q_policy),
-        |start, end| VarStr::from(&input[start..end]),
+        |start, end| ShStr::from(&input[start..end]),
       ),
       SplitPolicy::Set(set) => strops::split_all_with(
         &input,
         |s| strops::split_at_byteset_with(s, &set, q_policy),
-        |start, end| VarStr::from(&input[start..end]),
+        |start, end| ShStr::from(&input[start..end]),
       ),
 
       SplitPolicy::Ifs(ifs) => strops::ifs_split(&input, &ifs, None)
         .into_iter()
-        .map(VarStr::from)
+        .map(ShStr::from)
         .collect(),
     };
 

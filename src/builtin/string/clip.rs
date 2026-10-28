@@ -1,9 +1,9 @@
 use crate::{
   procio, sherr,
-  state::vars::VarStr,
+  state::vars::ShStr,
   two_way_display,
   util::{
-    strops::VarStrDisplay,
+    strops::ShStrDisplay,
     ui::{self, Justify},
   },
 };
@@ -26,7 +26,7 @@ two_way_display! {Unit,
 struct ClipSpec {
   limit  : usize,
   unit   : Unit,
-  marker : Option<VarStr>,
+  marker : Option<ShStr>,
   justify: Justify,
 }
 
@@ -110,7 +110,7 @@ impl Builtin for Clip {
       .get_input_with(&mut args, |a| a.arguments().count() <= 1)
       .map_or_else(
         || argv::join_raw_arg_iter(args.arguments().skip(1)).content(),
-        VarStr::from,
+        ShStr::from,
       );
 
     let out = match unit {
@@ -118,7 +118,7 @@ impl Builtin for Clip {
         string.as_bytes(),
         limit,
         justify,
-        marker.as_ref().map(VarStr::as_bytes),
+        marker.as_ref().map(ShStr::as_bytes),
       ),
       Unit::Chars => clip_chars(&string.to_str_lossy(), limit, justify, marker),
       Unit::Width => ui::truncate_with_marker(
@@ -136,7 +136,7 @@ impl Builtin for Clip {
   }
 }
 
-fn clip_chars(s: &str, limit: usize, justify: Justify, marker: Option<VarStr>) -> VarStr {
+fn clip_chars(s: &str, limit: usize, justify: Justify, marker: Option<ShStr>) -> ShStr {
   let marker     = marker.unwrap_or_default();
   let marker     = marker.to_str_lossy();
 
@@ -144,13 +144,13 @@ fn clip_chars(s: &str, limit: usize, justify: Justify, marker: Option<VarStr>) -
   let marker_len = marker.chars().count();
 
   if limit >= s_len {
-    return VarStr::from(s);
+    return ShStr::from(s);
   }
 
   if limit <= marker_len {
     // If the limit is less than or equal to the marker length,
     // we can't fit any of the original string, so we just return an empty string.
-    return VarStr::default();
+    return ShStr::default();
   }
 
   let keep = limit - marker_len;
@@ -184,12 +184,12 @@ fn clip_chars(s: &str, limit: usize, justify: Justify, marker: Option<VarStr>) -
     }
   };
 
-  VarStr::from(res)
+  ShStr::from(res)
 }
 
-fn clip_bytes(s: &[u8], limit: usize, justify: Justify, marker: Option<&[u8]>) -> VarStr {
+fn clip_bytes(s: &[u8], limit: usize, justify: Justify, marker: Option<&[u8]>) -> ShStr {
   if limit >= s.len() {
-    return VarStr::from(s);
+    return ShStr::from(s);
   }
 
   let marker_len = marker.map_or(0, <[u8]>::len);
@@ -197,7 +197,7 @@ fn clip_bytes(s: &[u8], limit: usize, justify: Justify, marker: Option<&[u8]>) -
   if limit <= marker_len {
     // If the limit is less than or equal to the marker length,
     // we can't fit any of the original string, so we just return an empty string.
-    return VarStr::default();
+    return ShStr::default();
   }
 
   let res = match justify {
@@ -238,5 +238,5 @@ fn clip_bytes(s: &[u8], limit: usize, justify: Justify, marker: Option<&[u8]>) -
     }
   };
 
-  VarStr::from(res)
+  ShStr::from(res)
 }

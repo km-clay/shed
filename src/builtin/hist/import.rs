@@ -14,7 +14,7 @@ use crate::{
   procio::{self, OsSink, Sink},
   readline::{self, Branch, HistDump, HistEntry, MAIN_HIST_TABLE_NAME, ReflogEntry, Table},
   sherr,
-  state::{paths, vars::VarStr},
+  state::{paths, vars::ShStr},
   status_msg,
   util::{
     self,
@@ -48,7 +48,7 @@ impl Builtin for HistImport {
       stdin
     };
 
-    let input: VarStr = procio::drain_sink(&*source)?.into();
+    let input: ShStr = procio::drain_sink(&*source)?.into();
 
     if Self::is_shed_dump(&input.to_str_lossy()) {
       Self::import_shed(&args, &input)
@@ -84,7 +84,7 @@ impl HistImport {
       .unwrap_or(false)
   }
 
-  fn import_shed(args: &BuiltinArgs, input: &VarStr) -> ShResult<()> {
+  fn import_shed(args: &BuiltinArgs, input: &ShStr) -> ShResult<()> {
     let span = args.cmd_span();
     let root: Value = serde_json::from_str(&input.to_str_lossy())
       .map_err(|e| sherr!(ExecFail @ span, "malformed backup: {e}"))?;
@@ -166,7 +166,7 @@ impl HistImport {
     status_msg!("hist: restored {count} entries");
     util::with_status(0)
   }
-  fn import_other(args: &BuiltinArgs, input: &VarStr) -> ShResult<()> {
+  fn import_other(args: &BuiltinArgs, input: &ShStr) -> ShResult<()> {
     let span = args.cmd_span();
     let hist = open_history(span, false, true)?;
 

@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 use crate::{
   builtin::Builtin,
   opt, procio, sherr,
-  state::{Shed, scopes::ScopeStack, vars::VarStr},
+  state::{Shed, scopes::ScopeStack, vars::ShStr},
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -24,7 +24,7 @@ use crate::{
 
 use super::{BuiltinArgs, opt::OptSpec};
 
-fn push_val(v: &mut ScopeStack, name: &VarStr, val: &VarStr, end: End) -> ShResult<()> {
+fn push_val(v: &mut ScopeStack, name: &ShStr, val: &ShStr, end: End) -> ShResult<()> {
   let arr = v.get_arr_mut(name)?;
   match end {
     End::Front => arr.push_front(val.clone()),
@@ -65,7 +65,7 @@ trait ArrOp: Builtin {
     }
     let input = self
       .get_input_with(&mut args, |a| a.arguments().count() == 1)
-      .map(VarStr::from);
+      .map(ShStr::from);
 
     if let Some(input) = input {
       if input.is_empty() {
@@ -94,7 +94,7 @@ trait ArrOp: Builtin {
 
           Shed::vars_mut(|v| -> ShResult<()> {
             for part in parts {
-              push_val(v, name, &VarStr::from(part), end).option_promote(name.span())?;
+              push_val(v, name, &ShStr::from(part), end).option_promote(name.span())?;
             }
             Ok(())
           })?;
@@ -145,7 +145,7 @@ trait ArrOp: Builtin {
 
     for arg in args.arguments() {
       for _ in 0..count {
-        let pop = |arr: &mut VecDeque<VarStr>| match end {
+        let pop = |arr: &mut VecDeque<ShStr>| match end {
           End::Front => arr.pop_front(),
           End::Back  => arr.pop_back(),
         };
@@ -304,7 +304,7 @@ impl super::Builtin for Rotate {
 mod tests {
   use crate::{
     set_var,
-    state::{self, Shed, vars::VarStr},
+    state::{self, Shed, vars::ShStr},
     tests::testutil::{TestGuard, test_input},
     var,
   };
@@ -318,7 +318,7 @@ mod tests {
     set_var!(name.as_bytes(), arr(arr.into_iter().map(Into::into))).unwrap();
   }
 
-  fn get_arr(name: &str) -> Vec<VarStr> {
+  fn get_arr(name: &str) -> Vec<ShStr> {
     Shed::vars(|v| v.try_get_arr_elems(name.as_bytes())).unwrap()
   }
 

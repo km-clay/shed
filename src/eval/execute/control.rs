@@ -14,7 +14,7 @@ use crate::{
   state::{
     Shed,
     meta::{CmdTimer, MetaTab},
-    vars::{DeferredAst, VarFlags, VarKind, VarStr, VarStrSliceExt},
+    vars::{DeferredAst, VarFlags, VarKind, ShStr, ShStrSliceExt},
   },
   util::{
     error::{ShErr, ShErrKind, ShResult, ShResultExt},
@@ -527,7 +527,7 @@ impl super::Dispatcher {
     };
 
     let for_logic = |s: &mut Self, tree: &Ast| -> ShResult<()> {
-      let to_expanded_strings = |tks: &[Tk]| -> ShResult<Vec<VarStr>> {
+      let to_expanded_strings = |tks: &[Tk]| -> ShResult<Vec<ShStr>> {
         let mut out = vec![];
         for tk in tks {
           out.extend(tk.expand_to_words()?.into_iter().map(|w| w.content()));
@@ -536,17 +536,17 @@ impl super::Dispatcher {
         Ok(out)
       };
 
-      let arr: Vec<VarStr> = if *positional {
+      let arr: Vec<ShStr> = if *positional {
         // the for loop was written with no 'in' keyword
         // so we use the positional parameters instead
         Shed::vars(|v| v.sh_argv().iter().skip(1).cloned().collect())
       } else {
         to_expanded_strings(&tree[*arr])?
       };
-      let vars: Vec<VarStr> = to_expanded_strings(&tree[*vars])?;
+      let vars: Vec<ShStr> = to_expanded_strings(&tree[*vars])?;
 
       'outer: for chunk in arr.chunks(vars.len()) {
-        let empty = VarStr::default();
+        let empty = ShStr::default();
         let chunk_iter = vars
           .iter()
           .zip(chunk.iter().chain(std::iter::repeat(&empty)));

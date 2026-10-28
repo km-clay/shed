@@ -5,7 +5,7 @@ use super::{
   register::RegisterContent,
   status_msg,
 };
-use crate::{eval::lex::TkFlags, state::vars::VarStr, util, verb};
+use crate::{eval::lex::TkFlags, state::vars::ShStr, util, verb};
 
 use super::{
   Grapheme, Line, Lines, MotionKind, Pos, SelectMode, killring, rot13_char, toggle_case_char,
@@ -475,7 +475,7 @@ impl super::LineBuf {
         // Pasting a macro: render to vim-style text and paste as a single
         // span line. Mirrors vim, where macros and text registers are
         // string-equivalent on paste.
-        let rendered: VarStr = keys
+        let rendered: ShStr = keys
           .iter()
           .fold(util::scratch_buf(), |mut buf, key| {
             buf.extend_from_slice(key.as_vim_seq().as_bytes());

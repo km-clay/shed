@@ -21,7 +21,7 @@ use crate::{
   match_loop, sherr,
   state::{
     self, Shed, SourceHandle, SourceId,
-    vars::{VarStr, VarStrSliceExt},
+    vars::{ShStr, ShStrSliceExt},
   },
   util::{
     self,
@@ -102,10 +102,10 @@ macro_rules! lex_err {
 thread_local! {
   /// Cached default source name, so `Span::new`
   /// doesn't re-allocate `"<stdin>"` on every call.
-  static STDIN_NAME: VarStr = VarStr::from("<stdin>");
+  static STDIN_NAME: ShStr = ShStr::from("<stdin>");
 }
 
-/// A slice of some source text. Ultimately wraps a [`crate::state::vars::VarStr`], which means these are cheap to clone.
+/// A slice of some source text. Ultimately wraps a [`crate::state::vars::ShStr`], which means these are cheap to clone.
 ///
 /// Load-bearing struct. Used extensively throughout the codebase for slicing shell input for various reasons (error reporting, tab completion, etc)
 #[derive(Clone, PartialEq, Copy, Debug, Hash, Eq)]
@@ -207,24 +207,24 @@ impl Span {
   pub(crate) fn line_and_col(&self) -> Option<(usize, usize)> {
     self.pos.map(|p| (p.row, p.col))
   }
-  pub(crate) fn name(&self) -> VarStr {
-    state::get_source_name(self.source()).unwrap_or_else(|| VarStr::from(b"<unknown>".as_slice()))
+  pub(crate) fn name(&self) -> ShStr {
+    state::get_source_name(self.source()).unwrap_or_else(|| ShStr::from(b"<unknown>".as_slice()))
   }
-  pub(crate) fn try_text(&self) -> Option<VarStr> {
+  pub(crate) fn try_text(&self) -> Option<ShStr> {
     state::get_source(self.source)
   }
   #[track_caller]
-  pub(crate) fn text(&self) -> VarStr {
+  pub(crate) fn text(&self) -> ShStr {
     let Some(text) = self.try_text() else {
       panic!("Span::text called in invalid span: {self:?}");
     };
     text
   }
-  pub(crate) fn try_slice(&self) -> Option<VarStr> {
+  pub(crate) fn try_slice(&self) -> Option<ShStr> {
     state::slice_source(*self)
   }
   #[track_caller]
-  pub(crate) fn slice(&self) -> VarStr {
+  pub(crate) fn slice(&self) -> ShStr {
     let Some(slice) = self.try_slice() else {
       panic!("Span::slice called in invalid span: {self:?}");
     };
@@ -358,12 +358,12 @@ impl Tk {
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || b"-_./".contains(&b))
   }
-  /// The token's effective text as a `VarStr`: the joined expansion for an
+  /// The token's effective text as a `ShStr`: the joined expansion for an
   /// expanded token, or the raw span otherwise. Mirrors `Display` without
   /// routing through the formatter.
   ///
   /// Cheap for small tokens, but may allocate for large expanded tokens.
-  pub(crate) fn word(&self) -> VarStr {
+  pub(crate) fn word(&self) -> ShStr {
     match &self.class {
       TkRule::Expanded { exp } => exp.join_with(" "),
       _ => self.span.slice().as_bytes().into(),
@@ -476,7 +476,7 @@ bitflags! {
 /// Cleans the input string by removing line continuations.
 ///
 /// Honestly kind of a hack, but it works.
-pub(crate) fn clean_input(input: &[u8]) -> VarStr {
+pub(crate) fn clean_input(input: &[u8]) -> ShStr {
   // PERF: Profile this function to see if it has any
   // meaningful impact on lex speed.
   let mut bytes      = SliceCursor::new(input);
@@ -486,7 +486,7 @@ pub(crate) fn clean_input(input: &[u8]) -> VarStr {
   let mut arith_end  = 0;
 
   // FIFO queue: heredocs on the same line are consumed in order
-  let mut heredoc_queue: VecDeque<VarStr> = VecDeque::new();
+  let mut heredoc_queue: VecDeque<ShStr> = VecDeque::new();
 
   match_loop!(bytes.next_byte() => b, {
     _ if in_comment && b != b'\n' && b != b'\r' => output.push(b),

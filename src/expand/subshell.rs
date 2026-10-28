@@ -15,7 +15,7 @@ use crate::{
   procio::{self, OsSink, RedirType, Sinks},
   readline::{self, NestedSub},
   sherr, shopt,
-  state::{ForkKind, Shed, meta::MetaTab, terminal::Terminal, vars::VarStr},
+  state::{ForkKind, Shed, meta::MetaTab, terminal::Terminal, vars::ShStr},
   util::{error::ShResult, guards},
 };
 
@@ -118,7 +118,7 @@ pub(crate) fn is_internal(raw: &[u8]) -> bool {
   !forks
 }
 
-pub(crate) fn internal_cmd_sub(raw: &[u8]) -> ShResult<VarStr> {
+pub(crate) fn internal_cmd_sub(raw: &[u8]) -> ShResult<ShStr> {
   // create read and write out here
   let (read, write) = Sinks::sink_pipes();
 
@@ -145,13 +145,13 @@ pub(crate) fn internal_cmd_sub(raw: &[u8]) -> ShResult<VarStr> {
   }
 
   Shed::meta_mut(|m| m.set_last_cmdsub_status(Shed::get_status()));
-  let output = VarStr::from(bytes.trim_end_with(|c| c == '\n'));
+  let output = ShStr::from(bytes.trim_end_with(|c| c == '\n'));
 
   Ok(output)
 }
 
 /// Get the command output of a given command input as a String
-pub(crate) fn expand_cmd_sub(span: Option<Span>, raw: &[u8]) -> ShResult<VarStr> {
+pub(crate) fn expand_cmd_sub(span: Option<Span>, raw: &[u8]) -> ShResult<ShStr> {
   if raw.starts_with(b"(") && raw.ends_with(b")") {
     return arithmetic::expand_arithmetic_wrapped(span, raw);
   }
@@ -195,7 +195,7 @@ pub(crate) fn expand_cmd_sub(span: Option<Span>, raw: &[u8]) -> ShResult<VarStr>
       let sink      = procio::read_capped(rpipe.as_fd())?;
       let truncated = sink.was_truncated();
       let size      = sink.limit();
-      let output    = VarStr::from(sink.trim_end_with(|c| c == '\n'));
+      let output    = ShStr::from(sink.trim_end_with(|c| c == '\n'));
 
       // Wait for child with EINTR retry
       let status = loop {

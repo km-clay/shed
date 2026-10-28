@@ -7,7 +7,7 @@ use std::ffi::{CStr, CString, OsStr};
 use std::os::unix::ffi::OsStrExt;
 
 use crate::eval::execute::reexec_as_script;
-use crate::state::vars::VarStr;
+use crate::state::vars::ShStr;
 use crate::var;
 
 pub(crate) fn execvpe(
@@ -23,7 +23,7 @@ pub(crate) fn execvpe(
   if filename.to_bytes().contains(&b'/') {
     let path_bytes = filename.to_bytes();
 
-    let path       = VarStr::from([b"_=", path_bytes].concat());
+    let path       = ShStr::from([b"_=", path_bytes].concat());
     envp.push(path.to_cstring_lossy());
 
     let Err(e) = execve(filename, args, &envp);
@@ -36,10 +36,10 @@ pub(crate) fn execvpe(
   let path = var!(b"PATH");
   for dir in std::env::split_paths(&path) {
     let full_path     = dir.join(OsStr::from_bytes(filename.to_bytes()));
-    let full_path_str = VarStr::from(full_path);
+    let full_path_str = ShStr::from(full_path);
 
     envp.retain(|e| !e.as_bytes().starts_with(b"_="));
-    let path = VarStr::from([b"_=", full_path_str.as_bytes()].concat());
+    let path = ShStr::from([b"_=", full_path_str.as_bytes()].concat());
     envp.push(path.to_cstring_lossy());
 
     let c_path = full_path_str.to_cstring_lossy();

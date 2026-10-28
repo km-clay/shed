@@ -7,7 +7,7 @@ use crate::{
   match_loop, sherr,
   state::{
     Shed,
-    vars::{VarFlags, VarKind, VarKindTag, VarName, VarStr},
+    vars::{VarFlags, VarKind, VarKindTag, VarName, ShStr},
   },
   try_var,
   util::{
@@ -122,7 +122,7 @@ enum ArithTk {
   BitNot,   // ~
   Question, // ? (lex token)
   Colon,    // : (lex token)
-  Var(VarStr),
+  Var(ShStr),
 
   // RPN-only opcodes for control flow (jump-based short-circuit + ternary)
   JumpIfZero(usize),        // pop, if 0 jump to offset
@@ -142,7 +142,7 @@ enum ArithTk {
 // Stack value used during eval_rpn, keeps Var names alive for assignment targets
 enum StackVal {
   Num(Num),
-  Var(VarStr),
+  Var(ShStr),
 }
 
 impl StackVal {
@@ -1192,7 +1192,7 @@ impl ArithTk {
 
 /// Evaluate an arithmetic expression string, returning the result.
 /// The caller is responsible for stripping any `((...))` or `(...)` wrappers.
-pub(crate) fn expand_arithmetic(span: Option<Span>, expr: &[u8]) -> ShResult<VarStr> {
+pub(crate) fn expand_arithmetic(span: Option<Span>, expr: &[u8]) -> ShResult<ShStr> {
   let unescaped = escape::unescape_math(expr)?;
   let expanded  = var::expand_raw(span, &mut unescaped.cursor())?.content();
   let tokens    = ArithTk::tokenize(&expanded)?;
@@ -1210,7 +1210,7 @@ pub(crate) fn eval_expanded(expr: &[u8]) -> ShResult<Num> {
 
 /// Strip `((...))` or `(...)` wrappers and evaluate. Convenience for call sites
 /// that receive the raw token including its delimiters.
-pub(crate) fn expand_arithmetic_wrapped(span: Option<Span>, raw: &[u8]) -> ShResult<VarStr> {
+pub(crate) fn expand_arithmetic_wrapped(span: Option<Span>, raw: &[u8]) -> ShResult<ShStr> {
   let mut expr = raw.trim();
   while let Some(inner) = strip_enclosing_parens(expr) {
     expr = inner.trim();

@@ -8,7 +8,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 use yansi::{Paint, Painted, Style};
 
-use crate::state::vars::VarStr;
+use crate::state::vars::ShStr;
 use crate::util::error::ShErr;
 use crate::varstr;
 use crate::{
@@ -511,7 +511,7 @@ pub(crate) fn hex_to_rgb(hex: &str) -> ShResult<(u8, u8, u8)> {
   Ok((r, g, b))
 }
 
-pub(crate) fn stylize_loglevel(level: log::Level) -> VarStr {
+pub(crate) fn stylize_loglevel(level: log::Level) -> ShStr {
   let style = match level {
     log::Level::Error => style_from_description("red bold").unwrap(),
     log::Level::Warn  => style_from_description("yellow bold").unwrap(),
@@ -865,7 +865,7 @@ mod stylize_loglevel_tests {
       log::Level::Debug,
       log::Level::Trace,
     ];
-    let outputs: Vec<VarStr> = levels.iter().copied().map(stylize_loglevel).collect();
+    let outputs: Vec<ShStr> = levels.iter().copied().map(stylize_loglevel).collect();
     for (i, a) in outputs.iter().enumerate() {
       for (j, b) in outputs.iter().enumerate() {
         if i != j {

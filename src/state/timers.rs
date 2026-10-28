@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::{
   sherr,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::{error::ShResult, strops},
 };
 
@@ -32,10 +32,10 @@ impl TimerStatus {
 
 /// A user-supplied timer name. `default` is reserved for the unnamed timer.
 #[derive(Clone, Debug)]
-pub(crate) struct WatchName(VarStr);
+pub(crate) struct WatchName(ShStr);
 
 impl WatchName {
-  pub(crate) fn new(name: VarStr) -> ShResult<Option<Self>> {
+  pub(crate) fn new(name: ShStr) -> ShResult<Option<Self>> {
     if name == "default" {
       Err(sherr!(ParseErr, "timer name 'default' is reserved"))
     } else if strops::has_unescaped(&name, b"%") {
@@ -47,7 +47,7 @@ impl WatchName {
 }
 
 impl WatchName {
-  pub(crate) fn as_var_str(&self) -> &VarStr {
+  pub(crate) fn as_var_str(&self) -> &ShStr {
     &self.0
   }
 }

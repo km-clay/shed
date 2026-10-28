@@ -1,7 +1,7 @@
 use crate::{
   expand::{escape, prompt},
   procio, shopt,
-  state::vars::{VarStr, VarStrSliceExt},
+  state::vars::{ShStr, ShStrSliceExt},
   util::{
     self,
     error::{ShResult, ShResultExt},
@@ -54,9 +54,9 @@ impl Builtin for Echo {
     let use_prompt = flags.contains(EchoFlags::USE_PROMPT);
     let use_escape = flags.contains(EchoFlags::USE_ESCAPE);
 
-    let prepared: ShResult<Vec<VarStr>> = args
+    let prepared: ShResult<Vec<ShStr>> = args
       .arguments()
-      .map(|st| -> ShResult<VarStr> {
+      .map(|st| -> ShResult<ShStr> {
         if use_escape {
           Ok(escape::expand_ansi_c(st.as_bytes()))
         } else if use_prompt {

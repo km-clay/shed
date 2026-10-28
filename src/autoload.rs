@@ -8,7 +8,7 @@ use std::{os::unix::ffi::OsStrExt, path::PathBuf};
 use crate::{
   COMPLETIONS, FUNCTIONS, HELP,
   eval::execute::exec_nonint,
-  state::{paths, rc::source_file, vars::VarStr},
+  state::{paths, rc::source_file, vars::ShStr},
   util::error::ShResult,
 };
 
@@ -23,11 +23,11 @@ pub(crate) trait Autoloader {
     self.files().map(|(n, _)| *n)
   }
   /// Files compiled into the binary, keyed by file stem.
-  fn bundled(&self) -> HashMap<VarStr, AutoloadSrc> {
+  fn bundled(&self) -> HashMap<ShStr, AutoloadSrc> {
     self
       .files()
       .filter_map(|(name, content)| {
-        let stem: VarStr = PathBuf::from(name)
+        let stem: ShStr = PathBuf::from(name)
           .file_stem()?
           .as_bytes()
           .into();
@@ -35,8 +35,8 @@ pub(crate) trait Autoloader {
           (
             stem,
             AutoloadSrc::Embedded {
-              name: VarStr::from(name.as_bytes()),
-              body: VarStr::from(*content),
+              name: ShStr::from(name.as_bytes()),
+              body: ShStr::from(*content),
             },
           )
         })
@@ -46,7 +46,7 @@ pub(crate) trait Autoloader {
 }
 
 /// Walk a `:`-separated list of directories, mapping each file's stem to its path.
-pub(crate) fn crawl(path_list: &[u8]) -> HashMap<VarStr, AutoloadSrc> {
+pub(crate) fn crawl(path_list: &[u8]) -> HashMap<ShStr, AutoloadSrc> {
   let mut out = HashMap::default();
   for entry in paths::path_list_entries(path_list) {
     let path = entry.path();
@@ -84,7 +84,7 @@ impl Autoloader for HelpLoader {
 #[derive(Clone, Debug)]
 pub(crate) enum AutoloadSrc {
   Path(PathBuf),
-  Embedded { name: VarStr, body: VarStr },
+  Embedded { name: ShStr, body: ShStr },
 }
 
 impl AutoloadSrc {

@@ -3,7 +3,7 @@ use chrono::{Local, TimeDelta, Utc};
 use crate::{
   builtin::opt::OptSpec,
   opt, procio, sherr,
-  state::vars::VarStr,
+  state::vars::ShStr,
   util::{self, error::ShResultExt, strops},
 };
 
@@ -42,8 +42,8 @@ impl Builtin for Format {
     let fmt_string = args
       .opt_value("format")
       .unwrap_or_else(|| match parse_duration {
-        true  => VarStr::from("%[%y years %]%[%O months %]%[%D days, %]%[%H:%]%M:%S.%03L"),
-        false => VarStr::from("%a %b %e %I:%M:%S %p %Z %Y"),
+        true  => ShStr::from("%[%y years %]%[%O months %]%[%D days, %]%[%H:%]%M:%S.%03L"),
+        false => ShStr::from("%a %b %e %I:%M:%S %p %Z %Y"),
       });
 
     // Operands are joined, so a multi-word expression needs no quoting. A
@@ -74,7 +74,7 @@ impl Builtin for Format {
         .option_promote(time.span())
         .with_code(1)?;
 
-      VarStr::from(buf)
+      ShStr::from(buf)
     } else {
       let dt = strops::TimeReader::interpret(&time.to_str_lossy())
         .option_promote(time.span())

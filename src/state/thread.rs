@@ -11,7 +11,7 @@ use crate::{
     scopes,
     shopt::ShOpts,
     timers::Timers,
-    vars::{VarName, VarStr, VarTab},
+    vars::{VarName, ShStr, VarTab},
   },
   util::error::LabelBuilder,
 };
@@ -31,7 +31,7 @@ pub(crate) struct ForkSpec {
 #[derive(Debug)]
 pub(crate) struct StageResult {
   status    : i32,
-  var_writes: Vec<(VarName, VarStr)>,
+  var_writes: Vec<(VarName, ShStr)>,
 }
 
 impl Default for StageResult {
@@ -53,7 +53,7 @@ impl StageResult {
   pub(crate) fn status(&self) -> i32 {
     self.status
   }
-  pub(crate) fn take_var_writes(&mut self) -> Vec<(VarName, VarStr)> {
+  pub(crate) fn take_var_writes(&mut self) -> Vec<(VarName, ShStr)> {
     std::mem::take(&mut self.var_writes)
   }
 }

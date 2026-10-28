@@ -6,11 +6,11 @@ use nix::libc;
 
 use crate::{
   sherr, signal,
-  state::{timers::TimerStatus, vars::VarStr},
+  state::{timers::TimerStatus, vars::ShStr},
   sub_command, try_var,
   util::{
     error::ShResult,
-    strops::{self, ByteCursor, Field, FieldParams, Sign, SliceCursor, StrFmt, VarStrDisplay},
+    strops::{self, ByteCursor, Field, FieldParams, Sign, SliceCursor, StrFmt, ShStrDisplay},
   },
   varstr,
 };
@@ -128,7 +128,7 @@ enum Zone {
   Named(Tz),
 }
 impl Zone {
-  fn parse(tz: Option<VarStr>, utc: bool) -> ShResult<Self> {
+  fn parse(tz: Option<ShStr>, utc: bool) -> ShResult<Self> {
     let tz = if let Some(name) = tz {
       let zone = name.parse::<Tz>().map_err(|n| {
         sherr!(ExecFail, "unknown timezone '{n}'",)
@@ -343,9 +343,9 @@ impl StrFmt for DurFmt {
   }
 }
 
-fn fmt_timer_status(status: &TimerStatus) -> VarStr {
+fn fmt_timer_status(status: &TimerStatus) -> ShStr {
   let mut fmt = strops::format_time(strops::dur_delta(status.elapsed()), true)
-    .unwrap_or_else(|| VarStr::from("0s"))
+    .unwrap_or_else(|| ShStr::from("0s"))
     .to_var_str();
 
   fmt.push(b' ');

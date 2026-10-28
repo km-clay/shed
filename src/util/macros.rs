@@ -367,7 +367,7 @@ macro_rules! sherr {
 	($kind:ident, $($arg:tt)*) => {
 		$crate::util::error::ShErr::simple(
 			$crate::util::error::ShErrKind::$kind,
-			$crate::state::vars::VarStr::from(::shed_macros::styled_format!($($arg)*))
+			$crate::state::vars::ShStr::from(::shed_macros::styled_format!($($arg)*))
 		)
 	};
 }
@@ -462,13 +462,13 @@ macro_rules! _write_inner {
   }};
 }
 
-/// Create a [`crate::state::vars::VarStr`] using format args
+/// Create a [`crate::state::vars::ShStr`] using format args
 ///
 /// Small stuff never allocates, so feel free to use this for stuff like zero-alloc number-to-string conversions
 #[macro_export]
 macro_rules! varstr {
   ($($arg:tt)*) => {
-    $crate::state::vars::VarStr::from(smol_str::format_smolstr!($($arg)*))
+    $crate::state::vars::ShStr::from(smol_str::format_smolstr!($($arg)*))
   };
 }
 

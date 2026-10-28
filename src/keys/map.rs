@@ -10,7 +10,7 @@ use bitflags::bitflags;
 
 use crate::{
   expand::{alias, escape},
-  state::vars::VarStr,
+  state::vars::ShStr,
 };
 
 use super::KeyEvent;
@@ -61,8 +61,8 @@ pub(crate) enum KeyMapMatch {
 #[derive(Debug, Clone)]
 pub(crate) struct KeyMap {
   pub flags : KeyMapFlags,
-  pub keys  : VarStr,
-  pub action: VarStr,
+  pub keys  : ShStr,
+  pub action: ShStr,
   pub remap : bool,
 }
 

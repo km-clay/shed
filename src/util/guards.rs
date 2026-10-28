@@ -16,7 +16,7 @@ use crate::{
   state::{
     Shed, params,
     scopes::ScopeStack,
-    vars::{Var, VarFlags, VarStr},
+    vars::{Var, VarFlags, ShStr},
   },
   try_var, util, var,
 };
@@ -141,7 +141,7 @@ pub(crate) fn shopt_guard() -> impl Drop {
   })
 }
 
-fn make_arg_vec(args: Option<Vec<Word>>) -> Option<Vec<VarStr>> {
+fn make_arg_vec(args: Option<Vec<Word>>) -> Option<Vec<ShStr>> {
   args.map(|a| a.into_iter().map(|s| s.content()).collect_vec())
 }
 
@@ -195,8 +195,8 @@ pub(crate) fn shared_scope_guard() -> impl Drop {
 // ============================================================================
 
 pub(crate) fn var_ctx_guard(
-  vars: HashSet<VarStr>,
-) -> ScopeGuard<HashSet<VarStr>, impl FnOnce(HashSet<VarStr>)> {
+  vars: HashSet<ShStr>,
+) -> ScopeGuard<HashSet<ShStr>, impl FnOnce(HashSet<ShStr>)> {
   guard(vars, |vars| {
     Shed::vars_mut(|v| {
       for var in &vars {
@@ -208,7 +208,7 @@ pub(crate) fn var_ctx_guard(
 
 /// Snapshot and restore the variables used in prefix assignment
 pub(crate) fn prefix_assign_guard(tree: &Ast, assignments: &[NodeId]) -> impl Drop {
-  let saved: Vec<(VarStr, Option<Var>)> = assignments
+  let saved: Vec<(ShStr, Option<Var>)> = assignments
     .iter()
     .filter_map(|a| match &tree[*a].class {
       NdRule::Assignment { var, .. } => {
