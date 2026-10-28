@@ -141,11 +141,7 @@ impl super::Builtin for Read {
     )?;
 
     if let Some(arr) = array_name {
-      if flags.contains(ReadFlags::QUOTED) {
-        field_split_arr_quoted(&input, &arr.to_str_lossy()).promote_err(args.span())
-      } else {
-        field_split_arr(&input, &arr.to_str_lossy()).promote_err(args.span())
-      }
+      field_split_arr(&input, &arr, flags.contains(ReadFlags::QUOTED))
     } else {
       if flags.contains(ReadFlags::QUOTED) {
         field_split_vars_quoted(&input, &arg_vec).promote_err(args.span())
@@ -410,11 +406,23 @@ fn glue_zero_width(fields: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
   out
 }
 
+/// Join byte-slice fields with `sep` (no trailing separator).
+fn join_fields(fields: &[Vec<u8>], sep: &[u8]) -> Vec<u8> {
+  let mut out = Vec::new();
+  for (i, f) in fields.iter().enumerate() {
+    if i > 0 {
+      out.extend_from_slice(sep);
+    }
+    out.extend_from_slice(f);
+  }
+  out
+}
+
 fn field_split_vars(input: &[u8], vars: &[Word]) -> ShResult<()> {
   if vars.is_empty() {
     Shed::vars_mut(|v| {
       v.set_var(
-        "REPLY",
+        b"REPLY",
         VarKind::string(VarStr::from(input)),
         VarFlags::empty(),
       )
@@ -430,7 +438,7 @@ fn field_split_vars(input: &[u8], vars: &[Word]) -> ShResult<()> {
 
     Shed::vars_mut(|v| {
       v.set_var(
-        &name.to_str_lossy(),
+        name,
         VarKind::string(VarStr::from(value)),
         VarFlags::empty(),
       )
@@ -440,34 +448,6 @@ fn field_split_vars(input: &[u8], vars: &[Word]) -> ShResult<()> {
   Ok(())
 }
 
-fn field_split_arr(input: &[u8], arr_name: &str) -> ShResult<()> {
-  if arr_name.is_empty() {
-    return Err(sherr!(ExecFail, "read: Array name cannot be empty"));
-  }
-
-  let sep    = params::get_separators();
-  let fields = glue_zero_width(strops::ifs_split(input, sep.as_bytes(), None));
-
-  Shed::vars_mut(|v| {
-    v.set_var(
-      arr_name,
-      VarKind::arr(fields.into_iter().map(VarStr::from)),
-      VarFlags::empty(),
-    )
-  })
-}
-
-/// Join byte-slice fields with `sep` (no trailing separator).
-fn join_fields(fields: &[Vec<u8>], sep: &[u8]) -> Vec<u8> {
-  let mut out = Vec::new();
-  for (i, f) in fields.iter().enumerate() {
-    if i > 0 {
-      out.extend_from_slice(sep);
-    }
-    out.extend_from_slice(f);
-  }
-  out
-}
 
 fn field_split_vars_quoted(input: &[u8], vars: &[Word]) -> ShResult<()> {
   let fields = glue_zero_width(quote::unquote_raw(input)?);
@@ -476,7 +456,7 @@ fn field_split_vars_quoted(input: &[u8], vars: &[Word]) -> ShResult<()> {
     let joined = join_fields(&fields, b" ");
     Shed::vars_mut(|v| {
       v.set_var(
-        "REPLY",
+        b"REPLY",
         VarKind::string(VarStr::from(joined)),
         VarFlags::empty(),
       )
@@ -484,19 +464,19 @@ fn field_split_vars_quoted(input: &[u8], vars: &[Word]) -> ShResult<()> {
     return Ok(());
   }
 
-  for (i, name) in vars.iter().enumerate() {
-    let value: Vec<u8> = if i >= fields.len() {
-      Vec::new()
-    } else if i + 1 == vars.len() {
-      join_fields(&fields[i..], b" ")
+  let mut var_names = vars.iter().enumerate().peekable();
+
+  while let Some((i, name)) = var_names.next() {
+    let value = if var_names.peek().is_none() {
+      fields.get(i..).map(|f| join_fields(f, b" "))
     } else {
-      fields[i].clone()
+      fields.get(i).cloned()
     };
 
     Shed::vars_mut(|v| {
       v.set_var(
-        &name.to_str_lossy(),
-        VarKind::string(VarStr::from(value)),
+        name,
+        VarKind::string(VarStr::from(value.unwrap_or_default())),
         VarFlags::empty(),
       )
     })?;
@@ -505,12 +485,17 @@ fn field_split_vars_quoted(input: &[u8], vars: &[Word]) -> ShResult<()> {
   Ok(())
 }
 
-fn field_split_arr_quoted(input: &[u8], arr_name: &str) -> ShResult<()> {
+fn field_split_arr(input: &[u8], arr_name: &[u8], quoted: bool) -> ShResult<()> {
   if arr_name.is_empty() {
     return Err(sherr!(ExecFail, "read: Array name cannot be empty"));
   }
 
-  let fields = glue_zero_width(quote::unquote_raw(input)?);
+  let sep    = params::get_separators();
+  let fields = if quoted {
+    glue_zero_width(quote::unquote_raw(input)?)
+  } else {
+    glue_zero_width(strops::ifs_split(input, sep.as_bytes(), None))
+  };
 
   Shed::vars_mut(|v| {
     v.set_var(
@@ -593,7 +578,7 @@ impl super::Builtin for ReadKey {
     if let Some(var) = var_name {
       Shed::vars_mut(|v| {
         v.set_var(
-          &var.to_str_lossy(),
+          &var,
           VarKind::string(vim_seq),
           VarFlags::empty(),
         )
@@ -616,7 +601,7 @@ mod tests {
   use crate::var;
 
   fn arr(name: &str) -> Vec<VarStr> {
-    Shed::vars(|v| v.try_get_arr_elems(name)).unwrap()
+    Shed::vars(|v| v.try_get_arr_elems(name.as_bytes())).unwrap()
   }
 
   // ===================== Basic read into REPLY =====================
@@ -625,7 +610,7 @@ mod tests {
   fn read_pipe_into_reply() {
     let _g = TestGuard::new();
     test_input("read < <(echo hello)").unwrap();
-    let val = var!("REPLY");
+    let val = var!(b"REPLY");
     assert_eq!(val, "hello");
   }
 
@@ -633,7 +618,7 @@ mod tests {
   fn read_pipe_into_named_var() {
     let _g = TestGuard::new();
     test_input("read myvar < <(echo world)").unwrap();
-    let val = var!("myvar");
+    let val = var!(b"myvar");
     assert_eq!(val, "world");
   }
 
@@ -643,15 +628,15 @@ mod tests {
     // It must now store the raw bytes verbatim, like bash.
     let _g = TestGuard::new();
     test_input("read x < <(printf 'a\\377b')").unwrap();
-    assert_eq!(var!("x").as_bytes(), &b"a\xffb"[..]);
+    assert_eq!(var!(b"x").as_bytes(), &b"a\xffb"[..]);
   }
 
   #[test]
   fn read_field_split_preserves_non_utf8_bytes() {
     let _g = TestGuard::new();
     test_input("read a b < <(printf 'x\\377y z')").unwrap();
-    assert_eq!(var!("a").as_bytes(), &b"x\xffy"[..]);
-    assert_eq!(var!("b").as_bytes(), &b"z"[..]);
+    assert_eq!(var!(b"a").as_bytes(), &b"x\xffy"[..]);
+    assert_eq!(var!(b"b").as_bytes(), &b"z"[..]);
   }
 
   // ===================== Field splitting =====================
@@ -660,26 +645,26 @@ mod tests {
   fn read_two_vars() {
     let _g = TestGuard::new();
     test_input("read a b < <(echo 'hello world')").unwrap();
-    assert_eq!(var!("a"), "hello");
-    assert_eq!(var!("b"), "world");
+    assert_eq!(var!(b"a"), "hello");
+    assert_eq!(var!(b"b"), "world");
   }
 
   #[test]
   fn read_last_var_gets_remainder() {
     let _g = TestGuard::new();
     test_input("read a b < <(echo 'one two three four')").unwrap();
-    assert_eq!(var!("a"), "one");
-    assert_eq!(var!("b"), "two three four");
+    assert_eq!(var!(b"a"), "one");
+    assert_eq!(var!(b"b"), "two three four");
   }
 
   #[test]
   fn read_more_vars_than_fields() {
     let _g = TestGuard::new();
     test_input("read a b c < <(echo 'only')").unwrap();
-    assert_eq!(var!("a"), "only");
+    assert_eq!(var!(b"a"), "only");
     // b and c get empty strings since there are no more fields
-    assert_eq!(var!("b"), "");
-    assert_eq!(var!("c"), "");
+    assert_eq!(var!(b"b"), "");
+    assert_eq!(var!(b"c"), "");
   }
 
   #[test]
@@ -704,8 +689,8 @@ mod tests {
     // whitespace intact, only trailing IFS-whitespace stripped.
     let _g = TestGuard::new();
     test_input("read a b < <(echo 'one   two   three')").unwrap();
-    assert_eq!(var!("a"), "one");
-    assert_eq!(var!("b"), "two   three");
+    assert_eq!(var!(b"a"), "one");
+    assert_eq!(var!(b"b"), "two   three");
   }
 
   #[test]
@@ -714,7 +699,7 @@ mod tests {
     // The zero-width gluing pass must not swallow these (zero bytes != zero
     // display width).
     let _g = TestGuard::new();
-    set_var!("IFS", VarKind::Str(":".into())).unwrap();
+    set_var!(b"IFS", VarKind::Str(":".into())).unwrap();
     test_input("read -a f < <(echo 'a::b')").unwrap();
     assert_eq!(arr("f"), vec!["a", "", "b"]);
   }
@@ -724,7 +709,7 @@ mod tests {
     // POSIX: `ws* hard ws*` is a single delimiter. `a , b` with IFS=' ,'
     // must yield two fields, not three (no spurious empty from trailing ws).
     let _g = TestGuard::new();
-    set_var!("IFS", VarKind::Str(" ,".into())).unwrap();
+    set_var!(b"IFS", VarKind::Str(" ,".into())).unwrap();
     test_input("read -a f < <(echo 'a , b')").unwrap();
     assert_eq!(arr("f"), vec!["a", "b"]);
   }
@@ -732,7 +717,7 @@ mod tests {
   #[test]
   fn read_ws_hard_ws_scalar_split() {
     let g = TestGuard::new();
-    set_var!("IFS", VarKind::Str(" ,".into())).unwrap();
+    set_var!(b"IFS", VarKind::Str(" ,".into())).unwrap();
     test_input("read x y < <(echo 'a , b'); echo \"[$x][$y]\"").unwrap();
     assert_eq!(g.read_output().trim(), "[a][b]");
   }
@@ -772,22 +757,22 @@ mod tests {
   #[test]
   fn read_custom_ifs() {
     let _g = TestGuard::new();
-    set_var!("IFS", VarKind::Str(":".into())).unwrap();
+    set_var!(b"IFS", VarKind::Str(":".into())).unwrap();
 
     test_input("read x y z < <(echo 'a:b:c')").unwrap();
-    assert_eq!(var!("x"), "a");
-    assert_eq!(var!("y"), "b");
-    assert_eq!(var!("z"), "c");
+    assert_eq!(var!(b"x"), "a");
+    assert_eq!(var!(b"y"), "b");
+    assert_eq!(var!(b"z"), "c");
   }
 
   #[test]
   fn read_custom_ifs_remainder() {
     let _g = TestGuard::new();
-    set_var!("IFS", VarKind::Str(":".into())).unwrap();
+    set_var!(b"IFS", VarKind::Str(":".into())).unwrap();
 
     test_input("read x y < <(echo 'a:b:c:d')").unwrap();
-    assert_eq!(var!("x"), "a");
-    assert_eq!(var!("y"), "b:c:d");
+    assert_eq!(var!(b"x"), "a");
+    assert_eq!(var!(b"y"), "b:c:d");
   }
 
   // ===================== Custom delimiter =====================
@@ -797,7 +782,7 @@ mod tests {
     let _g = TestGuard::new();
     // -d sets the delimiter; printf sends "hello,world" - read stops at ','
     test_input("read -d , myvar < <(echo -n 'hello,world')").unwrap();
-    assert_eq!(var!("myvar"), "hello");
+    assert_eq!(var!(b"myvar"), "hello");
   }
 
   #[test]
@@ -807,7 +792,7 @@ mod tests {
     // consumed), matching bash and the seekable path.
     let _g = TestGuard::new();
     test_input(r"read -d : x < <(printf '%s' 'a\:b:')").unwrap();
-    assert_eq!(var!("x"), "a:b");
+    assert_eq!(var!(b"x"), "a:b");
   }
 
   // ===================== Status =====================
@@ -859,7 +844,7 @@ mod tests {
     g.feed_tty(b"a");
     test_input("readkey -v key").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
-    assert_eq!(var!("key"), "a");
+    assert_eq!(var!(b"key"), "a");
   }
 
   #[test]
@@ -884,7 +869,7 @@ mod tests {
     g.feed_tty(b"y");
     test_input("readkey -v ans -w yn").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
-    assert_eq!(var!("ans"), "y");
+    assert_eq!(var!(b"ans"), "y");
   }
 
   #[test]
@@ -895,7 +880,7 @@ mod tests {
     test_input("readkey -v ans -w yn").unwrap();
     assert_eq!(state::Shed::get_status(), 1);
     // var should not be set when whitelist rejects.
-    assert_eq!(var!("ans"), "");
+    assert_eq!(var!(b"ans"), "");
   }
 
   #[test]
@@ -905,7 +890,7 @@ mod tests {
     g.feed_tty(b"q");
     test_input("readkey -v ans -b q").unwrap();
     assert_eq!(state::Shed::get_status(), 1);
-    assert_eq!(var!("ans"), "");
+    assert_eq!(var!(b"ans"), "");
   }
 
   #[test]
@@ -915,7 +900,7 @@ mod tests {
     g.feed_tty(b"a");
     test_input("readkey -v ans -b q").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
-    assert_eq!(var!("ans"), "a");
+    assert_eq!(var!(b"ans"), "a");
   }
 
   #[test]
@@ -927,7 +912,7 @@ mod tests {
     g.feed_tty(b"\r");
     test_input("readkey -v k").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
-    assert_eq!(var!("k"), "<Enter>");
+    assert_eq!(var!(b"k"), "<Enter>");
   }
 
   #[test]
@@ -938,7 +923,7 @@ mod tests {
     g.feed_tty(b"\x01");
     test_input("readkey -v k").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
-    assert_eq!(var!("k"), "<C-a>");
+    assert_eq!(var!(b"k"), "<C-a>");
   }
 
   // ===================== Read::execute remaining flags =====================
@@ -949,14 +934,14 @@ mod tests {
     // Without -r the backslash would be consumed as an escape. With -r
     // it is preserved verbatim.
     test_input("read -r line < <(printf 'a\\\\b\\n')").unwrap();
-    assert_eq!(var!("line"), "a\\b");
+    assert_eq!(var!(b"line"), "a\\b");
   }
 
   #[test]
   fn read_n_flag_limits_byte_count() {
     let _g = TestGuard::new();
     test_input("read -n 3 short < <(echo -n 'helloworld')").unwrap();
-    assert_eq!(var!("short"), "hel");
+    assert_eq!(var!(b"short"), "hel");
   }
 
   #[test]
@@ -990,6 +975,6 @@ mod tests {
     test_input("read -p 'enter> ' line < <(echo hi)").unwrap();
     let out = g.read_output();
     assert!(out.contains("enter> "), "got: {out:?}");
-    assert_eq!(var!("line"), "hi");
+    assert_eq!(var!(b"line"), "hi");
   }
 }

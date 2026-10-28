@@ -53,7 +53,7 @@ impl super::Builtin for KeyMapBuiltin {
     }
 
     if let Some(keys) = remove {
-      Shed::logic_mut(|l| l.remove_keymap(&keys.to_str_lossy(), flags));
+      Shed::logic_mut(|l| l.remove_keymap(&keys, flags));
       return util::with_status(0);
     }
 

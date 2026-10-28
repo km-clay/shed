@@ -21,9 +21,7 @@ use super::{
   status_msg,
 };
 use crate::{
-  eval::lex::TkFlags,
-  state::{Shed, SourceId, register_source, vars::VarStr},
-  varstr, verb,
+  HashSet, eval::lex::TkFlags, state::{Shed, SourceId, register_source, vars::VarStr}, varstr, verb,
 };
 use bitflags::bitflags;
 
@@ -195,7 +193,7 @@ const MAX_EX_ALIAS_DEPTH: usize = 50;
 /// a final backstop.
 fn expand_ex_aliases(input: &str) -> String {
   let mut input = input.to_string();
-  let mut active: crate::HashSet<String> = crate::HashSet::default();
+  let mut active: HashSet<VarStr> = HashSet::default();
 
   for _ in 0..MAX_EX_ALIAS_DEPTH {
     let handle = register_source(input.as_str());
@@ -206,7 +204,7 @@ fn expand_ex_aliases(input: &str) -> String {
     else {
       break;
     };
-    let name = cmd_tk.span.slice().to_str_lossy().to_string();
+    let name = cmd_tk.span.slice();
     if active.contains(&name) {
       break; // already expanding this name — treat it as a literal command
     }
@@ -1915,7 +1913,7 @@ mod ex_alias_tests {
   use crate::tests::testutil::TestGuard;
 
   fn set_alias(name: &str, body: &str) {
-    Shed::logic_mut(|l| l.insert_ex_alias(name, &body.into(), Span::default()));
+    Shed::logic_mut(|l| l.insert_ex_alias(name.as_bytes(), body.into(), Span::default()));
   }
 
   fn parse_ok(input: &str) -> ExNode {

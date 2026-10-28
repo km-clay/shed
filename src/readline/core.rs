@@ -178,7 +178,7 @@ impl EditorCore {
     self.editor.set_cursor_clamp(self.mode.clamp_cursor());
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_EDIT_MODE",
+        b"SHED_EDIT_MODE",
         VarKind::string(self.mode.report_mode().to_string().into()),
         VarFlags::empty(),
       )
@@ -325,7 +325,7 @@ impl EditorCore {
       self.saved_mode = Some(mode);
       Shed::vars_mut(|v| {
         v.set_var(
-          "SHED_EDIT_MODE",
+          b"SHED_EDIT_MODE",
           VarKind::string(self.mode.report_mode().to_string().into()),
           VarFlags::empty(),
         )
@@ -362,7 +362,7 @@ impl EditorCore {
 
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_EDIT_MODE",
+        b"SHED_EDIT_MODE",
         VarKind::string(self.mode.report_mode().to_string().into()),
         VarFlags::empty(),
       )

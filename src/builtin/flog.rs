@@ -95,7 +95,7 @@ impl super::Builtin for Flog {
       return util::with_status(0);
     }
 
-    let mut prefix_fmt = try_var!("FLOG_FMT").unwrap_or_else(|| "[%L]".into());
+    let mut prefix_fmt = try_var!(b"FLOG_FMT").unwrap_or_else(|| "[%L]".into());
 
     for opt in opts {
       if opt.key() == "prefix" {
@@ -128,7 +128,7 @@ impl super::Builtin for Flog {
 
 impl Flog {
   fn get_log_level() -> Option<log::Level> {
-    let level = try_var!("FLOG_LEVEL")?.to_ascii_uppercase();
+    let level = try_var!(b"FLOG_LEVEL")?.to_ascii_uppercase();
     String::from_utf8_lossy(&level).parse::<log::Level>().ok()
   }
 }
@@ -147,7 +147,7 @@ mod flog_execute_tests {
 
   fn set_var(name: &str, val: &str) {
     Shed::vars_mut(|v| {
-      v.set_var(name, VarKind::Str(val.into()), VarFlags::empty())
+      v.set_var(name.as_bytes(), VarKind::Str(val.into()), VarFlags::empty())
         .unwrap();
     });
   }
@@ -185,7 +185,7 @@ mod flog_execute_tests {
     let _g = TestGuard::new();
     drain_system_msgs();
     // Make sure FLOG_LEVEL is not set to something that would let info through.
-    Shed::vars_mut(|v| v.unset_var("FLOG_LEVEL").ok());
+    Shed::vars_mut(|v| v.unset_var(b"FLOG_LEVEL").ok());
     test_input("flog INFO suppressed_message_xyz").unwrap();
     assert_eq!(state::Shed::get_status(), 0);
     let msgs = collect_system_msgs();
@@ -225,7 +225,7 @@ mod flog_execute_tests {
   fn flog_default_prefix_contains_level_token() {
     let g = TestGuard::new();
     set_var("FLOG_LEVEL", "DEBUG");
-    Shed::vars_mut(|v| v.unset_var("FLOG_FMT").ok());
+    Shed::vars_mut(|v| v.unset_var(b"FLOG_FMT").ok());
     test_input("flog INFO check_default_prefix").unwrap();
     let out = g.read_output();
     // Default fmt is "[%L] …" — at minimum the level name appears.

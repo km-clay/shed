@@ -24,7 +24,7 @@ impl super::Builtin for Eval {
       .arguments()
       .map(Word::content)
       .collect::<Vec<_>>()
-      .join_with(&sep.to_str_lossy());
+      .join_with(&sep);
 
     // eval adds an xtrace layer
     let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
@@ -81,7 +81,7 @@ mod tests {
     let guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "CMD",
+        b"CMD",
         VarKind::Str("echo evaluated".into()),
         VarFlags::empty(),
       )
@@ -97,7 +97,7 @@ mod tests {
   fn eval_sets_variable() {
     let _g = TestGuard::new();
     test_input("eval x=42").unwrap();
-    let val = var!("x");
+    let val = var!(b"x");
     assert_eq!(val, "42");
   }
 

@@ -554,7 +554,7 @@ pub(crate) fn child_exited(pid: Pid, status: WtStat) -> ShResult<()> {
 
     Shed::vars_mut(|v| {
       v.set_var(
-        "PIPESTATUS",
+        b"PIPESTATUS",
         VarKind::arr(pipe_status.into_iter().map(Into::into)),
         VarFlags::empty(),
       )
@@ -802,7 +802,7 @@ mod tests {
     });
     set_signal(Signal::SIGUSR2);
     check_signals().unwrap();
-    assert_eq!(crate::var!("TRAP_FIRED"), "1");
+    assert_eq!(crate::var!(b"TRAP_FIRED"), "1");
   }
 
   #[test]
@@ -819,7 +819,7 @@ mod tests {
     check_signals().unwrap();
     // Both the flag AND the trap should have effect.
     assert!(GOT_SIGWINCH.load(Ordering::SeqCst));
-    assert_eq!(crate::var!("WINCH_TRAP"), "yes");
+    assert_eq!(crate::var!(b"WINCH_TRAP"), "yes");
   }
 
   // ─── Multiple signals in one swap ───────────────────────────────────

@@ -96,7 +96,7 @@ impl super::Builtin for Poll {
       }
     }
 
-    set_var!(&revents.to_str_lossy(), VarKind::AssocArr(revents_arr)).with_code(2)?;
+    set_var!(&revents, VarKind::AssocArr(revents_arr)).with_code(2)?;
 
     util::with_status(n != 0)
   }
@@ -208,7 +208,7 @@ impl Poll {
     let mut meta = vec![];
     let     span = args.opt_span("events").unwrap();
 
-    let Some(arr) = Shed::vars(|m| m.try_get_var_meta(&events.to_str_lossy())) else {
+    let Some(arr) = Shed::vars(|m| m.try_get_var_meta(&events)) else {
       return Err(sherr!(ExecFail @ span, "events array `{events}` not found"));
     };
     let VarKind::AssocArr(arr) = arr.kind() else {
@@ -247,7 +247,7 @@ mod tests {
   }
 
   fn revents(var: &str, key: &str) -> Option<String> {
-    Shed::vars(|v| v.try_get_var_meta(var)).and_then(|m| match m.kind() {
+    Shed::vars(|v| v.try_get_var_meta(var.as_bytes())).and_then(|m| match m.kind() {
       VarKind::AssocArr(arr) => arr
         .iter()
         .find(|(k, _)| k.to_str_lossy() == key)

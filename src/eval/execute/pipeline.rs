@@ -281,7 +281,7 @@ impl super::Dispatcher {
       let mut codes: Vec<i32> = match num_cmds - 1 {
         0 => vec![],
         1 => vec![Shed::get_status()],
-        _ => Shed::vars(|v| v.try_get_arr_elems("PIPESTATUS"))
+        _ => Shed::vars(|v| v.try_get_arr_elems(b"PIPESTATUS"))
           .map(|elems| {
             elems
               .iter()
@@ -301,7 +301,7 @@ impl super::Dispatcher {
 
       Shed::vars_mut(|v| {
         v.set_var(
-          "PIPESTATUS",
+          b"PIPESTATUS",
           VarKind::arr(codes.iter().map(|c| c.to_string().into())),
           VarFlags::empty(),
         )

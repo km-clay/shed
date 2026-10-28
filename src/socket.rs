@@ -104,7 +104,7 @@ mod private {
 
 /// Write something to the socket as a client.
 pub(crate) fn send_to_socket(msg: &str) -> ShResult<()> {
-  let Some(path) = try_var!("SHED_SOCK") else {
+  let Some(path) = try_var!(b"SHED_SOCK") else {
     return Err(sherr!(InternalErr, "Socket path not found"));
   };
   let mut stream  = UnixStream::connect(path)?;
@@ -462,7 +462,7 @@ impl ShedSocket {
     &self.path
   }
   pub(crate) fn mode() -> Mode {
-    var!("SHED_SOCK_MODE")
+    var!(b"SHED_SOCK_MODE")
       .to_str_lossy()
       .parse::<stat::mode_t>()
       .ok()
@@ -518,7 +518,7 @@ impl ShedSocket {
 
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_SOCK",
+        b"SHED_SOCK",
         VarKind::string(sock_path.to_string_lossy().into()),
         VarFlags::EXPORT,
       )
@@ -592,16 +592,14 @@ fn handle_query_request(header: QueryHeader, conn: &UnixStream) -> ShResult<Opti
       return Ok(None);
     }
     QueryHeader::GetVar(var) => {
-      let var = var!(&var.to_str_lossy());
+      let var = var!(&var);
       write(conn, var.as_bytes()).ok();
       write(conn, b"\n").ok();
       return Ok(None);
     }
     QueryHeader::SetVar(var, val, flags) => {
-      let var_name = &var.to_str_lossy();
-      let val      = VarKind::string(val.to_str_lossy().into());
-
-      Shed::vars_mut(|v| v.set_var(var_name, val, flags)).ok();
+      let val      = VarKind::string(val);
+      Shed::vars_mut(|v| v.set_var(&var, val, flags)).ok();
     }
     QueryHeader::Status(headers) => return handle_status_query(headers, conn),
   }
@@ -1286,7 +1284,7 @@ mod tests {
   #[test]
   fn handler_query_get_var_returns_value() {
     let _g = TestGuard::new();
-    set_var!("XYZZY", VarKind::Str("magic".into())).unwrap();
+    set_var!(b"XYZZY", VarKind::Str("magic".into())).unwrap();
     let mut rl = fresh_readline();
     let (resp, _) = run_handler(
       SocketRequest::Query(QueryHeader::GetVar("XYZZY".into())),
@@ -1319,7 +1317,7 @@ mod tests {
       &mut rl,
     );
     assert_eq!(resp, b"ok\n");
-    assert_eq!(var!("VIA_SOCKET"), "value-set");
+    assert_eq!(var!(b"VIA_SOCKET"), "value-set");
   }
 
   #[test]

@@ -160,7 +160,7 @@ impl EditCmd {
   }
   pub(crate) fn is_separator_insert(&self) -> bool {
     self.verb.as_ref().is_some_and(|v| {
-      let mut ifs = try_var!("IFS").unwrap_or(" \t\n".into()).to_string();
+      let mut ifs = try_var!(b"IFS").unwrap_or(" \t\n".into()).to_string();
       ifs.push(';');
       match &v.1 {
         Verb::AcceptLineOrNewline => true,

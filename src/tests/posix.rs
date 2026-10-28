@@ -176,7 +176,7 @@ mod shell_intro_2_1 {
     exec_dash_c("echo \"$*\"", args.clone()).unwrap();
     assert_output!(g, "a b c\n");
 
-    set_var!("IFS", VarKind::Str(":".into())).unwrap();
+    set_var!(b"IFS", VarKind::Str(":".into())).unwrap();
     exec_dash_c("echo \"$*\"", args.clone()).unwrap();
     assert_output!(g, "a:b:c\n");
   }
@@ -834,7 +834,7 @@ mod word_expansions_2_6 {
     test_input! {
       setup: {
         Shed::vars_mut(|v| v.set_var(
-          "HOME",
+          b"HOME",
           VarKind::string("/home/test".into()),
           VarFlags::EXPORT,
         )).unwrap();
@@ -855,7 +855,7 @@ mod word_expansions_2_6 {
     test_input! {
       setup: {
         Shed::vars_mut(|v| v.set_var(
-          "HOME",
+          b"HOME",
           VarKind::string("/home with spaces".into()),
           VarFlags::EXPORT,
         )).unwrap();
@@ -867,7 +867,7 @@ mod word_expansions_2_6 {
     test_input! {
       setup: {
         Shed::vars_mut(|v| v.set_var(
-          "HOME",
+          b"HOME",
           VarKind::string("/home/test".into()),
           VarFlags::EXPORT,
         )).unwrap();

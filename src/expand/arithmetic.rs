@@ -122,7 +122,7 @@ enum ArithTk {
   BitNot,   // ~
   Question, // ? (lex token)
   Colon,    // : (lex token)
-  Var(String),
+  Var(VarStr),
 
   // RPN-only opcodes for control flow (jump-based short-circuit + ternary)
   JumpIfZero(usize),        // pop, if 0 jump to offset
@@ -142,7 +142,7 @@ enum ArithTk {
 // Stack value used during eval_rpn, keeps Var names alive for assignment targets
 enum StackVal {
   Num(Num),
-  Var(String),
+  Var(VarStr),
 }
 
 impl StackVal {
@@ -196,9 +196,10 @@ impl Drop for DepthGuard {
 /// bash), so a variable holding another name (`y=x`) or a sub-expression
 /// (`b="a+1"`) resolves transitively. Unset/empty resolves to 0; cyclic
 /// references are cut off by [`MAX_ARITH_DEPTH`].
-fn resolve_var_num(name: &str) -> ShResult<Num> {
-  let val = if name.contains('[') {
-    let vn = VarName::parse(name, true)?;
+fn resolve_var_num(name: &[u8]) -> ShResult<Num> {
+  let val = if name.contains(&b'[') {
+    let vn = VarName::parse(&name.to_str_lossy(), true)?;
+
     Shed::vars(|v| v.resolve_words(&vn))
       .unwrap_or_default()
       .as_one_word()
@@ -214,7 +215,7 @@ fn resolve_var_num(name: &str) -> ShResult<Num> {
     return Ok(n);
   }
   if ARITH_DEPTH.with(Cell::get) >= MAX_ARITH_DEPTH {
-    return Err(sherr!(ParseErr, "arithmetic recursion limit exceeded resolving '{name}'"));
+    return Err(sherr!(ParseErr, "arithmetic recursion limit exceeded resolving '{}'", name.to_str_lossy()));
   }
   ARITH_DEPTH.with(|d| d.set(d.get() + 1));
   let _guard = DepthGuard;
@@ -222,7 +223,7 @@ fn resolve_var_num(name: &str) -> ShResult<Num> {
   result
     .to_str_lossy()
     .parse::<Num>()
-    .map_err(|_| sherr!(ParseErr, "Variable '{name}' does not contain an integer"))
+    .map_err(|_| sherr!(ParseErr, "Variable '{}' does not contain an integer", name.to_str_lossy()))
 }
 
 /// Evaluate a binary/assignment operator against the RPN value stack.
@@ -459,25 +460,29 @@ fn eval_op(op: &ArithOp, stack: &mut Vec<StackVal>) -> ShResult<()> {
 }
 
 /// Assign `val` to `name`, honouring an array subscript if the name carries one.
-fn assign_var(name: &str, val: Num) -> ShResult<()> {
-  let vn = VarName::parse(name, true)?;
+fn assign_var(name: &[u8], val: Num) -> ShResult<()> {
+  let vn = VarName::parse(&name.to_str_lossy(), true)?;
+
   if let Some(idx) = vn.index() {
     // `Raw` indexes defer resolution until the target's kind is known: a key
     // for an assoc array, an arithmetic subscript otherwise. That evaluation
     // can re-enter the variable table, so it happens outside both borrows.
-    let tag = Shed::vars(|v| v.try_get_var_kind_tag(vn.name())).unwrap_or(VarKindTag::Arr);
+    let name = vn.name();
+    let tag = Shed::vars(|v| v.try_get_var_kind_tag(&name)).unwrap_or(VarKindTag::Arr);
     let idx = idx.clone().resolve_for(tag)?;
-    return Shed::vars_mut(|v| {
-      v.set_var_indexed(vn.name(), idx, varstr!("{val}"), VarFlags::empty())
-    });
+
+    Shed::vars_mut(|v| {
+      v.set_var_indexed(&name, idx, varstr!("{val}"), VarFlags::empty())
+    })
+  } else {
+    Shed::vars_mut(|v| {
+      v.set_var(
+        name,
+        VarKind::string(val.to_string().into()),
+        VarFlags::empty(),
+      )
+    })
   }
-  Shed::vars_mut(|v| {
-    v.set_var(
-      name,
-      VarKind::string(val.to_string().into()),
-      VarFlags::empty(),
-    )
-  })
 }
 
 impl ArithTk {
@@ -753,16 +758,18 @@ impl ArithTk {
 
       _ if b.is_ascii_alphabetic() || b == b'_' => {
         cur.next_byte();
-        let mut var_name = String::new();
-        var_name.push(b as char);
+        let mut var_name = util::scratch_buf();
+        var_name.push(b);
+
         while let Some(c) = cur.peek_byte() {
           if c.is_ascii_alphanumeric() || c == b'_' {
-            var_name.push(c as char);
+            var_name.push(c);
             cur.next_byte();
           } else {
             break;
           }
         }
+
         if cur.peek_byte() == Some(b'[') {
           let sub_start = cur.pos();
           cur.next_byte();
@@ -772,9 +779,10 @@ impl ArithTk {
               "unterminated subscript in arithmetic expression"
             ));
           }
-          var_name.push_str(&String::from_utf8_lossy(&raw[sub_start..cur.pos()]));
+          var_name.extend_from_slice(&raw[sub_start..cur.pos()]);
         }
-        tokens.push(Self::Var(var_name));
+
+        tokens.push(Self::Var(var_name.into()));
         last_was_operand = true;
       }
 
@@ -1353,14 +1361,14 @@ mod tests {
   fn arith_recursive_variable_resolution() {
     let _g = TestGuard::new();
     // A variable holding another name resolves transitively.
-    set_var!("x", VarKind::string("3".into())).unwrap();
-    set_var!("y", VarKind::string("x".into())).unwrap();
+    set_var!(b"x", VarKind::string("3".into())).unwrap();
+    set_var!(b"y", VarKind::string("x".into())).unwrap();
     assert_eq!(arith("y+1"), 4.0);
     // A variable holding a sub-expression is evaluated.
-    set_var!("b", VarKind::string("x+1".into())).unwrap();
+    set_var!(b"b", VarKind::string("x+1".into())).unwrap();
     assert_eq!(arith("b*2"), 8.0);
     // A chain resolves to the end.
-    set_var!("a", VarKind::string("b".into())).unwrap();
+    set_var!(b"a", VarKind::string("b".into())).unwrap();
     assert_eq!(arith("a"), 4.0);
   }
 
@@ -1368,11 +1376,11 @@ mod tests {
   fn arith_recursion_cycle_errors_not_crashes() {
     // Self-reference must error (via the depth cap), not overflow the stack.
     let _g = TestGuard::new();
-    set_var!("z", VarKind::string("z".into())).unwrap();
+    set_var!(b"z", VarKind::string("z".into())).unwrap();
     assert!(expand_arithmetic(None, b"z").is_err());
     // Mutual reference likewise.
-    set_var!("p", VarKind::string("q".into())).unwrap();
-    set_var!("q", VarKind::string("p".into())).unwrap();
+    set_var!(b"p", VarKind::string("q".into())).unwrap();
+    set_var!(b"q", VarKind::string("p".into())).unwrap();
     assert!(expand_arithmetic(None, b"p").is_err());
   }
 
@@ -1472,16 +1480,16 @@ mod tests {
   fn arith_assign() {
     let _g = TestGuard::new();
     arith("(x = 5)");
-    let val = try_var!("x").unwrap();
+    let val = try_var!(b"x").unwrap();
     assert_eq!(val, "5");
   }
 
   #[test]
   fn arith_plus_assign() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("3".into())).unwrap();
+    set_var!(b"x", VarKind::Str("3".into())).unwrap();
     arith("(x += 2)");
-    let val = try_var!("x").unwrap();
+    let val = try_var!(b"x").unwrap();
     assert_eq!(val, "5");
   }
 
@@ -1489,8 +1497,8 @@ mod tests {
   fn arith_chained_assign() {
     let _g = TestGuard::new();
     arith("(a = b = 7)");
-    let a = try_var!("a").unwrap();
-    let b = try_var!("b").unwrap();
+    let a = try_var!(b"a").unwrap();
+    let b = try_var!(b"b").unwrap();
     assert_eq!(a, "7");
     assert_eq!(b, "7");
   }
@@ -1500,20 +1508,20 @@ mod tests {
   #[test]
   fn arith_postfix_inc() {
     let _g = TestGuard::new();
-    set_var!("i", VarKind::Str("5".into())).unwrap();
+    set_var!(b"i", VarKind::Str("5".into())).unwrap();
     let result = arith("(i++)");
     assert_eq!(result, 5.0); // returns old value
-    let val = try_var!("i").unwrap();
+    let val = try_var!(b"i").unwrap();
     assert_eq!(val, "6");
   }
 
   #[test]
   fn arith_prefix_inc() {
     let _g = TestGuard::new();
-    set_var!("i", VarKind::Str("5".into())).unwrap();
+    set_var!(b"i", VarKind::Str("5".into())).unwrap();
     let result = arith("(++i)");
     assert_eq!(result, 6.0); // returns new value
-    let val = try_var!("i").unwrap();
+    let val = try_var!(b"i").unwrap();
     assert_eq!(val, "6");
   }
 
@@ -1525,7 +1533,7 @@ mod tests {
     // (j=2, j+1) should set j=2 and return 3
     let result = arith("(j=2, j+1)");
     assert_eq!(result, 3.0);
-    let val = try_var!("j").unwrap();
+    let val = try_var!(b"j").unwrap();
     assert_eq!(val, "2");
   }
 
@@ -1534,8 +1542,8 @@ mod tests {
     let _g = TestGuard::new();
     // i=(j=2,j+1) sets j=2, evaluates j+1=3, assigns i=3
     arith("(i=(j=2,j+1))");
-    let i = try_var!("i").unwrap();
-    let j = try_var!("j").unwrap();
+    let i = try_var!(b"i").unwrap();
+    let j = try_var!(b"j").unwrap();
     assert_eq!(i, "3");
     assert_eq!(j, "2");
   }
@@ -1545,7 +1553,7 @@ mod tests {
   #[test]
   fn arith_with_variable() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("5".into())).unwrap();
+    set_var!(b"x", VarKind::Str("5".into())).unwrap();
     assert_eq!(arith("(x + 3)"), 8.0);
   }
 
@@ -1634,67 +1642,67 @@ mod tests {
   #[test]
   fn arith_minus_assign() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("10".into())).unwrap();
+    set_var!(b"x", VarKind::Str("10".into())).unwrap();
     assert_eq!(arith("(x -= 3)"), 7.0);
-    assert_eq!(try_var!("x").unwrap(), "7");
+    assert_eq!(try_var!(b"x").unwrap(), "7");
   }
 
   #[test]
   fn arith_mul_assign() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("6".into())).unwrap();
+    set_var!(b"x", VarKind::Str("6".into())).unwrap();
     assert_eq!(arith("(x *= 7)"), 42.0);
-    assert_eq!(try_var!("x").unwrap(), "42");
+    assert_eq!(try_var!(b"x").unwrap(), "42");
   }
 
   #[test]
   fn arith_div_assign() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("20".into())).unwrap();
+    set_var!(b"x", VarKind::Str("20".into())).unwrap();
     assert_eq!(arith("(x /= 4)"), 5.0);
-    assert_eq!(try_var!("x").unwrap(), "5");
+    assert_eq!(try_var!(b"x").unwrap(), "5");
   }
 
   #[test]
   fn arith_mod_assign() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("17".into())).unwrap();
+    set_var!(b"x", VarKind::Str("17".into())).unwrap();
     assert_eq!(arith("(x %= 5)"), 2.0);
-    assert_eq!(try_var!("x").unwrap(), "2");
+    assert_eq!(try_var!(b"x").unwrap(), "2");
   }
 
   #[test]
   fn arith_bit_and_assign() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("12".into())).unwrap();
+    set_var!(b"x", VarKind::Str("12".into())).unwrap();
     assert_eq!(arith("(x &= 10)"), 8.0);
   }
 
   #[test]
   fn arith_bit_or_assign() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("12".into())).unwrap();
+    set_var!(b"x", VarKind::Str("12".into())).unwrap();
     assert_eq!(arith("(x |= 3)"), 15.0);
   }
 
   #[test]
   fn arith_bit_xor_assign() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("12".into())).unwrap();
+    set_var!(b"x", VarKind::Str("12".into())).unwrap();
     assert_eq!(arith("(x ^= 10)"), 6.0);
   }
 
   #[test]
   fn arith_shift_l_assign() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("1".into())).unwrap();
+    set_var!(b"x", VarKind::Str("1".into())).unwrap();
     assert_eq!(arith("(x <<= 3)"), 8.0);
   }
 
   #[test]
   fn arith_shift_r_assign() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("32".into())).unwrap();
+    set_var!(b"x", VarKind::Str("32".into())).unwrap();
     assert_eq!(arith("(x >>= 2)"), 8.0);
   }
 
@@ -1703,19 +1711,19 @@ mod tests {
   #[test]
   fn arith_postfix_dec() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("5".into())).unwrap();
+    set_var!(b"x", VarKind::Str("5".into())).unwrap();
     // post-dec yields the pre-decrement value
     assert_eq!(arith("(x--)"), 5.0);
-    assert_eq!(try_var!("x").unwrap(), "4");
+    assert_eq!(try_var!(b"x").unwrap(), "4");
   }
 
   #[test]
   fn arith_prefix_dec() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("5".into())).unwrap();
+    set_var!(b"x", VarKind::Str("5".into())).unwrap();
     // pre-dec yields the new value
     assert_eq!(arith("(--x)"), 4.0);
-    assert_eq!(try_var!("x").unwrap(), "4");
+    assert_eq!(try_var!(b"x").unwrap(), "4");
   }
 
   // ===================== Ternary =====================
@@ -1774,14 +1782,14 @@ mod tests {
   #[test]
   fn arith_div_assign_by_zero_errors() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("5".into())).unwrap();
+    set_var!(b"x", VarKind::Str("5".into())).unwrap();
     assert!(expand_arithmetic(None, b"(x /= 0)").is_err());
   }
 
   #[test]
   fn arith_mod_assign_by_zero_errors() {
     let _g = TestGuard::new();
-    set_var!("x", VarKind::Str("5".into())).unwrap();
+    set_var!(b"x", VarKind::Str("5".into())).unwrap();
     assert!(expand_arithmetic(None, b"(x %= 0)").is_err());
   }
 
@@ -1868,7 +1876,7 @@ mod tests {
       "bad arith should error or set non-zero status; got Ok with status=0"
     );
     // The pre-fix bug: foo would end up as "(1 k 2)".
-    let foo = crate::var!("foo");
+    let foo = crate::var!(b"foo");
     assert!(
       foo.is_empty() || !foo.to_str_lossy().contains('k'),
       "foo should not contain the raw arith body; got {foo:?}"
@@ -1884,7 +1892,7 @@ mod tests {
     // reproduces the source line and would false-positive any check
     // against the raw arith text).
     test_input("foo=$(echo $((1 k 2)))").ok();
-    let foo = crate::var!("foo");
+    let foo = crate::var!(b"foo");
     assert!(
       foo.is_empty() || !foo.to_str_lossy().contains("(1 k 2)"),
       "raw arith body leaked into echo output: {foo:?}"

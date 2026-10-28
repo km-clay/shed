@@ -357,10 +357,10 @@ fn install_socket_fd(
 
   match (target_fd, var_name) {
     (None, None) => {
-      set_var!(default_var, VarKind::Int(fd))?;
+      set_var!(default_var.as_bytes(), VarKind::Int(fd))?;
     }
     (_, Some(var)) => {
-      set_var!(&var.to_str_lossy(), VarKind::Int(fd))?;
+      set_var!(&var, VarKind::Int(fd))?;
     }
     _ => {}
   }

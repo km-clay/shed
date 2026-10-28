@@ -7,27 +7,15 @@
 //! * [`VarFlags`]: the attributes of the variable (exported, local, readonly, integer)
 
 use std::{
-  borrow::Cow,
-  collections::VecDeque,
-  ffi::{CString, OsStr},
-  fmt::{self, Display},
-  ops::{Deref, RangeBounds},
-  os::unix::ffi::{OsStrExt, OsStringExt},
-  path::{Path, PathBuf},
-  rc::Rc,
-  str::FromStr,
-  sync::Arc,
-  time::{Duration, Instant},
+  borrow::{Borrow, Cow}, collections::VecDeque, ffi::{CString, OsStr, OsString}, fmt::{self, Debug, Display}, ops::{Deref, RangeBounds}, os::unix::ffi::{OsStrExt, OsStringExt}, path::{Path, PathBuf}, rc::Rc, str::FromStr, sync::Arc, time::{Duration, Instant},
 };
 
 use bitflags::bitflags;
 use bstr::ByteSlice;
 use hipstr::HipByt;
+use itertools::Itertools;
 use nix::{
-  NixPath,
-  errno::Errno,
-  sys::stat,
-  unistd::{self, Pid, User},
+  NixPath, errno::Errno, sys::stat, unistd::{self, Pid, Uid, User},
 };
 use rusqlite::{ToSql, types::FromSql};
 use smallvec::SmallVec;
@@ -136,7 +124,7 @@ fn join_lines(mut lines: Vec<Vec<u8>>) -> Vec<u8> {
   out
 }
 
-pub(crate) fn serialize_var(name: &str, var: &Var) -> Option<VarStr> {
+pub(crate) fn serialize_var(name: &[u8], var: &Var) -> Option<VarStr> {
   let Var { flags, kind } = var;
 
   if let VarKind::Magic(_) = kind {
@@ -364,8 +352,8 @@ bitflags! {
   }
 }
 
-pub(crate) const SHELL_MANAGED_VARS: &[&str] = &[
-  "PWD", "OLDPWD", "SHLVL", "PPID", "LINENO", "OPTIND", "UMASK", "_",
+pub(crate) const SHELL_MANAGED_VARS: &[&[u8]] = &[
+  b"PWD", b"OLDPWD", b"SHLVL", b"PPID", b"LINENO", b"OPTIND", b"UMASK", b"_",
 ];
 
 #[derive(Clone, Debug)]
@@ -388,7 +376,7 @@ impl ArrIndex {
   /// the `allow_side_effects` parameter controls whether or not mutating parameter
   /// expansions and command substitutions will be evaluated.
   pub(crate) fn parse(s: &str, allow_side_effects: bool) -> ShResult<Self> {
-    let input    = SegStream::from_bytes(s.as_bytes());
+    let input    = SegStream::from(s);
     let expanded = var::expand_raw_inner(None, &mut input.cursor(), allow_side_effects, false)?;
     let s        = VarStr::from(expanded.as_bytes());
 
@@ -446,14 +434,14 @@ impl ArrIndex {
 /// causing re-entrant borrows.
 #[derive(Clone, Debug)]
 pub(crate) struct VarName {
-  name       : String,
+  name       : VarStr,
   index      : Option<ArrIndex>,
   slice_start: Option<usize>,
   slice_len  : Option<usize>,
 }
 
 impl VarName {
-  fn plain(name: String) -> Self {
+  fn plain(name: VarStr) -> Self {
     Self {
       name,
       index: None,
@@ -473,8 +461,8 @@ impl VarName {
   ) -> ShResult<(Self, usize)> {
     let mut cursor    = stream.cursor();
     let mut qt_state  = QuoteState::default();
-    let mut name      = SegStream::new();
-    let mut index     = SegStream::new();
+    let mut name      = SegStream::default();
+    let mut index     = SegStream::default();
     let mut depth     = 0;
     let mut saw_quote = false;
     let mut closed    = false;
@@ -495,11 +483,11 @@ impl VarName {
         .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_');
 
       if next_is_name {
-        return Ok((Self::plain(String::new()), 0));
+        return Ok((Self::plain(VarStr::default()), 0));
       }
 
       cursor.bump();
-      return Ok((Self::plain((b as char).to_string()), 1));
+      return Ok((Self::plain(varstr!("{}", b as char)), 1));
     }
 
     while let Some(unit) = cursor.peek() {
@@ -563,7 +551,7 @@ impl VarName {
     }
 
     if !closed {
-      return Ok((Self::plain(name.content().to_string()), cursor.bpos()));
+      return Ok((Self::plain(name.content()), cursor.bpos()));
     }
 
     // expand array indexes
@@ -588,8 +576,8 @@ impl VarName {
       cursor.bump();
       qt_state.reset();
 
-      let mut skip_part   = SegStream::new();
-      let mut take_part   = SegStream::new();
+      let mut skip_part   = SegStream::default();
+      let mut take_part   = SegStream::default();
       let mut seen_colon  = false;
       let mut brace_depth = 0usize;
       let mut paren_depth = 0usize;
@@ -643,7 +631,7 @@ impl VarName {
 
     Ok((
       Self {
-        name: name.content().to_string(),
+        name: name.content(),
         index: Some(index),
         slice_start,
         slice_len,
@@ -652,12 +640,12 @@ impl VarName {
     ))
   }
   pub(crate) fn parse(raw: &str, allow_side_effects: bool) -> ShResult<Self> {
-    Self::parse_stream(&SegStream::from_bytes(raw.as_bytes()), allow_side_effects)
+    Self::parse_stream(&SegStream::from(raw), allow_side_effects)
       .map(|(varname, _)| varname)
   }
 
-  pub(crate) fn name(&self) -> &str {
-    &self.name
+  pub(crate) fn name(&self) -> VarStr {
+    self.name.clone()
   }
   pub(crate) fn index(&self) -> Option<&ArrIndex> {
     self.index.as_ref()
@@ -682,10 +670,10 @@ impl VarName {
     matches!(self.index(), Some(ArrIndex::AllJoined)) || self.is_argv_joined()
   }
   pub(crate) fn is_argv_split(&self) -> bool {
-    self.index.is_none() && matches!(self.name(), "@")
+    self.index.is_none() && *self.name() == *b"@"
   }
   pub(crate) fn is_argv_joined(&self) -> bool {
-    self.index.is_none() && matches!(self.name(), "*")
+    self.index.is_none() && *self.name() == *b"*"
   }
 }
 
@@ -705,18 +693,20 @@ impl Deref for MagicVar {
   }
 }
 
-impl std::fmt::Debug for MagicVar {
+impl Debug for MagicVar {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "<magic var>")
   }
 }
 
 pub(crate) trait VarStrSliceExt {
-  fn join_with(&self, sep: &str) -> VarStr;
+  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> VarStr;
 }
 
 impl VarStrSliceExt for [VarStr] {
-  fn join_with(&self, sep: &str) -> VarStr {
+  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> VarStr {
+    let sep = sep.as_ref();
+
     let mut out  = vec![];
     let mut iter = self.iter();
     if let Some(first) = iter.next() {
@@ -731,7 +721,9 @@ impl VarStrSliceExt for [VarStr] {
 }
 
 impl VarStrSliceExt for [Word] {
-  fn join_with(&self, sep: &str) -> VarStr {
+  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> VarStr {
+    let sep = sep.as_ref();
+
     let mut out  = vec![];
     let mut iter = self.iter();
     if let Some(first) = iter.next() {
@@ -746,7 +738,9 @@ impl VarStrSliceExt for [Word] {
 }
 
 impl VarStrSliceExt for [&VarStr] {
-  fn join_with(&self, sep: &str) -> VarStr {
+  fn join_with<P: AsRef<[u8]>>(&self, sep: P) -> VarStr {
+    let sep = sep.as_ref();
+
     let mut out  = vec![];
     let mut iter = self.iter();
     if let Some(first) = iter.next() {
@@ -768,7 +762,7 @@ impl VarStrSliceExt for [&VarStr] {
 /// It is a wrapper around [`hipstr::HipByt`], which is itself a shared-ownership byte sequence.
 /// It does not have the same UTF-8 guarantees as [`String`] and [`str`], which is necessary to preserve
 /// exact byte structure instead of mangling with functions like `to_string_lossy()`.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
 pub(crate) struct VarStr(HipByt<'static>);
 
 impl VarStr {
@@ -863,6 +857,12 @@ impl VarStr {
   }
 }
 
+impl Debug for VarStr {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "VarStr({:?})", self.to_str_lossy())
+  }
+}
+
 impl Deref for VarStr {
   type Target = [u8];
   fn deref(&self) -> &Self::Target {
@@ -914,9 +914,29 @@ impl NixPath for VarStr {
   }
 }
 
+impl Borrow<[u8]> for VarStr {
+  fn borrow(&self) -> &[u8] {
+    self.as_bytes()
+  }
+}
+
 impl From<SmallVec<[u8; 24]>> for VarStr {
   fn from(value: SmallVec<[u8; 24]>) -> Self {
     Self(HipByt::from(value.as_slice()))
+  }
+}
+
+impl From<char> for VarStr {
+  fn from(value: char) -> Self {
+    let mut buf = [0u8; 4];
+    let s       = value.encode_utf8(&mut buf);
+    Self(HipByt::from(s.as_bytes()))
+  }
+}
+
+impl From<OsString> for VarStr {
+  fn from(value: OsString) -> Self {
+    Self(HipByt::from(value.as_bytes()))
   }
 }
 
@@ -1048,7 +1068,7 @@ impl PartialEq<String> for VarStr {
 
 impl Display for VarStr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    self.0.to_str_lossy().fmt(f)
+    Display::fmt(&self.0.to_str_lossy(), f)
   }
 }
 
@@ -1358,7 +1378,7 @@ impl Var {
 
 impl Display for Var {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    self.kind.fmt(f)
+    Display::fmt(&self.kind, f)
   }
 }
 
@@ -1395,6 +1415,12 @@ impl From<VarStr> for Var {
 
 impl From<String> for Var {
   fn from(value: String) -> Self {
+    Self::new(VarKind::Str(value.into()), VarFlags::empty())
+  }
+}
+
+impl From<OsString> for Var {
+  fn from(value: OsString) -> Self {
     Self::new(VarKind::Str(value.into()), VarFlags::empty())
   }
 }
@@ -1446,7 +1472,7 @@ impl Deref for DeferredAst {
 
 #[derive(Default, Clone, Debug)]
 pub(crate) struct VarTab {
-  vars   : HashMap<String, Var>,
+  vars   : HashMap<VarStr, Var>,
   params : HashMap<ShellParam, VarStr>,
   sh_argv: VecDeque<VarStr>, /* Using a VecDeque makes the implementation of `shift` straightforward */
 
@@ -1494,22 +1520,24 @@ impl VarTab {
     params.insert(ShellParam::LastJob, VarStr::default()); // PID of the last background job (if any)
     params
   }
-  fn init_sh_vars() -> HashMap<String, Var> {
+  fn init_sh_vars() -> HashMap<VarStr, Var> {
     let mut vars = HashMap::default();
     vars.insert("COMP_WORDBREAKS".into(), " \t\n\"'@><=;|&(:".into());
     vars.insert("OPTIND".into(), "1".into());
     let env_vars = Self::init_env();
     vars.extend(env_vars);
     for (name, var) in &mut vars {
-      if SHELL_MANAGED_VARS.contains(&name.as_str()) {
+      if SHELL_MANAGED_VARS.contains(&name.as_bytes()) {
         var.flags |= VarFlags::SHELL;
       }
     }
     vars
   }
-  fn init_env() -> Vec<(String, Var)> {
+  fn init_env() -> Vec<(VarStr, Var)> {
     let pathbuf_to_string =
-      |pb: Result<PathBuf, std::io::Error>| pb.unwrap_or_default().to_string_lossy().to_string();
+      |pb: Result<PathBuf, std::io::Error>| -> VarStr {
+        pb.unwrap_or_default().into()
+      };
 
     // real fd, not the sink table: this runs during Shed construction, before
     // the fd table exists — stdin_is_tty() -> Shed::sinks would re-enter init.
@@ -1522,7 +1550,7 @@ impl VarTab {
     let home_fallback;
     let username_fallback;
     let uid;
-    if let Some(user) = User::from_uid(nix::unistd::Uid::current()).ok().flatten() {
+    if let Some(user) = User::from_uid(Uid::current()).ok().flatten() {
       home_fallback = user.dir;
       username_fallback = user.name;
       uid = user.uid;
@@ -1539,14 +1567,14 @@ impl VarTab {
     // Inherit OS env. Subsequent steps either insert-if-missing (user-set
     // vars like HOME/USER) or are unconditionally overridden for
     // shed-controlled vars like UID/PPID/PWD.
-    let mut env: HashMap<String, VarStr> = std::env::vars_os()
-      .filter_map(|(k, v)| Some((k.into_string().ok()?, VarStr::from(v.into_vec()))))
+    let mut env: HashMap<VarStr, VarStr> = std::env::vars_os()
+      .map(|(k, v)| (k.as_bytes().into(), v.as_bytes().into()))
       .collect();
 
     // Insert-if-missing: prefer the inherited value, fall back otherwise.
     env
       .entry("HOME".into())
-      .or_insert_with(|| home_fallback.clone().into());
+      .or_insert_with(|| home_fallback.clone());
     env
       .entry("USER".into())
       .or_insert_with(|| username_fallback.clone().into());
@@ -1554,10 +1582,10 @@ impl VarTab {
       env.entry("PATH".into()).or_insert_with(|| path.into());
     }
 
-    let resolved_home = env["HOME"].to_str_lossy().into_owned();
-    let resolved_user = env["USER"].clone();
+    let resolved_home = env[b"HOME".as_slice()].clone();
+    let resolved_user = env[b"USER".as_slice()].clone();
 
-    let mut state_dir = env.get("XDG_STATE_HOME").map_or_else(
+    let mut state_dir = env.get(b"XDG_STATE_HOME".as_slice()).map_or_else(
       || PathBuf::from(format!("{resolved_home}/.local/state")),
       |x| PathBuf::from(x.clone()),
     );
@@ -1572,16 +1600,16 @@ impl VarTab {
     env.entry("LOGNAME".into()).or_insert(resolved_user);
     env
       .entry("SHELL".into())
-      .or_insert_with(|| pathbuf_to_string(std::env::current_exe()).into());
+      .or_insert_with(|| pathbuf_to_string(std::env::current_exe()));
     env
       .entry("SHED_HISTDB".into())
       .or_insert_with(|| shed_db.display().to_string().into());
 
     // SHED_HPATH: prepend install_dir if it isn't already present.
     if let Some(install_dir) = super::builtin::HELP_PAGE_INSTALL_DIR {
-      let new_hpath = match env.get("SHED_HPATH") {
+      let new_hpath = match env.get(b"SHED_HPATH".as_slice()) {
         Some(hpath)
-          if !paths::split_path_list(&hpath.to_str_lossy())
+          if !paths::split_path_list(hpath)
             .any(|p| p.as_os_str() == install_dir) =>
         {
           Some(format!("{install_dir}:{}", hpath.to_str_lossy()))
@@ -1605,10 +1633,10 @@ impl VarTab {
     env.insert("PPID".into(), unistd::getppid().to_string().into());
     env.insert("HOST".into(), hostname.into());
 
-    let mut vars: Vec<(String, Var)> = env
+    let mut vars = env
       .into_iter()
       .map(|(k, v)| (k, Var::new(VarKind::Str(v), VarFlags::EXPORT)))
-      .collect();
+      .collect_vec();
 
     let     orig      = stat::umask(stat::Mode::empty());
     let     umask     = stat::umask(orig);
@@ -1620,8 +1648,8 @@ impl VarTab {
       VarFlags::EXPORT,
     );
     umask_var.flags |= VarFlags::READONLY;
-    vars.push(("UMASK".to_string(), umask_var));
-    vars.push(("_".to_string(), underline));
+    vars.push(("UMASK".into(), umask_var));
+    vars.push(("_".into(), underline));
 
     vars
   }
@@ -1675,15 +1703,15 @@ impl VarTab {
   pub(crate) fn fpop_arg(&mut self) -> Option<VarStr> {
     self.sh_argv.pop_front()
   }
-  pub(crate) fn vars(&self) -> &HashMap<String, Var> {
+  pub(crate) fn vars(&self) -> &HashMap<VarStr, Var> {
     &self.vars
   }
-  pub(crate) fn vars_mut(&mut self) -> &mut HashMap<String, Var> {
+  pub(crate) fn vars_mut(&mut self) -> &mut HashMap<VarStr, Var> {
     &mut self.vars
   }
   /// Clear the export attribute (`export -n`), leaving the variable's value
   /// intact as an ordinary shell variable.
-  pub(crate) fn unexport_var(&mut self, var_name: &str) {
+  pub(crate) fn unexport_var(&mut self, var_name: &[u8]) {
     if let Some(var) = self.vars.get_mut(var_name)
       && var.flags.contains(VarFlags::EXPORT)
     {
@@ -1691,7 +1719,7 @@ impl VarTab {
       Shed::meta_mut(MetaTab::clear_envp);
     }
   }
-  pub(crate) fn try_get_local(&self, var_name: &str) -> Option<VarStr> {
+  pub(crate) fn try_get_local(&self, var_name: &[u8]) -> Option<VarStr> {
     // A declared-but-unset variable is present in the scope (so it shadows
     // outer scopes and keeps later assignments local) but has no value: it
     // reads as unset for `${x-}`/`${x+}` etc
@@ -1700,33 +1728,35 @@ impl VarTab {
       other => other.map(VarStr::from),
     }
   }
-  pub(crate) fn try_take_local(&mut self, var_name: &str) -> ShResult<Option<Var>> {
+  pub(crate) fn try_take_local(&mut self, var_name: &[u8]) -> ShResult<Option<Var>> {
     let Some(var) = self.try_take_var(var_name)? else {
       return Ok(None);
     };
 
     match var.kind() {
       VarKind::Unset => {
-        self.vars.insert(var_name.to_string(), var);
+        self.vars.insert(var_name.into(), var);
         Ok(None)
       }
       _ => Ok(Some(var)),
     }
   }
-  pub(crate) fn try_get_var_meta(&self, var: &str) -> Option<Var> {
+  pub(crate) fn try_get_var_meta(&self, var: &[u8]) -> Option<Var> {
     self.vars.get(var).cloned()
   }
-  pub(crate) fn try_get_var_kind_tag(&self, var: &str) -> Option<VarKindTag> {
+  pub(crate) fn try_get_var_kind_tag(&self, var: &[u8]) -> Option<VarKindTag> {
     self.vars.get(var).map(|v| v.kind().tag())
   }
-  pub(crate) fn get_var_flags(&self, var_name: &str) -> Option<VarFlags> {
+  pub(crate) fn get_var_flags(&self, var_name: &[u8]) -> Option<VarFlags> {
     self.vars.get(var_name).map(|var| var.flags)
   }
   pub(crate) fn try_take_param(&mut self, param: ShellParam) -> Option<VarStr> {
     self.params.get_mut(&param).map(std::mem::take)
   }
-  pub(crate) fn try_take_var(&mut self, var_name: &str) -> ShResult<Option<Var>> {
+  pub(crate) fn try_take_var(&mut self, var_name: &[u8]) -> ShResult<Option<Var>> {
     if let Some(var) = self.vars.get(var_name) {
+      let var_name = var_name.to_str_lossy();
+
       if var.flags.contains(VarFlags::READONLY) {
         return Err(sherr!(ExecFail, "cannot unset readonly variable '{var_name}'"));
       }
@@ -1736,14 +1766,16 @@ impl VarTab {
     }
     Ok(self.vars.remove(var_name))
   }
-  pub(crate) fn unset_var(&mut self, var_name: &str) -> ShResult<()> {
+  pub(crate) fn unset_var(&mut self, var_name: &[u8]) -> ShResult<()> {
     self.try_take_var(var_name).map(|_| ())
   }
-  pub(crate) fn set_index(&mut self, var_name: &str, idx: ArrIndex, val: VarStr) -> ShResult<()> {
+  pub(crate) fn set_index(&mut self, var_name: &[u8], idx: ArrIndex, val: VarStr) -> ShResult<()> {
     // 'idx' must already be resolved at this point
     if self.var_exists(var_name)
       && let Some(var) = self.vars_mut().get_mut(var_name)
     {
+      let var_name = var_name.to_str_lossy();
+
       match var.kind_mut() {
         VarKind::Arr(items) => {
           let idx = match idx {
@@ -1789,6 +1821,7 @@ impl VarTab {
         }
       }
     }
+    let var_name = var_name.to_str_lossy();
 
     let kind = match idx {
       ArrIndex::Literal(n) => {
@@ -1806,12 +1839,14 @@ impl VarTab {
       }
     };
 
-    self.set_var(var_name, kind, VarFlags::empty())
+    self.set_var(var_name.as_bytes(), kind, VarFlags::empty())
   }
-  pub(crate) fn unset_index(&mut self, var_name: &str, idx: ArrIndex) -> ShResult<()> {
+  pub(crate) fn unset_index(&mut self, var_name: &[u8], idx: ArrIndex) -> ShResult<()> {
     let Some(var) = self.vars.get_mut(var_name) else {
       return Ok(());
     };
+    let var_name = var_name.to_str_lossy();
+
     if var.flags.contains(VarFlags::READONLY) {
       return Err(sherr!(ExecFail, "cannot unset readonly variable '{var_name}'"));
     }
@@ -1843,20 +1878,22 @@ impl VarTab {
       _ => Err(sherr!(ExecFail, "Variable '{var_name}' is not an array")),
     }
   }
-  pub(crate) fn put_var(&mut self, name: &str, var: Var) {
+  pub(crate) fn put_var(&mut self, name: &[u8], var: Var) {
     // zero-validation insertion of variables
-    self.vars.insert(name.to_string(), var);
+    self.vars.insert(name.into(), var);
   }
   pub(crate) fn params(&self) -> &HashMap<ShellParam, VarStr> {
     &self.params
   }
-  pub(crate) fn set_var(&mut self, var_name: &str, val: VarKind, flags: VarFlags) -> ShResult<()> {
+  pub(crate) fn set_var(&mut self, var_name: &[u8], val: VarKind, flags: VarFlags) -> ShResult<()> {
     let flags = if SHELL_MANAGED_VARS.contains(&var_name) {
       flags | VarFlags::SHELL
     } else {
       flags
     };
     if let Some(var) = self.vars.get_mut(var_name) {
+      let var_name = var_name.to_str_lossy();
+
       if var.flags.contains(VarFlags::READONLY) && !flags.contains(VarFlags::READONLY) {
         return Err(sherr!(ExecFail, "Variable '{var_name}' is readonly"));
       }
@@ -1875,14 +1912,14 @@ impl VarTab {
         Shed::meta_mut(MetaTab::clear_envp);
         var.mark_for_export();
       }
-      self.vars.insert(var_name.to_string(), var);
+      self.vars.insert(var_name.into(), var);
     }
     Ok(())
   }
   /// OR additional attribute flags onto an existing variable, leaving its value
   /// untouched. Used when re-declaring an already-set name (`x=5; declare x`),
   /// which adds attributes without clobbering the value.
-  pub(crate) fn merge_flags(&mut self, var_name: &str, flags: VarFlags) {
+  pub(crate) fn merge_flags(&mut self, var_name: &[u8], flags: VarFlags) {
     if let Some(var) = self.vars.get_mut(var_name) {
       let newly_exported =
         flags.contains(VarFlags::EXPORT) && !var.flags.contains(VarFlags::EXPORT);
@@ -1892,8 +1929,8 @@ impl VarTab {
       }
     }
   }
-  pub(crate) fn var_exists(&self, var_name: &str) -> bool {
-    if let Ok(param) = var_name.parse::<ShellParam>() {
+  pub(crate) fn var_exists(&self, var_name: &[u8]) -> bool {
+    if let Ok(param) = var_name.to_str_lossy().parse::<ShellParam>() {
       return self.params.contains_key(&param);
     }
     self.vars.contains_key(var_name)
@@ -2025,12 +2062,12 @@ mod parse_stream_slice_tests {
   use crate::expand::stream::SegStream;
 
   fn slice_of(src: &str) -> (Option<usize>, Option<usize>) {
-    let (parsed, _) = VarName::parse_stream(&SegStream::from_bytes(src.as_bytes()), false).unwrap();
+    let (parsed, _) = VarName::parse_stream(&SegStream::from(src), false).unwrap();
     (parsed.slice_start(), parsed.slice_len())
   }
 
   fn consumed(src: &str) -> usize {
-    VarName::parse_stream(&SegStream::from_bytes(src.as_bytes()), false)
+    VarName::parse_stream(&SegStream::from(src), false)
       .unwrap()
       .1
   }
@@ -2180,7 +2217,7 @@ mod set_index_tests {
     let mut tab = VarTab::new();
     tab
       .set_var(
-        name,
+        name.as_bytes(),
         VarKind::Arr(items.into_iter().map(VarStr::from).collect()),
         VarFlags::empty(),
       )
@@ -2189,14 +2226,14 @@ mod set_index_tests {
   }
 
   fn arr_items(tab: &VarTab, name: &str) -> Vec<VarStr> {
-    match tab.vars.get(name).map(super::Var::kind) {
+    match tab.vars.get(name.as_bytes()).map(super::Var::kind) {
       Some(VarKind::Arr(items)) => items.iter().cloned().collect(),
       other => panic!("expected Arr for {name}, got {other:?}"),
     }
   }
 
   fn assoc_items(tab: &VarTab, name: &str) -> Vec<(VarStr, VarStr)> {
-    match tab.vars.get(name).map(super::Var::kind) {
+    match tab.vars.get(name.as_bytes()).map(super::Var::kind) {
       Some(VarKind::AssocArr(items)) => items.clone(),
       other => panic!("expected AssocArr for {name}, got {other:?}"),
     }
@@ -2207,7 +2244,7 @@ mod set_index_tests {
     let     _g  = TestGuard::new();
     let mut tab = make_tab_with_arr("arr", vec!["a", "b", "c"]);
     tab
-      .set_index("arr", ArrIndex::Literal(1), "B!".into())
+      .set_index(b"arr", ArrIndex::Literal(1), "B!".into())
       .unwrap();
     assert_eq!(arr_items(&tab, "arr"), vec!["a", "B!", "c"]);
   }
@@ -2217,7 +2254,7 @@ mod set_index_tests {
     let     _g  = TestGuard::new();
     let mut tab = make_tab_with_arr("arr", vec!["a"]);
     tab
-      .set_index("arr", ArrIndex::Literal(3), "z".into())
+      .set_index(b"arr", ArrIndex::Literal(3), "z".into())
       .unwrap();
     assert_eq!(arr_items(&tab, "arr"), vec!["a", "", "", "z"]);
   }
@@ -2228,7 +2265,7 @@ mod set_index_tests {
     let mut tab = make_tab_with_arr("arr", vec!["a", "b", "c"]);
     // FromBack(1) → items.len() - 1 = index 2.
     tab
-      .set_index("arr", ArrIndex::FromBack(1), "C!".into())
+      .set_index(b"arr", ArrIndex::FromBack(1), "C!".into())
       .unwrap();
     assert_eq!(arr_items(&tab, "arr"), vec!["a", "b", "C!"]);
   }
@@ -2237,7 +2274,7 @@ mod set_index_tests {
   fn from_back_index_out_of_bounds_errors() {
     let     _g  = TestGuard::new();
     let mut tab = make_tab_with_arr("arr", vec!["a", "b"]);
-    let     res = tab.set_index("arr", ArrIndex::FromBack(5), "x".into());
+    let     res = tab.set_index(b"arr", ArrIndex::FromBack(5), "x".into());
     assert!(res.is_err());
   }
 
@@ -2246,10 +2283,10 @@ mod set_index_tests {
     let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
-      .set_var("h", VarKind::AssocArr(vec![]), VarFlags::empty())
+      .set_var(b"h", VarKind::AssocArr(vec![]), VarFlags::empty())
       .unwrap();
     tab
-      .set_index("h", ArrIndex::Key("k".into()), "v".into())
+      .set_index(b"h", ArrIndex::Key("k".into()), "v".into())
       .unwrap();
     assert_eq!(assoc_items(&tab, "h"), vec![("k".into(), "v".into())]);
   }
@@ -2277,13 +2314,13 @@ mod set_index_tests {
     let mut tab = VarTab::new();
     tab
       .set_var(
-        "h",
+        b"h",
         VarKind::AssocArr(vec![("k1".into(), "old".into()), ("k2".into(), "y".into())]),
         VarFlags::empty(),
       )
       .unwrap();
     tab
-      .set_index("h", ArrIndex::Key("k1".into()), "new".into())
+      .set_index(b"h", ArrIndex::Key("k1".into()), "new".into())
       .unwrap();
     assert_eq!(
       assoc_items(&tab, "h"),
@@ -2296,11 +2333,11 @@ mod set_index_tests {
     let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
-      .set_var("scalar", VarKind::Str("plain".into()), VarFlags::empty())
+      .set_var(b"scalar", VarKind::Str("plain".into()), VarFlags::empty())
       .unwrap();
     // After resolve_for on a Str, the literal index applies but the
     // catchall arm returns "Variable '...' is not an array".
-    let res = tab.set_index("scalar", ArrIndex::Literal(0), "x".into());
+    let res = tab.set_index(b"scalar", ArrIndex::Literal(0), "x".into());
     assert!(res.is_err());
   }
 
@@ -2309,7 +2346,7 @@ mod set_index_tests {
     let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
-      .set_index("never_existed", ArrIndex::Literal(0), "x".into())
+      .set_index(b"never_existed", ArrIndex::Literal(0), "x".into())
       .unwrap();
     assert_eq!(arr_items(&tab, "never_existed"), vec!["x"]);
   }
@@ -2319,7 +2356,7 @@ mod set_index_tests {
     let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
-      .set_index("sparse", ArrIndex::Literal(3), "v".into())
+      .set_index(b"sparse", ArrIndex::Literal(3), "v".into())
       .unwrap();
     assert_eq!(arr_items(&tab, "sparse"), vec!["", "", "", "v"]);
   }
@@ -2329,7 +2366,7 @@ mod set_index_tests {
     let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
-      .set_index("fresh", ArrIndex::Key("k".into()), "v".into())
+      .set_index(b"fresh", ArrIndex::Key("k".into()), "v".into())
       .unwrap();
     assert_eq!(
       assoc_items(&tab, "fresh"),
@@ -2341,19 +2378,19 @@ mod set_index_tests {
   fn missing_var_from_back_index_errors() {
     let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
-    let     res = tab.set_index("fresh", ArrIndex::FromBack(1), "v".into());
+    let     res = tab.set_index(b"fresh", ArrIndex::FromBack(1), "v".into());
     assert!(
       res.is_err(),
       "counting back from an absent array has no length"
     );
-    assert!(!tab.vars.contains_key("fresh"));
+    assert!(!tab.vars.contains_key(b"fresh".as_slice()));
   }
 
   #[test]
   fn wildcard_index_into_indexed_array_errors() {
     let     _g  = TestGuard::new();
     let mut tab = make_tab_with_arr("arr", vec!["a", "b"]);
-    let     res = tab.set_index("arr", ArrIndex::AllSplit, "x".into());
+    let     res = tab.set_index(b"arr", ArrIndex::AllSplit, "x".into());
     assert!(res.is_err());
   }
 
@@ -2363,13 +2400,13 @@ mod set_index_tests {
     let mut tab = VarTab::new();
     tab
       .set_var(
-        "h",
+        b"h",
         VarKind::AssocArr(vec![("k".into(), "v".into())]),
         VarFlags::empty(),
       )
       .unwrap();
     // Wildcard (AllSplit / AllJoined) on assoc array → inner not-a-Key arm errors.
-    let res = tab.set_index("h", ArrIndex::AllSplit, "x".into());
+    let res = tab.set_index(b"h", ArrIndex::AllSplit, "x".into());
     assert!(res.is_err());
   }
 
@@ -2386,11 +2423,11 @@ mod set_index_tests {
     let     _g  = TestGuard::new();
     let mut tab = VarTab::new();
     tab
-      .set_var("h", VarKind::AssocArr(vec![]), VarFlags::empty())
+      .set_var(b"h", VarKind::AssocArr(vec![]), VarFlags::empty())
       .unwrap();
-    let tag      = tab.try_get_var_kind_tag("h").unwrap();
+    let tag      = tab.try_get_var_kind_tag(b"h").unwrap();
     let resolved = ArrIndex::Literal(7).resolve_for(tag).unwrap();
-    tab.set_index("h", resolved, "v".into()).unwrap();
+    tab.set_index(b"h", resolved, "v".into()).unwrap();
     assert_eq!(assoc_items(&tab, "h"), vec![("7".into(), "v".into())]);
   }
 }

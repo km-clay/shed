@@ -177,10 +177,10 @@ fn legacy_data_db_path() -> Option<PathBuf> {
 
 /// The on-disk path of the history database.
 fn history_db_path() -> PathBuf {
-  let db_path: VarStr = if let Some(var) = try_var!("SHED_HISTDB") {
+  let db_path: VarStr = if let Some(var) = try_var!(b"SHED_HISTDB") {
     var
   } else {
-    let home = try_var!("HOME").unwrap_or_else(|| ".".into());
+    let home = try_var!(b"HOME").unwrap_or_else(|| ".".into());
     default_state_db_path().map_or_else(
       || format!("{home}/.local/state/shed/shed_hist.db").into(),
       |p| p.to_string_lossy().into(),

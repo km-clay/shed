@@ -642,7 +642,7 @@ impl super::LineBuf {
   }
 
   fn ex_edit(paths: &[PathBuf]) -> ShResult<()> {
-    if try_var!("EDITOR").is_none() {
+    if try_var!(b"EDITOR").is_none() {
       system_msg!("$EDITOR is unset. Aborting edit.");
       Ok(())
     } else {
@@ -696,11 +696,11 @@ impl super::LineBuf {
     let mut anchor         = self.anchor_to_flat();
 
     Shed::vars_mut(|v| -> ShResult<()> {
-      v.set_var("BUFFER", VarKind::string(buf.clone()), VarFlags::EXPORT)?;
-      v.set_var("CURSOR", VarKind::string(cursor.clone()), VarFlags::EXPORT)?;
+      v.set_var(b"BUFFER", VarKind::string(buf.clone()), VarFlags::EXPORT)?;
+      v.set_var(b"CURSOR", VarKind::string(cursor.clone()), VarFlags::EXPORT)?;
       if let Some(anchor) = anchor {
         v.set_var(
-          "ANCHOR",
+          b"ANCHOR",
           VarKind::string(anchor.to_string().into()),
           VarFlags::EXPORT,
         )?;
@@ -730,12 +730,12 @@ impl super::LineBuf {
     let mut new_anchor = None;
 
     let keys = Shed::vars_mut(|v| {
-      buf = v.take_var("BUFFER").unwrap_or_default();
-      cursor = v.take_var("CURSOR").unwrap_or_default();
+      buf = v.take_var(b"BUFFER").unwrap_or_default();
+      cursor = v.take_var(b"CURSOR").unwrap_or_default();
       if anchor.is_some() {
-        new_anchor = Some(v.take_var("ANCHOR").unwrap_or_default());
+        new_anchor = Some(v.take_var(b"ANCHOR").unwrap_or_default());
       }
-      v.take_var("KEYS").unwrap_or_default()
+      v.take_var(b"KEYS").unwrap_or_default()
     });
 
     self.set_buffer(&buf.to_str_lossy());

@@ -106,7 +106,8 @@ fn tokenize_prompt(raw: &[u8]) -> Vec<PromptTk> {
                 tokens.push(PromptTk::Text(format_smolstr!("\\@{{{}", func_name.as_bstr()).into()));
               } else {
                 // End of unbraced function name
-                let func_exists = Shed::logic(|l| l.get_func(&String::from_utf8_lossy(&func_name)).is_some());
+                let func_exists = Shed::logic(|l| l.get_func(&func_name).is_some());
+
                 if func_exists {
                   tokens.push(PromptTk::Function(func_name.clone().into()));
                 } else {
@@ -118,7 +119,8 @@ fn tokenize_prompt(raw: &[u8]) -> Vec<PromptTk> {
           });
           // Handle end-of-input: function name collected but loop ended without pushing
           if !handled && !func_name.is_empty() {
-            let func_exists = Shed::logic(|l| l.get_func(&String::from_utf8_lossy(&func_name)).is_some());
+            let func_exists = Shed::logic(|l| l.get_func(&func_name).is_some());
+
             if func_exists {
               tokens.push(PromptTk::Function(func_name.into()));
             } else {
@@ -268,7 +270,7 @@ fn runtime(formatted: bool, out: &mut String) {
 }
 
 fn prompt_pwd(short: bool, out: &mut String) {
-  let pwd = paths::display_path(var!("PWD"));
+  let pwd = paths::display_path(var!(b"PWD"));
 
   if !short {
     out.push_str(&pwd);
@@ -291,12 +293,12 @@ fn prompt_pwd(short: bool, out: &mut String) {
 }
 
 fn username(out: &mut String) {
-  let username = var!("USER");
+  let username = var!(b"USER");
   out.push_str(&username.to_str_lossy());
 }
 
 fn prompt_symbol(out: &mut String) {
-  let uid    = var!("UID");
+  let uid    = var!(b"UID");
   let symbol = if &uid == "0" { '#' } else { '$' };
   out.push(symbol);
 }
@@ -331,7 +333,7 @@ fn func_expand(input: &str, out: &mut String) -> ShResult<()> {
 }
 
 fn hostname(short: bool, out: &mut String) {
-  let hostname = var!("HOST");
+  let hostname = var!(b"HOST");
 
   if short && let Some(first) = hostname.to_str_lossy().split('.').next() {
     out.push_str(first);
@@ -635,13 +637,13 @@ mod tests {
     let _g = crate::tests::testutil::TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "PWD",
+        b"PWD",
         crate::state::vars::VarKind::string("/home/testuser/proj".into()),
         crate::state::vars::VarFlags::empty(),
       )
       .unwrap();
       v.set_var(
-        "HOME",
+        b"HOME",
         crate::state::vars::VarKind::string("/home/testuser".into()),
         crate::state::vars::VarFlags::empty(),
       )
@@ -657,13 +659,13 @@ mod tests {
     Shed::shopts_mut(|o| o.prompt.trunc_prompt_path = 2);
     Shed::vars_mut(|v| {
       v.set_var(
-        "PWD",
+        b"PWD",
         crate::state::vars::VarKind::string("/a/b/c/d/e".into()),
         crate::state::vars::VarFlags::empty(),
       )
       .unwrap();
       v.set_var(
-        "HOME",
+        b"HOME",
         crate::state::vars::VarKind::string("/nowhere".into()),
         crate::state::vars::VarFlags::empty(),
       )
@@ -686,13 +688,13 @@ mod tests {
     Shed::shopts_mut(|o| o.prompt.trunc_prompt_path = 100);
     Shed::vars_mut(|v| {
       v.set_var(
-        "PWD",
+        b"PWD",
         crate::state::vars::VarKind::string("/home/testuser/proj".into()),
         crate::state::vars::VarFlags::empty(),
       )
       .unwrap();
       v.set_var(
-        "HOME",
+        b"HOME",
         crate::state::vars::VarKind::string("/home/testuser".into()),
         crate::state::vars::VarFlags::empty(),
       )
@@ -707,7 +709,7 @@ mod tests {
     let _g = crate::tests::testutil::TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "HOST",
+        b"HOST",
         crate::state::vars::VarKind::string("box.example.com".into()),
         crate::state::vars::VarFlags::empty(),
       )
@@ -722,7 +724,7 @@ mod tests {
     let _g = crate::tests::testutil::TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "HOST",
+        b"HOST",
         crate::state::vars::VarKind::string("box.example.com".into()),
         crate::state::vars::VarFlags::empty(),
       )
@@ -769,7 +771,7 @@ mod tests {
 
   fn set_var(name: &str, value: &str) {
     use crate::state::vars::VarKind;
-    set_var!(name, VarKind::string(value.into())).unwrap();
+    set_var!(name.as_bytes(), VarKind::string(value.into())).unwrap();
   }
 
   #[test]

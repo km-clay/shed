@@ -25,7 +25,7 @@ use crate::{
 use super::{BuiltinArgs, opt::OptSpec};
 
 fn push_val(v: &mut ScopeStack, name: &VarStr, val: &VarStr, end: End) -> ShResult<()> {
-  let arr = v.get_arr_mut(&name.to_str_lossy())?;
+  let arr = v.get_arr_mut(name)?;
   match end {
     End::Front => arr.push_front(val.clone()),
     End::Back  => arr.push_back(val.clone()),
@@ -149,7 +149,7 @@ trait ArrOp: Builtin {
           End::Front => arr.pop_front(),
           End::Back  => arr.pop_back(),
         };
-        let Some(popped_val) = Shed::vars_mut(|v| v.get_arr_mut(&arg.to_str_lossy()).map(pop))?
+        let Some(popped_val) = Shed::vars_mut(|v| v.get_arr_mut(arg).map(pop))?
         else {
           return util::with_status(1);
         };
@@ -285,7 +285,7 @@ impl super::Builtin for Rotate {
       // each arg is a variable name of an array to rotate
       for arg in args.arguments() {
         let arr = v
-          .get_arr_mut(&arg.to_str_lossy())
+          .get_arr_mut(arg)
           .promote_err(args.span())?;
         if reverse {
           arr.rotate_right(count.min(arr.len()));
@@ -315,11 +315,11 @@ mod tests {
       .iter()
       .map(ToString::to_string)
       .collect::<VecDeque<_>>();
-    set_var!(name, arr(arr.into_iter().map(Into::into))).unwrap();
+    set_var!(name.as_bytes(), arr(arr.into_iter().map(Into::into))).unwrap();
   }
 
   fn get_arr(name: &str) -> Vec<VarStr> {
-    Shed::vars(|v| v.try_get_arr_elems(name)).unwrap()
+    Shed::vars(|v| v.try_get_arr_elems(name.as_bytes())).unwrap()
   }
 
   // ===================== push =====================
@@ -416,7 +416,7 @@ mod tests {
     set_arr("arr", &["x", "y", "z"]);
 
     test_input("pop arr >@result").unwrap();
-    let val = var!("result");
+    let val = var!(b"result");
     assert_eq!(val, "z");
     assert_eq!(get_arr("arr"), vec!["x", "y"]);
   }
@@ -468,7 +468,7 @@ mod tests {
     set_arr("arr", &["first", "second"]);
 
     test_input("fpop arr >@result").unwrap();
-    let val = var!("result");
+    let val = var!(b"result");
     assert_eq!(val, "first");
     assert_eq!(get_arr("arr"), vec!["second"]);
   }

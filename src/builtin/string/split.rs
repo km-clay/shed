@@ -183,7 +183,7 @@ impl Builtin for Split {
 
         Shed::vars_mut(|v| {
           v.set_var(
-            &arr_name.to_str_lossy(),
+            &arr_name,
             VarKind::arr(arr),
             VarFlags::empty(),
           )

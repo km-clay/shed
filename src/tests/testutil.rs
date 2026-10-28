@@ -255,7 +255,7 @@ impl TestGuard {
     }
     Shed::vars_mut(|v| {
       for key in scrub_keys {
-        let _ = v.unset_var(key);
+        let _ = v.unset_var(key.as_bytes());
       }
     });
     cmd::try_hash();

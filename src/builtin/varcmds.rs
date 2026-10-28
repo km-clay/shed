@@ -137,7 +137,6 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<Word>, base_flags: VarFlags) -> ShResu
   for arg in argv {
     let src             = arg.span().map(|s| s.slice()).unwrap_or(arg.content());
     let (name, raw_val) = strops::split_assignment_raw(&arg);
-    let name            = &name.to_str_lossy();
 
     declare_var(name, kind, raw_val, flags, &src).option_promote(arg.span())?
   }
@@ -146,7 +145,7 @@ fn apply_var_decl(opts: &[Opt], argv: Vec<Word>, base_flags: VarFlags) -> ShResu
 }
 
 fn declare_var(
-  name: &str,
+  name: &[u8],
   kind: DeclareKind,
   raw_val: Option<&[u8]>,
   flags: VarFlags,
@@ -230,23 +229,23 @@ fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
         procio::outln_bytes(&output);
       } else {
         for name in argv {
-          let Some(var) = Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy())) else {
+          let Some(var) = Shed::vars(|v| v.try_get_var_meta(name)) else {
             return Err(sherr!(
               NotFound ? name.span(),
               "'{name}' not found",
             ));
           };
-          if let Some(line) = vars::serialize_var(&name.to_str_lossy(), &var) {
+          if let Some(line) = vars::serialize_var(name, &var) {
             procio::outln_bytes(line.as_bytes());
           }
         }
       }
     }
     IntrospectMode::FunctionsFull => {
-      let names: Vec<&str> = argv
+      let names = argv
         .iter()
-        .map(|n| n.to_str().unwrap_or_default())
-        .collect();
+        .map(|n| n.content())
+        .collect_vec();
 
       // Source any explicitly requested autoload functions so their bodies
       // become visible to the iteration below; otherwise `declare -f name`
@@ -280,7 +279,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
           let ShFunc::Defined { source, .. } = func else {
             continue;
           };
-          if !names.is_empty() && !names.contains(&name.as_str()) {
+          if !names.is_empty() && !names.contains(name) {
             continue;
           }
           // Function source is shell text, which may contain non-UTF-8 bytes;
@@ -295,7 +294,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
       let missing = Shed::logic(|l| {
         names
           .iter()
-          .any(|n| !matches!(l.funcs().get(*n), Some(ShFunc::Defined { .. })))
+          .any(|n| !matches!(l.funcs().get(n), Some(ShFunc::Defined { .. })))
       });
 
       if !dump.is_empty() {
@@ -306,17 +305,17 @@ fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
       }
     }
     IntrospectMode::FunctionNames => {
-      let names: Vec<&str> = argv
+      let names = argv
         .iter()
-        .map(|n| n.to_str().unwrap_or_default())
-        .collect();
+        .map(|n| n.content())
+        .collect_vec();
 
       let dump = Shed::logic(|table| {
         table
           .funcs()
           .keys()
           .sorted()
-          .filter(|k| names.is_empty() || names.contains(&k.as_str()))
+          .filter(|k| names.is_empty() || names.contains(k))
           .map(|k| varstr!("declare -f {k}"))
           .fold(VarStr::default(), |mut acc, name| {
             acc.push_slice(name);
@@ -325,7 +324,7 @@ fn declare_introspect(mode: IntrospectMode, argv: &[Word]) -> ShResult<()> {
           })
       });
 
-      let missing = Shed::logic(|table| names.iter().any(|n| !table.funcs().contains_key(*n)));
+      let missing = Shed::logic(|table| names.iter().any(|n| !table.funcs().contains_key(n)));
 
       if !dump.is_empty() {
         outln!("{dump}");
@@ -367,7 +366,6 @@ impl super::Builtin for Readonly {
     for arg in arg_vec {
       let src        = arg.span().map(|s| s.slice()).unwrap_or(arg.content());
       let (var, val) = strops::split_assignment(&arg, src.as_bytes());
-      let var        = &var.to_str_lossy();
 
       Shed::vars_mut(|v| match val {
         Some(val) => v.set_var(var, val, VarFlags::READONLY),
@@ -396,27 +394,29 @@ impl super::Builtin for Unset {
 
     for arg in arg_vec {
       if is_func {
-        Shed::logic_mut(|l| l.remove_func(&arg.to_str_lossy()));
+        Shed::logic_mut(|l| l.remove_func(arg.as_bytes()));
         continue;
       }
 
       let parsed = VarName::parse(&arg.to_str_lossy(), true)?;
-      if !Shed::vars(|v| v.var_exists(parsed.name())) {
+      let name = parsed.name();
+
+      if !Shed::vars(|v| v.var_exists(&name)) {
         continue;
       }
 
       match parsed.index() {
         None => {
-          Shed::vars_mut(|v| v.unset_var(parsed.name()))?;
+          Shed::vars_mut(|v| v.unset_var(&name))?;
         }
         Some(idx) => {
           // resolve the raw index (a string key vs a numeric index) against
           // the target's kind, then drop just that element
-          let Some(tag) = Shed::vars(|v| v.try_get_var_kind_tag(parsed.name())) else {
+          let Some(tag) = Shed::vars(|v| v.try_get_var_kind_tag(&name)) else {
             continue;
           };
           let resolved = idx.clone().resolve_for(tag)?;
-          Shed::vars_mut(|v| v.unset_index(parsed.name(), resolved))?;
+          Shed::vars_mut(|v| v.unset_index(&name, resolved))?;
         }
       }
     }
@@ -459,7 +459,6 @@ impl super::Builtin for Export {
     for arg in arg_vec {
       let src        = arg.span().map(|s| s.slice()).unwrap_or(arg.content());
       let (var, val) = strops::split_assignment(&arg, src.as_bytes());
-      let var        = &var.to_str_lossy();
 
       if unexport {
         if let Some(val) = val {
@@ -528,7 +527,6 @@ impl super::Builtin for Global {
     for arg in arg_vec {
       let src             = arg.span().map(|s| s.slice()).unwrap_or(arg.content());
       let (name, raw_val) = strops::split_assignment_raw(&arg);
-      let name            = &name.to_str_lossy();
 
       if raw_val.is_some() {
         declare_var(name, kind, raw_val, VarFlags::empty(), &src).option_promote(arg.span())?;
@@ -595,7 +593,7 @@ impl super::Builtin for Clone {
       return Err(sherr!(ExecFail @ args.cmd_span(), "missing target variable name"));
     }
 
-    if nounset && try_var!(&name.to_str_lossy()).is_none() {
+    if nounset && try_var!(&name).is_none() {
       return Err(sherr!(ExecFail ? name.span(), "variable '{name}' not set"));
     }
 
@@ -659,7 +657,7 @@ mod tests {
   fn readonly_sets_flag() {
     let _g = TestGuard::new();
     test_input("readonly myvar").unwrap();
-    let flags = Shed::vars(|v| v.get_var_flags("myvar"));
+    let flags = Shed::vars(|v| v.get_var_flags(b"myvar"));
     assert!(flags.unwrap().contains(VarFlags::READONLY));
   }
 
@@ -667,8 +665,8 @@ mod tests {
   fn readonly_with_value() {
     let _g = TestGuard::new();
     test_input("readonly myvar=hello").unwrap();
-    assert_eq!(var!("myvar"), "hello");
-    let flags = Shed::vars(|v| v.get_var_flags("myvar"));
+    assert_eq!(var!(b"myvar"), "hello");
+    let flags = Shed::vars(|v| v.get_var_flags(b"myvar"));
     assert!(flags.unwrap().contains(VarFlags::READONLY));
   }
 
@@ -677,7 +675,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("readonly myvar=hello").unwrap();
     test_input("myvar=world").ok();
-    assert_eq!(var!("myvar"), "hello");
+    assert_eq!(var!(b"myvar"), "hello");
   }
 
   #[test]
@@ -687,8 +685,8 @@ mod tests {
     let _g = TestGuard::new();
     test_input("myvar=hello").unwrap();
     test_input("readonly myvar").unwrap();
-    assert_eq!(var!("myvar"), "hello");
-    let flags = Shed::vars(|v| v.get_var_flags("myvar"));
+    assert_eq!(var!(b"myvar"), "hello");
+    let flags = Shed::vars(|v| v.get_var_flags(b"myvar"));
     assert!(flags.unwrap().contains(VarFlags::READONLY));
   }
 
@@ -716,15 +714,15 @@ mod tests {
   fn readonly_multiple() {
     let _g = TestGuard::new();
     test_input("readonly a=1 b=2").unwrap();
-    assert_eq!(var!("a"), "1");
-    assert_eq!(var!("b"), "2");
+    assert_eq!(var!(b"a"), "1");
+    assert_eq!(var!(b"b"), "2");
     assert!(
-      Shed::vars(|v| v.get_var_flags("a"))
+      Shed::vars(|v| v.get_var_flags(b"a"))
         .unwrap()
         .contains(VarFlags::READONLY)
     );
     assert!(
-      Shed::vars(|v| v.get_var_flags("b"))
+      Shed::vars(|v| v.get_var_flags(b"b"))
         .unwrap()
         .contains(VarFlags::READONLY)
     );
@@ -743,9 +741,9 @@ mod tests {
   fn unset_removes_variable() {
     let _g = TestGuard::new();
     test_input("myvar=hello").unwrap();
-    assert_eq!(var!("myvar"), "hello");
+    assert_eq!(var!(b"myvar"), "hello");
     test_input("unset myvar").unwrap();
-    assert_eq!(var!("myvar"), "");
+    assert_eq!(var!(b"myvar"), "");
   }
 
   #[test]
@@ -754,8 +752,8 @@ mod tests {
     test_input("a=1").unwrap();
     test_input("b=2").unwrap();
     test_input("unset a b").unwrap();
-    assert_eq!(var!("a"), "");
-    assert_eq!(var!("b"), "");
+    assert_eq!(var!(b"a"), "");
+    assert_eq!(var!(b"b"), "");
   }
 
   #[test]
@@ -771,7 +769,7 @@ mod tests {
     test_input("readonly myvar=protected").unwrap();
     test_input("unset myvar").ok();
     assert_ne!(state::Shed::get_status(), 0);
-    assert_eq!(var!("myvar"), "protected");
+    assert_eq!(var!(b"myvar"), "protected");
   }
 
   #[test]
@@ -812,8 +810,8 @@ mod tests {
   fn export_with_value() {
     let _g = TestGuard::new();
     test_input("export SHED_TEST_VAR=hello_export").unwrap();
-    assert_eq!(var!("SHED_TEST_VAR"), "hello_export");
-    assert_eq!(var!("SHED_TEST_VAR"), "hello_export");
+    assert_eq!(var!(b"SHED_TEST_VAR"), "hello_export");
+    assert_eq!(var!(b"SHED_TEST_VAR"), "hello_export");
     unsafe { std::env::remove_var("SHED_TEST_VAR") };
   }
 
@@ -822,7 +820,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("SHED_TEST_VAR2=existing").unwrap();
     test_input("export SHED_TEST_VAR2").unwrap();
-    assert_eq!(var!("SHED_TEST_VAR2"), "existing");
+    assert_eq!(var!(b"SHED_TEST_VAR2"), "existing");
     unsafe { std::env::remove_var("SHED_TEST_VAR2") };
   }
 
@@ -830,7 +828,7 @@ mod tests {
   fn export_sets_flag() {
     let _g = TestGuard::new();
     test_input("export SHED_TEST_VAR3=flagged").unwrap();
-    let flags = Shed::vars(|v| v.get_var_flags("SHED_TEST_VAR3"));
+    let flags = Shed::vars(|v| v.get_var_flags(b"SHED_TEST_VAR3"));
     assert!(flags.unwrap().contains(VarFlags::EXPORT));
     unsafe { std::env::remove_var("SHED_TEST_VAR3") };
   }
@@ -840,17 +838,17 @@ mod tests {
     let _g = TestGuard::new();
     test_input("export SHED_UNEXP=1").unwrap();
     assert!(
-      Shed::vars(|v| v.get_var_flags("SHED_UNEXP"))
+      Shed::vars(|v| v.get_var_flags(b"SHED_UNEXP"))
         .unwrap()
         .contains(VarFlags::EXPORT)
     );
     test_input("export -n SHED_UNEXP").unwrap();
-    let flags = Shed::vars(|v| v.get_var_flags("SHED_UNEXP")).unwrap();
+    let flags = Shed::vars(|v| v.get_var_flags(b"SHED_UNEXP")).unwrap();
     assert!(
       !flags.contains(VarFlags::EXPORT),
       "export -n should clear EXPORT"
     );
-    assert_eq!(var!("SHED_UNEXP"), "1", "value must be preserved");
+    assert_eq!(var!(b"SHED_UNEXP"), "1", "value must be preserved");
     unsafe { std::env::remove_var("SHED_UNEXP") };
   }
 
@@ -858,8 +856,8 @@ mod tests {
   fn export_n_with_value_assigns_unexported() {
     let _g = TestGuard::new();
     test_input("export -n SHED_UNEXP2=42").unwrap();
-    assert_eq!(var!("SHED_UNEXP2"), "42");
-    let flags = Shed::vars(|v| v.get_var_flags("SHED_UNEXP2")).unwrap();
+    assert_eq!(var!(b"SHED_UNEXP2"), "42");
+    let flags = Shed::vars(|v| v.get_var_flags(b"SHED_UNEXP2")).unwrap();
     assert!(!flags.contains(VarFlags::EXPORT));
   }
 
@@ -896,8 +894,8 @@ mod tests {
   fn export_multiple() {
     let _g = TestGuard::new();
     test_input("export SHED_A=1 SHED_B=2").unwrap();
-    assert_eq!(var!("SHED_A"), "1");
-    assert_eq!(var!("SHED_B"), "2");
+    assert_eq!(var!(b"SHED_A"), "1");
+    assert_eq!(var!(b"SHED_B"), "2");
     unsafe { std::env::remove_var("SHED_A") };
     unsafe { std::env::remove_var("SHED_B") };
   }
@@ -917,7 +915,7 @@ mod tests {
     let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     test_input("local mylocal=hello").unwrap();
-    assert_eq!(var!("mylocal"), "hello");
+    assert_eq!(var!(b"mylocal"), "hello");
   }
 
   #[test]
@@ -925,7 +923,7 @@ mod tests {
     let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     test_input("local mylocal=val").unwrap();
-    let flags = Shed::vars(|v| v.get_var_flags("mylocal"));
+    let flags = Shed::vars(|v| v.get_var_flags(b"mylocal"));
     assert!(flags.unwrap().contains(VarFlags::LOCAL));
   }
 
@@ -934,9 +932,9 @@ mod tests {
     let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     test_input("local mylocal").unwrap();
-    assert_eq!(var!("mylocal"), "");
+    assert_eq!(var!(b"mylocal"), "");
     assert!(
-      Shed::vars(|v| v.get_var_flags("mylocal"))
+      Shed::vars(|v| v.get_var_flags(b"mylocal"))
         .unwrap()
         .contains(VarFlags::LOCAL)
     );
@@ -957,8 +955,8 @@ mod tests {
     let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     test_input("local x=10 y=20").unwrap();
-    assert_eq!(var!("x"), "10");
-    assert_eq!(var!("y"), "20");
+    assert_eq!(var!(b"x"), "10");
+    assert_eq!(var!(b"y"), "20");
   }
 
   #[test]
@@ -969,7 +967,7 @@ mod tests {
     // which collapsed runs of whitespace into single spaces. Now uses
     // expand_no_split via the get_opts_from_tokens_raw_no_split path.
     test_input(r#"local ws=$(echo "FOO    BAR")"#).unwrap();
-    assert_eq!(var!("ws"), "FOO    BAR");
+    assert_eq!(var!(b"ws"), "FOO    BAR");
   }
 
   #[test]
@@ -977,7 +975,7 @@ mod tests {
     let _g  = TestGuard::new();
     let _fn = FuncScope::new();
     test_input(r"local ml=$(printf 'a\nb\nc')").unwrap();
-    assert_eq!(var!("ml"), "a\nb\nc");
+    assert_eq!(var!(b"ml"), "a\nb\nc");
   }
 
   #[test]
@@ -987,30 +985,30 @@ mod tests {
     // Make sure the no-split path didn't break bare-name declarations:
     // `local a b c` should still declare three separate variables.
     test_input("local la=1 lb=2 lc=3").unwrap();
-    assert_eq!(var!("la"), "1");
-    assert_eq!(var!("lb"), "2");
-    assert_eq!(var!("lc"), "3");
+    assert_eq!(var!(b"la"), "1");
+    assert_eq!(var!(b"lb"), "2");
+    assert_eq!(var!(b"lc"), "3");
   }
 
   #[test]
   fn declare_cmd_sub_preserves_whitespace() {
     let _g = TestGuard::new();
     test_input(r#"declare dws=$(echo "X    Y    Z")"#).unwrap();
-    assert_eq!(var!("dws"), "X    Y    Z");
+    assert_eq!(var!(b"dws"), "X    Y    Z");
   }
 
   #[test]
   fn export_cmd_sub_preserves_whitespace() {
     let _g = TestGuard::new();
     test_input(r#"export EXP_WS=$(echo "P    Q")"#).unwrap();
-    assert_eq!(var!("EXP_WS"), "P    Q");
+    assert_eq!(var!(b"EXP_WS"), "P    Q");
   }
 
   #[test]
   fn readonly_cmd_sub_preserves_whitespace() {
     let _g = TestGuard::new();
     test_input(r#"readonly RO_WS=$(echo "M    N")"#).unwrap();
-    assert_eq!(var!("RO_WS"), "M    N");
+    assert_eq!(var!(b"RO_WS"), "M    N");
   }
 
   // Quoting context (e.g. `$'...'` ANSI-C strings) must survive assoc array
@@ -1021,7 +1019,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input(r"declare -A aq=([k]=$'a\tb')").unwrap();
     test_input(r#"aq_out="${aq[k]}""#).unwrap();
-    assert_eq!(var!("aq_out"), "a\tb");
+    assert_eq!(var!(b"aq_out"), "a\tb");
   }
 
   #[test]
@@ -1029,7 +1027,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input(r"declare -A aq=([k]=$'one\ntwo\nthree')").unwrap();
     test_input(r#"aq_out="${aq[k]}""#).unwrap();
-    assert_eq!(var!("aq_out"), "one\ntwo\nthree");
+    assert_eq!(var!(b"aq_out"), "one\ntwo\nthree");
   }
 
   // ===================== Str += concat regression =====================
@@ -1041,7 +1039,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("sx=2").unwrap();
     test_input("sx+=3").unwrap();
-    assert_eq!(var!("sx"), "23");
+    assert_eq!(var!(b"sx"), "23");
   }
 
   #[test]
@@ -1052,7 +1050,7 @@ mod tests {
     test_input(r#"sb+="0""#).unwrap();
     test_input(r#"sb+="1""#).unwrap();
     test_input(r#"sb+="6""#).unwrap();
-    assert_eq!(var!("sb"), "2016");
+    assert_eq!(var!(b"sb"), "2016");
   }
 
   #[test]
@@ -1062,7 +1060,7 @@ mod tests {
     // should not have broken this path.
     test_input("declare -i iy=2").unwrap();
     test_input("iy+=3").unwrap();
-    assert_eq!(var!("iy"), "5");
+    assert_eq!(var!(b"iy"), "5");
   }
 
   #[test]
@@ -1126,7 +1124,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("readonly arr=(1 2 3)").unwrap();
     test_input("echo \"${arr[1]}\"").unwrap();
-    let flags = Shed::vars(|v| v.get_var_flags("arr"));
+    let flags = Shed::vars(|v| v.get_var_flags(b"arr"));
     assert!(
       flags.unwrap().contains(VarFlags::READONLY),
       "readonly arr=(...) should set READONLY"
@@ -1142,7 +1140,7 @@ mod tests {
     let guard = TestGuard::new();
     test_input("foo").unwrap();
     let out  = guard.read_output();
-    let home = var!("HOME");
+    let home = var!(b"HOME");
     assert!(out.contains(&format!("x={home}")), "got {out:?}");
   }
 
@@ -1252,7 +1250,7 @@ mod tests {
   fn declare_plain_assignment() {
     let _g = TestGuard::new();
     test_input("declare foo=hello").unwrap();
-    assert_eq!(var!("foo"), "hello");
+    assert_eq!(var!(b"foo"), "hello");
   }
 
   #[test]
@@ -1260,15 +1258,15 @@ mod tests {
     let _g = TestGuard::new();
     test_input("declare foo").unwrap();
     // Declared but empty.
-    assert_eq!(var!("foo"), "");
+    assert_eq!(var!(b"foo"), "");
   }
 
   #[test]
   fn declare_r_sets_readonly_flag() {
     let _g = TestGuard::new();
     test_input("declare -r myvar=42").unwrap();
-    assert_eq!(var!("myvar"), "42");
-    let flags = Shed::vars(|v| v.get_var_flags("myvar"));
+    assert_eq!(var!(b"myvar"), "42");
+    let flags = Shed::vars(|v| v.get_var_flags(b"myvar"));
     assert!(flags.unwrap().contains(VarFlags::READONLY));
   }
 
@@ -1276,7 +1274,7 @@ mod tests {
   fn declare_x_sets_export_flag() {
     let _g = TestGuard::new();
     test_input("declare -x exported=yes").unwrap();
-    let flags = Shed::vars(|v| v.get_var_flags("exported"));
+    let flags = Shed::vars(|v| v.get_var_flags(b"exported"));
     assert!(flags.unwrap().contains(VarFlags::EXPORT));
   }
 
@@ -1284,7 +1282,7 @@ mod tests {
   fn declare_i_sets_integer_flag() {
     let _g = TestGuard::new();
     test_input("declare -i n=5").unwrap();
-    let flags = Shed::vars(|v| v.get_var_flags("n")).unwrap();
+    let flags = Shed::vars(|v| v.get_var_flags(b"n")).unwrap();
     assert!(flags.contains(VarFlags::INTEGER));
   }
 
@@ -1293,7 +1291,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("declare -i n").unwrap();
     test_input("n=3+4").unwrap();
-    assert_eq!(var!("n"), "7");
+    assert_eq!(var!(b"n"), "7");
   }
 
   #[test]
@@ -1302,7 +1300,7 @@ mod tests {
     test_input("declare -i n=10").unwrap();
     test_input("n=5").unwrap();
     test_input("n+=3").unwrap();
-    assert_eq!(var!("n"), "8");
+    assert_eq!(var!(b"n"), "8");
   }
 
   #[test]
@@ -1310,7 +1308,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("declare -i n").unwrap();
     test_input("n=abc").unwrap();
-    assert_eq!(var!("n"), "0");
+    assert_eq!(var!(b"n"), "0");
   }
 
   #[test]
@@ -1318,9 +1316,9 @@ mod tests {
     let _g = TestGuard::new();
     test_input("typeset -i m").unwrap();
     test_input("m=6*7").unwrap();
-    assert_eq!(var!("m"), "42");
+    assert_eq!(var!(b"m"), "42");
     assert!(
-      Shed::vars(|v| v.get_var_flags("m"))
+      Shed::vars(|v| v.get_var_flags(b"m"))
         .unwrap()
         .contains(VarFlags::INTEGER)
     );
@@ -1330,7 +1328,7 @@ mod tests {
   fn declare_rx_combined_flags() {
     let _g = TestGuard::new();
     test_input("declare -rx both=val").unwrap();
-    let flags = Shed::vars(|v| v.get_var_flags("both")).unwrap();
+    let flags = Shed::vars(|v| v.get_var_flags(b"both")).unwrap();
     assert!(flags.contains(VarFlags::READONLY));
     assert!(flags.contains(VarFlags::EXPORT));
   }
@@ -1339,7 +1337,7 @@ mod tests {
   fn declare_i_evaluates_arithmetic() {
     let _g = TestGuard::new();
     test_input("declare -i n=5+3").unwrap();
-    assert_eq!(var!("n"), "8");
+    assert_eq!(var!(b"n"), "8");
   }
 
   #[test]
@@ -1408,7 +1406,7 @@ mod tests {
     // declare -a with no `=...` produces an empty array.
     test_input("declare -a empty").unwrap();
     // A bare element access on an empty array should be empty.
-    assert_eq!(var!("empty[0]"), "");
+    assert_eq!(var!(b"empty[0]"), "");
   }
 
   #[test]
@@ -1465,7 +1463,7 @@ mod tests {
   fn declare_assoc_empty() {
     let _g = TestGuard::new();
     test_input("declare -A mymap").unwrap();
-    assert_eq!(var!("mymap"), "");
+    assert_eq!(var!(b"mymap"), "");
   }
 
   #[test]
@@ -1473,10 +1471,10 @@ mod tests {
     let _g = TestGuard::new();
     test_input("declare -A mymap=([foo]=bar [biz]=baz)").unwrap();
     let val =
-      Shed::vars(|v| v.index_var("mymap", &crate::state::vars::ArrIndex::Key("foo".into())));
+      Shed::vars(|v| v.index_var(b"mymap", &crate::state::vars::ArrIndex::Key("foo".into())));
     assert_eq!(val.unwrap(), "bar");
     let val2 =
-      Shed::vars(|v| v.index_var("mymap", &crate::state::vars::ArrIndex::Key("biz".into())));
+      Shed::vars(|v| v.index_var(b"mymap", &crate::state::vars::ArrIndex::Key("biz".into())));
     assert_eq!(val2.unwrap(), "baz");
   }
 
@@ -1517,7 +1515,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("declare -A aa=([a]=1 [b]=2 [c]=3)").unwrap();
     test_input("declare -i count=${#aa[@]}").unwrap();
-    assert_eq!(var!("count"), "3");
+    assert_eq!(var!(b"count"), "3");
   }
 
   #[test]
@@ -1731,7 +1729,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("foo() { local -A m=([k]=v); }").unwrap();
     test_input("foo").unwrap();
-    assert_eq!(var!("m"), "");
+    assert_eq!(var!(b"m"), "");
   }
 
   #[test]
@@ -1843,7 +1841,7 @@ mod tests {
     test_input("foo() { local arr=(); for c in x; do arr+=(\"$c\"); done; }").unwrap();
     test_input("foo").unwrap();
     // arr was local to foo; should not exist at top level.
-    assert_eq!(var!("arr"), "");
+    assert_eq!(var!(b"arr"), "");
   }
 
   // ===================== quoted `(...)` is a string, not an array (#121) =====================
@@ -1854,21 +1852,21 @@ mod tests {
     // array by the expanded value's shape (issue #121).
     let _g = TestGuard::new();
     test_input("export t='(3[0-2]|([1-2][0-9])|[6-9])'").unwrap();
-    assert_eq!(var!("t"), "(3[0-2]|([1-2][0-9])|[6-9])");
+    assert_eq!(var!(b"t"), "(3[0-2]|([1-2][0-9])|[6-9])");
   }
 
   #[test]
   fn readonly_quoted_parens_is_literal_string() {
     let _g = TestGuard::new();
     test_input("readonly t='(a|b)'").unwrap();
-    assert_eq!(var!("t"), "(a|b)");
+    assert_eq!(var!(b"t"), "(a|b)");
   }
 
   #[test]
   fn declare_quoted_parens_is_literal_string() {
     let _g = TestGuard::new();
     test_input("declare t='(a b)'").unwrap();
-    assert_eq!(var!("t"), "(a b)");
+    assert_eq!(var!(b"t"), "(a b)");
   }
 
   #[test]
@@ -1986,8 +1984,8 @@ mod tests {
   fn take_into_the_same_name_keeps_its_attributes() {
     let _g = TestGuard::new();
     test_input("s=hello; export s; take s s").unwrap();
-    assert_eq!(var!("s"), "hello");
-    let flags = Shed::vars(|v| v.get_var_flags("s"));
+    assert_eq!(var!(b"s"), "hello");
+    let flags = Shed::vars(|v| v.get_var_flags(b"s"));
     assert!(flags.unwrap().contains(VarFlags::EXPORT));
   }
 

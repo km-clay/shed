@@ -234,11 +234,11 @@ impl Terminal {
     // non-empty. The previous version used `try_var!("NO_COLOR")?`
     // which propagated None when the var was unset — making the
     // function return None ("no color") in the common case.
-    if try_var!("NO_COLOR").is_some_and(|v| !v.is_empty()) {
+    if try_var!(b"NO_COLOR").is_some_and(|v| !v.is_empty()) {
       return None;
     }
 
-    if let Some(val) = try_var!("SHED_COLOR_MODE") {
+    if let Some(val) = try_var!(b"SHED_COLOR_MODE") {
       match val.to_str_lossy().as_ref() {
         "truecolor" | "24bit" => return Some(ColorMode::Truecolor),
         "256" | "256color"    => return Some(ColorMode::Palette256),
@@ -252,7 +252,7 @@ impl Terminal {
       return Some(ColorMode::Truecolor);
     }
 
-    if let Some(term) = try_var!("TERM") {
+    if let Some(term) = try_var!(b"TERM") {
       if term == "dumb" {
         return None;
       }
@@ -479,7 +479,7 @@ impl Terminal {
       });
     }
 
-    if let Some(val) = try_var!("COLORTERM")
+    if let Some(val) = try_var!(b"COLORTERM")
       && matches!(val.to_str_lossy().as_ref(), "truecolor" | "24bit")
     {
       caps.insert(TermCap::TRUECOLOR);
@@ -1235,15 +1235,15 @@ mod color_mode_tests {
 
   fn unset_all_color_vars() {
     Shed::vars_mut(|v| {
-      v.unset_var("NO_COLOR").ok();
-      v.unset_var("SHED_COLOR_MODE").ok();
-      v.unset_var("TERM").ok();
+      v.unset_var(b"NO_COLOR").ok();
+      v.unset_var(b"SHED_COLOR_MODE").ok();
+      v.unset_var(b"TERM").ok();
     });
   }
 
   fn set_var(name: &str, val: &str) {
     Shed::vars_mut(|v| {
-      v.set_var(name, VarKind::Str(val.into()), VarFlags::empty())
+      v.set_var(name.as_bytes(), VarKind::Str(val.into()), VarFlags::empty())
         .unwrap();
     });
   }

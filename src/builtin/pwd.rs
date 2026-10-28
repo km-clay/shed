@@ -37,7 +37,7 @@ impl super::Builtin for Pwd {
     }
 
     let dir: Option<VarStr> = if logical {
-      try_var!("PWD")
+      try_var!(b"PWD")
         .filter(|p| is_same_dir_as_cwd(p.as_bytes()))
         .or_else(|| physical_cwd().map(|p| paths::path_to_varstr(&p)))
     } else {
@@ -154,7 +154,7 @@ mod tests {
     env::set_current_dir(&real).unwrap();
     Shed::vars_mut(|v| {
       v.set_var(
-        "PWD",
+        b"PWD",
         VarKind::Str(link.to_string_lossy().into()),
         VarFlags::EXPORT,
       )
@@ -176,7 +176,7 @@ mod tests {
     // Corrupt $PWD so it doesn't name the current directory.
     Shed::vars_mut(|v| {
       v.set_var(
-        "PWD",
+        b"PWD",
         VarKind::Str("/definitely/not/the/cwd".into()),
         VarFlags::EXPORT,
       )

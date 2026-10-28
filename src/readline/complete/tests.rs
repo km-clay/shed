@@ -256,7 +256,7 @@ fn wordbreak_colon_when_set() {
   let _g = TestGuard::new();
   Shed::vars_mut(|v| {
     v.set_var(
-      "COMP_WORDBREAKS",
+      b"COMP_WORDBREAKS",
       VarKind::Str("=:".into()),
       VarFlags::empty(),
     )
@@ -290,7 +290,7 @@ fn wordbreak_splits_on_subtoken_edge() {
   let _g = TestGuard::new();
   Shed::vars_mut(|v| {
     v.set_var(
-      "COMP_WORDBREAKS",
+      b"COMP_WORDBREAKS",
       VarKind::Str("=:".into()),
       VarFlags::empty(),
     )
@@ -318,7 +318,7 @@ fn wordbreak_rightmost_wins() {
   let _g = TestGuard::new();
   Shed::vars_mut(|v| {
     v.set_var(
-      "COMP_WORDBREAKS",
+      b"COMP_WORDBREAKS",
       VarKind::Str("=:".into()),
       VarFlags::empty(),
     )
@@ -376,7 +376,7 @@ fn get_candidates_var_prefix_completes_with_shell_var() {
   // Use a name unlikely to be defined by the environment.
   Shed::vars_mut(|v| {
     v.set_var(
-      "UNIQUE_COMP_TEST_VAR_XYZZY",
+      b"UNIQUE_COMP_TEST_VAR_XYZZY",
       VarKind::Str("hello".into()),
       VarFlags::empty(),
     )
@@ -401,10 +401,10 @@ fn get_candidates_var_prefix_completes_even_when_prefix_isset_var() {
   // variable, so a longer name like FOOBAR could never be completed.
   let _g = TestGuard::new();
   Shed::vars_mut(|v| {
-    v.set_var("SETPFX_ZZZ", VarKind::Str("1".into()), VarFlags::empty())
+    v.set_var(b"SETPFX_ZZZ", VarKind::Str("1".into()), VarFlags::empty())
       .unwrap();
     v.set_var(
-      "SETPFX_ZZZ_LONG",
+      b"SETPFX_ZZZ_LONG",
       VarKind::Str("2".into()),
       VarFlags::empty(),
     )
@@ -1079,9 +1079,9 @@ fn run_comp_func_with_args(cmd: &str, cword: &str, pword: &str) -> (String, Stri
   );
   test_input(input).unwrap();
   (
-    var!("CAP1").to_string(),
-    var!("CAP2").to_string(),
-    var!("CAP3").to_string(),
+    var!(b"CAP1").to_string(),
+    var!(b"CAP2").to_string(),
+    var!(b"CAP3").to_string(),
   )
 }
 
@@ -1721,7 +1721,7 @@ mod bash_comp_spec_tests {
     let dir_path = dir.path().to_string_lossy().to_string();
     state::Shed::vars_mut(|v| {
       v.set_var(
-        "TESTDIR",
+        b"TESTDIR",
         VarKind::string(dir_path.clone().into()),
         VarFlags::EXPORT,
       )

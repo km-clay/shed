@@ -218,7 +218,7 @@ impl Vice {
     Self::exec_cmds(core, prog, prog.cmds.clone(), &mut fields, &mut spent_cmds)?;
 
     Ok(if !fields.is_empty() {
-      fields.join_with(&prog.delim.to_str_lossy()) // captured fields, kept even on abort
+      fields.join_with(&prog.delim) // captured fields, kept even on abort
     } else if core.editor.search_failed() {
       VarStr::default() // aborted before capturing anything
     } else {

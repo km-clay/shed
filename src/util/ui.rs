@@ -731,14 +731,14 @@ impl WidthCalculator for NoZwj {
 }
 
 pub(crate) fn width_calculator() -> Box<dyn WidthCalculator> {
-  match try_var!("TERM_PROGRAM")
+  match try_var!(b"TERM_PROGRAM")
     .as_ref()
     .map(|v| v.to_str_lossy())
     .as_deref()
   {
     Some("Apple_Terminal" | "iTerm.app" | "WezTerm") => Box::new(UnicodeWidth),
     Some(_) => Box::new(WcWidth),
-    None => match try_var!("TERM")
+    None => match try_var!(b"TERM")
       .as_ref()
       .map(|v| v.to_str_lossy())
       .as_deref()
@@ -898,16 +898,16 @@ mod color_application_tests {
 
   fn set_var(name: &str, val: &str) {
     Shed::vars_mut(|v| {
-      v.set_var(name, VarKind::Str(val.into()), VarFlags::empty())
+      v.set_var(name.as_bytes(), VarKind::Str(val.into()), VarFlags::empty())
         .unwrap();
     });
   }
 
   fn reset_color_env() {
     Shed::vars_mut(|v| {
-      v.unset_var("NO_COLOR").ok();
-      v.unset_var("SHED_COLOR_MODE").ok();
-      v.unset_var("TERM").ok();
+      v.unset_var(b"NO_COLOR").ok();
+      v.unset_var(b"SHED_COLOR_MODE").ok();
+      v.unset_var(b"TERM").ok();
     });
   }
 

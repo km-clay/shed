@@ -133,7 +133,7 @@ where
     .keys()
     .map(|k| {
       let prev = Shed::vars(|v| {
-        v.try_get_var_meta(&k.to_str_lossy())
+        v.try_get_var_meta(k)
           .map(|var| (var.kind().clone(), var.flags()))
       });
       (k.clone(), prev)
@@ -143,7 +143,7 @@ where
   for (name, val) in vars {
     let val = val.into();
     Shed::vars_mut(|v| {
-      v.set_var(&name.to_str_lossy(), val.kind().clone(), val.flags())
+      v.set_var(&name, val.kind().clone(), val.flags())
         .unwrap();
     });
   }
@@ -153,10 +153,10 @@ where
       for (name, prev) in restores {
         match prev {
           Some((kind, flags)) => {
-            v.set_var(&name.to_str_lossy(), kind, flags).ok();
+            v.set_var(&name, kind, flags).ok();
           }
           None => {
-            v.unset_var(&name.to_str_lossy()).ok();
+            v.unset_var(&name).ok();
           }
         }
       }
@@ -166,7 +166,7 @@ where
 }
 
 pub(crate) fn get_comp_wordbreaks() -> VarStr {
-  try_var!("COMP_WORDBREAKS").unwrap_or_else(|| "\"'><;|=&(:".into())
+  try_var!(b"COMP_WORDBREAKS").unwrap_or_else(|| "\"'><;|=&(:".into())
 }
 
 /// Get the first char of IFS
@@ -186,11 +186,11 @@ pub(crate) fn get_separator() -> VarStr {
 ///
 /// Used mainly for splitting strings
 pub(crate) fn get_separators() -> VarStr {
-  try_var!("IFS").unwrap_or_else(|| " \t\n".into())
+  try_var!(b"IFS").unwrap_or_else(|| " \t\n".into())
 }
 
 pub(crate) fn get_ps4() -> VarStr {
-  try_var!("PS4")
+  try_var!(b"PS4")
     .and_then(|ps4| {
       Expander::from_raw(&ps4, TkFlags::empty())
         .expand_no_split()
@@ -200,7 +200,7 @@ pub(crate) fn get_ps4() -> VarStr {
 }
 
 pub(crate) fn get_time_fmt() -> VarStr {
-  try_var!("TIMEFMT").unwrap_or_else(|| "\nreal\t%*E\nuser\t%*U\nsys\t%*S".into())
+  try_var!(b"TIMEFMT").unwrap_or_else(|| "\nreal\t%*E\nuser\t%*U\nsys\t%*S".into())
 }
 
 pub(crate) fn set_ver_info() -> ShResult<()> {
@@ -221,12 +221,12 @@ pub(crate) fn set_ver_info() -> ShResult<()> {
 
   Shed::vars_mut(|v| {
     v.set_var(
-      "SHED_VERSION",
+      b"SHED_VERSION",
       VarKind::Str(version.into()),
       VarFlags::EXPORT,
     )?;
     v.set_var(
-      "SHED_VER_INFO",
+      b"SHED_VER_INFO",
       VarKind::AssocArr(ver_info),
       VarFlags::empty(),
     )
@@ -236,7 +236,7 @@ pub(crate) fn set_ver_info() -> ShResult<()> {
 }
 
 fn adjust_sh_lvl(lvl: i32) -> ShResult<()> {
-  let cur = try_var!("SHLVL")
+  let cur = try_var!(b"SHLVL")
     .map(|l| l.to_str_lossy().parse::<u32>().ok())
     .flatten()
     .unwrap_or_default();
@@ -245,7 +245,7 @@ fn adjust_sh_lvl(lvl: i32) -> ShResult<()> {
 
   let sh_lvl = Var::new(VarKind::string(varstr!("{new}")), VarFlags::EXPORT);
 
-  Shed::vars_mut(|v| v.put_var("SHLVL", sh_lvl));
+  Shed::vars_mut(|v| v.put_var(b"SHLVL", sh_lvl));
   Shed::meta_mut(MetaTab::clear_envp);
 
   Ok(())
@@ -331,7 +331,7 @@ pub(crate) fn get_exec_wrappers() -> Vec<VarStr> {
 
   // lets users define their own exec wrappers for the highlighter if they want
   // for instance, my personal config has a wrapper function called 'invoke'
-  let user_wrappers = Shed::vars(|v| v.get_arr_elems("SHED_EXEC_WRAPPERS"));
+  let user_wrappers = Shed::vars(|v| v.get_arr_elems(b"SHED_EXEC_WRAPPERS"));
   wrappers.extend(user_wrappers);
 
   wrappers
@@ -353,14 +353,14 @@ mod set_ver_info_tests {
   fn sets_shed_version_to_cargo_pkg_version() {
     let _g = TestGuard::new();
     set_ver_info().unwrap();
-    assert_eq!(var!("SHED_VERSION"), env!("CARGO_PKG_VERSION"));
+    assert_eq!(var!(b"SHED_VERSION"), env!("CARGO_PKG_VERSION"));
   }
 
   #[test]
   fn ver_info_is_assoc_array_with_five_keys() {
     let _g = TestGuard::new();
     set_ver_info().unwrap();
-    let kind = Shed::vars(|v| v.try_get_var_kind("SHED_VER_INFO"));
+    let kind = Shed::vars(|v| v.try_get_var_kind(b"SHED_VER_INFO"));
     match kind {
       Some(VarKind::AssocArr(items)) => {
         let keys: crate::HashSet<&VarStr> = items.iter().map(|(k, _)| k).collect();
@@ -380,7 +380,7 @@ mod set_ver_info_tests {
   fn ver_info_arch_and_os_match_compile_time_consts() {
     let _g = TestGuard::new();
     set_ver_info().unwrap();
-    let items = match Shed::vars(|v| v.try_get_var_kind("SHED_VER_INFO")) {
+    let items = match Shed::vars(|v| v.try_get_var_kind(b"SHED_VER_INFO")) {
       Some(VarKind::AssocArr(items)) => items,
       other => panic!("expected AssocArr, got {other:?}"),
     };
@@ -399,7 +399,7 @@ mod set_ver_info_tests {
   fn ver_info_semver_components_match_cargo_pkg_version() {
     let _g = TestGuard::new();
     set_ver_info().unwrap();
-    let items = match Shed::vars(|v| v.try_get_var_kind("SHED_VER_INFO")) {
+    let items = match Shed::vars(|v| v.try_get_var_kind(b"SHED_VER_INFO")) {
       Some(VarKind::AssocArr(items)) => items,
       other => panic!("expected AssocArr, got {other:?}"),
     };

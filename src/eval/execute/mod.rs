@@ -135,7 +135,7 @@ fn commit_underscore() {
   }
   let last = LAST_ARG.with(|l| l.borrow_mut().take());
   if let Some(arg) = last {
-    set_var!("_", VarKind::string(arg); EXPORT).ok();
+    set_var!(b"_", VarKind::string(arg); EXPORT).ok();
   }
 }
 
@@ -392,7 +392,7 @@ impl Dispatcher {
   }
   pub(crate) fn dispatch_cmd(&mut self, tree: &Ast, node: NodeId) -> ShResult<()> {
     let (line, _) = tree.span_for(node).clone().line_and_col().unwrap_or((0, 0));
-    set_var!("LINENO", VarKind::Int((line + 1) as i32))?;
+    set_var!(b"LINENO", VarKind::Int((line + 1) as i32))?;
 
     let result = self.route_command(tree, node, true);
     commit_underscore();
@@ -432,7 +432,7 @@ impl Dispatcher {
 
     let cmd = &tree[*cmd];
 
-    if allow_func && classify::is_func(&cmd_word.to_str_lossy()) {
+    if allow_func && classify::is_func(&cmd_word) {
       // function
       self.exec_func(tree, node)
     } else if cmd.flags.contains(TkFlags::BUILTIN) || BUILTIN_NAMES.contains(&cmd_word.as_bytes()) {
@@ -571,7 +571,7 @@ impl Dispatcher {
 }
 
 pub(crate) fn pipefail_span(spans: &[Span]) -> Option<Span> {
-  let pipestatus = Shed::vars(|v| v.try_get_arr_elems("PIPESTATUS")).ok()?;
+  let pipestatus = Shed::vars(|v| v.try_get_arr_elems(b"PIPESTATUS")).ok()?;
   for (i, status) in pipestatus.into_iter().enumerate().rev() {
     let status = status.to_str_lossy().parse::<usize>().ok()?;
     if status != 0 {

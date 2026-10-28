@@ -4,13 +4,7 @@
 //! `$PATH` table ([`PathTable`], [`Utility`]), and loop/fork depth guards.
 
 use std::{
-  collections::{VecDeque, vec_deque},
-  ffi::CString,
-  fmt::Write,
-  os::fd::OwnedFd,
-  path::{Path, PathBuf},
-  rc::Rc,
-  time::{Duration, Instant},
+  collections::{VecDeque, vec_deque}, ffi::CString, fmt::Write, os::{fd::OwnedFd, unix::ffi::OsStrExt}, path::{Path, PathBuf}, rc::Rc, time::{Duration, Instant},
 };
 
 use nix::{
@@ -24,18 +18,10 @@ use nix::{
 use regex::Regex;
 
 use crate::{
-  HashMap,
-  expand::{
+  HashMap, HashSet, expand::{
     alias,
     glob::{GlobOpts, Pattern},
-  },
-  match_loop,
-  readline::{Candidate, CompSpec},
-  sherr,
-  state::{Shed, params, paths, vars::VarStr},
-  system_msg,
-  util::{error::ShResult, ui},
-  var,
+  }, match_loop, readline::{Candidate, CompSpec}, sherr, state::{Shed, params, paths, vars::VarStr}, system_msg, util::{error::ShResult, ui}, var,
 };
 
 use super::{
@@ -423,32 +409,31 @@ impl Utility {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PathTable {
-  index: HashMap<String, PathBuf>,
+  index: HashMap<VarStr, PathBuf>,
 }
 
 impl PathTable {
   pub(crate) fn new() -> Self {
     Self::default()
   }
-  pub(crate) fn hash_path_list(&mut self, path_list: &str) {
+  pub(crate) fn hash_path_list(&mut self, path_list: &[u8]) {
     self.index.clear();
     for entry in paths::path_list_entries(path_list) {
       if !paths::is_executable_file(&entry) {
         continue;
       }
-      let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-        continue;
-      };
-      self.index.entry(name).or_insert_with(|| entry.path());
+      let name = entry.file_name();
+
+      self.index.entry(name.as_bytes().into()).or_insert_with(|| entry.path());
     }
   }
-  pub(crate) fn lookup(&self, cmd: &str) -> Option<&Path> {
+  pub(crate) fn lookup(&self, cmd: &[u8]) -> Option<&Path> {
     self.index.get(cmd).map(PathBuf::as_path)
   }
-  pub(crate) fn insert(&mut self, name: String, path: PathBuf) {
-    self.index.insert(name, path);
+  pub(crate) fn insert(&mut self, name: &[u8], path: PathBuf) {
+    self.index.insert(name.into(), path);
   }
-  pub(crate) fn entries(&self) -> impl Iterator<Item = (&String, &PathBuf)> {
+  pub(crate) fn entries(&self) -> impl Iterator<Item = (&VarStr, &PathBuf)> {
     self.index.iter()
   }
   pub(crate) fn clear(&mut self) {
@@ -1052,7 +1037,7 @@ impl MetaTab {
     std::mem::take(&mut self.last_was_func_def)
   }
   pub(crate) fn get_exec_files_in_cwd() -> Vec<Rc<Utility>> {
-    let     cwd   = var!("PWD");
+    let     cwd   = var!(b"PWD");
     let mut files = vec![];
     if let Ok(entries) = Path::new(&cwd).read_dir() {
       for entry in entries.flatten() {
@@ -1077,14 +1062,14 @@ impl MetaTab {
     // Walk scopes outermost-to-innermost so inner bindings shadow outer
     // ones in the flat map. Libc env is not consulted, so shell writes
     // outside this builder can't desync the env children inherit.
-    let mut flat: HashMap<String, String> = HashMap::default();
+    let mut flat: HashMap<VarStr, VarStr> = HashMap::default();
     Shed::vars(|v| {
       for scope in v.scopes_iter() {
         for (name, var) in scope.vars() {
           if var.flags().contains(VarFlags::EXPORT)
             && let VarKind::Str(s) = var.kind()
           {
-            flat.insert(name.clone(), s.to_string());
+            flat.insert(name.clone(), s.clone());
           }
         }
       }
@@ -1110,7 +1095,7 @@ impl MetaTab {
   /// Look up an external command in the PATH cache. Returns `None` for a
   /// cache miss; callers that want to populate the cache on miss should
   /// call [`try_rehash_path_cache`](Self::try_rehash_path_cache) first.
-  pub(crate) fn lookup_cached_cmd(&self, cmd: &str) -> Option<&Path> {
+  pub(crate) fn lookup_cached_cmd(&self, cmd: &[u8]) -> Option<&Path> {
     self.path_cache.lookup(cmd)
   }
 
@@ -1119,9 +1104,9 @@ impl MetaTab {
   }
 
   pub(crate) fn rehash_path_cache(&mut self) {
-    let path = var!("PATH");
+    let path = var!(b"PATH");
     self.old_path = Some(path.clone());
-    self.path_cache.hash_path_list(&path.to_str_lossy());
+    self.path_cache.hash_path_list(&path);
   }
 
   pub(crate) fn clear_path_cache(&mut self) {
@@ -1130,21 +1115,21 @@ impl MetaTab {
   }
 
   pub(crate) fn try_rehash_path_cache(&mut self) {
-    let path = var!("PATH");
+    let path = var!(b"PATH");
     if self.old_path.as_ref().is_none_or(|old| *old != path) {
       self.old_path = Some(path.clone());
-      self.path_cache.hash_path_list(&path.to_str_lossy());
+      self.path_cache.hash_path_list(&path);
     }
   }
   pub(crate) fn invalidate_path_cache_if_stale(&mut self) {
-    let path = var!("PATH");
+    let path = var!(b"PATH");
     if self.old_path.as_ref().is_none_or(|old| *old != path) {
       self.old_path = Some(path);
       self.path_cache.clear();
     }
   }
 
-  pub(crate) fn cache_cmd(&mut self, name: String, path: PathBuf) {
+  pub(crate) fn cache_cmd(&mut self, name: &[u8], path: PathBuf) {
     self.path_cache.insert(name, path);
   }
   pub(crate) fn start_timer(&mut self) {
@@ -1187,21 +1172,22 @@ impl MetaTab {
     &mut self.dir_stack
   }
   pub(crate) fn get_cmds_in_path() -> Vec<Rc<Utility>> {
-    let     path  = var!("PATH");
-    let     path  = path.to_str_lossy();
+    let     path  = var!(b"PATH");
     let     paths = paths::path_list_entries(&path);
 
-    let mut seen  = crate::HashSet::default();
+    let mut seen  = HashSet::default();
     let mut cmds  = vec![];
 
     for entry in paths {
       let is_exec = paths::is_executable_file(&entry);
 
-      if is_exec
-        && let Some(name) = entry.file_name().to_str()
-        && seen.insert(name.to_string())
-      {
-        let util = Utility::command(name.into(), entry.path());
+      if is_exec {
+        let name = VarStr::from(entry.file_name().as_bytes());
+        if !seen.insert(name.clone()) {
+          continue;
+        }
+
+        let util = Utility::command(name, entry.path());
         cmds.push(util.into());
       }
     }

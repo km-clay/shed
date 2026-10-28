@@ -189,50 +189,50 @@ impl TryFrom<char> for Selection {
 }
 
 fn wayland_set() -> bool {
-  try_var!("WAYLAND_DISPLAY").is_some()
+  try_var!(b"WAYLAND_DISPLAY").is_some()
 }
 
 fn display_set() -> bool {
-  try_var!("DISPLAY").is_some()
+  try_var!(b"DISPLAY").is_some()
 }
 
 fn tmux_set() -> bool {
-  try_var!("TMUX").is_some()
+  try_var!(b"TMUX").is_some()
 }
 
-fn exists(cmd: &str) -> bool {
+fn exists(cmd: &[u8]) -> bool {
   cmd::which_util(cmd).is_some_and(|u| matches!(u.kind(), UtilKind::Command(_)))
 }
 
 impl ClipboardProvider {
   pub(super) fn detect() -> Self {
-    if exists("pbcopy") {
+    if exists(b"pbcopy") {
       return Self::PbCopy;
     }
 
     if wayland_set() {
-      if exists("wl-copy") {
+      if exists(b"wl-copy") {
         return Self::WlCopy;
       }
-      if exists("wayclip") {
+      if exists(b"wayclip") {
         return Self::Wayclip;
       }
     }
 
     if display_set() {
-      if exists("xsel") {
+      if exists(b"xsel") {
         return Self::Xsel;
       }
-      if exists("xclip") {
+      if exists(b"xclip") {
         return Self::Xclip;
       }
     }
 
-    if exists("termux-clipboard-set") {
+    if exists(b"termux-clipboard-set") {
       return Self::Termux;
     }
 
-    if tmux_set() && exists("tmux") {
+    if tmux_set() && exists(b"tmux") {
       return Self::Tmux;
     }
 

@@ -80,7 +80,7 @@ impl super::Builtin for Forget {
           let Ok(var) = opt.value() else {
             return Err(sherr!(ParseErr @ opt.span(), "missing argument for '{}'", opt).with_code(2));
           };
-          spec.exclude(&var.to_str_lossy());
+          spec.exclude(&var);
         }
         _ => return Err(sherr!(ParseErr @ opt.span(), "unrecognized option '{}'", opt).with_code(2)),
       }
@@ -141,11 +141,11 @@ mod tests {
     let _g = TestGuard::new();
     test_input("alias al=echo; f() { :; }; forget -a").unwrap();
     assert!(
-      Shed::logic(|l| l.get_alias("al").is_none()),
+      Shed::logic(|l| l.get_alias(b"al").is_none()),
       "alias dropped"
     );
     assert!(
-      Shed::logic(|l| l.get_func("f").is_some()),
+      Shed::logic(|l| l.get_func(b"f").is_some()),
       "function survives -a"
     );
   }
@@ -155,11 +155,11 @@ mod tests {
     let _g = TestGuard::new();
     test_input("alias al=echo; f() { :; }; forget -f").unwrap();
     assert!(
-      Shed::logic(|l| l.get_func("f").is_none()),
+      Shed::logic(|l| l.get_func(b"f").is_none()),
       "function dropped"
     );
     assert!(
-      Shed::logic(|l| l.get_alias("al").is_some()),
+      Shed::logic(|l| l.get_alias(b"al").is_some()),
       "alias survives -f"
     );
   }
@@ -169,7 +169,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("f() { :; }; forget -f").unwrap();
     assert!(
-      Shed::logic(|l| l.get_func("f").is_none()),
+      Shed::logic(|l| l.get_func(b"f").is_none()),
       "user function dropped"
     );
     assert!(
@@ -216,8 +216,8 @@ mod tests {
     let g = TestGuard::new();
     test_input(r#"myvar=x; alias al=echo; f() { :; }; forget; printf '[%s]' "$myvar""#).unwrap();
     assert_eq!(g.read_output(), "[]", "user var gone");
-    assert!(Shed::logic(|l| l.get_alias("al").is_none()), "alias gone");
-    assert!(Shed::logic(|l| l.get_func("f").is_none()), "function gone");
+    assert!(Shed::logic(|l| l.get_alias(b"al").is_none()), "alias gone");
+    assert!(Shed::logic(|l| l.get_func(b"f").is_none()), "function gone");
   }
 
   // ===================== except / exclude =====================
@@ -234,11 +234,11 @@ mod tests {
     let _g = TestGuard::new();
     test_input("alias al=echo; f() { :; }; forget --except -f").unwrap();
     assert!(
-      Shed::logic(|l| l.get_func("f").is_some()),
+      Shed::logic(|l| l.get_func(b"f").is_some()),
       "function kept by --except -f"
     );
     assert!(
-      Shed::logic(|l| l.get_alias("al").is_none()),
+      Shed::logic(|l| l.get_alias(b"al").is_none()),
       "alias forgotten by --except -f"
     );
   }

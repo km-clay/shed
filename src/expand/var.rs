@@ -26,7 +26,7 @@ pub(crate) fn expand_raw_inner(
   allow_side_effects: bool,
   mark_split: bool,
 ) -> ShResult<SegStream> {
-  let mut result   = SegStream::new();
+  let mut result   = SegStream::default();
   let mut qt_state = QuoteState::default();
 
   match_loop!(chars.next() => unit, {
@@ -57,7 +57,7 @@ pub(crate) fn expand_raw_inner(
 
       let (home, expanded): (VarStr, bool) = if username.is_empty() {
         // standard '~' expansion
-        (var!("HOME"), true)
+        (var!(b"HOME"), true)
       } else if let Ok(Some(user)) = User::from_name(&username) {
         // username expansion like '~user'
         (user.dir.as_os_str().as_bytes().into(), true)
@@ -127,7 +127,7 @@ pub(crate) fn expand_var(
   stream: &mut SegCursor,
   allow_side_effects: bool,
 ) -> ShResult<SegStream> {
-  let mut var_name               = SegStream::new();
+  let mut var_name               = SegStream::default();
   let mut brace_depth      : i32 = 0;
   let mut inner_brace_depth: i32 = 0;
   let mut prev_was_dollar        = false;
@@ -150,15 +150,15 @@ pub(crate) fn expand_var(
       if !found_end {
         // if there isnt a closing SUBSH, we are probably in some tab completion context
         // and we got passed some unfinished input. Just treat it as literal text
-        let mut out = SegStream::from_bytes(b"$(");
+        let mut out = SegStream::from_slice(b"$(");
         out.push_bytes(&subsh_body);
         return Ok(out);
       }
       if allow_side_effects {
         let expanded = subshell::expand_cmd_sub(span, &subsh_body)?;
-        return Ok(SegStream::from_bytes(expanded.as_bytes()));
+        return Ok(SegStream::new(expanded));
       }
-      return Ok(SegStream::from_bytes(&subsh_body));
+      return Ok(SegStream::from_bytes(subsh_body));
     }
     Unit::Byte(b'{') if var_name.is_empty() && brace_depth == 0 => {
       stream.bump();
@@ -212,9 +212,8 @@ pub(crate) fn expand_var(
         return Ok(words_seg(&fields));
       }
 
-      let mut buf = [0u8; 4];
-      let parameter = (b as char).encode_utf8(&mut buf);
-      let val = var!(parameter);
+      let parameter = VarStr::from(b as char);
+      let val = var!(&parameter);
 
       return Ok(val.into());
     }
@@ -230,7 +229,7 @@ pub(crate) fn expand_var(
     }
   });
   if var_name.is_empty() {
-    Ok(SegStream::new())
+    Ok(SegStream::default())
   } else {
     lookup_var(&var_name)
   }
@@ -246,7 +245,7 @@ pub(crate) fn emit_words(parsed: &VarName, words: &Words) -> SegStream {
 }
 
 fn words_seg(fields: &Words) -> SegStream {
-  let mut out = SegStream::new();
+  let mut out = SegStream::default();
   if fields.is_empty() {
     out.push_marker(Marker::NullExpand);
     return out;
@@ -264,7 +263,7 @@ fn words_seg(fields: &Words) -> SegStream {
 fn lookup_var(var_name: &SegStream) -> ShResult<SegStream> {
   let name_bytes = var_name.as_bytes();
   let name       = String::from_utf8_lossy(name_bytes);
-  let val        = try_var!(name.as_ref());
+  let val        = try_var!(name.as_bytes());
   if val.is_none() && shopt!(set.nounset) {
     return Err(sherr!(NotFound, "Variable '{name}' is not set"));
   }
@@ -343,7 +342,7 @@ mod tests {
   #[test]
   fn var_expansion_basic() {
     let _guard = TestGuard::new();
-    set_var!("MYVAR", VarKind::Str("hello".into())).unwrap();
+    set_var!(b"MYVAR", VarKind::Str("hello".into())).unwrap();
 
     let raw    = unescape_str(b"$MYVAR");
     let result = expand_raw(&mut raw.cursor()).unwrap();
@@ -353,7 +352,7 @@ mod tests {
   #[test]
   fn var_expansion_braced() {
     let _guard = TestGuard::new();
-    set_var!("FOO", VarKind::Str("bar".into())).unwrap();
+    set_var!(b"FOO", VarKind::Str("bar".into())).unwrap();
 
     let raw    = unescape_str(b"${FOO}");
     let result = expand_raw(&mut raw.cursor()).unwrap();
@@ -372,8 +371,8 @@ mod tests {
   #[test]
   fn var_expansion_concatenated() {
     let _guard = TestGuard::new();
-    set_var!("A", VarKind::Str("hello".into())).unwrap();
-    set_var!("B", VarKind::Str("world".into())).unwrap();
+    set_var!(b"A", VarKind::Str("hello".into())).unwrap();
+    set_var!(b"B", VarKind::Str("world".into())).unwrap();
 
     let raw    = unescape_str(b"${A}_${B}");
     let result = expand_raw(&mut raw.cursor()).unwrap();
@@ -385,7 +384,7 @@ mod tests {
   #[test]
   fn tilde_expansion_home() {
     let _guard = TestGuard::new();
-    let home   = var!("HOME");
+    let home   = var!(b"HOME");
 
     let raw    = unescape_str(b"~/foo");
     let result = expand_raw(&mut raw.cursor()).unwrap();
@@ -398,7 +397,7 @@ mod tests {
   #[test]
   fn tilde_expansion_bare() {
     let _guard = TestGuard::new();
-    let home   = var!("HOME");
+    let home   = var!(b"HOME");
 
     let raw    = unescape_str(b"~");
     let result = expand_raw(&mut raw.cursor()).unwrap();
@@ -413,7 +412,7 @@ mod tests {
     // The ESCAPE-marker → glob-literal conversion lives in
     // `markers_to_glob_escapes` now (escape_glob is plain-backslash only).
     use crate::expand::stream::{Marker, SegStream};
-    let mut seg = SegStream::new();
+    let mut seg = SegStream::default();
     seg.push_bytes(b"foo");
     seg.push_marker(Marker::Escape);
     seg.push_bytes(b"*");

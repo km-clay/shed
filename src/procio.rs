@@ -505,7 +505,7 @@ impl FdSlot {
 
     let fd = Shed::sinks(|s| s.free_high_fd())?;
     let vn = VarName::parse(&name.to_str_lossy(), true)?;
-    Shed::vars_mut(|v| v.set_var(vn.name(), VarKind::Str(varstr!("{fd}")), VarFlags::empty()))?;
+    Shed::vars_mut(|v| v.set_var(&vn.name(), VarKind::Str(varstr!("{fd}")), VarFlags::empty()))?;
     Ok(ResolvedFd::New(fd))
   }
 }
@@ -2292,22 +2292,23 @@ fn expand_var_target(raw: &VarStr) -> ShResult<VarName> {
   VarName::parse(&expanded.to_str_lossy(), true)
 }
 
-fn commit_var(name: &VarName, bytes: &[u8]) -> ShResult<()> {
+fn commit_var(var_name: &VarName, bytes: &[u8]) -> ShResult<()> {
   let val = VarStr::from(bytes);
+  let name = var_name.name();
 
   STAGE_VAR_WRITES.with(|w| {
     if let Some(writes) = w.borrow_mut().as_mut() {
-      writes.push((name.clone(), val.clone()));
+      writes.push((var_name.clone(), val.clone()));
     }
   });
 
-  match name.index() {
+  match var_name.index() {
     Some(idx) => {
-      let tag = Shed::vars(|v| v.try_get_var_kind_tag(name.name())).unwrap_or(VarKindTag::Arr);
+      let tag = Shed::vars(|v| v.try_get_var_kind_tag(&name)).unwrap_or(VarKindTag::Arr);
       let idx = idx.clone().resolve_for(tag)?;
-      Shed::vars_mut(|v| v.set_var_indexed(name.name(), idx, val, VarFlags::empty()))
+      Shed::vars_mut(|v| v.set_var_indexed(&name, idx, val, VarFlags::empty()))
     }
-    None => Shed::vars_mut(|v| v.set_var(name.name(), VarKind::string(val), VarFlags::empty())),
+    None => Shed::vars_mut(|v| v.set_var(&name, VarKind::string(val), VarFlags::empty())),
   }
 }
 

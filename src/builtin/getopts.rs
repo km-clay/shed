@@ -126,7 +126,7 @@ impl super::Builtin for GetOpts {
 fn advance_optind(opt_index: usize, amount: usize) -> ShResult<()> {
   Shed::vars_mut(|v| {
     v.set_var(
-      "OPTIND",
+      b"OPTIND",
       VarKind::Str((opt_index + amount).to_string().into()),
       VarFlags::empty(),
     )
@@ -162,23 +162,23 @@ impl GetOpts {
     };
     let ch = cur.ch;
 
-    let _  = Shed::vars_mut(|v| v.unset_var("OPTARG"));
+    let _  = Shed::vars_mut(|v| v.unset_var(b"OPTARG"));
 
     match opts_spec.matches(ch) {
       OptMatch::NoMatch => {
         // char does not match any option in the spec, report error and set opt_var to "?".
         Self::advance_one_char(cur.last_in_arg, cur.opt_index)?;
         if opts_spec.silent_err {
-          set_var!(opt_var, VarKind::Str("?".into()))?;
+          set_var!(opt_var.as_bytes(), VarKind::Str("?".into()))?;
           Shed::vars_mut(|v| {
             v.set_var(
-              "OPTARG",
+              b"OPTARG",
               VarKind::Str(ch.to_string().into()),
               VarFlags::empty(),
             )
           })?;
         } else {
-          set_var!(opt_var, VarKind::Str("?".into()))?;
+          set_var!(opt_var.as_bytes(), VarKind::Str("?".into()))?;
           sherr!(
             ExecFail @ blame,
             "illegal option '-{ch}'",
@@ -192,7 +192,7 @@ impl GetOpts {
         Self::advance_one_char(cur.last_in_arg, cur.opt_index)?;
         Shed::vars_mut(|v| {
           v.set_var(
-            opt_var,
+            opt_var.as_bytes(),
             VarKind::Str(ch.to_string().into()),
             VarFlags::empty(),
           )
@@ -212,7 +212,7 @@ impl GetOpts {
   /// options in `argv`: a `--` terminator, a non-option word, a bare `-`,
   /// or running off the end of the current arg / `argv`.
   fn resolve(argv: &[VarStr]) -> ShResult<Option<OptCursor>> {
-    let opt_index = var!("OPTIND").to_str_lossy().parse::<usize>().unwrap_or(1);
+    let opt_index = var!(b"OPTIND").to_str_lossy().parse::<usize>().unwrap_or(1);
     // OPTIND is 1-based
     let arr_idx   = opt_index.saturating_sub(1);
 
@@ -285,13 +285,13 @@ impl GetOpts {
       // value begins at byte offset `char_idx + 2` (past `-` and the flag).
       let arg    = &argv[cur.arr_idx];
       let optarg = VarStr::from(&arg.as_bytes()[cur.char_idx + 2..]);
-      set_var!("OPTARG", VarKind::string(optarg))?;
+      set_var!(b"OPTARG", VarKind::string(optarg))?;
       advance_optind(cur.opt_index, 1)?;
     } else if let Some(next_arg) = argv.get(cur.arr_idx + 1) {
       // Next arg is the argument
       Shed::vars_mut(|v| {
         v.set_var(
-          "OPTARG",
+          b"OPTARG",
           VarKind::string(next_arg.clone()),
           VarFlags::empty(),
         )
@@ -301,16 +301,16 @@ impl GetOpts {
     } else {
       // Missing required argument
       if opts_spec.silent_err {
-        set_var!(opt_var, VarKind::Str(":".into()))?;
+        set_var!(opt_var.as_bytes(), VarKind::Str(":".into()))?;
         Shed::vars_mut(|v| {
           v.set_var(
-            "OPTARG",
+            b"OPTARG",
             VarKind::Str(ch.to_string().into()),
             VarFlags::empty(),
           )
         })?;
       } else {
-        set_var!(opt_var, VarKind::Str("?".into()))?;
+        set_var!(opt_var.as_bytes(), VarKind::Str("?".into()))?;
         sherr!(
           ExecFail @ blame,
           "option '-{ch}' requires an argument",
@@ -323,7 +323,7 @@ impl GetOpts {
 
     Shed::vars_mut(|v| {
       v.set_var(
-        opt_var,
+        opt_var.as_bytes(),
         VarKind::Str(ch.to_string().into()),
         VarFlags::empty(),
       )
@@ -383,7 +383,7 @@ mod tests {
   fn getopts_simple_flag() {
     let _g = TestGuard::new();
     test_input("getopts ab opt -a").unwrap();
-    assert_eq!(var!("opt"), "a");
+    assert_eq!(var!(b"opt"), "a");
     assert_eq!(state::Shed::get_status(), 0);
   }
 
@@ -391,7 +391,7 @@ mod tests {
   fn getopts_second_flag() {
     let _g = TestGuard::new();
     test_input("getopts ab opt -b").unwrap();
-    assert_eq!(var!("opt"), "b");
+    assert_eq!(var!(b"opt"), "b");
   }
 
   // ===================== Option with argument =====================
@@ -400,16 +400,16 @@ mod tests {
   fn getopts_option_with_separate_arg() {
     let _g = TestGuard::new();
     test_input("getopts a: opt -a value").unwrap();
-    assert_eq!(var!("opt"), "a");
-    assert_eq!(var!("OPTARG"), "value");
+    assert_eq!(var!(b"opt"), "a");
+    assert_eq!(var!(b"OPTARG"), "value");
   }
 
   #[test]
   fn getopts_option_with_attached_arg() {
     let _g = TestGuard::new();
     test_input("getopts a: opt -avalue").unwrap();
-    assert_eq!(var!("opt"), "a");
-    assert_eq!(var!("OPTARG"), "value");
+    assert_eq!(var!(b"opt"), "a");
+    assert_eq!(var!(b"OPTARG"), "value");
   }
 
   #[test]
@@ -418,10 +418,10 @@ mod tests {
     // separate (`-a VAL`) argument.
     let _g = TestGuard::new();
     test_input(r#"set -- "-a$(printf 'v\377w')"; getopts a: o"#).unwrap();
-    assert_eq!(super::var!("OPTARG").as_bytes(), &b"v\xffw"[..]);
+    assert_eq!(super::var!(b"OPTARG").as_bytes(), &b"v\xffw"[..]);
 
     test_input(r#"OPTIND=1; set -- -a "$(printf 'v\377w')"; getopts a: o"#).unwrap();
-    assert_eq!(super::var!("OPTARG").as_bytes(), &b"v\xffw"[..]);
+    assert_eq!(super::var!(b"OPTARG").as_bytes(), &b"v\xffw"[..]);
   }
 
   // ===================== Bundled options =====================
@@ -432,11 +432,11 @@ mod tests {
 
     // First call gets 'a' from -ab
     test_input("getopts abc opt -ab").unwrap();
-    assert_eq!(var!("opt"), "a");
+    assert_eq!(var!(b"opt"), "a");
 
     // Second call gets 'b' from same -ab
     test_input("getopts abc opt -ab").unwrap();
-    assert_eq!(var!("opt"), "b");
+    assert_eq!(var!(b"opt"), "b");
   }
 
   // ===================== OPTIND advancement =====================
@@ -446,7 +446,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("getopts ab opt -a").unwrap();
 
-    let optind: usize = var!("OPTIND").to_str_lossy().parse().unwrap();
+    let optind: usize = var!(b"OPTIND").to_str_lossy().parse().unwrap();
     assert_eq!(optind, 2); // Advanced past -a
   }
 
@@ -455,7 +455,7 @@ mod tests {
     let _g = TestGuard::new();
     test_input("getopts a: opt -a val").unwrap();
 
-    let optind: usize = var!("OPTIND").to_str_lossy().parse().unwrap();
+    let optind: usize = var!(b"OPTIND").to_str_lossy().parse().unwrap();
     assert_eq!(optind, 3); // Advanced past both -a and val
   }
 
@@ -547,11 +547,11 @@ mod tests {
     let _g = TestGuard::new();
 
     test_input("getopts ab opt -a -b").unwrap();
-    assert_eq!(var!("opt"), "a");
+    assert_eq!(var!(b"opt"), "a");
     assert_eq!(state::Shed::get_status(), 0);
 
     test_input("getopts ab opt -a -b").unwrap();
-    assert_eq!(var!("opt"), "b");
+    assert_eq!(var!(b"opt"), "b");
     assert_eq!(state::Shed::get_status(), 0);
 
     // Third call: no more options
@@ -588,7 +588,7 @@ mod tests {
   fn getopts_unknown_option() {
     let _g = TestGuard::new();
     test_input("getopts ab opt -z").unwrap();
-    assert_eq!(var!("opt"), "?");
+    assert_eq!(var!(b"opt"), "?");
     assert_eq!(state::Shed::get_status(), 0);
   }
 
@@ -598,16 +598,16 @@ mod tests {
   fn getopts_silent_unknown_sets_optarg() {
     let _g = TestGuard::new();
     test_input("getopts :ab opt -z").unwrap();
-    assert_eq!(var!("opt"), "?");
-    assert_eq!(var!("OPTARG"), "z");
+    assert_eq!(var!(b"opt"), "?");
+    assert_eq!(var!(b"OPTARG"), "z");
   }
 
   #[test]
   fn getopts_silent_missing_arg() {
     let _g = TestGuard::new();
     test_input("getopts :a: opt -a").unwrap();
-    assert_eq!(var!("opt"), ":");
-    assert_eq!(var!("OPTARG"), "a");
+    assert_eq!(var!(b"opt"), ":");
+    assert_eq!(var!(b"OPTARG"), "a");
   }
 
   // ===================== Missing required argument (non-silent) =====================
@@ -616,7 +616,7 @@ mod tests {
   fn getopts_missing_arg_non_silent() {
     let _g = TestGuard::new();
     test_input("getopts a: opt -a").unwrap();
-    assert_eq!(var!("opt"), "?");
+    assert_eq!(var!(b"opt"), "?");
   }
 
   // ===================== Error cases =====================

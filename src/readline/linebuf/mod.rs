@@ -219,12 +219,12 @@ impl LineBuf {
 
     Shed::vars_mut(|v| {
       v.set_var(
-        "EDITOR_LINES",
+        b"EDITOR_LINES",
         VarKind::string(num_lines.to_string().into()),
         VarFlags::READONLY,
       )?;
       v.set_var(
-        "EDITOR_LINE",
+        b"EDITOR_LINE",
         VarKind::string((cursor_line + 1).to_string().into()),
         VarFlags::READONLY,
       )
@@ -234,7 +234,7 @@ impl LineBuf {
       let display = paths::display_path(file);
       Shed::vars_mut(|v| {
         v.set_var(
-          "EDITOR_FILE",
+          b"EDITOR_FILE",
           VarKind::string(display.into()),
           VarFlags::READONLY,
         )
@@ -300,12 +300,12 @@ impl LineBuf {
       }
       let tk_start = last.span.start();
       let word     = last.slice();
-      let word     = &word.to_string();
 
-      if let Some(alias) = Shed::logic(|l| l.aliases().get(word).cloned())
+      if let Some(alias) = Shed::logic(|l| l.aliases().get(&word).cloned())
         && let alias = alias.to_string()
         && !raw[tk_start..].starts_with(&alias)
       {
+        let word     = &word.to_string();
         let delta = alias.graphemes(true).count() as isize - word.graphemes(true).count() as isize;
         let expanded = last.replaced(&alias);
 

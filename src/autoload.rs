@@ -3,7 +3,7 @@
 //! Handles autoloading for functions, completions, and the help pages.
 //! This includes files we bundle with the shell, and also files provided by the user.
 
-use std::path::PathBuf;
+use std::{os::unix::ffi::OsStrExt, path::PathBuf};
 
 use crate::{
   COMPLETIONS, FUNCTIONS, HELP,
@@ -23,14 +23,14 @@ pub(crate) trait Autoloader {
     self.files().map(|(n, _)| *n)
   }
   /// Files compiled into the binary, keyed by file stem.
-  fn bundled(&self) -> HashMap<String, AutoloadSrc> {
+  fn bundled(&self) -> HashMap<VarStr, AutoloadSrc> {
     self
       .files()
       .filter_map(|(name, content)| {
-        let stem = PathBuf::from(name)
-          .file_stem()
-          .and_then(|n| n.to_str())?
-          .to_string();
+        let stem: VarStr = PathBuf::from(name)
+          .file_stem()?
+          .as_bytes()
+          .into();
         (!stem.is_empty()).then(|| {
           (
             stem,
@@ -46,7 +46,7 @@ pub(crate) trait Autoloader {
 }
 
 /// Walk a `:`-separated list of directories, mapping each file's stem to its path.
-pub(crate) fn crawl(path_list: &str) -> HashMap<String, AutoloadSrc> {
+pub(crate) fn crawl(path_list: &[u8]) -> HashMap<VarStr, AutoloadSrc> {
   let mut out = HashMap::default();
   for entry in paths::path_list_entries(path_list) {
     let path = entry.path();
@@ -54,7 +54,7 @@ pub(crate) fn crawl(path_list: &str) -> HashMap<String, AutoloadSrc> {
       continue;
     }
     if let Some(name) = path.file_stem().and_then(|n| n.to_str()) {
-      out.insert(name.to_string(), AutoloadSrc::Path(path));
+      out.insert(name.into(), AutoloadSrc::Path(path));
     }
   }
   out

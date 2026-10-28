@@ -581,14 +581,14 @@ impl super::Builtin for Pack {
 impl Pack {
   fn pack(args: &BuiltinArgs, arr_name: VarStr, associative: bool) -> ShResult<()> {
     let mut array: VecDeque<(Option<VarStr>, VarStr)> = if associative {
-      Shed::vars(|v| v.try_get_assoc_items(&arr_name.to_str_lossy()))
+      Shed::vars(|v| v.try_get_assoc_items(&arr_name))
         .option_promote(args.opt_span("assoc"))
         .promote_err(args.cmd_span())?
         .into_iter()
         .map(|(k, v)| (Some(k), v))
         .collect()
     } else {
-      Shed::vars(|v| v.try_get_arr_elems(&arr_name.to_str_lossy()))
+      Shed::vars(|v| v.try_get_arr_elems(&arr_name))
         .option_promote(args.opt_span("array"))
         .promote_err(args.cmd_span())?
         .into_iter()
@@ -882,7 +882,7 @@ impl Unpack {
 
         if append {
           let assoc = v
-            .get_assoc_mut(&arr_name.to_str_lossy())
+            .get_assoc_mut(&arr_name)
             .promote_err(args.cmd_span())?;
 
           if let Some((name, _, span)) = named
@@ -898,7 +898,7 @@ impl Unpack {
           assoc.extend(named.into_iter().map(|(key, val, _)| (key, val)));
         } else {
           v.set_var(
-            &arr_name.to_str_lossy(),
+            &arr_name,
             VarKind::assoc_arr(named.into_iter().map(|(key, val, _)| (key, val))),
             VarFlags::empty(),
           )?;
@@ -910,13 +910,13 @@ impl Unpack {
 
         if append {
           let arr = v
-            .get_arr_mut(&arr_name.to_str_lossy())
+            .get_arr_mut(&arr_name)
             .promote_err(args.cmd_span())?;
 
           arr.extend(data);
         } else {
           v.set_var(
-            &arr_name.to_str_lossy(),
+            &arr_name,
             VarKind::arr(data),
             VarFlags::empty(),
           )?;

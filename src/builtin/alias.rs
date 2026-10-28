@@ -7,9 +7,7 @@
 use bstr::ByteSlice;
 
 use crate::{
-  opt, sherr,
-  state::{Shed, vars},
-  util::{self, error::ShResult, strops},
+  opt, sherr, state::{Shed, vars::{self, VarStr}}, util::{self, error::ShResult, strops}
 };
 
 use super::opt::OptSpec;
@@ -44,8 +42,8 @@ impl super::Builtin for Alias {
       if let Some(value) = value
         && let Some(span) = word.span()
       {
-        Shed::logic_mut(|l| l.insert_alias(&name.to_str_lossy(), &value.into(), span));
-      } else if let Some(alias) = Shed::logic(|l| l.get_alias(&name.to_str_lossy())) {
+        Shed::logic_mut(|l| l.insert_alias(name, &value.into(), span));
+      } else if let Some(alias) = Shed::logic(|l| l.get_alias(name)) {
         outln_bytes(&vars::display_as_var(name, alias.body()));
       } else {
         return Err(sherr!(
@@ -72,13 +70,13 @@ impl super::Builtin for Unalias {
     }
 
     for word in args.arguments() {
-      if Shed::logic(|l| l.get_alias(&word.to_str_lossy())).is_none() {
+      if Shed::logic(|l| l.get_alias(word)).is_none() {
         return Err(sherr!(
           SyntaxErr ? word.span(),
           "unalias: alias '{word}' not found",
         ));
       }
-      Shed::logic_mut(|l| l.remove_alias(&word.to_str_lossy()));
+      Shed::logic_mut(|l| l.remove_alias(word));
     }
 
     util::with_status(0)
@@ -115,18 +113,17 @@ impl super::Builtin for ExCmd {
     for word in args.arguments() {
       let arg           = word.content();
       let (name, value) = strops::split_assignment_raw(&arg);
-      let name          = &name.to_str_lossy();
 
       if !remove
         && let Some(value) = value
         && let Some(span) = word.span()
       {
-        Shed::logic_mut(|l| l.insert_ex_alias(name, &value.into(), span));
+        Shed::logic_mut(|l| l.insert_ex_alias(name, value.into(), span));
       } else {
         match Shed::logic(|l| l.get_ex_alias(name)) {
           Some(_) if remove => Shed::logic_mut(|l| l.remove_ex_alias(name)),
           Some(alias)       => outln_bytes(&vars::display_as_var(name.as_bytes(), alias.body())),
-          None => return Err(sherr!(SyntaxErr ? word.span(), "Unknown ex command alias '{name}'")),
+          None => return Err(sherr!(SyntaxErr ? word.span(), "Unknown ex command alias '{}'", VarStr::from(name))),
         }
       }
     }
@@ -148,7 +145,7 @@ mod tests {
     let guard = TestGuard::new();
     test_input("alias ll='ls -la'").unwrap();
 
-    let alias = Shed::logic(|l| l.get_alias("ll"));
+    let alias = Shed::logic(|l| l.get_alias(b"ll"));
     assert!(alias.is_some());
     assert_eq!(alias.unwrap().body(), "ls -la");
 
@@ -163,8 +160,8 @@ mod tests {
     let _guard = TestGuard::new();
     test_input("alias a='echo a' b='echo b'").unwrap();
 
-    assert_eq!(Shed::logic(|l| l.get_alias("a")).unwrap().body(), "echo a");
-    assert_eq!(Shed::logic(|l| l.get_alias("b")).unwrap().body(), "echo b");
+    assert_eq!(Shed::logic(|l| l.get_alias(b"a")).unwrap().body(), "echo a");
+    assert_eq!(Shed::logic(|l| l.get_alias(b"b")).unwrap().body(), "echo b");
   }
 
   #[test]
@@ -173,7 +170,7 @@ mod tests {
     test_input("alias x='first'").unwrap();
     test_input("alias x='second'").unwrap();
 
-    assert_eq!(Shed::logic(|l| l.get_alias("x")).unwrap().body(), "second");
+    assert_eq!(Shed::logic(|l| l.get_alias(b"x")).unwrap().body(), "second");
   }
 
   #[test]
@@ -241,10 +238,10 @@ mod tests {
   fn unalias_removes() {
     let _guard = TestGuard::new();
     test_input("alias tmp='something'").unwrap();
-    assert!(Shed::logic(|l| l.get_alias("tmp")).is_some());
+    assert!(Shed::logic(|l| l.get_alias(b"tmp")).is_some());
 
     test_input("unalias tmp").unwrap();
-    assert!(Shed::logic(|l| l.get_alias("tmp")).is_none());
+    assert!(Shed::logic(|l| l.get_alias(b"tmp")).is_none());
   }
 
   #[test]
@@ -260,9 +257,9 @@ mod tests {
     test_input("alias a='1' b='2' c='3'").unwrap();
     test_input("unalias a c").unwrap();
 
-    assert!(Shed::logic(|l| l.get_alias("a")).is_none());
-    assert!(Shed::logic(|l| l.get_alias("b")).is_some());
-    assert!(Shed::logic(|l| l.get_alias("c")).is_none());
+    assert!(Shed::logic(|l| l.get_alias(b"a")).is_none());
+    assert!(Shed::logic(|l| l.get_alias(b"b")).is_some());
+    assert!(Shed::logic(|l| l.get_alias(b"c")).is_none());
   }
 
   #[test]
@@ -282,7 +279,7 @@ mod tests {
     let _guard = TestGuard::new();
     test_input("alias empty=''").unwrap();
 
-    let alias = Shed::logic(|l| l.get_alias("empty"));
+    let alias = Shed::logic(|l| l.get_alias(b"empty"));
     assert!(alias.is_some());
     assert_eq!(alias.unwrap().body(), "");
   }

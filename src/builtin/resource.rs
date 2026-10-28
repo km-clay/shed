@@ -261,7 +261,7 @@ impl super::Builtin for UMask {
 fn change_umask(mask: stat::mode_t) -> Mode {
   Shed::vars_mut(|v| {
     v.set_var(
-      "UMASK",
+      b"UMASK",
       VarKind::string(format!("{mask:04o}").into()),
       VarFlags::EXPORT | VarFlags::READONLY,
     )

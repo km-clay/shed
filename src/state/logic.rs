@@ -144,6 +144,12 @@ impl ShFunc {
   }
 }
 
+#[derive(Clone, Debug)]
+struct ShLambda {
+  src: Arc<Ast>,
+  source: Span,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum AutoCmdKind {
   PreCmd,
@@ -277,10 +283,11 @@ impl Display for TrapTarget {
 /// Contains aliases and functions
 #[derive(Default, Clone, Debug)]
 pub(crate) struct LogTab {
-  functions     : HashMap<String, ShFunc>,
-  comp_autoloads: HashMap<String, AutoloadSrc>,
-  aliases       : HashMap<String, ShAlias>,
-  ex_aliases    : HashMap<String, ShAlias>,
+  functions     : HashMap<VarStr, ShFunc>,
+  comp_autoloads: HashMap<VarStr, AutoloadSrc>,
+  aliases       : HashMap<VarStr, ShAlias>,
+  ex_aliases    : HashMap<VarStr, ShAlias>,
+  lambdas       : HashMap<VarStr, ShLambda>,
 
   traps   : HashMap<TrapTarget, VarStr>,
   keymaps : Vec<KeyMap>,
@@ -292,6 +299,12 @@ impl LogTab {
     let mut new = Self::default();
     new.register_autoload_funcs();
     new
+  }
+  pub(crate) fn get_lambda(&mut self, body: &[u8]) -> ShResult<Arc<Ast>> {
+    if let Some(tree) = self.lambdas.get(body) {
+      return Ok(tree.src.clone());
+    }
+    todo!()
   }
   pub(super) fn forget(&mut self, flags: ForgetFlags) {
     if flags.contains(ForgetFlags::FUNCS) {
@@ -332,7 +345,7 @@ impl LogTab {
       .functions
       .iter()
       .filter_map(|(name, func)| match func {
-        ShFunc::Autoload(AutoloadSrc::Path(_)) => Some(name.into()),
+        ShFunc::Autoload(AutoloadSrc::Path(_)) => Some(name.clone()),
         _ => None,
       })
       .collect();
@@ -344,14 +357,14 @@ impl LogTab {
       .comp_autoloads
       .iter()
       .filter_map(|(name, src)| match src {
-        AutoloadSrc::Path(_)         => Some(name.into()),
+        AutoloadSrc::Path(_)         => Some(name.clone()),
         AutoloadSrc::Embedded { .. } => None,
       })
       .collect();
     names.sort();
     names
   }
-  pub(crate) fn insert_comp_autoload(&mut self, name: &str, src: AutoloadSrc) {
+  pub(crate) fn insert_comp_autoload(&mut self, name: &[u8], src: AutoloadSrc) {
     self.comp_autoloads.insert(name.into(), src);
   }
   pub(crate) fn insert_autocmd(&mut self, cmd: AutoCmd) {
@@ -389,9 +402,9 @@ impl LogTab {
     self.keymaps.retain(|km| !km.flags.is_empty());
     self.keymaps.push(keymap);
   }
-  pub(crate) fn remove_keymap(&mut self, keys: &str, flags: KeyMapFlags) {
+  pub(crate) fn remove_keymap(&mut self, keys: &[u8], flags: KeyMapFlags) {
     for km in &mut self.keymaps {
-      if km.keys == keys {
+      if *km.keys == *keys {
         km.flags.remove(flags);
       }
     }
@@ -412,7 +425,7 @@ impl LogTab {
       }
     }
   }
-  pub(crate) fn insert_func(&mut self, name: &str, src: ShFunc) {
+  pub(crate) fn insert_func(&mut self, name: &[u8], src: ShFunc) {
     self.functions.insert(name.into(), src);
     self.invalidate_internal_cache();
   }
@@ -431,57 +444,57 @@ impl LogTab {
   pub(crate) fn traps(&self) -> &HashMap<TrapTarget, VarStr> {
     &self.traps
   }
-  pub(crate) fn has_command_func(&self, name: &str) -> bool {
+  pub(crate) fn has_command_func(&self, name: &[u8]) -> bool {
     self.functions.contains_key(name)
   }
-  pub(crate) fn get_func(&self, name: &str) -> Option<ShFunc> {
+  pub(crate) fn get_func(&self, name: &[u8]) -> Option<ShFunc> {
     self.functions.get(name).cloned()
   }
-  pub(crate) fn get_func_ref(&self, name: &str) -> Option<&ShFunc> {
+  pub(crate) fn get_func_ref(&self, name: &[u8]) -> Option<&ShFunc> {
     self.functions.get(name)
   }
-  pub(crate) fn get_func_mut(&mut self, name: &str) -> Option<&mut ShFunc> {
+  pub(crate) fn get_func_mut(&mut self, name: &[u8]) -> Option<&mut ShFunc> {
     self.functions.get_mut(name)
   }
-  pub(crate) fn funcs(&self) -> &HashMap<String, ShFunc> {
-    &self.functions
-  }
-  pub(crate) fn remove_func(&mut self, name: &str) -> Option<ShFunc> {
+  pub(crate) fn remove_func(&mut self, name: &[u8]) -> Option<ShFunc> {
     let func = self.functions.remove(name);
     self.invalidate_internal_cache();
     func
   }
-  pub(crate) fn take_comp_autoload(&mut self, name: &str) -> Option<AutoloadSrc> {
+  pub(crate) fn take_comp_autoload(&mut self, name: &[u8]) -> Option<AutoloadSrc> {
     self.comp_autoloads.remove(name)
   }
-  pub(crate) fn aliases(&self) -> &HashMap<String, ShAlias> {
-    &self.aliases
-  }
-  pub(crate) fn insert_alias(&mut self, name: &str, body: &VarStr, source: Span) {
+  pub(crate) fn insert_alias(&mut self, name: &[u8], body: &VarStr, source: Span) {
     self
       .aliases
       .insert(name.into(), ShAlias::new(body.clone(), source));
   }
-  pub(crate) fn get_alias(&self, name: &str) -> Option<ShAlias> {
+  pub(crate) fn get_alias(&self, name: &[u8]) -> Option<ShAlias> {
     self.aliases.get(name).cloned()
   }
-  pub(crate) fn remove_alias(&mut self, name: &str) {
+  pub(crate) fn remove_alias(&mut self, name: &[u8]) {
     self.aliases.remove(name);
   }
 
-  pub(crate) fn insert_ex_alias(&mut self, name: &str, body: &VarStr, source: Span) {
+  pub(crate) fn insert_ex_alias(&mut self, name: &[u8], body: VarStr, source: Span) {
     self
       .ex_aliases
-      .insert(name.into(), ShAlias::new(body.clone(), source));
+      .insert(name.into(), ShAlias::new(body, source));
   }
-  pub(crate) fn remove_ex_alias(&mut self, name: &str) {
+  pub(crate) fn remove_ex_alias(&mut self, name: &[u8]) {
     self.ex_aliases.remove(name);
   }
-  pub(crate) fn get_ex_alias(&self, name: &str) -> Option<ShAlias> {
+  pub(crate) fn get_ex_alias(&self, name: &[u8]) -> Option<ShAlias> {
     self.ex_aliases.get(name).cloned()
   }
-  pub(crate) fn ex_aliases(&self) -> &HashMap<String, ShAlias> {
+  pub(crate) fn ex_aliases(&self) -> &HashMap<VarStr, ShAlias> {
     &self.ex_aliases
+  }
+  pub(crate) fn funcs(&self) -> &HashMap<VarStr, ShFunc> {
+    &self.functions
+  }
+  pub(crate) fn aliases(&self) -> &HashMap<VarStr, ShAlias> {
+    &self.aliases
   }
 }
 
@@ -491,9 +504,9 @@ mod tests {
 
   use super::*;
 
-  fn user_comp() -> (String, AutoloadSrc) {
+  fn user_comp() -> (VarStr, AutoloadSrc) {
     (
-      "jj".to_string(),
+      "jj".into(),
       AutoloadSrc::Path(PathBuf::from("/tmp/shed-comp/jj.sh")),
     )
   }

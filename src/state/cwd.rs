@@ -64,7 +64,7 @@ pub(crate) fn change_dir_with_pwd<P: AsRef<Path>>(
     }
   };
 
-  let current_dir = try_var!("PWD")
+  let current_dir = try_var!(b"PWD")
     .or_else(|| {
       std::env::current_dir()
         .ok()
@@ -119,8 +119,8 @@ pub(crate) fn change_dir_with_pwd<P: AsRef<Path>>(
   }
 
   Shed::vars_mut(|v| {
-    v.set_var("OLDPWD", VarKind::Str(current_dir), VarFlags::EXPORT)?;
-    v.set_var("PWD", VarKind::string(new_pwd), VarFlags::EXPORT)
+    v.set_var(b"OLDPWD", VarKind::Str(current_dir), VarFlags::EXPORT)?;
+    v.set_var(b"PWD", VarKind::string(new_pwd), VarFlags::EXPORT)
   })?;
 
   Ok(())

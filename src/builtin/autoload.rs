@@ -58,7 +58,7 @@ impl super::Builtin for Autoload {
     if path {
       // arguments are directories (or `:`-separated lists) to crawl
       for arg in args.arguments() {
-        for (name, src) in autoload::crawl(&arg.to_str_lossy()) {
+        for (name, src) in autoload::crawl(arg) {
           register(&name, src, now, comp)?;
         }
       }
@@ -71,18 +71,17 @@ impl super::Builtin for Autoload {
         autoload::FuncLoader.bundled()
       };
       let search = if comp {
-        var!("SHED_COMPLETE_PATH")
+        var!(b"SHED_COMPLETE_PATH")
       } else {
-        var!("SHED_FUNC_PATH")
+        var!(b"SHED_FUNC_PATH")
       };
-      set.extend(autoload::crawl(&search.to_str_lossy()));
+      set.extend(autoload::crawl(&search));
 
       for arg in args.arguments() {
-        let name = arg.to_str_lossy();
-        let Some(src) = set.remove(name.as_ref()) else {
+        let Some(src) = set.remove(arg.as_bytes()) else {
           return Err(sherr!(ParseErr ? arg.span(), "no such autoload: {arg}"));
         };
-        register(&name, src, now, comp)?;
+        register(arg, src, now, comp)?;
       }
     }
 
@@ -91,7 +90,7 @@ impl super::Builtin for Autoload {
 }
 
 /// Register a resolved autoload entry, or source it immediately when `now`.
-fn register(name: &str, src: AutoloadSrc, now: bool, comp: bool) -> ShResult<()> {
+fn register(name: &[u8], src: AutoloadSrc, now: bool, comp: bool) -> ShResult<()> {
   if now {
     return src.source();
   }

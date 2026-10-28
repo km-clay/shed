@@ -124,7 +124,7 @@ impl super::Dispatcher {
     // argv is not empty. let's set this stuff here.
     let cmd_tk       = &tree[argv.get(0)];
     let cmd_name     = &cmd_tk.slice();
-    let cmd_name     = &cmd_name.to_str_lossy();
+
     let exec_path    = cmd::lookup_cmd(cmd_name);
 
     let no_fork      = cmd.flags.contains(NdFlags::NO_FORK);
@@ -170,7 +170,7 @@ impl super::Dispatcher {
             params::parse_arr_bracket(raw).map_or_else(|| raw.into(), |(base, _)| base);
 
           if names.insert(name.clone()) {
-            let Some(var) = Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy())) else {
+            let Some(var) = Shed::vars(|v| v.try_get_var_meta(&name)) else {
               continue;
             };
             resolved_env.push((name, var));
@@ -195,7 +195,7 @@ impl super::Dispatcher {
       // so `get_envp` picks them up for `execve`. No expansion happens here.
       for (name, var) in &resolved_env {
         let _ =
-          Shed::vars_mut(|v| v.set_var(&name.to_str_lossy(), var.kind().clone(), var.flags()));
+          Shed::vars_mut(|v| v.set_var(name, var.kind().clone(), var.flags()));
       }
       let exec_args = super::ExecArgs::from_expanded(expanded.clone());
 

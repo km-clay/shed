@@ -59,7 +59,7 @@ impl super::Builtin for Complete {
       } else {
         Shed::meta(|m| -> ShResult<()> {
           for cmd in args.arguments() {
-            if let Some(spec) = m.comp_specs().get(cmd) {
+            if let Some(spec) = m.comp_specs().get(&cmd.content()) {
               out!("{}", spec.source());
             }
           }
@@ -224,7 +224,7 @@ impl super::Builtin for Compadd {
       .collect();
 
     if let Some(cand_arr) = opts.cand_arr {
-      let elems: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems(&cand_arr.to_str_lossy()))
+      let elems: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems(&cand_arr))
         .into_iter()
         .map(make_candidate)
         .collect();
@@ -237,7 +237,7 @@ impl super::Builtin for Compadd {
       vec![desc; candidates.len()]
     } else if let Some(desc_arr) = opts.desc_arr {
       // description array
-      Shed::vars(|v| v.get_arr_elems(&desc_arr.to_str_lossy()))
+      Shed::vars(|v| v.get_arr_elems(&desc_arr))
     } else {
       // nothing
       vec![]
@@ -255,7 +255,7 @@ impl super::Builtin for Compadd {
       .collect();
 
     if let Some(assoc_arr) = opts.assoc_arr
-      && let Some(assoc_arr) = Shed::vars(|v| v.try_get_var_meta(&assoc_arr.to_str_lossy()))
+      && let Some(assoc_arr) = Shed::vars(|v| v.try_get_var_meta(&assoc_arr))
       && let VarKind::AssocArr(arr) = assoc_arr.kind()
     {
       for (cand, desc) in arr {
@@ -581,7 +581,7 @@ mod tests {
   #[test]
   fn compgen_variables() {
     let guard = TestGuard::new();
-    set_var!("TESTCOMPVAR", VarKind::Str("x".into())).unwrap();
+    set_var!(b"TESTCOMPVAR", VarKind::Str("x".into())).unwrap();
 
     test_input("compgen -v TESTCOMP").unwrap();
     let out = guard.read_output();

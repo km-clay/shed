@@ -133,7 +133,7 @@ mod tests {
     g.read_output();
 
     test_input("read line <&9").unwrap();
-    let val = var!("line");
+    let val = var!(b"line");
     assert_eq!(val, "world");
   }
 
@@ -212,7 +212,7 @@ mod tests {
     // Read again from beginning
     test_input("read line <&9").unwrap();
 
-    let val = var!("line");
+    let val = var!(b"line");
     assert_eq!(val, "abc");
   }
 

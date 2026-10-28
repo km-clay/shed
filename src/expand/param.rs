@@ -4,6 +4,7 @@ use crate::{
   expand::{Words, arithmetic::Num, glob::Pattern},
   set_var,
   state::params,
+  util::strops,
 };
 use bstr::ByteSlice;
 use itertools::Itertools;
@@ -45,8 +46,8 @@ pub(crate) enum ParamExp {
   ReplaceAllMatches(SegStream, SegStream), // //search/replace
   ReplacePrefix(SegStream, SegStream),     // #search/replace
   ReplaceSuffix(SegStream, SegStream),     // %search/replace
-  VarNamesWithPrefix(String),              // !prefix@ || !prefix*
-  ExpandInnerVar(String),                  // !var
+  VarNamesWithPrefix(VarStr),              // !prefix@ || !prefix*
+  ExpandInnerVar(VarStr),                  // !var
 }
 
 /// Parse a parameter expansion
@@ -60,7 +61,7 @@ pub(crate) enum ParamExp {
 fn split_search_repl(rest: SegStream) -> (SegStream, SegStream) {
   match rest.split_once_unescaped(b'/') {
     Some(pair) => pair,
-    None       => (rest, SegStream::new()),
+    None => (rest, SegStream::default()),
   }
 }
 
@@ -72,24 +73,24 @@ pub(crate) fn parse_param_exp(body: &SegStream) -> ShResult<ParamExp> {
   // The operator is markerless ASCII at the very front of the body, so match it
   // against the leading bytes; the operand (which may carry markers) is the
   // remainder stream after the operator is peeled off.
-  let lead      = body.as_bytes();
-  let lead_run  = body.leading_bytes();
+  let lead = body.as_bytes();
+  let lead_run = body.leading_bytes();
 
   match lead {
     b"^^" => return Ok(PE::ToUpperAll),
-    b"^"  => return Ok(PE::ToUpperFirst),
+    b"^" => return Ok(PE::ToUpperFirst),
     b",," => return Ok(PE::ToLowerAll),
-    b","  => return Ok(PE::ToLowerFirst),
-    _     => {}
+    b"," => return Ok(PE::ToLowerFirst),
+    _ => {}
   }
 
   // Handle indirect var expansion: ${!var}
   if lead.first() == Some(&b'!') {
-    let var = String::from_utf8_lossy(&lead[1..]).into_owned();
-    if var.ends_with(']') && (var.contains("[@]") || var.contains("[*]")) {
+    let var = VarStr::from(&lead[1..]);
+    if var.ends_with(b"]") && (var.contains_slice(b"[@]") || var.contains_slice(b"[*]")) {
       return Ok(PE::ExpandInnerVar(var));
     }
-    if var.ends_with('*') || var.ends_with('@') {
+    if var.ends_with(b"*") || var.ends_with(b"@") {
       return Ok(PE::VarNamesWithPrefix(var));
     }
     return Ok(PE::ExpandInnerVar(var));
@@ -174,7 +175,7 @@ fn eval_slice_index(
   allow_side_effects: bool,
 ) -> ShResult<Num> {
   let expanded = var::expand_raw_inner(span, &mut stream.cursor(), allow_side_effects, false)?;
-  let bytes    = expanded.as_bytes();
+  let bytes = expanded.as_bytes();
   // An empty index (e.g. an unset variable) is 0, as in an empty arith context.
   if bytes.iter().all(u8::is_ascii_whitespace) {
     return Ok(0);
@@ -196,8 +197,8 @@ fn align_slice(start: Num, len: Option<Num>, n: Num) -> ShResult<(usize, usize)>
   let start = resolve_offset(start, n);
   let end = match len {
     Some(l) if l < 0 => n + l,
-    Some(l)          => (start + l).min(n),
-    None             => n,
+    Some(l) => (start + l).min(n),
+    None => n,
   };
 
   if end < start {
@@ -207,12 +208,12 @@ fn align_slice(start: Num, len: Option<Num>, n: Num) -> ShResult<(usize, usize)>
 }
 
 fn slice_chars(value: &VarStr, start: Num, len: Option<Num>) -> ShResult<VarStr> {
-  let bytes        = value.as_bytes();
-  let starts       = bytes.char_indices().map(|(s, _, _)| s).collect_vec();
+  let bytes = value.as_bytes();
+  let starts = bytes.char_indices().map(|(s, _, _)| s).collect_vec();
   let (skip, take) = align_slice(start, len, starts.len() as Num)?;
 
-  let start_byte   = starts.get(skip).copied().unwrap_or(bytes.len());
-  let end_byte     = starts.get(skip + take).copied().unwrap_or(bytes.len());
+  let start_byte = starts.get(skip).copied().unwrap_or(bytes.len());
+  let end_byte = starts.get(skip + take).copied().unwrap_or(bytes.len());
 
   value
     .try_slice(start_byte..end_byte)
@@ -222,13 +223,13 @@ fn slice_chars(value: &VarStr, start: Num, len: Option<Num>) -> ShResult<VarStr>
 fn slice_words(words: Words, start: Num, len: Option<Num>) -> ShResult<Words> {
   let (skip, take) = align_slice(start, len, words.len() as Num)?;
 
-  let slice        = words.into_iter().skip(skip).take(take).collect();
+  let slice = words.into_iter().skip(skip).take(take).collect();
 
   Ok(slice)
 }
 
 fn slice_param(parsed: &VarName, start: Num, len: Option<Num>) -> ShResult<SegStream> {
-  if parsed.index().is_none() && matches!(parsed.name(), "@" | "*") {
+  if parsed.index().is_none() && matches!(parsed.name().as_bytes(), b"@" | b"*") {
     let words = Shed::vars(|v| {
       v.sh_argv_scope()
         .sh_argv()
@@ -279,9 +280,9 @@ fn trim_param(
   let trimmed = words.map_content(|word| {
     let range = {
       let hit = match trim {
-        Trim::Prefix(TrimLen::Longest)  => pattern.match_longest_prefix(&word),
+        Trim::Prefix(TrimLen::Longest) => pattern.match_longest_prefix(&word),
         Trim::Prefix(TrimLen::Shortest) => pattern.match_shortest_prefix(&word),
-        Trim::Suffix(TrimLen::Longest)  => pattern.match_longest_suffix(&word),
+        Trim::Suffix(TrimLen::Longest) => pattern.match_longest_suffix(&word),
         Trim::Suffix(TrimLen::Shortest) => pattern.match_shortest_suffix(&word),
       };
 
@@ -309,7 +310,7 @@ enum ReplaceMode {
 
 #[derive(Debug, Clone)]
 struct ReplaceSpec {
-  pat    : Rc<Pattern>,
+  pat: Rc<Pattern>,
   replace: VarStr,
 }
 
@@ -332,7 +333,7 @@ impl ReplaceSpec {
       .expand_for_glob()?;
 
     Ok(Some(Self {
-      pat    : Shed::meta_mut(|m| m.get_glob(&expanded_search)),
+      pat: Shed::meta_mut(|m| m.get_glob(&expanded_search)),
       replace: expanded_replace,
     }))
   }
@@ -344,7 +345,7 @@ fn replace_in(haystack: &VarStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option
   match mode {
     ReplaceMode::First => {
       let mut out: Vec<u8> = Vec::with_capacity(haystack.len());
-      let     (start, end) = pat.find(haystack, 0)?;
+      let (start, end) = pat.find(haystack, 0)?;
 
       out.extend_from_slice(&haystack[..start]);
       out.extend_from_slice(&replace);
@@ -353,10 +354,10 @@ fn replace_in(haystack: &VarStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option
       Some(VarStr::from(out))
     }
     ReplaceMode::All => {
-      let mut out  = Vec::new();
+      let mut out = Vec::new();
       let mut last = 0;
       let mut from = 0;
-      let mut hit  = false;
+      let mut hit = false;
 
       while let Some((start, end)) = pat.find(haystack, from) {
         hit = true;
@@ -372,7 +373,7 @@ fn replace_in(haystack: &VarStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option
       })
     }
     ReplaceMode::Prefix => {
-      let     len = pat.match_longest_prefix(haystack)?;
+      let len = pat.match_longest_prefix(haystack)?;
       let mut out = replace;
 
       out.push_slice(&haystack[len..]);
@@ -380,8 +381,8 @@ fn replace_in(haystack: &VarStr, spec: ReplaceSpec, mode: ReplaceMode) -> Option
       Some(out)
     }
     ReplaceMode::Suffix => {
-      let     len = pat.match_longest_suffix(haystack)?;
-      let     pos = haystack.len() - len;
+      let len = pat.match_longest_suffix(haystack)?;
+      let pos = haystack.len() - len;
       let mut out = haystack.clone();
 
       out.truncate(pos);
@@ -420,7 +421,7 @@ fn change_first_case(parsed: &VarName, words: Words, case: Case) -> SegStream {
     }
 
     let first = v.try_slice(..1).unwrap();
-    let rest  = v.try_slice(1..).unwrap();
+    let rest = v.try_slice(1..).unwrap();
 
     match case {
       Case::Upper => first.to_ascii_uppercase().chain(rest),
@@ -435,31 +436,31 @@ fn null_expand(parsed: &VarName) -> SegStream {
   if parsed.is_all_split() {
     var::emit_words(parsed, &Words::default())
   } else {
-    SegStream::new()
+    SegStream::default()
   }
 }
 
-fn handle_len_expansion(raw: &str, allow_side_effects: bool) -> ShResult<SegStream> {
-  let var_spec = raw.strip_prefix('#').unwrap();
-  if var_spec.is_empty() || var_spec == "*" || var_spec == "@" {
+fn handle_len_expansion(raw: &[u8], allow_side_effects: bool) -> ShResult<SegStream> {
+  let var_spec = raw.strip_prefix(b"#").unwrap();
+  if var_spec.is_empty() || var_spec == b"*" || var_spec == b"@" {
     // this is either asking for the `#` parameter directly, or asking for the length
     // of `$*` or `$@`. All of these refer to the same thing: the number of positional
     // arguments.
     return Ok(Shed::vars(|v| v.get_param(ShellParam::ArgCount)).into());
   }
 
-  if let Ok(param) = var_spec.parse::<ShellParam>() {
+  if let Ok(param) = var_spec.to_str_lossy().parse::<ShellParam>() {
     let len = Shed::vars(|v| v.try_get_param(param)).map_or(0, |val| val.chars().count());
     return Ok(varstr!("{len}").into());
   }
 
-  let parsed = VarName::parse(var_spec, allow_side_effects)?;
+  let parsed = VarName::parse(&var_spec.to_str_lossy(), allow_side_effects)?;
   if let Some(idx) = parsed.index() {
     match idx {
       ArrIndex::AllSplit | ArrIndex::AllJoined | ArrIndex::ArgCount => {
-        let var = Shed::vars(|v| v.get_var_meta(parsed.name()));
+        let var = Shed::vars(|v| v.get_var_meta(&parsed.name()));
         let len = match var.kind() {
-          VarKind::Arr(items)      => items.len(),
+          VarKind::Arr(items) => items.len(),
           VarKind::AssocArr(items) => items.len(),
           _ => 0,
         };
@@ -467,7 +468,7 @@ fn handle_len_expansion(raw: &str, allow_side_effects: bool) -> ShResult<SegStre
         return Ok(varstr!("{len}").into());
       }
       _ => {
-        let val = Shed::vars(|v| v.index_var(parsed.name(), idx))?;
+        let val = Shed::vars(|v| v.index_var(&parsed.name(), idx))?;
         let len = val.chars().count();
         return Ok(varstr!("{len}").into());
       }
@@ -476,12 +477,12 @@ fn handle_len_expansion(raw: &str, allow_side_effects: bool) -> ShResult<SegStre
 
   let var = Shed::vars(|v| v.get_var_meta(var_spec));
   let len = match var.kind() {
-    VarKind::Magic(func)     => func().unwrap_or_default().chars().count(),
-    VarKind::Str(v)          => v.chars().count(),
-    VarKind::Int(i)          => varstr!("{i}").chars().count(),
-    VarKind::Arr(items)      => items.len(),
+    VarKind::Magic(func) => func().unwrap_or_default().chars().count(),
+    VarKind::Str(v) => v.chars().count(),
+    VarKind::Int(i) => varstr!("{i}").chars().count(),
+    VarKind::Arr(items) => items.len(),
     VarKind::AssocArr(items) => items.len(),
-    VarKind::Unset           => 0,
+    VarKind::Unset => 0,
   };
 
   Ok(varstr!("{len}").into())
@@ -493,20 +494,20 @@ pub(crate) fn perform_param_expansion(
   allow_side_effects: bool,
 ) -> ShResult<SegStream> {
   if body.as_bytes().starts_with(b"#") {
-    return handle_len_expansion(&body.content().to_str_lossy(), allow_side_effects);
+    return handle_len_expansion(&body.content(), allow_side_effects);
   }
 
   let (mut parsed, consumed) = VarName::parse_stream(body, allow_side_effects)?;
 
   if matches!(parsed.index(), Some(ArrIndex::Raw(_))) {
-    let tag = Shed::vars(|v| v.try_get_var_kind_tag(parsed.name()));
+    let tag = Shed::vars(|v| v.try_get_var_kind_tag(&parsed.name()));
     if let Some(tag) = tag {
       let resolved = parsed.index().unwrap().clone().resolve_for(tag)?;
       parsed.set_index(resolved);
     }
   }
 
-  let get     = |v: &ScopeStack| v.resolve_words(&parsed).unwrap_or_default();
+  let get = |v: &ScopeStack| v.resolve_words(&parsed).unwrap_or_default();
   let try_get = |v: &ScopeStack| v.resolve_words(&parsed).filter(|w| !w.is_empty());
   let operand = body.split_off_front(consumed).1;
 
@@ -527,13 +528,13 @@ pub(crate) fn perform_param_expansion(
     ParamExp::ToLowerFirst => Ok(change_first_case(&parsed, Shed::vars(get), Case::Lower)),
 
     ParamExp::ToUpperAll => {
-      let words  = Shed::vars(get);
+      let words = Shed::vars(get);
       let mapped = words.map_content(|c| c.to_ascii_uppercase());
 
       Ok(var::emit_words(&parsed, &mapped))
     }
     ParamExp::ToLowerAll => {
-      let words  = Shed::vars(get);
+      let words = Shed::vars(get);
       let mapped = words.map_content(|c| c.to_ascii_lowercase());
 
       Ok(var::emit_words(&parsed, &mapped))
@@ -541,11 +542,11 @@ pub(crate) fn perform_param_expansion(
     ParamExp::DefaultUnsetOrNull(default) => match Shed::vars(try_get).filter(|v| !v.empty_param())
     {
       Some(val) => Ok(var::emit_words(&parsed, &val)),
-      None      => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
+      None => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
     },
     ParamExp::DefaultUnset(default) => match Shed::vars(try_get) {
       Some(val) => Ok(var::emit_words(&parsed, &val)),
-      None      => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
+      None => var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false),
     },
     ParamExp::SetDefaultUnsetOrNull(default) => {
       match Shed::vars(try_get).filter(|v| !v.empty_param()) {
@@ -555,7 +556,7 @@ pub(crate) fn perform_param_expansion(
             var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
           if allow_side_effects {
             let stored = VarStr::from(expanded.as_bytes());
-            set_var!(parsed.name(), VarKind::string(stored))?;
+            set_var!(&parsed.name(), VarKind::string(stored))?;
           }
           Ok(expanded)
         }
@@ -568,37 +569,45 @@ pub(crate) fn perform_param_expansion(
           var::expand_raw_inner(span, &mut default.cursor(), allow_side_effects, false)?;
         if allow_side_effects {
           let stored = VarStr::from(expanded.as_bytes());
-          set_var!(parsed.name(), VarKind::string(stored))?;
+          set_var!(&parsed.name(), VarKind::string(stored))?;
         }
         Ok(expanded)
       }
     },
     ParamExp::AltSetNotNull(alt) => match Shed::vars(try_get).filter(|v| !v.empty_param()) {
       Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
-      None    => Ok(null_expand(&parsed)),
+      None => Ok(null_expand(&parsed)),
     },
     ParamExp::AltNotNull(alt) => match Shed::vars(try_get) {
       Some(_) => var::expand_raw_inner(span, &mut alt.cursor(), allow_side_effects, false),
-      None    => Ok(null_expand(&parsed)),
+      None => Ok(null_expand(&parsed)),
     },
     ParamExp::ErrUnsetOrNull(err) => match Shed::vars(try_get).filter(|v| !v.empty_param()) {
       Some(val) => Ok(var::emit_words(&parsed, &val)),
       None => {
         if !allow_side_effects {
-          return Ok(SegStream::new());
+          return Ok(SegStream::default());
         }
         let expanded = var::expand_raw_inner(span, &mut err.cursor(), allow_side_effects, false)?;
-        Err(sherr!(ExecFail, "{}", String::from_utf8_lossy(expanded.as_bytes())))
+        Err(sherr!(
+          ExecFail,
+          "{}",
+          String::from_utf8_lossy(expanded.as_bytes())
+        ))
       }
     },
     ParamExp::ErrUnset(err) => match Shed::vars(try_get) {
       Some(val) => Ok(var::emit_words(&parsed, &val)),
       None => {
         if !allow_side_effects {
-          return Ok(SegStream::new());
+          return Ok(SegStream::default());
         }
         let expanded = var::expand_raw_inner(span, &mut err.cursor(), allow_side_effects, false)?;
-        Err(sherr!(ExecFail, "{}", String::from_utf8_lossy(expanded.as_bytes())))
+        Err(sherr!(
+          ExecFail,
+          "{}",
+          String::from_utf8_lossy(expanded.as_bytes())
+        ))
       }
     },
     ParamExp::SliceOpen(offset) => {
@@ -637,32 +646,34 @@ pub(crate) fn perform_param_expansion(
       replace_param(&parsed, Shed::vars(get), s, r, ReplaceMode::Suffix)
     }
 
-    ParamExp::VarNamesWithPrefix(prefix) => {
-      let flat = Shed::vars(ScopeStack::flatten_vars);
-      let match_vars: Vec<_> = flat
+    ParamExp::VarNamesWithPrefix(prefix) => Ok(
+      Shed::vars(ScopeStack::flatten_vars)
         .keys()
         .filter(|var| var.starts_with(&prefix))
         .cloned()
-        .collect();
-      Ok(match_vars.join(" ").into())
-    }
+        .enumerate()
+        .fold(vec![], strops::fold_bytes)
+        .into()
+    ),
     ParamExp::ExpandInnerVar(inner) => {
-      if inner.contains("[@]") || inner.contains("[*]") {
-        let var_name = inner.find('[').map_or(&inner[..], |pos| &inner[..pos]);
+      if inner.contains_slice(b"[@]") || inner.contains_slice(b"[*]") {
+        let var_name = inner.find_byte(b'[').map_or(&inner[..], |pos| &inner[..pos]);
 
-        if inner.contains("[*]") {
+        if inner.contains_slice(b"[*]") {
           return Shed::vars(|v| v.get_array_keys(var_name)).map(Into::into);
         }
 
-        let name = VarName::parse(&inner, allow_side_effects)?;
+        let name = VarName::parse(&inner.to_str_lossy(), allow_side_effects)?;
+
         match Shed::vars(|v| v.split_keys(&name)) {
           Some(fields) => Ok(var::emit_words(&parsed, &fields)),
-          None         => unreachable!("inner has an index, so it always returns fields"),
+          None => unreachable!("inner has an index, so it always returns fields"),
         }
       } else {
-        let inner_name = VarName::parse(&inner, allow_side_effects)?;
+        let inner_name = VarName::parse(&inner.to_str_lossy(), allow_side_effects)?;
         let value = Shed::vars(|v| v.resolve_words(&inner_name).unwrap_or_default()).as_one_word();
-        Ok(var!(&value.to_str_lossy()).into())
+
+        Ok(var!(&value).into())
       }
     }
   }
@@ -676,11 +687,11 @@ mod tests {
   use crate::tests::testutil::{TestGuard, test_input};
 
   fn test_param_parse(val: &str) -> ParamExp {
-    parse_param_exp(&SegStream::from_bytes(val.as_bytes())).unwrap()
+    parse_param_exp(&SegStream::from(val)).unwrap()
   }
 
   fn test_param_expansion(val: &str) -> ShResult<VarStr> {
-    perform_param_expansion(None, &SegStream::from_bytes(val.as_bytes()), true)
+    perform_param_expansion(None, &SegStream::from(val), true)
       .map(|s| VarStr::from(s.as_bytes()))
   }
 
@@ -831,7 +842,7 @@ mod tests {
   }
 
   fn set_v_abcdef() {
-    set_var!("V", VarKind::Str("abcdef".into())).unwrap();
+    set_var!(b"V", VarKind::Str("abcdef".into())).unwrap();
   }
 
   #[test]
@@ -892,7 +903,7 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "EMPTY",
+        b"EMPTY",
         VarKind::string(VarStr::default()),
         VarFlags::empty(),
       )
@@ -906,7 +917,7 @@ mod tests {
   #[test]
   fn param_default_unset_or_null_set() {
     let _guard = TestGuard::new();
-    set_var!("SET", VarKind::Str("value".into())).unwrap();
+    set_var!(b"SET", VarKind::Str("value".into())).unwrap();
 
     let result = test_param_expansion("SET:-fallback").unwrap();
     assert_eq!(result, "value");
@@ -917,7 +928,7 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "EMPTY",
+        b"EMPTY",
         VarKind::string(VarStr::default()),
         VarFlags::empty(),
       )
@@ -932,7 +943,7 @@ mod tests {
   #[test]
   fn param_alt_set_not_null() {
     let _guard = TestGuard::new();
-    set_var!("SET", VarKind::Str("value".into())).unwrap();
+    set_var!(b"SET", VarKind::Str("value".into())).unwrap();
 
     let result = test_param_expansion("SET:+alt").unwrap();
     assert_eq!(result, "alt");
@@ -962,7 +973,7 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "S",
+        b"S",
         VarKind::AssocArr(vec![
           ("present".into(), "v".into()),
           ("empty".into(), "".into()),
@@ -985,7 +996,7 @@ mod tests {
   #[test]
   fn param_length() {
     let _guard = TestGuard::new();
-    set_var!("STR", VarKind::Str("hello".into())).unwrap();
+    set_var!(b"STR", VarKind::Str("hello".into())).unwrap();
 
     let result = test_param_expansion("#STR").unwrap();
     assert_eq!(result, "5");
@@ -994,7 +1005,7 @@ mod tests {
   #[test]
   fn param_substr() {
     let _guard = TestGuard::new();
-    set_var!("STR", VarKind::Str("hello world".into())).unwrap();
+    set_var!(b"STR", VarKind::Str("hello world".into())).unwrap();
 
     let result = test_param_expansion("STR:6").unwrap();
     assert_eq!(result, "world");
@@ -1003,7 +1014,7 @@ mod tests {
   #[test]
   fn param_substr_len() {
     let _guard = TestGuard::new();
-    set_var!("STR", VarKind::Str("hello world".into())).unwrap();
+    set_var!(b"STR", VarKind::Str("hello world".into())).unwrap();
 
     let result = test_param_expansion("STR:0:5").unwrap();
     assert_eq!(result, "hello");
@@ -1014,7 +1025,7 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "PATH",
+        b"PATH",
         VarKind::Str("/usr/local/bin".into()),
         VarFlags::empty(),
       )
@@ -1030,7 +1041,7 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "PATH",
+        b"PATH",
         VarKind::Str("/usr/local/bin".into()),
         VarFlags::empty(),
       )
@@ -1046,7 +1057,7 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "FILE",
+        b"FILE",
         VarKind::Str("file.tar.gz".into()),
         VarFlags::empty(),
       )
@@ -1062,7 +1073,7 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "FILE",
+        b"FILE",
         VarKind::Str("file.tar.gz".into()),
         VarFlags::empty(),
       )
@@ -1076,7 +1087,7 @@ mod tests {
   #[test]
   fn param_replace_first() {
     let _guard = TestGuard::new();
-    set_var!("STR", VarKind::Str("hello hello".into())).unwrap();
+    set_var!(b"STR", VarKind::Str("hello hello".into())).unwrap();
 
     let result = test_param_expansion("STR/hello/world").unwrap();
     assert_eq!(result, "world hello");
@@ -1085,7 +1096,7 @@ mod tests {
   #[test]
   fn param_replace_all() {
     let _guard = TestGuard::new();
-    set_var!("STR", VarKind::Str("hello hello".into())).unwrap();
+    set_var!(b"STR", VarKind::Str("hello hello".into())).unwrap();
 
     let result = test_param_expansion("STR//hello/world").unwrap();
     assert_eq!(result, "world world");
@@ -1094,8 +1105,8 @@ mod tests {
   #[test]
   fn param_indirect() {
     let _guard = TestGuard::new();
-    set_var!("REF", VarKind::Str("TARGET".into())).unwrap();
-    set_var!("TARGET", VarKind::Str("value".into())).unwrap();
+    set_var!(b"REF", VarKind::Str("TARGET".into())).unwrap();
+    set_var!(b"TARGET", VarKind::Str("value".into())).unwrap();
 
     let result = test_param_expansion("!REF").unwrap();
     assert_eq!(result, "value");
@@ -1109,7 +1120,7 @@ mod tests {
     assert_eq!(result, "assigned");
 
     // Verify it was actually set
-    let val = var!("NEWVAR");
+    let val = var!(b"NEWVAR");
     assert_eq!(val, "assigned");
   }
 
@@ -1118,7 +1129,7 @@ mod tests {
   #[test]
   fn param_exp_prefix_removal_escaped() {
     let guard = TestGuard::new();
-    set_var!("branch", VarKind::Str("## main".into())).unwrap();
+    set_var!(b"branch", VarKind::Str("## main".into())).unwrap();
 
     test_input("echo \"${branch#\\#\\# }\"").unwrap();
 
@@ -1131,7 +1142,7 @@ mod tests {
     let guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "val",
+        b"val",
         VarKind::Str("hello world!!".into()),
         VarFlags::empty(),
       )
@@ -1151,7 +1162,7 @@ mod tests {
   #[test]
   fn param_exp_suffix_removal_bare_parens() {
     let guard = TestGuard::new();
-    set_var!("v", VarKind::Str("abc(x)".into())).unwrap();
+    set_var!(b"v", VarKind::Str("abc(x)".into())).unwrap();
 
     test_input("echo ${v%(x)}").unwrap();
     assert_eq!(guard.read_output(), "abc\n");
@@ -1160,7 +1171,7 @@ mod tests {
   #[test]
   fn param_exp_suffix_removal_bare_parens_double_quoted() {
     let guard = TestGuard::new();
-    set_var!("v", VarKind::Str("abc(x)".into())).unwrap();
+    set_var!(b"v", VarKind::Str("abc(x)".into())).unwrap();
 
     test_input("echo \"${v%(x)}\"").unwrap();
     assert_eq!(guard.read_output(), "abc\n");
@@ -1169,7 +1180,7 @@ mod tests {
   #[test]
   fn param_exp_prefix_removal_bare_parens() {
     let guard = TestGuard::new();
-    set_var!("v", VarKind::Str("(x)abc".into())).unwrap();
+    set_var!(b"v", VarKind::Str("(x)abc".into())).unwrap();
 
     test_input("echo ${v#(x)}").unwrap();
     assert_eq!(guard.read_output(), "abc\n");
@@ -1183,7 +1194,7 @@ mod tests {
   #[test]
   fn param_exp_replace_escaped_brace_unquoted() {
     let guard = TestGuard::new();
-    set_var!("u", VarKind::Str("a}b".into())).unwrap();
+    set_var!(b"u", VarKind::Str("a}b".into())).unwrap();
 
     test_input("echo ${u/\\}/_}").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1192,7 +1203,7 @@ mod tests {
   #[test]
   fn param_exp_replace_escaped_brace_double_quoted() {
     let guard = TestGuard::new();
-    set_var!("u", VarKind::Str("a}b".into())).unwrap();
+    set_var!(b"u", VarKind::Str("a}b".into())).unwrap();
 
     test_input("echo \"${u/\\}/_}\"").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1215,7 +1226,7 @@ mod tests {
   #[test]
   fn param_exp_replace_escaped_slash_unquoted() {
     let guard = TestGuard::new();
-    set_var!("s", VarKind::Str("a/b".into())).unwrap();
+    set_var!(b"s", VarKind::Str("a/b".into())).unwrap();
 
     test_input("echo ${s/\\//_}").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1224,7 +1235,7 @@ mod tests {
   #[test]
   fn param_exp_replace_escaped_slash_double_quoted() {
     let guard = TestGuard::new();
-    set_var!("s", VarKind::Str("a/b".into())).unwrap();
+    set_var!(b"s", VarKind::Str("a/b".into())).unwrap();
 
     test_input("echo \"${s/\\//_}\"").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1236,7 +1247,7 @@ mod tests {
   #[test]
   fn param_exp_replace_single_quoted_brace_double_quoted() {
     let guard = TestGuard::new();
-    set_var!("u", VarKind::Str("a}b".into())).unwrap();
+    set_var!(b"u", VarKind::Str("a}b".into())).unwrap();
 
     test_input("echo \"${u/'}'/_}\"").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1245,7 +1256,7 @@ mod tests {
   #[test]
   fn param_exp_replace_single_quoted_slash_double_quoted() {
     let guard = TestGuard::new();
-    set_var!("s", VarKind::Str("a/b".into())).unwrap();
+    set_var!(b"s", VarKind::Str("a/b".into())).unwrap();
 
     test_input("echo \"${s/'/'/_}\"").unwrap();
     assert_eq!(guard.read_output(), "a_b\n");
@@ -1255,7 +1266,7 @@ mod tests {
   #[test]
   fn double_quote_apostrophe_stays_literal() {
     let guard = TestGuard::new();
-    set_var!("x", VarKind::Str("hi".into())).unwrap();
+    set_var!(b"x", VarKind::Str("hi".into())).unwrap();
 
     test_input("echo \"${x}'s\"").unwrap();
     assert_eq!(guard.read_output(), "hi's\n");
@@ -1268,7 +1279,7 @@ mod tests {
   #[test]
   fn param_exp_replace_nested_double_quote() {
     let guard = TestGuard::new();
-    set_var!("foo", VarKind::Str("bar".into())).unwrap();
+    set_var!(b"foo", VarKind::Str("bar".into())).unwrap();
 
     test_input("echo \"${foo/bar/\"biz\"}\"").unwrap();
     assert_eq!(guard.read_output(), "biz\n");
@@ -1280,7 +1291,7 @@ mod tests {
   #[test]
   fn param_exp_replace_nested_double_quote_with_apostrophe() {
     let guard = TestGuard::new();
-    set_var!("foo", VarKind::Str("bar".into())).unwrap();
+    set_var!(b"foo", VarKind::Str("bar".into())).unwrap();
 
     test_input("echo \"${foo/bar/\"'biz\"}\"").unwrap();
     assert_eq!(guard.read_output(), "'biz\n");
@@ -1293,7 +1304,7 @@ mod tests {
   #[test]
   fn param_exp_ansi_c_quote_in_double_quoted_operand() {
     let guard = TestGuard::new();
-    set_var!("s", VarKind::Str("first\nsecond".into())).unwrap();
+    set_var!(b"s", VarKind::Str("first\nsecond".into())).unwrap();
 
     test_input("printf '[%s]' \"${s%%$'\\n'*}\"").unwrap();
     assert_eq!(guard.read_output(), "[first]");
@@ -1303,8 +1314,8 @@ mod tests {
   #[test]
   fn param_exp_replace_nested_double_quote_expands_var() {
     let guard = TestGuard::new();
-    set_var!("foo", VarKind::Str("bar".into())).unwrap();
-    set_var!("x", VarKind::Str("XX".into())).unwrap();
+    set_var!(b"foo", VarKind::Str("bar".into())).unwrap();
+    set_var!(b"x", VarKind::Str("XX".into())).unwrap();
 
     test_input("echo \"${foo/bar/\"$x\"}\"").unwrap();
     assert_eq!(guard.read_output(), "XX\n");
@@ -1313,7 +1324,7 @@ mod tests {
   #[test]
   fn param_exp_quoted_glob_meta_is_literal() {
     let guard = TestGuard::new();
-    set_var!("foo", VarKind::Str("ba*r".into())).unwrap();
+    set_var!(b"foo", VarKind::Str("ba*r".into())).unwrap();
 
     // "*" makes the asterisk literal — strips the literal "*r" suffix.
     test_input("echo ${foo%\"*\"r}").unwrap();
@@ -1324,7 +1335,7 @@ mod tests {
   #[test]
   fn param_exp_unquoted_glob_meta_is_wildcard() {
     let guard = TestGuard::new();
-    set_var!("foo", VarKind::Str("ba*r".into())).unwrap();
+    set_var!(b"foo", VarKind::Str("ba*r".into())).unwrap();
 
     // unquoted *r is a glob — shortest match is just "r".
     test_input("echo ${foo%*r}").unwrap();
@@ -1335,7 +1346,7 @@ mod tests {
   #[test]
   fn param_exp_backslash_glob_meta_is_literal() {
     let guard = TestGuard::new();
-    set_var!("foo", VarKind::Str("ba*r".into())).unwrap();
+    set_var!(b"foo", VarKind::Str("ba*r".into())).unwrap();
 
     test_input("echo ${foo%\\*r}").unwrap();
     let out = guard.read_output();
@@ -1345,7 +1356,7 @@ mod tests {
   #[test]
   fn param_exp_single_quoted_glob_meta_is_literal() {
     let guard = TestGuard::new();
-    set_var!("foo", VarKind::Str("ba*r".into())).unwrap();
+    set_var!(b"foo", VarKind::Str("ba*r".into())).unwrap();
 
     test_input("echo ${foo%'*'r}").unwrap();
     let out = guard.read_output();
@@ -1355,7 +1366,7 @@ mod tests {
   // ===================== Case conversion =====================
 
   fn set(name: &str, val: &str) {
-    set_var!(name, VarKind::Str(val.into())).unwrap();
+    set_var!(name.as_bytes(), VarKind::Str(val.into())).unwrap();
   }
 
   #[test]
@@ -1397,11 +1408,11 @@ mod tests {
 
   #[test]
   fn param_set_default_unset_or_null_when_unset() {
-    let _g     = TestGuard::new();
+    let _g = TestGuard::new();
     let result = test_param_expansion("NEWVAR:=defaultval").unwrap();
     assert_eq!(result, "defaultval");
     // Side effect: variable should now be set.
-    assert_eq!(var!("NEWVAR"), "defaultval");
+    assert_eq!(var!(b"NEWVAR"), "defaultval");
   }
 
   #[test]
@@ -1410,7 +1421,7 @@ mod tests {
     set("EMPTY", "");
     let result = test_param_expansion("EMPTY:=fallback").unwrap();
     assert_eq!(result, "fallback");
-    assert_eq!(var!("EMPTY"), "fallback");
+    assert_eq!(var!(b"EMPTY"), "fallback");
   }
 
   #[test]
@@ -1419,14 +1430,14 @@ mod tests {
     set("x", "original");
     let result = test_param_expansion("x:=replacement").unwrap();
     assert_eq!(result, "original");
-    assert_eq!(var!("x"), "original");
+    assert_eq!(var!(b"x"), "original");
   }
 
   // ===================== AltSetNotNull edge: var unset returns empty =====================
 
   #[test]
   fn param_alt_set_not_null_unset_returns_empty() {
-    let _g     = TestGuard::new();
+    let _g = TestGuard::new();
     let result = test_param_expansion("UNSET:+alt").unwrap();
     assert_eq!(result, "");
   }
@@ -1443,7 +1454,7 @@ mod tests {
 
   #[test]
   fn param_err_unset_or_null_when_unset() {
-    let _g     = TestGuard::new();
+    let _g = TestGuard::new();
     let result = test_param_expansion("UNSET:?missing!");
     assert!(result.is_err());
   }
@@ -1466,7 +1477,7 @@ mod tests {
 
   #[test]
   fn param_err_unset_when_unset() {
-    let _g     = TestGuard::new();
+    let _g = TestGuard::new();
     let result = test_param_expansion("UNSET?missing");
     assert!(result.is_err());
   }

@@ -196,9 +196,9 @@ impl super::Builtin for FixCmd {
 fn fc_edit(hist: &History, opts: FixCmdOpts) -> ShResult<()> {
   let editor = if let Some(cfg_editor) = opts.editor {
     cfg_editor
-  } else if let Some(fc_editor) = try_var!("FCEDIT") {
+  } else if let Some(fc_editor) = try_var!(b"FCEDIT") {
     fc_editor
-  } else if let Some(env_editor) = try_var!("EDITOR") {
+  } else if let Some(env_editor) = try_var!(b"EDITOR") {
     env_editor
   } else {
     return Err(sherr!(ExecFail, "No editor specified for fc command"));
@@ -641,14 +641,14 @@ mod tests {
 
   fn unset_editor_vars() {
     Shed::vars_mut(|v| {
-      v.unset_var("EDITOR").ok();
-      v.unset_var("FCEDIT").ok();
+      v.unset_var(b"EDITOR").ok();
+      v.unset_var(b"FCEDIT").ok();
     });
   }
 
   fn set_shell_var(name: &str, val: &str) {
     Shed::vars_mut(|v| {
-      v.set_var(name, VarKind::Str(val.into()), VarFlags::empty())
+      v.set_var(name.as_bytes(), VarKind::Str(val.into()), VarFlags::empty())
         .unwrap();
     });
   }
@@ -906,7 +906,7 @@ mod tests {
     // Force FCEDIT to "true" so fc_edit picks a no-op editor.
     Shed::vars_mut(|v| {
       v.set_var(
-        "FCEDIT",
+        b"FCEDIT",
         crate::state::vars::VarKind::Str("true".into()),
         crate::state::vars::VarFlags::empty(),
       )

@@ -95,7 +95,7 @@ pub(super) mod tests {
     file.write_all(b"some_var=some_val").unwrap();
 
     test_input(format!("source {path}")).unwrap();
-    let var = var!("some_var");
+    let var = var!(b"some_var");
     assert_eq!(var, "some_val".to_string());
   }
 
@@ -111,7 +111,7 @@ pub(super) mod tests {
       .unwrap();
 
     test_input(format!("source {path}")).unwrap();
-    assert_eq!(var!("src_ok_var"), "yes");
+    assert_eq!(var!(b"src_ok_var"), "yes");
   }
 
   #[test]
@@ -122,9 +122,9 @@ pub(super) mod tests {
     file.write_all(b"x=1\ny=2\nz=3").unwrap();
 
     test_input(format!("source {path}")).unwrap();
-    assert_eq!(var!("x"), "1");
-    assert_eq!(var!("y"), "2");
-    assert_eq!(var!("z"), "3");
+    assert_eq!(var!(b"x"), "1");
+    assert_eq!(var!(b"y"), "2");
+    assert_eq!(var!(b"z"), "3");
   }
 
   #[test]
@@ -135,7 +135,7 @@ pub(super) mod tests {
     file.write_all(b"greet() { echo hi; }").unwrap();
 
     test_input(format!("source {path}")).unwrap();
-    let func = Shed::logic(|l| l.get_func("greet"));
+    let func = Shed::logic(|l| l.get_func(b"greet"));
     assert!(func.is_some());
   }
 
@@ -147,7 +147,7 @@ pub(super) mod tests {
     file.write_all(b"alias ll='ls -la'").unwrap();
 
     test_input(format!("source {path}")).unwrap();
-    let alias = Shed::logic(|l| l.get_alias("ll"));
+    let alias = Shed::logic(|l| l.get_alias(b"ll"));
     assert!(alias.is_some());
   }
 
@@ -225,7 +225,7 @@ pub(super) mod tests {
     file.write_all(b"dot_var=dot_val").unwrap();
 
     test_input(format!(". {path}")).unwrap();
-    assert_eq!(var!("dot_var"), "dot_val");
+    assert_eq!(var!(b"dot_var"), "dot_val");
   }
 
   // ===================== Error cases =====================
@@ -268,8 +268,8 @@ pub(super) mod tests {
       .unwrap();
 
     test_input(format!("source {path}")).unwrap();
-    assert_eq!(var!("before"), "set");
-    assert_eq!(var!("after"), "");
+    assert_eq!(var!(b"before"), "set");
+    assert_eq!(var!(b"after"), "");
     assert_eq!(state::Shed::get_status(), 0);
   }
 
@@ -298,6 +298,6 @@ pub(super) mod tests {
       .unwrap();
 
     test_input(format!("source {path}")).unwrap();
-    assert_eq!(var!("after"), "");
+    assert_eq!(var!(b"after"), "");
   }
 }

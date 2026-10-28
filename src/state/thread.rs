@@ -128,15 +128,15 @@ mod tests {
   fn timeline_fork_isolates_vars() {
     let _g = TestGuard::new();
 
-    set_var!("x", VarKind::Str("parent".into())).unwrap();
+    set_var!(b"x", VarKind::Str("parent".into())).unwrap();
 
     let spec = Shed::fork_spec(Sinks::new(), empty_ast());
 
     let (inherited, child_val) = thread::spawn(move || {
       Shed::install(spec);
-      let inherited = Shed::vars(|v| v.try_get_var("x"));
-      set_var!("x", VarKind::Str("child".into())).unwrap();
-      let child_val = Shed::vars(|v| v.get_var("x"));
+      let inherited = Shed::vars(|v| v.try_get_var(b"x"));
+      set_var!(b"x", VarKind::Str("child".into())).unwrap();
+      let child_val = Shed::vars(|v| v.get_var(b"x"));
       (inherited, child_val)
     })
     .join()
@@ -149,7 +149,7 @@ mod tests {
     );
     assert_eq!(child_val, "child", "child sees its own write");
     assert_eq!(
-      Shed::vars(|v| v.get_var("x")),
+      Shed::vars(|v| v.get_var(b"x")),
       "parent",
       "child's write must not leak to the parent"
     );

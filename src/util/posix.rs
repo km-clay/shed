@@ -7,8 +7,8 @@ use std::ffi::{CStr, CString, OsStr};
 use std::os::unix::ffi::OsStrExt;
 
 use crate::eval::execute::reexec_as_script;
-use crate::state::Shed;
 use crate::state::vars::VarStr;
+use crate::var;
 
 pub(crate) fn execvpe(
   filename: &CStr,
@@ -33,7 +33,7 @@ pub(crate) fn execvpe(
     return reexec_as_script(filename, args, &envp);
   }
 
-  let path = Shed::vars(|v| v.get_var("PATH"));
+  let path = var!(b"PATH");
   for dir in std::env::split_paths(&path) {
     let full_path     = dir.join(OsStr::from_bytes(filename.to_bytes()));
     let full_path_str = VarStr::from(full_path);

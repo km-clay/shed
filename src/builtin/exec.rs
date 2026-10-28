@@ -29,11 +29,11 @@ impl super::Builtin for Exec {
 
     let cmd         = &args.cmd.0;
     let span        = args.cmd.1;
-    let cmd_str     = cmd.to_string_lossy();
 
     let _term_guard = Shed::term_mut(Terminal::prepare_for_exec);
 
-    if cmd::lookup_cmd(&cmd_str).is_none() {
+    if cmd::lookup_cmd(cmd.as_bytes()).is_none() {
+      let cmd_str = cmd.to_string_lossy();
       return Err(sherr!(NotFound @ span, "command not found: {cmd_str}").with_code(127));
     }
 

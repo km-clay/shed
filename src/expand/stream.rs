@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 #[cfg(test)]
 use smallvec::SmallVec;
 
@@ -62,32 +64,38 @@ impl PartialEq<String> for SegStream {
 
 impl From<String> for SegStream {
   fn from(s: String) -> Self {
-    Self::from_bytes(s.as_bytes())
+    Self::from_bytes(s.into_bytes())
   }
 }
 impl From<&str> for SegStream {
   fn from(s: &str) -> Self {
-    Self::from_bytes(s.as_bytes())
+    Self::from_slice(s.as_bytes())
   }
 }
-impl From<std::borrow::Cow<'_, str>> for SegStream {
-  fn from(s: std::borrow::Cow<'_, str>) -> Self {
-    Self::from_bytes(s.as_bytes())
+impl From<Cow<'_, str>> for SegStream {
+  fn from(s: Cow<'_, str>) -> Self {
+    Self::from_slice(s.as_bytes())
   }
 }
 impl From<VarStr> for SegStream {
   fn from(v: VarStr) -> Self {
-    Self::from_bytes(v.as_bytes())
+    Self::new(v)
   }
 }
 impl SegStream {
-  pub(crate) fn new() -> Self {
+  pub(crate) fn new(content: VarStr) -> Self {
     Self {
-      content: VarStr::default(),
+      content,
       marks  : Vec::new(),
     }
   }
-  pub(crate) fn from_bytes(b: &[u8]) -> Self {
+  pub(crate) fn from_bytes(b: Vec<u8>) -> Self {
+    Self {
+      content: VarStr::from(b),
+      marks  : Vec::new(),
+    }
+  }
+  pub(crate) fn from_slice(b: &[u8]) -> Self {
     Self {
       content: VarStr::from(b),
       marks  : Vec::new(),
@@ -162,7 +170,7 @@ impl SegStream {
   /// marker) and not inside a quote region, returning `(before, after)` with
   /// the separator consumed. `None` if no such separator exists.
   pub(crate) fn split_once_unescaped(&self, sep: u8) -> Option<(SegStream, SegStream)> {
-    let mut before = SegStream::new();
+    let mut before = SegStream::default();
     let mut cursor = self.cursor();
     let mut qt     = QuoteState::default();
     while let Some(unit) = cursor.next() {
@@ -182,7 +190,7 @@ impl SegStream {
           before.push(unit);
         }
         Unit::Byte(b) if b == sep && qt.outside() => {
-          let mut after = SegStream::new();
+          let mut after = SegStream::default();
           while let Some(u) = cursor.next() {
             after.push(u);
           }
@@ -218,6 +226,12 @@ impl SegStream {
   }
   pub(crate) fn cursor(&self) -> SegCursor<'_> {
     SegCursor::new(&self.content, &self.marks)
+  }
+}
+
+impl From<Vec<u8>> for SegStream {
+  fn from(v: Vec<u8>) -> Self {
+    Self::from_bytes(v)
   }
 }
 

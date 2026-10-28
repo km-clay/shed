@@ -10,7 +10,7 @@ pub(crate) fn init() -> ShResult<()> {
 }
 
 pub(crate) fn update_log_level() {
-  let level_raw = var!("SHED_LOG");
+  let level_raw = var!(b"SHED_LOG");
   let level = level_raw
     .to_str_lossy()
     .parse::<log::LevelFilter>()

@@ -140,7 +140,7 @@ impl Zone {
       Zone::Utc
     } else {
       // an inherited TZ we cannot parse is not this command's problem
-      try_var!("TZ")
+      try_var!(b"TZ")
         .and_then(|v| v.parse::<Tz>().ok())
         .map_or(Zone::Local, Zone::Named)
     };

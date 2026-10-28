@@ -67,7 +67,7 @@ impl EditMode for ViInsert {
       if matches!(key, key!(Esc)) {
         Shed::vars_mut(|v| {
           v.set_var(
-            "SHED_EDIT_MODE",
+            b"SHED_EDIT_MODE",
             VarKind::Str("INSERT".into()),
             VarFlags::empty(),
           )
@@ -83,7 +83,7 @@ impl EditMode for ViInsert {
 
       Shed::vars_mut(|v| {
         v.set_var(
-          "SHED_EDIT_MODE",
+          b"SHED_EDIT_MODE",
           VarKind::Str("INSERT".into()),
           VarFlags::empty(),
         )
@@ -120,7 +120,7 @@ impl EditMode for ViInsert {
         self.normal = Some(mode);
         Shed::vars_mut(|v| {
           v.set_var(
-            "SHED_EDIT_MODE",
+            b"SHED_EDIT_MODE",
             VarKind::Str("(insert)".into()),
             VarFlags::empty(),
           )

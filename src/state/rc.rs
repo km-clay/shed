@@ -4,10 +4,11 @@
 //! source the shell's rc, profile, and env files.
 
 use std::{
-  fs::OpenOptions,
-  io::{Read, Write},
-  path::PathBuf,
+  ffi::OsStr, fs::OpenOptions, io::{Read, Write}, os::unix::ffi::OsStrExt, path::PathBuf,
 };
+
+use bstr::ByteSlice;
+use itertools::Itertools;
 
 use crate::{
   state::{Shed, logic::ShFunc, vars::VarStr},
@@ -16,11 +17,11 @@ use crate::{
   varstr,
 };
 
-use super::{ShResult, eval::execute, meta::MetaTab, paths, sherr, shopt::ShoptSource};
+use super::{ShResult, eval::execute, meta::MetaTab, paths, sherr, shopt::ShoptSource, vars};
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
 pub(crate) fn rc_file_path() -> Option<PathBuf> {
-  if let Some(p) = try_var!("SHED_RC") {
+  if let Some(p) = try_var!(b"SHED_RC") {
     return Some(PathBuf::from(p));
   }
   let xdg  = paths::config_dir().map(|c| c.join("shed").join("shedrc"));
@@ -87,18 +88,18 @@ fn rc_entry(entry: &str, doc: &str, comments: bool) -> VarStr {
 
 /// Live `alias` definitions, sorted by name.
 fn live_aliases() -> Vec<VarStr> {
-  let mut aliases: Vec<(VarStr, VarStr)> = Shed::logic(|l| {
+  let mut aliases = Shed::logic(|l| {
     l.aliases()
       .iter()
-      .map(|(name, a)| (name.into(), a.body()))
-      .collect()
+      .map(|(name, a)| (name.clone(), a.body()))
+      .collect_vec()
   });
   aliases.sort_by(|a, b| a.0.cmp(&b.0));
   aliases
     .into_iter()
     .map(|(name, body)| {
       let mut line = b"alias ".to_vec();
-      line.extend_from_slice(&super::vars::display_as_var(name.as_bytes(), body));
+      line.extend_from_slice(&vars::display_as_var(name.as_bytes(), body));
       VarStr::from(line)
     })
     .collect()
@@ -107,30 +108,30 @@ fn live_aliases() -> Vec<VarStr> {
 /// Live variable definitions as re-sourceable `declare` statements, sorted by
 /// name. Shell-managed vars (`PWD`, `LINENO`, …) and magic vars are excluded.
 fn live_vars() -> Vec<VarStr> {
-  let mut vars: Vec<(String, VarStr)> = Shed::vars(|v| {
+  Shed::vars(|v| {
     v.flatten_vars()
       .into_iter()
-      .filter(|(_, var)| !var.flags().contains(super::vars::VarFlags::SHELL))
-      .filter_map(|(name, var)| super::vars::serialize_var(&name, &var).map(|line| (name, line)))
-      .collect()
-  });
-  vars.sort_by(|a, b| a.0.cmp(&b.0));
-  vars.into_iter().map(|(_, line)| line).collect()
+      .filter(|(_, var)| !var.flags().contains(vars::VarFlags::SHELL))
+      .filter_map(|(name, var)| vars::serialize_var(&name, &var).map(|line| (name, line)))
+      .sorted_by(|(a_name,_), (b_name,_)| a_name.cmp(b_name))
+      .map(|(_, line)| line)
+      .collect_vec()
+  })
 }
 
 /// Live user function definitions (verbatim source), sorted by name.
 fn live_funcs() -> Vec<VarStr> {
-  let mut funcs: Vec<(VarStr, VarStr)> = Shed::logic(|l| {
+  Shed::logic(|l| {
     l.funcs()
       .iter()
       .filter_map(|(name, f)| match f {
-        ShFunc::Defined { source, .. } => Some((name.into(), source.slice())),
+        ShFunc::Defined { source, .. } => Some((name.clone(), source.slice())),
         ShFunc::Autoload(_)            => None,
       })
-      .collect()
-  });
-  funcs.sort_by(|a, b| a.0.cmp(&b.0));
-  funcs.into_iter().map(|(_, src)| src).collect()
+      .sorted_by(|(a_name,_), (b_name,_)| a_name.cmp(b_name))
+      .map(|(_,src)| src)
+      .collect_vec()
+  })
 }
 
 /// Live `complete` registrations (verbatim source), sorted by command.
@@ -347,8 +348,8 @@ pub(crate) fn generate_default_rc() -> ShResult<Option<PathBuf>> {
   Ok(Some(rc_path))
 }
 
-pub(crate) fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShResult<()> {
-  let etc_path = PathBuf::from(varstr!("/etc/shed/{name}"));
+pub(crate) fn source_runtime_file(name: &[u8], env_var_name: Option<&[u8]>) -> ShResult<()> {
+  let etc_path = PathBuf::from("/etc/shed").join(OsStr::from_bytes(name));
   if etc_path.is_file()
     && let Err(e) = source_file(etc_path)
   {
@@ -361,11 +362,11 @@ pub(crate) fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShR
     Some(PathBuf::from(p))
   } else {
     paths::config_dir()
-      .map(|c| c.join("shed").join(name))
+      .map(|c| c.join("shed").join(OsStr::from_bytes(name)))
       .filter(|p| p.is_file())
       .or_else(|| {
         paths::get_home()
-          .map(|h| h.join(format!(".{name}")))
+          .map(|h| h.join(varstr!(".{}", name.to_str_lossy())))
           .filter(|p| p.is_file())
       })
   };
@@ -377,15 +378,15 @@ pub(crate) fn source_runtime_file(name: &str, env_var_name: Option<&str>) -> ShR
 }
 
 pub(crate) fn source_rc() -> ShResult<()> {
-  source_runtime_file("shedrc", Some("SHED_RC"))
+  source_runtime_file(b"shedrc", Some(b"SHED_RC"))
 }
 
 pub(crate) fn source_login() -> ShResult<()> {
-  source_runtime_file("shed_profile", Some("SHED_PROFILE"))
+  source_runtime_file(b"shed_profile", Some(b"SHED_PROFILE"))
 }
 
 pub(crate) fn source_env() -> ShResult<()> {
-  source_runtime_file("shedenv", Some("SHED_ENV"))
+  source_runtime_file(b"shedenv", Some(b"SHED_ENV"))
 }
 
 pub(crate) fn source_file(path: PathBuf) -> ShResult<()> {
@@ -426,7 +427,7 @@ mod generate_default_rc_tests {
   fn set_rc_path(p: &std::path::Path) {
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_RC",
+        b"SHED_RC",
         VarKind::string(p.to_string_lossy().into()),
         VarFlags::empty(),
       )
@@ -527,7 +528,7 @@ mod source_runtime_file_tests {
 
   fn set_var(name: &str, val: &str) {
     Shed::vars_mut(|v| {
-      v.set_var(name, VarKind::Str(val.into()), VarFlags::empty())
+      v.set_var(name.as_bytes(), VarKind::Str(val.into()), VarFlags::empty())
         .unwrap();
     });
   }
@@ -539,15 +540,15 @@ mod source_runtime_file_tests {
     let path = dir.path().join("source.sh");
     std::fs::write(&path, "MARKER_VAR=set_by_source\n").unwrap();
     set_var("TEST_RC_VAR", &path.to_string_lossy());
-    source_runtime_file("testrc", Some("TEST_RC_VAR")).unwrap();
-    assert_eq!(var!("MARKER_VAR"), "set_by_source");
+    source_runtime_file(b"testrc", Some(b"TEST_RC_VAR")).unwrap();
+    assert_eq!(var!(b"MARKER_VAR"), "set_by_source");
   }
 
   #[test]
   fn missing_target_file_is_no_op() {
     let _g = TestGuard::new();
     set_var("TEST_RC_NONEXISTENT", "/path/that/should/never/exist/zzz");
-    let res = source_runtime_file("nonexistent", Some("TEST_RC_NONEXISTENT"));
+    let res = source_runtime_file(b"nonexistent", Some(b"TEST_RC_NONEXISTENT"));
     assert!(res.is_ok());
   }
 
@@ -557,8 +558,8 @@ mod source_runtime_file_tests {
     // Point HOME to a tempdir with no matching file.
     let dir = tempfile::TempDir::new().unwrap();
     set_var("HOME", &dir.path().to_string_lossy());
-    Shed::vars_mut(|v| v.unset_var("TEST_NOTHING").ok());
-    let res = source_runtime_file("nothing", Some("TEST_NOTHING"));
+    Shed::vars_mut(|v| v.unset_var(b"TEST_NOTHING").ok());
+    let res = source_runtime_file(b"nothing", Some(b"TEST_NOTHING"));
     assert!(res.is_ok());
   }
 
@@ -569,9 +570,9 @@ mod source_runtime_file_tests {
     let dotfile = dir.path().join(".my_test_rc");
     std::fs::write(&dotfile, "HOME_FALLBACK_MARKER=via_home\n").unwrap();
     set_var("HOME", &dir.path().to_string_lossy());
-    Shed::vars_mut(|v| v.unset_var("ENV_NAME_NOT_SET").ok());
-    source_runtime_file("my_test_rc", Some("ENV_NAME_NOT_SET")).unwrap();
-    assert_eq!(var!("HOME_FALLBACK_MARKER"), "via_home");
+    Shed::vars_mut(|v| v.unset_var(b"ENV_NAME_NOT_SET").ok());
+    source_runtime_file(b"my_test_rc", Some(b"ENV_NAME_NOT_SET")).unwrap();
+    assert_eq!(var!(b"HOME_FALLBACK_MARKER"), "via_home");
   }
 
   #[test]
@@ -581,7 +582,7 @@ mod source_runtime_file_tests {
     let xdg  = tempfile::TempDir::new().unwrap();
     set_var("HOME", &home.path().to_string_lossy());
     set_var("XDG_CONFIG_HOME", &xdg.path().to_string_lossy());
-    Shed::vars_mut(|v| v.unset_var("XDG_OVER_LEGACY_ENV").ok());
+    Shed::vars_mut(|v| v.unset_var(b"XDG_OVER_LEGACY_ENV").ok());
 
     // legacy ~/.over_legacy_rc
     std::fs::write(
@@ -597,8 +598,8 @@ mod source_runtime_file_tests {
     )
     .unwrap();
 
-    source_runtime_file("over_legacy_rc", Some("XDG_OVER_LEGACY_ENV")).unwrap();
-    assert_eq!(var!("OVER_LEGACY_SRC"), "xdg");
+    source_runtime_file(b"over_legacy_rc", Some(b"XDG_OVER_LEGACY_ENV")).unwrap();
+    assert_eq!(var!(b"OVER_LEGACY_SRC"), "xdg");
   }
 
   #[test]
@@ -608,7 +609,7 @@ mod source_runtime_file_tests {
     let xdg  = tempfile::TempDir::new().unwrap();
     set_var("HOME", &home.path().to_string_lossy());
     set_var("XDG_CONFIG_HOME", &xdg.path().to_string_lossy());
-    Shed::vars_mut(|v| v.unset_var("XDG_ONLY_ENV").ok());
+    Shed::vars_mut(|v| v.unset_var(b"XDG_ONLY_ENV").ok());
 
     std::fs::create_dir_all(xdg.path().join("shed")).unwrap();
     std::fs::write(
@@ -617,8 +618,8 @@ mod source_runtime_file_tests {
     )
     .unwrap();
 
-    source_runtime_file("xdg_only_rc", Some("XDG_ONLY_ENV")).unwrap();
-    assert_eq!(var!("XDG_ONLY_MARKER"), "from_xdg");
+    source_runtime_file(b"xdg_only_rc", Some(b"XDG_ONLY_ENV")).unwrap();
+    assert_eq!(var!(b"XDG_ONLY_MARKER"), "from_xdg");
   }
 
   #[test]
@@ -642,8 +643,8 @@ mod source_runtime_file_tests {
     std::fs::write(&explicit, "TRIPLE_SRC=explicit\n").unwrap();
     set_var("TRIPLE_RC_ENV", &explicit.to_string_lossy());
 
-    source_runtime_file("triple_rc", Some("TRIPLE_RC_ENV")).unwrap();
-    assert_eq!(var!("TRIPLE_SRC"), "explicit");
+    source_runtime_file(b"triple_rc", Some(b"TRIPLE_RC_ENV")).unwrap();
+    assert_eq!(var!(b"TRIPLE_SRC"), "explicit");
   }
 }
 
@@ -661,7 +662,7 @@ mod source_wrapper_tests {
 
   fn set_var(name: &str, val: &str) {
     Shed::vars_mut(|v| {
-      v.set_var(name, VarKind::Str(val.into()), VarFlags::empty())
+      v.set_var(name.as_bytes(), VarKind::Str(val.into()), VarFlags::empty())
         .unwrap();
     });
   }
@@ -674,7 +675,7 @@ mod source_wrapper_tests {
     std::fs::write(&path, "SOURCE_RC_MARKER=fired\n").unwrap();
     set_var("SHED_RC", &path.to_string_lossy());
     source_rc().unwrap();
-    assert_eq!(var!("SOURCE_RC_MARKER"), "fired");
+    assert_eq!(var!(b"SOURCE_RC_MARKER"), "fired");
   }
 
   #[test]
@@ -685,7 +686,7 @@ mod source_wrapper_tests {
     std::fs::write(&path, "SOURCE_LOGIN_MARKER=fired\n").unwrap();
     set_var("SHED_PROFILE", &path.to_string_lossy());
     source_login().unwrap();
-    assert_eq!(var!("SOURCE_LOGIN_MARKER"), "fired");
+    assert_eq!(var!(b"SOURCE_LOGIN_MARKER"), "fired");
   }
 
   #[test]
@@ -696,6 +697,6 @@ mod source_wrapper_tests {
     std::fs::write(&path, "SOURCE_ENV_MARKER=fired\n").unwrap();
     set_var("SHED_ENV", &path.to_string_lossy());
     source_env().unwrap();
-    assert_eq!(var!("SOURCE_ENV_MARKER"), "fired");
+    assert_eq!(var!(b"SOURCE_ENV_MARKER"), "fired");
   }
 }

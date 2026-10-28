@@ -19,19 +19,13 @@ use std::{
 };
 
 use crate::{
-  HashMap,
-  builtin::ForkBehavior,
-  eval::{
+  HashMap, builtin::ForkBehavior, eval::{
     lex::Span,
     parse::{
       ast::{Ast, NodeId},
       node,
     },
-  },
-  socket::SocketRequest,
-  state::{jobs::Outcome, source::StrongSpan},
-  util::error,
-  varstr,
+  }, socket::SocketRequest, state::{jobs::Outcome, source::StrongSpan, vars::VarStr}, util::error, varstr,
 };
 
 use super::{
@@ -225,7 +219,7 @@ impl ForkBlame {
 
 pub(crate) struct ForgetSpec {
   flags       : ForgetFlags,
-  exclude_vars: Vec<String>,
+  exclude_vars: Vec<VarStr>,
 }
 
 impl ForgetSpec {
@@ -244,8 +238,8 @@ impl ForgetSpec {
   pub(crate) fn flags(&self) -> ForgetFlags {
     self.flags
   }
-  pub(crate) fn exclude(&mut self, var: &str) {
-    self.exclude_vars.push(var.to_string());
+  pub(crate) fn exclude(&mut self, var: &[u8]) {
+    self.exclude_vars.push(var.into());
   }
   pub(crate) fn except(&mut self) {
     self.flags = self.flags.complement();
@@ -1048,7 +1042,7 @@ impl Shed {
 
       Self::vars_mut(|v| {
         v.set_var(
-          "PIPESTATUS",
+          b"PIPESTATUS",
           VarKind::arr(pipe_status.into_iter().map(Into::into)),
           VarFlags::empty(),
         )

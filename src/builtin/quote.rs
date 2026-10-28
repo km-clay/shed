@@ -30,7 +30,7 @@ impl super::Builtin for Quote {
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {
     let no_nl = args.has_opt("no-nl");
     if let Some(name) = args.opt_value("var") {
-      let Some(var) = quote_var(&name.to_str_lossy()) else {
+      let Some(var) = quote_var(&name) else {
         let span = args.opt_span("var").unwrap();
         return Err(sherr!(ExecFail @ span, "variable '{name}' is unset").with_code(2));
       };
@@ -76,32 +76,37 @@ impl super::Builtin for Quote {
   }
 }
 
-fn quote_var(name: &str) -> Option<VarStr> {
+fn quote_var(name: &[u8]) -> Option<VarStr> {
   let var = Shed::vars(|v| v.try_get_var_meta(name))?;
   match var.kind() {
-    VarKind::Str(var_str) => Some(escape::shell_quote(var_str.as_bytes())),
-    VarKind::Int(int) => {
-      let int_str = varstr!("{int}");
-      Some(escape::shell_quote(&int_str))
-    }
+    VarKind::Str(var_str) => Some(escape::shell_quote(var_str)),
+    VarKind::Int(int) => Some(escape::shell_quote(&varstr!("{int}"))),
+
     VarKind::Arr(var_strs) => Some(
       var_strs
         .iter()
-        .map(|v| escape::shell_quote(v.as_bytes()))
-        .collect::<Vec<_>>()
-        .join_with(" "),
+        .fold(vec![], |mut acc, v| {
+          if !acc.is_empty() {
+            acc.push(b' ');
+          }
+          escape::shell_quote_fmt(v, &mut acc).ok();
+          acc
+        })
+        .into()
     ),
     VarKind::AssocArr(items) => Some(
       items
         .iter()
-        .map(|(k, v)| {
-          let mut entry = escape::shell_quote(k.as_bytes());
-          entry.push(b' ');
-          entry.push_slice(escape::shell_quote(v.as_bytes()));
-          entry
+        .fold(vec![], |mut acc, (k, v)| {
+          if !acc.is_empty() {
+            acc.push(b'\n');
+          }
+          escape::shell_quote_fmt(k, &mut acc).ok();
+          acc.push(b' ');
+          escape::shell_quote_fmt(v, &mut acc).ok();
+          acc
         })
-        .collect::<Vec<_>>()
-        .join_with("\n"),
+        .into()
     ),
     VarKind::Magic(magic_var) => {
       let resolved = magic_var()?;
@@ -173,12 +178,12 @@ impl super::Builtin for Unquote {
       }
       Some(UnquoteTarget::Array(name)) => {
         let var = VarKind::arr(fields.map(VarStr::from));
-        Shed::vars_mut(|v| v.set_var(&name.to_str_lossy(), var, VarFlags::empty()))?;
+        Shed::vars_mut(|v| v.set_var(&name, var, VarFlags::empty()))?;
       }
       Some(UnquoteTarget::Var(name)) => {
         let collected: Vec<Vec<u8>> = fields.collect();
         let var = VarKind::string(VarStr::from(join_bytes(&collected, b" ")));
-        Shed::vars_mut(|v| v.set_var(&name.to_str_lossy(), var, VarFlags::empty()))?;
+        Shed::vars_mut(|v| v.set_var(&name, var, VarFlags::empty()))?;
       }
     }
 

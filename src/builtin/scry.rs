@@ -52,7 +52,7 @@ impl super::Builtin for Scry {
     // since they appear before the given args, the parser in execute() will naturally
     // overwrite any given user overrides since options are applied left-to-right
 
-    let _src_handle = try_var!("SCRY_DEFAULT_OPTS").map(|default_opts| {
+    let _src_handle = try_var!(b"SCRY_DEFAULT_OPTS").map(|default_opts| {
       let source =
         source::register_named_source("SCRY_DEFAULT_OPTS".as_bytes(), default_opts.as_bytes());
 
@@ -113,7 +113,7 @@ impl super::Builtin for Scry {
       .unwrap_or_default();
 
     if input.is_empty() && args.no_arguments() {
-      match try_var!("SCRY_DEFAULT_CMD") {
+      match try_var!(b"SCRY_DEFAULT_CMD") {
         Some(cmd) if !cmd.trim().is_empty() => {
           input = procio::capture_command(cmd.as_bytes(), None, Some(&"scry".into()))?.to_string();
         }

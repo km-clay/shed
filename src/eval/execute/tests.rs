@@ -778,7 +778,7 @@ use crate::var;
 fn assign_eq_basic() {
   let _g = TestGuard::new();
   test_input("x=hello").unwrap();
-  assert_eq!(var!("x"), "hello");
+  assert_eq!(var!(b"x"), "hello");
 }
 
 #[test]
@@ -786,7 +786,7 @@ fn assign_eq_overwrites() {
   let _g = TestGuard::new();
   test_input("x=hello").unwrap();
   test_input("x=world").unwrap();
-  assert_eq!(var!("x"), "world");
+  assert_eq!(var!(b"x"), "world");
 }
 
 #[test]
@@ -796,14 +796,14 @@ fn assign_eq_cmd_sub_preserves_whitespace() {
   // assignment context does not apply word splitting.
   let _g = TestGuard::new();
   test_input(r#"ws=$(echo "FOO    BAR")"#).unwrap();
-  assert_eq!(var!("ws"), "FOO    BAR");
+  assert_eq!(var!(b"ws"), "FOO    BAR");
 }
 
 #[test]
 fn assign_eq_cmd_sub_preserves_newlines() {
   let _g = TestGuard::new();
   test_input(r"ml=$(printf 'a\nb\nc')").unwrap();
-  assert_eq!(var!("ml"), "a\nb\nc");
+  assert_eq!(var!(b"ml"), "a\nb\nc");
 }
 
 // ─── Assignment exit status (POSIX §2.9.1) ─────────────────────────
@@ -883,7 +883,7 @@ fn assign_plus_eq_string_var_concatenates() {
   // building strings character-by-character.
   let _g = TestGuard::new();
   test_input("x=5; x+=3").unwrap();
-  assert_eq!(var!("x"), "53");
+  assert_eq!(var!(b"x"), "53");
 }
 
 #[test]
@@ -891,14 +891,14 @@ fn assign_plus_eq_int_var_does_arithmetic() {
   // declare -i opts into arithmetic +=.
   let _g = TestGuard::new();
   test_input("declare -i y=5; y+=3").unwrap();
-  assert_eq!(var!("y"), "8");
+  assert_eq!(var!(b"y"), "8");
 }
 
 #[test]
 fn assign_plus_eq_non_numeric_concatenates() {
   let _g = TestGuard::new();
   test_input("x=hello; x+=world").unwrap();
-  assert_eq!(var!("x"), "helloworld");
+  assert_eq!(var!(b"x"), "helloworld");
 }
 
 #[test]
@@ -912,7 +912,7 @@ fn assign_plus_eq_sum_of_digits_regression() {
   test_input(r#"buf+="0""#).unwrap();
   test_input(r#"buf+="1""#).unwrap();
   test_input(r#"buf+="6""#).unwrap();
-  assert_eq!(var!("buf"), "2016");
+  assert_eq!(var!(b"buf"), "2016");
 }
 
 #[test]
@@ -920,7 +920,7 @@ fn assign_plus_eq_mixed_falls_back_to_concat() {
   let _g = TestGuard::new();
   test_input("x=5; x+=hello").unwrap();
   // RHS not parseable as int → concatenation.
-  assert_eq!(var!("x"), "5hello");
+  assert_eq!(var!(b"x"), "5hello");
 }
 
 // ─── MinusEq / MultEq / DivEq ───────────────────────────────────────
@@ -929,21 +929,21 @@ fn assign_plus_eq_mixed_falls_back_to_concat() {
 fn assign_minus_eq_int_subtracts() {
   let _g = TestGuard::new();
   test_input("x=10; x-=4").unwrap();
-  assert_eq!(var!("x"), "6");
+  assert_eq!(var!(b"x"), "6");
 }
 
 #[test]
 fn assign_mult_eq_multiplies() {
   let _g = TestGuard::new();
   test_input("x=6; x*=7").unwrap();
-  assert_eq!(var!("x"), "42");
+  assert_eq!(var!(b"x"), "42");
 }
 
 #[test]
 fn assign_div_eq_divides() {
   let _g = TestGuard::new();
   test_input("x=20; x/=4").unwrap();
-  assert_eq!(var!("x"), "5");
+  assert_eq!(var!(b"x"), "5");
 }
 
 // Failed standalone assignments set status=1 AND leave the var
@@ -954,7 +954,7 @@ fn assign_div_eq_by_zero_errors_and_leaves_var_unchanged() {
   let _g = TestGuard::new();
   test_input("x=5; x/=0").ok();
   assert_ne!(state::Shed::get_status(), 0);
-  assert_eq!(var!("x"), "5");
+  assert_eq!(var!(b"x"), "5");
 }
 
 #[test]
@@ -962,7 +962,7 @@ fn assign_minus_eq_on_non_numeric_string_errors_and_leaves_var_unchanged() {
   let _g = TestGuard::new();
   test_input("x=hello; x-=3").ok();
   assert_ne!(state::Shed::get_status(), 0);
-  assert_eq!(var!("x"), "hello");
+  assert_eq!(var!(b"x"), "hello");
 }
 
 #[test]
@@ -970,7 +970,7 @@ fn assign_mult_eq_on_non_numeric_string_errors_and_leaves_var_unchanged() {
   let _g = TestGuard::new();
   test_input("x=hello; x*=3").ok();
   assert_ne!(state::Shed::get_status(), 0);
-  assert_eq!(var!("x"), "hello");
+  assert_eq!(var!(b"x"), "hello");
 }
 
 // ─── Compound ops on undefined var (treated as empty) ───────────────
@@ -980,7 +980,7 @@ fn assign_plus_eq_on_undefined_var_uses_empty_string() {
   let _g = TestGuard::new();
   // No prior `x=`. += starts from an empty Str default.
   test_input("x+=hello").unwrap();
-  assert_eq!(var!("x"), "hello");
+  assert_eq!(var!(b"x"), "hello");
 }
 
 // ─── Compound ops on arrays ─────────────────────────────────────────

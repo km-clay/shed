@@ -20,14 +20,7 @@ use std::{
 };
 
 use crate::{
-  HashSet,
-  autoload::{self, Autoloader},
-  opt, outln,
-  readline::ScoredCandidate,
-  sherr,
-  state::{Shed, meta::MetaTab, paths, terminal::Terminal},
-  util::{error::ShResult, guards, with_status},
-  var,
+  HashSet, autoload::{self, Autoloader}, opt, outln, readline::ScoredCandidate, sherr, state::{Shed, meta::MetaTab, paths::{self, PathCache}, terminal::Terminal}, util::{error::ShResult, guards, with_status}, var,
 };
 
 use super::opt::OptSpec;
@@ -110,7 +103,7 @@ fn cached_tags<F: FnOnce() -> Vec<ScoredTag>>(build: F) -> Vec<ScoredTag> {
     if needs_rebuild {
       let tags = build();
       let path_cache = borrow.take().map_or_else(
-        || paths::PathCache::new("SHED_HPATH".to_string()),
+        || PathCache::new("SHED_HPATH".into()),
         |(pc, _)| pc,
       );
       *borrow = Some((path_cache, tags.clone()));
@@ -188,10 +181,10 @@ fn embedded_pages(shadowed: &HashSet<String>) -> impl Iterator<Item = &'static s
 pub(super) fn get_all_tags() -> ShResult<Vec<ScoredTag>> {
   let mut tags  = vec![];
 
-  let     hpath = var!("SHED_HPATH");
+  let     hpath = var!(b"SHED_HPATH");
   let mut hpath_names: HashSet<String> = HashSet::default();
 
-  for entry in paths::path_list_entries(&hpath.to_str_lossy()) {
+  for entry in paths::path_list_entries(&hpath) {
     let path = entry.path();
     if !path.is_file() {
       continue;
@@ -234,10 +227,10 @@ pub(super) fn get_help_content(topic: &str) -> Option<(usize, String, Option<Str
     ));
   }
 
-  let hpath = var!("SHED_HPATH");
+  let hpath = var!(b"SHED_HPATH");
   let mut hpath_names: HashSet<String> = HashSet::default();
 
-  for entry in paths::path_list_entries(&hpath.to_str_lossy()) {
+  for entry in paths::path_list_entries(&hpath) {
     let path = entry.path();
     if !path.is_file() {
       continue;
@@ -267,7 +260,7 @@ pub(super) fn get_help_content(topic: &str) -> Option<(usize, String, Option<Str
   // No filename match, fall through to tag scoring across both sources.
   let mut tags = cached_tags(|| {
     let mut tags = vec![];
-    for entry in paths::path_list_entries(&hpath.to_str_lossy()) {
+    for entry in paths::path_list_entries(&hpath) {
       let path = entry.path();
       if !path.is_file() {
         continue;
@@ -558,7 +551,7 @@ mod open_help_tests {
     let _g      = TestGuard::new();
     let dir     = tempfile::TempDir::new().unwrap();
     let dir_raw = dir.path().display().to_string();
-    set_var!("SHED_HPATH", VarKind::Str(dir_raw.into()); EXPORT).unwrap();
+    set_var!(b"SHED_HPATH", VarKind::Str(dir_raw.into()); EXPORT).unwrap();
     let file_path = dir.path().join("some_help_file.txt");
     std::fs::write(
       &file_path,
@@ -576,7 +569,7 @@ mod open_help_tests {
     let _g      = TestGuard::new();
     let dir     = tempfile::TempDir::new().unwrap();
     let dir_raw = dir.path().display().to_string();
-    set_var!("SHED_HPATH", VarKind::Str(dir_raw.into()); EXPORT).unwrap();
+    set_var!(b"SHED_HPATH", VarKind::Str(dir_raw.into()); EXPORT).unwrap();
     let file_path = dir.path().join("some_help_file.txt");
 
     let body      = "This is some help content\nmore content  *more-content*\nfoo bar biz";
@@ -598,7 +591,7 @@ mod open_help_tests {
     // Wipe HPATH so we don't accidentally match a system file.
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str(VarStr::default()),
         VarFlags::EXPORT,
       )
@@ -623,7 +616,7 @@ mod open_help_tests {
     std::fs::write(&shadow, "hpath shadow").unwrap();
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str(hpath_dir.path().to_string_lossy().into()),
         VarFlags::EXPORT,
       )
@@ -646,7 +639,7 @@ mod open_help_tests {
     let _g = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str(VarStr::default()),
         VarFlags::EXPORT,
       )
@@ -665,7 +658,7 @@ mod open_help_tests {
     let _g = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str(VarStr::default()),
         VarFlags::EXPORT,
       )
@@ -682,7 +675,7 @@ mod open_help_tests {
     let _g = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str(VarStr::default()),
         VarFlags::EXPORT,
       )
@@ -701,7 +694,7 @@ mod open_help_tests {
     let _g = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str("/this/path/should/never/exist/xyz".into()),
         VarFlags::EXPORT,
       )
@@ -724,7 +717,7 @@ mod open_help_tests {
     std::fs::write(&file_path, "found me").unwrap();
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str(dir.path().to_string_lossy().into()),
         VarFlags::EXPORT,
       )
@@ -742,7 +735,7 @@ mod open_help_tests {
     let _g = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str(VarStr::default()),
         VarFlags::EXPORT,
       )
@@ -846,7 +839,7 @@ mod get_all_tags_tests {
     // Empty HPATH so only the builtin HELP_PAGES contribute.
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str(VarStr::default()),
         VarFlags::EXPORT,
       )
@@ -871,7 +864,7 @@ mod get_all_tags_tests {
     .unwrap();
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str(dir.path().to_string_lossy().into()),
         VarFlags::EXPORT,
       )
@@ -887,7 +880,7 @@ mod get_all_tags_tests {
     let _g = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str("/this/dir/never/exists/zzz".into()),
         VarFlags::EXPORT,
       )
@@ -911,7 +904,7 @@ mod get_all_tags_tests {
     .unwrap();
     Shed::vars_mut(|v| {
       v.set_var(
-        "SHED_HPATH",
+        b"SHED_HPATH",
         VarKind::Str(dir.path().to_string_lossy().into()),
         VarFlags::EXPORT,
       )

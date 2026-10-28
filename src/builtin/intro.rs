@@ -31,7 +31,7 @@ impl super::Builtin for Type {
     }
 
     for arg in args.arguments() {
-      if let Some(util) = cmd::which_util(&arg.to_str_lossy()) {
+      if let Some(util) = cmd::which_util(arg) {
         match util.kind() {
           UtilKind::Alias    => Self::display_alias(arg, short),
           UtilKind::Function => Self::display_func(arg, short),
@@ -42,7 +42,7 @@ impl super::Builtin for Type {
         }
       } else if KEYWORDS.contains(&arg.as_bytes()) {
         Self::display_keyword(arg, short);
-      } else if let Some(var) = Shed::vars(|v| v.try_get_var_meta(&arg.to_str_lossy())) {
+      } else if let Some(var) = Shed::vars(|v| v.try_get_var_meta(arg)) {
         Self::display_variable(arg, &var, short);
       } else {
         sherr!(
@@ -63,7 +63,7 @@ impl Type {
   fn terse_mode(args: &super::BuiltinArgs) -> ShResult<()> {
     let mut status = 0;
     for arg in args.arguments() {
-      if let Some(util) = cmd::which_util(&arg.to_str_lossy()) {
+      if let Some(util) = cmd::which_util(arg) {
         match util.kind() {
           UtilKind::Alias    => outln!("alias"),
           UtilKind::Function => outln!("function"),
@@ -79,7 +79,7 @@ impl Type {
     util::with_status(status)
   }
   fn display_alias(arg: &VarStr, short: bool) {
-    let alias       = Shed::logic(|v| v.get_alias(&arg.to_str_lossy())).unwrap();
+    let alias       = Shed::logic(|v| v.get_alias(arg)).unwrap();
     let (line, col) = alias.source().line_and_col().unwrap_or((0, 0));
     let name        = alias.source().name();
     if short {
@@ -94,7 +94,7 @@ impl Type {
     }
   }
   fn display_func(arg: &VarStr, short: bool) {
-    let func = Shed::logic(|v| v.get_func(&arg.to_str_lossy())).unwrap();
+    let func = Shed::logic(|v| v.get_func(arg)).unwrap();
     match func {
       ShFunc::Autoload(src) => {
         let (origin, location) = match &src {

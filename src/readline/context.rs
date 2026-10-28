@@ -260,7 +260,7 @@ fn is_valid_cmd(command: &Tk) -> Option<CmdKind> {
   } else if BUILTIN_NAMES.contains(&name.as_bytes()) {
     Some(CmdKind::Builtin)
   } else {
-    let util = cmd::which_util(&name.to_str_lossy())?;
+    let util = cmd::which_util(&name)?;
     match util.kind() {
       UtilKind::Alias    => Some(CmdKind::Alias),
       UtilKind::Function => Some(CmdKind::Function),
@@ -683,7 +683,7 @@ impl CtxTk {
       },
       ExTkRule::Command(cmd) => {
         if let ExCommand::Unknown = cmd {
-          if Shed::logic(|l| l.get_ex_alias(&span.slice().to_str_lossy())).is_some() {
+          if Shed::logic(|l| l.get_ex_alias(&span.slice())).is_some() {
             vec![Self::leaf(span, CtxTkRule::ValidExCommand)]
           } else {
             vec![Self::leaf(span, CtxTkRule::InvalidExCommand)]

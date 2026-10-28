@@ -66,7 +66,7 @@ impl super::Builtin for Cd {
       let base = if new_dir.is_absolute() {
         PathBuf::new()
       } else {
-        try_var!("PWD")
+        try_var!(b"PWD")
           .map(PathBuf::from)
           .or_else(|| std::env::current_dir().ok())
           .unwrap_or_else(|| PathBuf::from("/"))
@@ -98,7 +98,7 @@ impl super::Builtin for Cd {
     }
 
     if print_dir {
-      let pwd = PathBuf::from(var!("PWD"));
+      let pwd = PathBuf::from(var!(b"PWD"));
       procio::outln_bytes(&paths::display_path_bytes(&pwd));
     }
 
@@ -107,8 +107,7 @@ impl super::Builtin for Cd {
 }
 
 fn search_cd_path(new_dir: impl AsRef<Path>) -> Option<PathBuf> {
-  let path = try_var!("CDPATH")?;
-  let path = path.to_str_lossy();
+  let path = try_var!(b"CDPATH")?;
 
   paths::split_path_list(&path)
     .filter(|p| !p.as_os_str().is_empty())
@@ -119,7 +118,7 @@ fn search_cd_path(new_dir: impl AsRef<Path>) -> Option<PathBuf> {
 }
 
 fn get_old_pwd() -> PathBuf {
-  try_var!("OLDPWD")
+  try_var!(b"OLDPWD")
     .or_else(|| paths::get_home_str().or_else(|| Some("/".into())))
     .map(PathBuf::from)
     .unwrap()
@@ -183,7 +182,7 @@ pub(super) mod tests {
     test_input("cd ..").unwrap();
 
     let kernel = env::current_dir().unwrap().display().to_string();
-    let pwd    = var!("PWD").to_string();
+    let pwd    = var!(b"PWD").to_string();
     // The core of the bug: kernel cwd and $PWD must agree.
     assert_eq!(kernel, pwd, "kernel cwd must match $PWD (no desync)");
     // And both must be the logical parent A, not the target's physical parent B.
@@ -200,7 +199,7 @@ pub(super) mod tests {
     let temp_dir = TempDir::new().unwrap();
     Shed::vars_mut(|v| {
       v.set_var(
-        "HOME",
+        b"HOME",
         VarKind::Str(temp_dir.path().display().to_string().into()),
         VarFlags::empty(),
       )
@@ -340,7 +339,7 @@ pub(super) mod tests {
     // canonical form. On macOS `/var/folders/...` is a symlink to
     // `/private/var/folders/...` so comparing against `canon(...)` would
     // wrongly canonicalize it.
-    let oldpwd = var!("OLDPWD");
+    let oldpwd = var!(b"OLDPWD");
     assert_eq!(oldpwd, dir_a.path().display().to_string());
   }
 
@@ -354,7 +353,7 @@ pub(super) mod tests {
     // -L semantics: $PWD reflects what the user typed, not the canonical
     // kernel cwd. The kernel cwd can differ if any component of the input
     // path is a symlink (e.g. macOS's `/var` → `/private/var`).
-    let pwd = var!("PWD");
+    let pwd = var!(b"PWD");
     assert_eq!(pwd, temp_dir.path().display().to_string());
   }
 
@@ -404,7 +403,7 @@ pub(super) mod tests {
 
     Shed::vars_mut(|v| {
       v.set_var(
-        "CDPATH",
+        b"CDPATH",
         VarKind::Str(base.path().to_string_lossy().into()),
         VarFlags::EXPORT,
       )
@@ -428,7 +427,7 @@ pub(super) mod tests {
 
     Shed::vars_mut(|v| {
       v.set_var(
-        "CDPATH",
+        b"CDPATH",
         VarKind::Str(format!("/nonexistent_cdpath_xyz:{}", base.path().to_string_lossy()).into()),
         VarFlags::EXPORT,
       )
@@ -451,7 +450,7 @@ pub(super) mod tests {
 
     Shed::vars_mut(|v| {
       v.set_var(
-        "CDPATH",
+        b"CDPATH",
         VarKind::Str(decoy.path().to_string_lossy().into()),
         VarFlags::EXPORT,
       )
@@ -478,7 +477,7 @@ pub(super) mod tests {
     let decoy = TempDir::new().unwrap();
     Shed::vars_mut(|v| {
       v.set_var(
-        "CDPATH",
+        b"CDPATH",
         VarKind::Str(decoy.path().to_string_lossy().into()),
         VarFlags::EXPORT,
       )
@@ -499,7 +498,7 @@ pub(super) mod tests {
 
     test_input(format!("cd {}", temp_dir.path().display())).unwrap();
 
-    set_var!("CDPATH", VarKind::Str("".into()); EXPORT).unwrap();
+    set_var!(b"CDPATH", VarKind::Str("".into()); EXPORT).unwrap();
     test_input("cd child").unwrap();
 
     let cwd = env::current_dir().unwrap();
@@ -548,7 +547,7 @@ pub(super) mod tests {
 
     test_input(format!("cd {}", link_dir.display())).unwrap();
 
-    let pwd = var!("PWD");
+    let pwd = var!(b"PWD");
     assert_eq!(pwd, link_dir.display().to_string());
   }
 
@@ -566,7 +565,7 @@ pub(super) mod tests {
     test_input(format!("cd {}", link.display())).unwrap();
     test_input("cd ..").unwrap();
 
-    let pwd = var!("PWD");
+    let pwd = var!(b"PWD");
     assert_eq!(pwd, temp_dir.path().display().to_string());
   }
 
@@ -580,7 +579,7 @@ pub(super) mod tests {
     let weird = format!("{}/sub/../sub", temp_dir.path().display());
     test_input(format!("cd {weird}")).unwrap();
 
-    let pwd = var!("PWD");
+    let pwd = var!(b"PWD");
     assert_eq!(pwd, sub.display().to_string());
   }
 
@@ -596,7 +595,7 @@ pub(super) mod tests {
 
     test_input(format!("cd -P {}", link.display())).unwrap();
 
-    let pwd = var!("PWD");
+    let pwd = var!(b"PWD");
     assert_eq!(pwd, fs::canonicalize(&real).unwrap().display().to_string());
   }
 }

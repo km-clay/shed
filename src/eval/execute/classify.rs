@@ -33,7 +33,7 @@ pub(crate) fn in_cd_path(name: &Tk) -> bool {
   if Path::new(&name).is_dir() {
     return true;
   }
-  let cd_path = var!("CDPATH");
+  let cd_path = var!(b"CDPATH");
   let cd_path = cd_path.to_str_lossy();
   let entries = cd_path.split(':');
   for entry in entries {
@@ -72,7 +72,7 @@ pub(crate) fn is_in_path(name: &Tk) -> bool {
     }
     false
   } else {
-    let Some(path) = try_var!("PATH") else {
+    let Some(path) = try_var!(b"PATH") else {
       return false;
     };
     let path  = path.to_str_lossy();
@@ -96,10 +96,10 @@ pub(crate) fn is_in_path(name: &Tk) -> bool {
 pub(crate) fn is_func_node(cmd: NodeId, tree: &Ast) -> bool {
   tree
     .command_for(cmd)
-    .is_some_and(|cmd_word| is_func(&cmd_word.slice().to_str_lossy()))
+    .is_some_and(|cmd_word| is_func(&cmd_word.slice()))
 }
 
-pub(super) fn is_func(name: &str) -> bool {
+pub(super) fn is_func(name: &[u8]) -> bool {
   Shed::logic(|l| l.has_command_func(name))
 }
 
@@ -115,9 +115,10 @@ pub(crate) fn is_builtin(cmd: NodeId, tree: &Ast) -> bool {
   let Some(cmd_word) = tree.command_for(cmd) else {
     return false;
   };
+  let cmd = cmd_word.slice();
 
-  !is_func(&cmd_word.slice().to_str_lossy())
-    && builtin::fork_behavior_for(cmd_word.slice().as_bytes())
+  !is_func(&cmd)
+    && builtin::fork_behavior_for(&cmd)
       .is_some_and(|b| !matches!(b, ForkBehavior::Always))
     && cmd_word.flags.contains(TkFlags::BUILTIN)
 }
@@ -132,7 +133,7 @@ pub(super) fn runs_inline(cmd: &Node, tree: &Ast) -> bool {
       }
       let cmd_id   = cmd.get_command().unwrap();
       let cmd_word = &tree[cmd_id];
-      is_func(&cmd_word.slice().to_str_lossy()) || cmd_word.flags.contains(TkFlags::BUILTIN)
+      is_func(&cmd_word.slice()) || cmd_word.flags.contains(TkFlags::BUILTIN)
     }
     NdRule::List { .. }
     | NdRule::Conjunction { .. }
@@ -159,7 +160,7 @@ pub(super) fn will_fork(cmd: &Node, tree: &Ast) -> bool {
     NdRule::Command { argv, .. } if !argv.is_empty() => {
       let cmd_id   = cmd.get_command().unwrap();
       let cmd_word = &tree[cmd_id];
-      !(is_func(&cmd_word.slice().to_str_lossy()) || cmd_word.flags.contains(TkFlags::BUILTIN))
+      !(is_func(&cmd_word.slice()) || cmd_word.flags.contains(TkFlags::BUILTIN))
     }
     _ => false,
   }

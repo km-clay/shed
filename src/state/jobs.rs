@@ -1974,7 +1974,7 @@ mod tests {
     // Custom format with our own marker text.
     Shed::vars_mut(|v| {
       v.set_var(
-        "TIMEFMT",
+        b"TIMEFMT",
         crate::state::vars::VarKind::Str("CUSTOM_TIMEFMT_MARKER".into()),
         crate::state::vars::VarFlags::empty(),
       )

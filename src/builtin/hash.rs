@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 use crate::{
   expand::escape,
   procio, sherr,
@@ -34,11 +36,11 @@ impl super::Builtin for Hash {
     }
 
     if args.no_arguments() && args.no_options() {
-      let entries: Vec<(String, std::path::PathBuf)> = Shed::meta(|m| {
+      let entries = Shed::meta(|m| {
         m.path_cache()
           .entries()
           .map(|(name, path)| (name.clone(), path.clone()))
-          .collect()
+          .collect_vec()
       });
       for (name, path) in entries {
         let mut line = name.into_bytes();
@@ -63,7 +65,7 @@ impl super::Builtin for Hash {
       Shed::meta_mut(MetaTab::rehash_path_cache);
       Shed::meta(|m| -> ShResult<()> {
         for arg in args.arguments() {
-          if m.lookup_cached_cmd(&arg.to_str_lossy()).is_none() {
+          if m.lookup_cached_cmd(arg).is_none() {
             return Err(sherr!(NotFound, "Command not found: {arg}").option_promote(arg.span()));
           }
         }

@@ -296,7 +296,7 @@ pub(super) fn setup() -> Option<ShedArgs> {
 
   if !args.no_rc {
     if let Some(ref path) = args.rc_path {
-      set_var!("SHED_RC", VarKind::string(path.into()); EXPORT).ok();
+      set_var!(b"SHED_RC", VarKind::string(path.into()); EXPORT).ok();
     }
     if let Err(e) = rc::source_env() {
       e.print_error();

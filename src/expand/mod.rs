@@ -541,7 +541,7 @@ impl Expander {
     use stream::{Marker, SegStream, Unit};
     let mut words: Vec<SegStream> = vec![];
     let mut cursor                = raw.cursor();
-    let mut cur_word              = SegStream::new();
+    let mut cur_word              = SegStream::default();
     let mut was_quoted            = false;
     let     ifs                   = params::get_separators();
     // Delimiter-run tracking: whitespace and non-whitespace IFS chars combine
@@ -617,7 +617,7 @@ impl Expander {
             // Already in a delimiter run and we hit another non-WS IFS char.
             if delim_has_non_ws {
               // Second non-WS in this run -> emit an empty field.
-              words.push(SegStream::new());
+              words.push(SegStream::default());
             } else {
               // First non-WS adjacent to WS in the run -> just absorb into the run.
               delim_has_non_ws = true;
@@ -658,7 +658,7 @@ impl Expander {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::set_var;
+  use crate::{expand::stream::SegStream, set_var};
   use std::collections::VecDeque;
 
   // These tests build an `Expander.raw` from a marker-char string; convert it
@@ -674,9 +674,9 @@ mod tests {
     pub(super) const EXPAND_START: char = '\u{fde1}';
     pub(super) const EXPAND_END: char = '\u{fde2}';
   }
-  fn to_segstream(s: &str) -> stream::SegStream {
+  fn to_segstream(s: &str) -> SegStream {
     use stream::{Marker, ProcSubKind, Quote};
-    let mut seg = stream::SegStream::new();
+    let mut seg = SegStream::default();
     for ch in s.chars() {
       let marker = match ch {
         '\u{fdd0}' => Some(Marker::Quote(Quote::Double)),
@@ -702,7 +702,7 @@ mod tests {
     }
     seg
   }
-  fn render(seg: &stream::SegStream) -> String {
+  fn render(seg: &SegStream) -> String {
     use stream::{Marker, ProcSubKind, Quote, StreamSeg};
     let mut out = String::new();
     for s in &seg.stream() {
@@ -759,7 +759,7 @@ mod tests {
   #[test]
   fn word_split_custom_ifs() {
     let _guard = TestGuard::new();
-    set_var!("IFS", VarKind::Str(":".into())).unwrap();
+    set_var!(b"IFS", VarKind::Str(":".into())).unwrap();
 
     let raw = format!("{}a:b:c{}", markers::EXPAND_START, markers::EXPAND_END);
     let exp = Expander {
@@ -777,7 +777,7 @@ mod tests {
   #[test]
   fn word_split_empty_ifs() {
     let _guard = TestGuard::new();
-    set_var!("IFS", VarKind::Str(VarStr::default())).unwrap();
+    set_var!(b"IFS", VarKind::Str(VarStr::default())).unwrap();
 
     // Even as expansion output, an empty IFS suppresses all field splitting.
     let raw = format!(
@@ -853,7 +853,7 @@ mod tests {
   #[test]
   fn word_split_escaped_custom_ifs() {
     let _guard = TestGuard::new();
-    set_var!("IFS", VarKind::Str(":".into())).unwrap();
+    set_var!(b"IFS", VarKind::Str(":".into())).unwrap();
 
     let raw = format!("a{}b:c", render(&escape::unescape_str(b"\\:")));
     let exp = Expander {
@@ -878,14 +878,14 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "arr",
+        b"arr",
         VarKind::arr(["a", "b", "c"].map(VarStr::from)),
         VarFlags::empty(),
       )
     })
     .unwrap();
 
-    let val = Shed::vars(|v| v.index_var("arr", &ArrIndex::Literal(0))).unwrap();
+    let val = Shed::vars(|v| v.index_var(b"arr", &ArrIndex::Literal(0))).unwrap();
     assert_eq!(val, "a");
   }
 
@@ -894,14 +894,14 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "arr",
+        b"arr",
         VarKind::arr(["x", "y", "z"].map(VarStr::from)),
         VarFlags::empty(),
       )
     })
     .unwrap();
 
-    let val = Shed::vars(|v| v.index_var("arr", &ArrIndex::Literal(1))).unwrap();
+    let val = Shed::vars(|v| v.index_var(b"arr", &ArrIndex::Literal(1))).unwrap();
     assert_eq!(val, "y");
   }
 
@@ -910,14 +910,14 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "arr",
+        b"arr",
         VarKind::arr(["a", "b", "c"].map(VarStr::from)),
         VarFlags::empty(),
       )
     })
     .unwrap();
 
-    let elems = Shed::vars(|v| v.try_get_arr_elems("arr")).unwrap();
+    let elems = Shed::vars(|v| v.try_get_arr_elems(b"arr")).unwrap();
     assert_eq!(elems, vec!["a", "b", "c"]);
   }
 
@@ -926,14 +926,14 @@ mod tests {
     let _guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "arr",
+        b"arr",
         VarKind::arr(["a", "b", "c"].map(VarStr::from)),
         VarFlags::empty(),
       )
     })
     .unwrap();
 
-    let elems = Shed::vars(|v| v.try_get_arr_elems("arr")).unwrap();
+    let elems = Shed::vars(|v| v.try_get_arr_elems(b"arr")).unwrap();
     assert_eq!(elems.len(), 3);
   }
 
@@ -944,7 +944,7 @@ mod tests {
     let guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "arr",
+        b"arr",
         VarKind::Arr(VecDeque::from(["foo".into(), "bar".into(), "biz".into()])),
         VarFlags::empty(),
       )
@@ -962,7 +962,7 @@ mod tests {
     let guard = TestGuard::new();
     Shed::vars_mut(|v| {
       v.set_var(
-        "arr",
+        b"arr",
         VarKind::Arr(VecDeque::from(["foo".into(), "bar".into(), "biz".into()])),
         VarFlags::empty(),
       )
@@ -970,7 +970,7 @@ mod tests {
     .unwrap();
     Shed::vars_mut(|v| {
       v.set_var(
-        "i",
+        b"i",
         VarKind::Arr(VecDeque::from(["0".into(), "1".into(), "2".into()])),
         VarFlags::empty(),
       )

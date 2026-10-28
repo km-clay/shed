@@ -641,15 +641,15 @@ fn complete_ex_commands(start: &str) -> Vec<Candidate> {
 fn command_utils() -> Vec<Utility> {
   let mut utils = Vec::new();
   Shed::logic(|l| {
-    utils.extend(l.aliases().keys().map(VarStr::from).map(Utility::alias));
-    utils.extend(l.funcs().keys().map(VarStr::from).map(Utility::function));
+    utils.extend(l.aliases().keys().cloned().map(Utility::alias));
+    utils.extend(l.funcs().keys().cloned().map(Utility::function));
   });
   utils.extend(BUILTIN_NAMES.iter().map(|n| Utility::builtin((*n).into())));
   Shed::meta(|m| {
     utils.extend(
       m.path_cache()
         .entries()
-        .map(|(name, path)| Utility::command(name.into(), path.clone())),
+        .map(|(name, path)| Utility::command(name.clone(), path.clone())),
     );
   });
   utils.extend(
@@ -961,28 +961,28 @@ impl BashCompSpec {
     let raw_words = words.clone();
     Shed::vars_mut(|v| {
       v.set_var(
-        "COMP_WORDS",
+        b"COMP_WORDS",
         VarKind::arr(raw_words.into_iter().map(Into::into)),
         VarFlags::READONLY,
       )
     })?;
     Shed::vars_mut(|v| {
       v.set_var(
-        "COMP_CWORD",
+        b"COMP_CWORD",
         VarKind::string(cword.to_string().into()),
         VarFlags::READONLY,
       )
     })?;
     Shed::vars_mut(|v| {
       v.set_var(
-        "COMP_LINE",
+        b"COMP_LINE",
         VarKind::string(line.into()),
         VarFlags::READONLY,
       )
     })?;
     Shed::vars_mut(|v| {
       v.set_var(
-        "COMP_POINT",
+        b"COMP_POINT",
         VarKind::string(cursor_pos.to_string().into()),
         VarFlags::READONLY,
       )
@@ -1009,7 +1009,7 @@ impl BashCompSpec {
     let _cooked = Shed::term_mut(|t| t.yield_terminal(false));
     execute::exec_nonint(input.into(), Some("comp_function".into()))?;
 
-    let comp_reply: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems("COMPREPLY"))
+    let comp_reply: Vec<Candidate> = Shed::vars(|v| v.get_arr_elems(b"COMPREPLY"))
       .into_iter()
       .map(Candidate::from)
       .collect();
@@ -1551,7 +1551,7 @@ impl SimpleCompleter {
       return Self::run_comp_spec(ctx, &*spec);
     }
 
-    if let Some(src) = Shed::logic_mut(|l| l.take_comp_autoload(cmd)) {
+    if let Some(src) = Shed::logic_mut(|l| l.take_comp_autoload(cmd.as_bytes())) {
       src.source()?;
       if let Some(spec) = Shed::meta(|m| m.get_comp_spec(cmd)) {
         return Self::run_comp_spec(ctx, &*spec);

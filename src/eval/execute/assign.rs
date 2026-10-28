@@ -66,7 +66,6 @@ impl super::Dispatcher {
 
       let old_status = Shed::get_status();
       let var_name   = &tree[*var].span.slice();
-      let var_name   = &var_name.to_str_lossy();
 
       let is_integer = !is_arr
         && Shed::vars(|v| v.get_var_flags(var_name)).is_some_and(|f| f.contains(VarFlags::INTEGER));
@@ -93,7 +92,7 @@ impl super::Dispatcher {
 
       let indexed = if let Some((name, idx)) = indexed {
         let tag =
-          Shed::vars(|v| v.try_get_var_kind_tag(&name.to_str_lossy())).unwrap_or(VarKindTag::Arr);
+          Shed::vars(|v| v.try_get_var_kind_tag(&name)).unwrap_or(VarKindTag::Arr);
         Some((name, idx.resolve_for(tag)?))
       } else {
         None
@@ -149,7 +148,7 @@ impl super::Dispatcher {
                   ));
                 }
               }
-              v.set_var_indexed(&name.to_str_lossy(), idx, val.value_bytes().into(), flags)
+              v.set_var_indexed(&name, idx, val.value_bytes().into(), flags)
             })?;
           } else {
             Shed::vars_mut(|v| v.set_var(var_name, val.clone(), flags))?;
@@ -205,7 +204,7 @@ impl super::Dispatcher {
           }
 
           let mut var = if let Some((name, idx)) = &indexed {
-            Shed::vars(|v| v.index_var(&name.to_str_lossy(), idx))?.into()
+            Shed::vars(|v| v.index_var(name, idx))?.into()
           } else {
             Shed::vars(|v| v.try_get_var_meta_for_write(var_name)).unwrap_or_else(|| {
               let kind = if is_arr {
@@ -336,7 +335,7 @@ impl super::Dispatcher {
           }
 
           let indexed = if let Some((name, idx)) = indexed {
-            let tag = Shed::vars(|v| v.try_get_var_kind_tag(&name.to_str_lossy()))
+            let tag = Shed::vars(|v| v.try_get_var_kind_tag(&name))
               .unwrap_or(VarKindTag::Arr);
             Some((name, idx.resolve_for(tag)?))
           } else {
@@ -345,7 +344,7 @@ impl super::Dispatcher {
 
           if let Some((name, idx)) = indexed {
             Shed::vars_mut(|v| {
-              v.set_var_indexed(&name.to_str_lossy(), idx, var.into(), VarFlags::empty())
+              v.set_var_indexed(&name, idx, var.into(), VarFlags::empty())
             })?;
           } else {
             set_var!(var_name, var.kind().clone())?;

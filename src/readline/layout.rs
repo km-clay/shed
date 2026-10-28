@@ -228,13 +228,13 @@ pub(super) fn redraw(
   // Reset SGR
   write_term!("\x1b[0m").ok();
 
-  if let Some(prefix) = try_var!("SHELL_PROMPT_PREFIX") {
+  if let Some(prefix) = try_var!(b"SHELL_PROMPT_PREFIX") {
     write_term!("{prefix}").ok();
   }
 
   write_term!("{padded_prompt}").ok();
 
-  if let Some(suffix) = try_var!("SHELL_PROMPT_SUFFIX") {
+  if let Some(suffix) = try_var!(b"SHELL_PROMPT_SUFFIX") {
     write_term!("{suffix}").ok();
   }
 

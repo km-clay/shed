@@ -426,8 +426,8 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
         // Caller is about to execute this anyway (cmd sub, pipeline, etc),
         // so source the autoload now while we have the chance.
         let autoload_src = Shed::logic_mut(|l| {
-          if let Some(ShFunc::Autoload(_)) = l.get_func_ref(&func_name.to_str_lossy()) {
-            let func = l.remove_func(&func_name.to_str_lossy())?;
+          if let Some(ShFunc::Autoload(_)) = l.get_func_ref(&func_name) {
+            let func = l.remove_func(&func_name)?;
             if let ShFunc::Autoload(src) = func {
               return Some(src);
             }
@@ -446,7 +446,7 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
         // Cached verdict: outer None means cache miss (compute below); outer
         // Some(inner) short-circuits, with inner None = not internal.
         let cached = Shed::logic(|l| {
-          let Some(func) = l.get_func_ref(&func_name.to_str_lossy()) else {
+          let Some(func) = l.get_func_ref(&func_name) else {
             return Some(None);
           };
 
@@ -471,7 +471,7 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
 
         // Cache miss: function exists, is Defined, is_internal is None.
         // Mark Checking and clone the body in a single borrow.
-        let Some(logic) = Shed::logic_mut(|l| match l.get_func_mut(&func_name.to_str_lossy()) {
+        let Some(logic) = Shed::logic_mut(|l| match l.get_func_mut(&func_name) {
           Some(ShFunc::Defined {
             logic, is_internal, ..
           }) => {
@@ -495,7 +495,7 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
           ForkBehavior::Always
         };
         Shed::logic_mut(|l| {
-          if let Some(func) = l.get_func_mut(&func_name.to_str_lossy()) {
+          if let Some(func) = l.get_func_mut(&func_name) {
             func.set_is_internal(IsInternal::Resolved(behavior)).ok();
           }
         });

@@ -5,6 +5,9 @@
 
 use std::{path::PathBuf, rc::Rc};
 
+use bstr::ByteSlice;
+use itertools::Itertools;
+
 use crate::{
   HashSet,
   builtin::{self, BUILTIN_NAMES},
@@ -19,9 +22,9 @@ use crate::{
 };
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
-pub(crate) fn lookup_cmd(cmd: &str) -> Option<PathBuf> {
-  if cmd.contains('/') {
-    let p = PathBuf::from(cmd);
+pub(crate) fn lookup_cmd(cmd: &[u8]) -> Option<PathBuf> {
+  if cmd.contains(&b'/') {
+    let p = PathBuf::from(VarStr::from(cmd));
     return p.is_file().then_some(p);
   }
   let path = Shed::meta_mut(|m| {
@@ -34,13 +37,14 @@ pub(crate) fn lookup_cmd(cmd: &str) -> Option<PathBuf> {
   if let Some(p) = path {
     return Some(p);
   }
-  let path_env = var!("PATH");
-  let resolved = paths::resolve_in_path(&path_env.to_str_lossy(), cmd)?;
-  Shed::meta_mut(|m| m.cache_cmd(cmd.to_string(), resolved.clone()));
+  let path_env = var!(b"PATH");
+  let resolved = paths::resolve_in_path(&path_env, cmd)?;
+
+  Shed::meta_mut(|m| m.cache_cmd(cmd, resolved.clone()));
   Some(resolved)
 }
 
-pub(crate) fn which_util(name: &str) -> Option<Rc<Utility>> {
+pub(crate) fn which_util(name: &[u8]) -> Option<Rc<Utility>> {
   if Shed::logic(|l| l.get_alias(name).is_some()) {
     return Some(Rc::new(Utility::alias(name.into())));
   }
@@ -56,7 +60,7 @@ pub(crate) fn which_util(name: &str) -> Option<Rc<Utility>> {
   // Last resort: an executable file living in $PWD that isn't in $PATH.
   MetaTab::get_exec_files_in_cwd()
     .into_iter()
-    .find(|u| u.name() == name)
+    .find(|u| *u.name() == *name)
 }
 
 pub(crate) fn try_hash() {
@@ -71,8 +75,8 @@ pub(crate) fn list_util_names() -> HashSet<VarStr> {
     .into_iter()
     .map(|u| u.name());
   let builtin_names = BUILTIN_NAMES.iter().map(|n| VarStr::from(*n));
-  let func_names    = Shed::logic(|l| l.funcs().keys().map(VarStr::from).collect::<Vec<_>>());
-  let aliases       = Shed::logic(|l| l.aliases().keys().map(VarStr::from).collect::<Vec<_>>());
+  let func_names    = Shed::logic(|l| l.funcs().keys().cloned().collect_vec());
+  let aliases       = Shed::logic(|l| l.aliases().keys().cloned().collect_vec());
 
   cmd_names.extend(path_cmds);
   cmd_names.extend(builtin_names);
@@ -131,7 +135,7 @@ mod lookup_cmd_tests {
     let _g = TestGuard::new();
     crate::shopt_mut!(set.hashall = true);
     try_hash();
-    let path = lookup_cmd("ls");
+    let path = lookup_cmd(b"ls");
     assert!(path.is_some(), "expected Some(path) for 'ls'");
     // Whatever the path is, it should end with "ls".
     let path = path.unwrap();
@@ -145,14 +149,14 @@ mod lookup_cmd_tests {
     }
     let _g = TestGuard::new();
     crate::shopt_mut!(set.hashall = false);
-    let path = lookup_cmd("ls");
+    let path = lookup_cmd(b"ls");
     assert!(path.is_some(), "expected Some(path) for 'ls'");
   }
 
   #[test]
   fn lookup_returns_none_for_unknown_command() {
     let _g = TestGuard::new();
-    assert!(lookup_cmd("definitely_not_a_real_binary_zzzqqq").is_none());
+    assert!(lookup_cmd(b"definitely_not_a_real_binary_zzzqqq").is_none());
   }
 }
 
@@ -169,7 +173,7 @@ mod check_typo_tests {
   use crate::tests::testutil::TestGuard;
 
   fn alias(name: &str) {
-    Shed::logic_mut(|l| l.insert_alias(name, &"echo".into(), Span::default()));
+    Shed::logic_mut(|l| l.insert_alias(name.as_bytes(), &"echo".into(), Span::default()));
   }
 
   fn suggestions(cmd: &str) -> Vec<String> {

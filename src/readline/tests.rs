@@ -934,7 +934,7 @@ macro_rules! alias_expansion_test {
           Shed::shopts_mut(|o| o.prompt.expand_aliases = true);
           Shed::logic_mut(|l| {
             for (name, body) in $aliases {
-              l.insert_alias(name, &(*body).into(), Span::default());
+              l.insert_alias(name.as_bytes(), &(*body).into(), Span::default());
             }
           });
 
@@ -955,7 +955,7 @@ macro_rules! alias_expansion_test {
             Shed::shopts_mut(|o| o.prompt.expand_aliases = true);
             Shed::logic_mut(|l| {
               for (name, body) in $aliases2 {
-                l.insert_alias(name, &(*body).into(), Span::default());
+                l.insert_alias(name.as_bytes(), &(*body).into(), Span::default());
               }
             });
 
@@ -1006,7 +1006,7 @@ fn alias_no_expand_when_disabled() {
   let _g = TestGuard::new();
   Shed::shopts_mut(|o| o.prompt.expand_aliases = false);
   Shed::logic_mut(|l| {
-    l.insert_alias("gc", &"git commit".into(), Span::default());
+    l.insert_alias(b"gc", &"git commit".into(), Span::default());
   });
 
   let     prompt = Prompt::default();
@@ -1028,7 +1028,7 @@ fn alias_no_inline_expand_when_disabled() {
   let _g = TestGuard::new();
   Shed::shopts_mut(|o| o.prompt.expand_aliases = false);
   Shed::logic_mut(|l| {
-    l.insert_alias("gc", &"git commit".into(), Span::default());
+    l.insert_alias(b"gc", &"git commit".into(), Span::default());
   });
 
   let     prompt = Prompt::default();
@@ -2028,9 +2028,9 @@ mod readline_mod_coverage {
   fn prompt_new_uses_ps1_and_psr_when_set() {
     let _g = TestGuard::new();
     Shed::vars_mut(|v| {
-      v.set_var("PS1", VarKind::string("PS1_RAW".into()), VarFlags::empty())
+      v.set_var(b"PS1", VarKind::string("PS1_RAW".into()), VarFlags::empty())
         .unwrap();
-      v.set_var("PSR", VarKind::string("PSR_RAW".into()), VarFlags::empty())
+      v.set_var(b"PSR", VarKind::string("PSR_RAW".into()), VarFlags::empty())
         .unwrap();
     });
     let mut p = Prompt::new();
@@ -2043,7 +2043,7 @@ mod readline_mod_coverage {
   fn prompt_new_falls_back_to_default_when_ps1_unset() {
     let     _g = TestGuard::new();
     // PS1 should be unset for this test (TestGuard clears env).
-    let     _  = Shed::vars_mut(|v| v.unset_var("PS1"));
+    let     _  = Shed::vars_mut(|v| v.unset_var(b"PS1"));
     let mut p  = Prompt::new();
     // Default PS1 expands; it's non-empty.
     assert!(!p.get_ps1().is_empty());
@@ -2365,7 +2365,7 @@ mod normal_command_mappings {
     });
   }
   fn unregister(keys: &str) {
-    Shed::logic_mut(|l| l.remove_keymap(keys, KeyMapFlags::NORMAL));
+    Shed::logic_mut(|l| l.remove_keymap(keys.as_bytes(), KeyMapFlags::NORMAL));
   }
 
   #[test]

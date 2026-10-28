@@ -19,7 +19,7 @@ fn has_braces(span: Option<Span>, s: &[u8]) -> bool {
   if !s.contains(&b'{') {
     return false;
   }
-  let s = var::expand_raw(span, &mut SegStream::from_bytes(s).cursor())
+  let s = var::expand_raw(span, &mut SegStream::from_slice(s).cursor())
     .map_or_else(|_| VarStr::from(s), |sg| sg.content());
   let mut bytes           = SliceCursor::new(&s);
   let mut depth           = 0;

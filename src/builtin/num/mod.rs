@@ -64,7 +64,7 @@ fn emit(
   args: &BuiltinArgs,
 ) -> ShResult<()> {
   if let Some(name) = args.opt_value("array") {
-    Shed::vars_mut(|v| v.set_var(&name.to_str_lossy(), VarKind::arr(vals), VarFlags::empty()))
+    Shed::vars_mut(|v| v.set_var(&name, VarKind::arr(vals), VarFlags::empty()))
       .promote_err(args.cmd_span())?;
   } else {
     for (i, v) in vals.enumerate() {

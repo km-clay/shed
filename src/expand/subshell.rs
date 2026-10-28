@@ -349,7 +349,7 @@ mod tests {
     // cwd_guard keys off `$PWD`; give it a baseline to save/compare against.
     Shed::vars_mut(|v| {
       v.set_var(
-        "PWD",
+        b"PWD",
         VarKind::string(start.to_string_lossy().into()),
         VarFlags::EXPORT,
       )

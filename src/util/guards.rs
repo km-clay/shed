@@ -158,10 +158,10 @@ pub(crate) fn function_scope_guard(args: Option<Vec<Word>>) -> impl Drop {
 }
 
 pub(crate) fn cwd_guard() -> impl Drop {
-  let saved = try_var!("PWD");
+  let saved = try_var!(b"PWD");
   guard(saved, |saved| {
     if let Some(cwd) = saved
-      && var!("PWD") != cwd
+      && var!(b"PWD") != cwd
     {
       let _ = std::env::set_current_dir(cwd);
     }
@@ -169,10 +169,10 @@ pub(crate) fn cwd_guard() -> impl Drop {
 }
 
 pub(crate) fn umask_guard() -> impl Drop {
-  let saved = try_var!("UMASK");
+  let saved = try_var!(b"UMASK");
   guard(saved, |saved| {
     if let Some(umask) = saved
-      && var!("UMASK") != umask
+      && var!(b"UMASK") != umask
       && let Ok(bits) = stat::mode_t::from_str_radix(&umask.to_str_lossy(), 8)
     {
       let _ = stat::umask(stat::Mode::from_bits_truncate(bits));
@@ -200,7 +200,7 @@ pub(crate) fn var_ctx_guard(
   guard(vars, |vars| {
     Shed::vars_mut(|v| {
       for var in &vars {
-        v.unset_var(&var.to_str_lossy()).ok();
+        v.unset_var(var).ok();
       }
     });
   })
@@ -208,7 +208,7 @@ pub(crate) fn var_ctx_guard(
 
 /// Snapshot and restore the variables used in prefix assignment
 pub(crate) fn prefix_assign_guard(tree: &Ast, assignments: &[NodeId]) -> impl Drop {
-  let saved: Vec<(String, Option<Var>)> = assignments
+  let saved: Vec<(VarStr, Option<Var>)> = assignments
     .iter()
     .filter_map(|a| match &tree[*a].class {
       NdRule::Assignment { var, .. } => {
@@ -221,8 +221,8 @@ pub(crate) fn prefix_assign_guard(tree: &Ast, assignments: &[NodeId]) -> impl Dr
       _ => None,
     })
     .map(|name| {
-      let prior = Shed::vars(|v| v.try_get_var_meta(&name.to_str_lossy()));
-      (name.to_str_lossy().to_string(), prior)
+      let prior = Shed::vars(|v| v.try_get_var_meta(&name));
+      (name, prior)
     })
     .collect();
 

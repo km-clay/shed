@@ -123,12 +123,12 @@ fn unescape_with(stream: SegStream, flags: ExpandFlags) -> SegStream {
   }
 
   let mut cursor = stream.cursor();
-  let mut out    = SegStream::new();
+  let mut out    = SegStream::default();
 
   let (word_breaks, mut last_was_word_break, mut first_char) = if flags.contains(ExpandFlags::TILDE)
   {
-    let wb  = try_var!("COMP_WORDBREAKS").unwrap_or("\"'><=;|&(: ".into());
-    let ifs = try_var!("IFS").unwrap_or(" \t\n".into());
+    let wb  = try_var!(b"COMP_WORDBREAKS").unwrap_or("\"'><=;|&(: ".into());
+    let ifs = try_var!(b"IFS").unwrap_or(" \t\n".into());
 
     (Some(wb.chain(ifs)), false, true)
   } else {
@@ -231,7 +231,7 @@ fn unescape_with(stream: SegStream, flags: ExpandFlags) -> SegStream {
 /// Full word-context unescape: all substitutions, quote sub-machines, tildes,
 /// process subs, escapes. Used by the main expansion pipeline.
 pub(crate) fn unescape_str(raw: &[u8]) -> SegStream {
-  unescape_with(SegStream::from_bytes(raw), ExpandFlags::WORD)
+  unescape_with(SegStream::from_slice(raw), ExpandFlags::WORD)
 }
 
 /// Like `unescape_str` but for the pattern/replacement operand of a parameter
@@ -245,7 +245,7 @@ pub(crate) fn unescape_pattern(raw: SegStream) -> SegStream {
 /// Prompt-context unescape: $var, ${var}, $(cmd), backticks. No quote handling,
 /// no tildes, no procsubs, no bare subshells. Used by `prompt.substitute`.
 pub(crate) fn unescape_prompt(raw: &str) -> SegStream {
-  unescape_with(SegStream::from_bytes(raw.as_bytes()), ExpandFlags::PROMPT)
+  unescape_with(SegStream::from(raw), ExpandFlags::PROMPT)
 }
 
 fn read_varsub(stream: &mut SegCursor, out: &mut SegStream) -> bool {
@@ -402,8 +402,8 @@ fn read_dub_quote(stream: &mut SegCursor, out: &mut SegStream) {
 }
 
 pub(crate) fn expand_ansi_c(s: &[u8]) -> VarStr {
-  let     input = SegStream::from_bytes(s);
-  let mut out   = SegStream::new();
+  let     input = SegStream::from_slice(s);
+  let mut out   = SegStream::default();
   expand_ansi_c_stream(&mut input.cursor(), &mut out, None);
   out.content()
 }
@@ -652,7 +652,7 @@ fn read_backtick(stream: &mut SegCursor, out: &mut SegStream, in_dquote: bool) {
 /// Heredoc body: $var / ${var} / $(cmd) / backticks only. Quotes, tildes,
 /// globs, process subs, and bare subshells all pass through as literal text.
 pub(crate) fn unescape_heredoc(raw: &[u8]) -> SegStream {
-  unescape_with(SegStream::from_bytes(raw), ExpandFlags::HEREDOC)
+  unescape_with(SegStream::from_slice(raw), ExpandFlags::HEREDOC)
 }
 
 pub(crate) fn escape_str(raw: &str) -> String {
@@ -698,7 +698,7 @@ pub(crate) fn escape_str_bounded(raw: &str, bound: Option<&Range<usize>>) -> Str
 
 pub(crate) fn unescape_math(raw: &[u8]) -> ShResult<SegStream> {
   let mut cur      = SliceCursor::new(raw);
-  let mut out      = SegStream::new();
+  let mut out      = SegStream::default();
   let mut qt_state = QuoteState::default();
 
   match_loop!(cur.next_byte() => ch, {

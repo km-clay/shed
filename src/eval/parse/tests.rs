@@ -886,7 +886,7 @@ fn heredoc_multiline_output() {
 #[test]
 fn heredoc_variable_expansion() {
   let guard = TestGuard::new();
-  set_var!("NAME", VarKind::Str("world".into())).unwrap();
+  set_var!(b"NAME", VarKind::Str("world".into())).unwrap();
   test_input("cat <<EOF\nhello $NAME\nEOF".to_string()).unwrap();
   let out = guard.read_output();
   assert_eq!(out, "hello world\n");
@@ -895,7 +895,7 @@ fn heredoc_variable_expansion() {
 #[test]
 fn heredoc_literal_no_expansion() {
   let guard = TestGuard::new();
-  set_var!("NAME", VarKind::Str("world".into())).unwrap();
+  set_var!(b"NAME", VarKind::Str("world".into())).unwrap();
   test_input("cat <<'EOF'\nhello $NAME\nEOF".to_string()).unwrap();
   let out = guard.read_output();
   assert_eq!(out, "hello $NAME\n");
@@ -951,7 +951,7 @@ fn heredoc_space_before_unquoted_delim() {
 #[test]
 fn heredoc_space_before_single_quoted_delim() {
   let guard = TestGuard::new();
-  set_var!("NAME", VarKind::Str("world".into())).unwrap();
+  set_var!(b"NAME", VarKind::Str("world".into())).unwrap();
   test_input("cat << 'EOF'\nhello $NAME\nEOF".to_string()).unwrap();
   let out = guard.read_output();
   // Single-quoted delim → literal heredoc, no expansion.
@@ -1009,7 +1009,7 @@ fn herestring_basic() {
 #[test]
 fn herestring_variable_expansion() {
   let guard = TestGuard::new();
-  set_var!("MSG", VarKind::Str("hi there".into())).unwrap();
+  set_var!(b"MSG", VarKind::Str("hi there".into())).unwrap();
   test_input("cat <<< $MSG".to_string()).unwrap();
   let out = guard.read_output();
   assert_eq!(out, "hi there\n");
@@ -1029,7 +1029,7 @@ fn herestring_in_func_body_defers_expansion() {
 #[test]
 fn heredoc_double_quoted_delimiter_is_literal() {
   let guard = TestGuard::new();
-  set_var!("X", VarKind::Str("val".into())).unwrap();
+  set_var!(b"X", VarKind::Str("val".into())).unwrap();
   test_input("cat <<\"EOF\"\nhello $X\nEOF".to_string()).unwrap();
   let out = guard.read_output();
   assert_eq!(out, "hello $X\n");
@@ -1183,7 +1183,7 @@ fn try_block_continues_after_catch() {
 #[test]
 fn try_block_catch_message_expansion() {
   let guard = TestGuard::new();
-  set_var!("name", VarKind::Str("world".into())).unwrap();
+  set_var!(b"name", VarKind::Str("world".into())).unwrap();
   test_input(r#"try false; catch "hello $name""#).unwrap();
   let out = guard.read_output();
   assert!(

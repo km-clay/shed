@@ -554,7 +554,7 @@ impl super::Dispatcher {
         for (var, val) in chunk_iter {
           Shed::vars_mut(|v| {
             v.set_var(
-              &var.to_str_lossy(),
+              var,
               VarKind::string(val.clone()),
               VarFlags::empty(),
             )

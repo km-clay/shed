@@ -109,6 +109,16 @@ fn dec_map_depth() {
   KEYMAP_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
 }
 
+fn set_editmode_var(mode: &dyn EditMode) -> ShResult<()> {
+  Shed::vars_mut(|v| {
+    v.set_var(
+      b"SHED_EDIT_MODE",
+      VarKind::string(mode.report_mode().to_string().into()),
+      VarFlags::empty(),
+    )
+  })
+}
+
 /// Convenience macro to create a boxed edit mode instance
 #[macro_export]
 macro_rules! mode {
@@ -315,7 +325,7 @@ impl Prompt {
   pub(crate) fn new() -> Self {
     autocmd!(PrePrompt);
 
-    let Some(ps1_raw) = try_var!("PS1") else {
+    let Some(ps1_raw) = try_var!(b"PS1") else {
       return Self::default();
     };
     // PS1 expansion may involve running commands (e.g., for \h or \W), which can modify shell state
@@ -323,7 +333,7 @@ impl Prompt {
     else {
       return Self::default();
     };
-    let psr_raw = try_var!("PSR");
+    let psr_raw = try_var!(b"PSR");
     let psr_expanded = psr_raw
       .clone()
       .map(|r| util::with_saved_status(|| prompt::expand_prompt(r.as_bytes())))
@@ -645,14 +655,9 @@ impl ShedLine {
       overlay_cursor_offset: 0,
       worker: HintWorker::new()?,
     };
-    Shed::vars_mut(|v| {
-      v.set_var(
-        "SHED_EDIT_MODE",
-        VarKind::string(new.core.mode.report_mode().to_string().into()),
-        VarFlags::empty(),
-      )
-    })?;
+    set_editmode_var(&*new.core.mode).ok();
     new.refresh_ui();
+
     queue_term!(TermCtl::PrintChar('\n')).ok();
     new.print_line(false)?;
     Ok(new)
@@ -734,10 +739,10 @@ impl ShedLine {
     self.refresh_ui();
     self.core.editor = LineBuf::default();
     Shed::vars_mut(|v| {
-      v.set_var("EDITOR_LINES", VarKind::Int(1), VarFlags::READONLY)?;
-      v.set_var("EDITOR_LINE", VarKind::Int(1), VarFlags::READONLY)?;
+      v.set_var(b"EDITOR_LINES", VarKind::Int(1), VarFlags::READONLY)?;
+      v.set_var(b"EDITOR_LINE", VarKind::Int(1), VarFlags::READONLY)?;
       v.set_var(
-        "EDITOR_FILE",
+        b"EDITOR_FILE",
         VarKind::string(VarStr::default()),
         VarFlags::READONLY,
       )
@@ -862,14 +867,7 @@ impl ShedLine {
           autocmd!(OnHistorySelect);
         });
 
-        Shed::vars_mut(|v| {
-          v.set_var(
-            "SHED_EDIT_MODE",
-            VarKind::string(self.core.mode.report_mode().to_string().into()),
-            VarFlags::empty(),
-          )
-        })
-        .ok();
+        set_editmode_var(&*self.core.mode).ok();
         self.refresh_ui();
         self.needs_redraw = true;
       }
@@ -885,15 +883,8 @@ impl ShedLine {
         if let Some(finder) = self.history_fzf() {
           finder.clear();
         }
+        set_editmode_var(&*self.core.mode).ok();
         self.focused_history().stop_search();
-        Shed::vars_mut(|v| {
-          v.set_var(
-            "SHED_EDIT_MODE",
-            VarKind::string(self.core.mode.report_mode().to_string().into()),
-            VarFlags::empty(),
-          )
-        })
-        .ok();
         self.refresh_ui();
         self.needs_redraw = true;
       }
@@ -920,14 +911,7 @@ impl ShedLine {
         comp.clear();
       }
       this.completer = None;
-      Shed::vars_mut(|v| {
-        v.set_var(
-          "SHED_EDIT_MODE",
-          VarKind::string(this.core.mode.report_mode().to_string().into()),
-          VarFlags::empty(),
-        )
-      })
-      .ok();
+      set_editmode_var(&*this.core.mode).ok();
       this.refresh_ui();
       this.needs_redraw = true;
       Ok(())
@@ -954,14 +938,7 @@ impl ShedLine {
         self.completer = None;
         self.needs_redraw = true;
 
-        Shed::vars_mut(|v| {
-          v.set_var(
-            "SHED_EDIT_MODE",
-            VarKind::string(self.core.mode.report_mode().to_string().into()),
-            VarFlags::empty(),
-          )
-        })
-        .ok();
+        set_editmode_var(&*self.core.mode).ok();
         self.refresh_ui();
 
         params::with_vars(
@@ -1098,14 +1075,7 @@ impl ShedLine {
       }
     }
     if self.completer.is_none() && self.history_fzf().is_none() {
-      Shed::vars_mut(|v| {
-        v.set_var(
-          "SHED_EDIT_MODE",
-          VarKind::string(self.core.mode.report_mode().to_string().into()),
-          VarFlags::empty(),
-        )
-      })
-      .ok();
+      set_editmode_var(&*self.core.mode).ok();
     }
 
     // Redraw if we processed any input
@@ -1293,10 +1263,10 @@ impl ShedLine {
           });
         let cand_assoc = VarKind::AssocArr(cand_vec);
 
-        Shed::vars_mut(|v| v.set_var("MATCHES", cand_assoc, VarFlags::LOCAL).unwrap());
+        Shed::vars_mut(|v| v.set_var(b"MATCHES", cand_assoc, VarFlags::LOCAL).unwrap());
         Shed::vars_mut(|v| {
           v.set_var(
-            "NUM_MATCHES",
+            b"NUM_MATCHES",
             VarKind::Int(num_candidates as i32),
             VarFlags::LOCAL,
           )
@@ -1304,7 +1274,7 @@ impl ShedLine {
         .unwrap();
         Shed::vars_mut(|v| {
           v.set_var(
-            "SEARCH_STR",
+            b"SEARCH_STR",
             VarKind::string(comp.token().into()),
             VarFlags::LOCAL,
           )
@@ -1333,9 +1303,9 @@ impl ShedLine {
 
         crate::defer! {
           Shed::vars_mut(|v| {
-            v.unset_var("MATCHES").ok();
-            v.unset_var("NUM_MATCHES").ok();
-            v.unset_var("SEARCH_STR").ok();
+            v.unset_var(b"MATCHES").ok();
+            v.unset_var(b"NUM_MATCHES").ok();
+            v.unset_var(b"SEARCH_STR").ok();
           })
         }
 
@@ -1343,7 +1313,7 @@ impl ShedLine {
           autocmd!(OnCompletionCancel);
         } else if comp.is_active() {
           let Ok(Some(VarKind::AssocArr(filtered))) =
-            Shed::vars_mut(|v| v.try_take_var_kind("MATCHES"))
+            Shed::vars_mut(|v| v.try_take_var_kind(b"MATCHES"))
           else {
             system_msg!("completion error: MATCHES variable must be an associative array");
 
@@ -1363,14 +1333,7 @@ impl ShedLine {
             self.apply_completion(comp.as_ref(), &line, cand);
           } else {
             self.completer = Some(comp);
-            Shed::vars_mut(|v| {
-              v.set_var(
-                "SHED_EDIT_MODE",
-                VarKind::string("COMPLETE".into()),
-                VarFlags::empty(),
-              )
-            })
-            .ok();
+            set_editmode_var(&*self.core.mode).ok();
             self.refresh_ui();
             self.needs_redraw = true;
             self.core.editor.clear_hint();
@@ -1400,14 +1363,7 @@ impl ShedLine {
       self.focused_history().reset_to_pending();
     }
     self.update_editor_hint();
-    Shed::vars_mut(|v| {
-      v.set_var(
-        "SHED_EDIT_MODE",
-        VarKind::string(self.core.mode.report_mode().to_string().into()),
-        VarFlags::empty(),
-      )
-    })
-    .ok();
+    set_editmode_var(&*self.core.mode).ok();
   }
 
   fn start_hist_search(&mut self) {
@@ -1460,14 +1416,9 @@ impl ShedLine {
           self.core.focused_editor().set_buffer(cand.content());
           self.core.focused_editor().move_cursor_to_end();
         }
-        Shed::vars_mut(|v| {
-          v.set_var(
-            "SHED_EDIT_MODE",
-            VarKind::string("SEARCH".into()),
-            VarFlags::empty(),
-          )
-        })
-        .ok();
+
+        set_editmode_var(&*self.core.mode).ok();
+
         self.refresh_ui();
         self.needs_redraw = true;
         self.core.editor.clear_hint();

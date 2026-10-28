@@ -220,7 +220,7 @@ fn interactive_setup(
     }
   }
 
-  if let Some(welcome) = try_var!("SHELL_WELCOME") {
+  if let Some(welcome) = try_var!(b"SHELL_WELCOME") {
     // support for systemd's run0 message
     errln!("\n{welcome}\n\n");
   }
@@ -950,7 +950,7 @@ mod tests {
 
     assert!(h.vi_mode, "harness vi_mode flag should now be true");
     // ShedLine's actual mode should be ViInsert, which reports "INSERT".
-    assert_eq!(var!("SHED_EDIT_MODE"), "INSERT");
+    assert_eq!(var!(b"SHED_EDIT_MODE"), "INSERT");
   }
 
   #[test]
@@ -979,7 +979,7 @@ mod tests {
     // For a 50ms idle interval, as_secs() truncates to 0, so IDLE_SECONDS
     // expands to "0". The non-empty check guards against the regression
     // where the variable isn't set at all.
-    let fired = var!("IDLE_FIRED");
+    let fired = var!(b"IDLE_FIRED");
     assert!(
       !fired.is_empty(),
       "expected IDLE_FIRED to be set by on-idle-timeout autocmd; got empty"

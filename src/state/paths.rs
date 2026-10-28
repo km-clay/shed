@@ -8,14 +8,17 @@ use crate::{HashMap, state::vars::VarStr, util::strops};
 use super::try_var;
 
 use std::{
-  os::unix::{ffi::OsStrExt, fs::PermissionsExt},
-  path::{Path, PathBuf},
-  time::SystemTime,
+  ffi::OsStr, os::unix::{ffi::OsStrExt, fs::PermissionsExt}, path::{Path, PathBuf}, time::SystemTime,
 };
 
 use nix::unistd::{User, getuid};
 
 use super::var;
+
+pub(crate) fn bytes_to_path(bytes: &[u8]) -> PathBuf {
+  use std::os::unix::ffi::OsStrExt;
+  PathBuf::from(OsStr::from_bytes(bytes))
+}
 
 /// Caches the current state of a path-list-style env var (e.g. `$SHED_HPATH`)
 /// so consumers can cheaply detect when either the var's value or any of the
@@ -28,7 +31,7 @@ use super::var;
 /// checked. The common "nothing changed" case costs one stat per directory
 /// plus one stat per cached file.
 pub(crate) struct PathCache {
-  name    : String,
+  name    : VarStr,
   path_raw: VarStr,
   entries : HashMap<PathBuf, EntryCache>,
 }
@@ -46,7 +49,7 @@ enum EntryCache {
 
 pub(crate) fn path_from_bytes(bytes: &[u8]) -> &Path {
   use std::os::unix::ffi::OsStrExt;
-  std::ffi::OsStr::from_bytes(bytes).as_ref()
+  OsStr::from_bytes(bytes).as_ref()
 }
 
 fn mtime_of(path: &Path) -> SystemTime {
@@ -82,9 +85,9 @@ fn build_entry(path: &Path) -> EntryCache {
 }
 
 impl PathCache {
-  pub(crate) fn new(name: String) -> Self {
+  pub(crate) fn new(name: VarStr) -> Self {
     let path_raw = var!(&name);
-    let entries  = Self::build_entries(&path_raw.to_str_lossy());
+    let entries  = Self::build_entries(&path_raw);
     Self {
       name,
       path_raw,
@@ -92,7 +95,7 @@ impl PathCache {
     }
   }
 
-  fn build_entries(path_raw: &str) -> HashMap<PathBuf, EntryCache> {
+  fn build_entries(path_raw: &[u8]) -> HashMap<PathBuf, EntryCache> {
     split_path_list(path_raw)
       .map(|p| {
         let entry = build_entry(&p);
@@ -108,7 +111,7 @@ impl PathCache {
     let path_raw = var!(&self.name);
     if path_raw != self.path_raw {
       self.path_raw = path_raw;
-      self.entries = Self::build_entries(&self.path_raw.to_str_lossy());
+      self.entries = Self::build_entries(&self.path_raw);
       return true;
     }
 
@@ -148,9 +151,9 @@ impl PathCache {
   }
 }
 
-pub(crate) fn resolve_in_path(path_list: &str, cmd: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_in_path(path_list: &[u8], cmd: &[u8]) -> Option<PathBuf> {
   for dir in split_path_list(path_list) {
-    let candidate = dir.join(cmd);
+    let candidate = dir.join(OsStr::from_bytes(cmd));
     if let Ok(meta) = std::fs::metadata(&candidate)
       && meta.is_file()
       && meta.permissions().mode() & 0o111 != 0
@@ -162,14 +165,14 @@ pub(crate) fn resolve_in_path(path_list: &str, cmd: &str) -> Option<PathBuf> {
 }
 
 /// Split a POSIX path-list-style string (colon separated paths) into an iterator of `PathBuf`s.
-pub(crate) fn split_path_list(path_list: &str) -> impl Iterator<Item = PathBuf> {
+pub(crate) fn split_path_list(path_list: &[u8]) -> impl Iterator<Item = PathBuf> {
   let paths = strops::split_all_with(
-    path_list.as_bytes(),
+    path_list,
     |paths| strops::split_at_unescaped(paths, b":"),
-    |start, end| path_list[start..end].to_string(),
+    |start, end| bytes_to_path(&path_list[start..end]),
   );
 
-  paths.into_iter().map(PathBuf::from)
+  paths.into_iter()
 }
 
 pub(crate) fn path_entries<P: AsRef<Path>>(path: P) -> impl Iterator<Item = std::fs::DirEntry> {
@@ -182,7 +185,7 @@ pub(crate) fn path_entries<P: AsRef<Path>>(path: P) -> impl Iterator<Item = std:
     .filter_map(Result::ok)
 }
 
-pub(crate) fn path_list_entries(path_list: &str) -> impl Iterator<Item = std::fs::DirEntry> {
+pub(crate) fn path_list_entries(path_list: &[u8]) -> impl Iterator<Item = std::fs::DirEntry> {
   let paths = split_path_list(path_list);
 
   paths.flat_map(|p| {
@@ -278,32 +281,32 @@ pub(crate) fn display_path_bytes(path: &Path) -> Vec<u8> {
 
 #[derive(Debug, Clone, Copy)]
 enum Fallback {
-  Dir(&'static str),
-  Var(&'static str),
+  Dir(&'static [u8]),
+  Var(&'static [u8]),
 }
 
-fn get_dir(env: &str) -> Option<PathBuf> {
+fn get_dir(env: &[u8]) -> Option<PathBuf> {
   try_var!(env).map(PathBuf::from).filter(|p| p.is_absolute())
 }
 
-fn xdg_dir(env: &str, fallback: Fallback) -> Option<PathBuf> {
+fn xdg_dir(env: &[u8], fallback: Fallback) -> Option<PathBuf> {
   get_dir(env).or_else(|| match fallback {
-    Fallback::Dir(d) => get_home().map(|h| h.join(d)),
+    Fallback::Dir(d) => get_home().map(|h| h.join(OsStr::from_bytes(d))),
     Fallback::Var(v) => get_dir(v),
   })
 }
 
 pub(crate) fn data_dir() -> Option<PathBuf> {
-  xdg_dir("XDG_DATA_HOME", Fallback::Dir(".local/share"))
+  xdg_dir(b"XDG_DATA_HOME", Fallback::Dir(b".local/share"))
 }
 pub(crate) fn state_dir() -> Option<PathBuf> {
-  xdg_dir("XDG_STATE_HOME", Fallback::Dir(".local/state"))
+  xdg_dir(b"XDG_STATE_HOME", Fallback::Dir(b".local/state"))
 }
 pub(crate) fn config_dir() -> Option<PathBuf> {
-  xdg_dir("XDG_CONFIG_HOME", Fallback::Dir(".config"))
+  xdg_dir(b"XDG_CONFIG_HOME", Fallback::Dir(b".config"))
 }
 pub(crate) fn runtime_dir() -> Option<PathBuf> {
-  xdg_dir("XDG_RUNTIME_DIR", Fallback::Var("TMPDIR"))
+  xdg_dir(b"XDG_RUNTIME_DIR", Fallback::Var(b"TMPDIR"))
 }
 
 pub(crate) fn get_exe_path() -> Option<VarStr> {
@@ -313,7 +316,7 @@ pub(crate) fn get_exe_path() -> Option<VarStr> {
 }
 
 pub(crate) fn get_home() -> Option<PathBuf> {
-  try_var!("HOME")
+  try_var!(b"HOME")
     .map(PathBuf::from)
     .or_else(|| User::from_uid(getuid()).ok().flatten().map(|u| u.dir))
 }
@@ -332,13 +335,13 @@ mod xdg_resolver_tests {
 
   fn set_var(name: &str, val: &str) {
     Shed::vars_mut(|v| {
-      v.set_var(name, VarKind::Str(val.into()), VarFlags::EXPORT)
+      v.set_var(name.as_bytes(), VarKind::Str(val.into()), VarFlags::EXPORT)
         .unwrap();
     });
   }
   fn unset_var(name: &str) {
     Shed::vars_mut(|v| {
-      v.unset_var(name).ok();
+      v.unset_var(name.as_bytes()).ok();
     });
   }
 

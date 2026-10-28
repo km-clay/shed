@@ -326,10 +326,10 @@ pub(crate) fn eval_binary(op: &BinaryOp, lhs: &Word, rhs: &Word, extended: bool)
             .iter()
             .map(|m| m.map(|mat| VarStr::from(mat.as_str())).unwrap_or_default())
             .collect();
-          set_var!("SHED_REMATCH", VarKind::arr(groups); LOCAL)?;
+          set_var!(b"SHED_REMATCH", VarKind::arr(groups); LOCAL)?;
           Ok(true)
         } else {
-          Shed::vars_mut(|v| v.unset_var("SHED_REMATCH")).ok();
+          Shed::vars_mut(|v| v.unset_var(b"SHED_REMATCH")).ok();
           Ok(false)
         }
       }

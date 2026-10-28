@@ -1042,20 +1042,20 @@ impl CommandBuiltin {
       let Some(name) = argv.first() else {
         return util::with_status(2);
       };
-      let name_word = tree[name].word();
-      let name_str  = name_word.to_str_lossy();
-      match cmd::which_util(&name_str) {
+      let name = tree[name].word();
+
+      match cmd::which_util(&name) {
         Some(util) => match util.kind() {
           UtilKind::Alias => {
-            let Some(alias) = Shed::logic(|l| l.get_alias(&name_str)) else {
+            let Some(alias) = Shed::logic(|l| l.get_alias(&name)) else {
               return util::with_status(127);
             };
-            outln!("alias {name_str}={}", escape::shell_quote(&alias.body()));
+            outln!("alias {name}={}", escape::shell_quote(&alias.body()));
           }
-          UtilKind::Function | UtilKind::Builtin   => outln!("{name_str}"),
+          UtilKind::Function | UtilKind::Builtin   => outln!("{name}"),
           UtilKind::Command(p) | UtilKind::File(p) => outln!("{}", p.display()),
         },
-        None if KEYWORDS.contains(&name_str.as_bytes()) => outln!("{name_str}"),
+        None if KEYWORDS.contains(&name.as_bytes()) => outln!("{name}"),
         None => return util::with_status(127),
       }
 
@@ -1065,28 +1065,28 @@ impl CommandBuiltin {
       let Some(name) = argv.first() else {
         return util::with_status(2);
       };
-      let name_word = tree[name].word();
-      let name_str  = name_word.to_str_lossy();
-      match cmd::which_util(&name_str) {
+      let name = tree[name].word();
+
+      match cmd::which_util(&name) {
         Some(util) => match util.kind() {
           UtilKind::Alias => {
-            let Some(alias) = Shed::logic(|l| l.get_alias(&name_str)) else {
+            let Some(alias) = Shed::logic(|l| l.get_alias(&name)) else {
               return util::with_status(127);
             };
             outln!(
-              "{name_str} is an alias for {}",
+              "{name} is an alias for {}",
               escape::shell_quote(&alias.body())
             );
           }
-          UtilKind::Function => outln!("{name_str} is a function"),
-          UtilKind::Builtin  => outln!("{name_str} is a shell builtin"),
+          UtilKind::Function => outln!("{name} is a function"),
+          UtilKind::Builtin  => outln!("{name} is a shell builtin"),
           UtilKind::Command(p) | UtilKind::File(p) => {
-            outln!("{name_str} is {}", p.display());
+            outln!("{name} is {}", p.display());
           }
         },
-        None if KEYWORDS.contains(&name_str.as_bytes()) => outln!("{name_str} is a shell keyword"),
+        None if KEYWORDS.contains(&name.as_bytes()) => outln!("{name} is a shell keyword"),
         None => {
-          errln!("command: {name_str}: not found");
+          errln!("command: {name}: not found");
           return util::with_status(127);
         }
       }
@@ -1306,7 +1306,7 @@ pub(crate) mod tests {
   fn prefix_assign_to_special_with_allexport_persists_and_exports() {
     let _g = TestGuard::new();
     test_input("set -a; FOO=bar export").unwrap();
-    let var   = Shed::vars(|v| v.try_get_var_meta("FOO")).unwrap();
+    let var   = Shed::vars(|v| v.try_get_var_meta(b"FOO")).unwrap();
     let flags = var.flags();
     assert!(flags.contains(VarFlags::EXPORT));
   }
@@ -1415,9 +1415,9 @@ pub(crate) mod tests {
     // Force the exact post-pipeline state: pristine cache, then resolve one
     // command so $PATH is marked seen with only `cat` cached.
     state::Shed::meta_mut(state::meta::MetaTab::clear_path_cache);
-    let _ = cmd::lookup_cmd("cat");
+    let _ = cmd::lookup_cmd(b"cat");
     assert!(
-      cmd::which_util("env").is_some(),
+      cmd::which_util(b"env").is_some(),
       "env must resolve even though only `cat` is cached"
     );
   }

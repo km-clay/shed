@@ -1,11 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::{
-  HashSet,
-  eval::lex::{LexFlags, LexStream, Tk, TkFlags},
-  keys::{KeyCode, KeyEvent, ModKeys},
-  shopt,
-  state::{self, Shed, SourceHandle},
+  HashSet, eval::lex::{LexFlags, LexStream, Tk, TkFlags}, keys::{KeyCode, KeyEvent, ModKeys}, shopt, state::{self, Shed, SourceHandle, vars::VarStr},
 };
 
 struct AliasExpander {
@@ -23,7 +19,7 @@ impl AliasExpander {
 
   fn expand(mut self) -> (String, Option<usize>) {
     let mut cursor                  = 0;
-    let mut active: HashSet<String> = HashSet::default();
+    let mut active: HashSet<VarStr> = HashSet::default();
 
     let mut input_handle            = state::register_source(self.input.as_str());
     let mut tokens                  = Self::lex_tokens(&input_handle);
@@ -42,7 +38,7 @@ impl AliasExpander {
       }
       let Some(tk) = tokens.get(ti) else { break };
       let (start, end) = (tk.start(), tk.end());
-      let word         = tk.slice().to_str_lossy().to_string();
+      let word         = tk.slice();
 
       let alias = if active.contains(&word) {
         None // guarded: re-expanding would recurse
@@ -366,7 +362,7 @@ mod tests {
   fn alias_simple() {
     let _guard     = TestGuard::new();
     let dummy_span = Span::default();
-    Shed::logic_mut(|l| l.insert_alias("ll", &"ls -la".into(), dummy_span));
+    Shed::logic_mut(|l| l.insert_alias(b"ll", &"ls -la".into(), dummy_span));
 
     let result = expand_aliases("ll");
     assert_eq!(result, "ls -la");
@@ -376,7 +372,7 @@ mod tests {
   fn alias_circular_prevention() {
     let _guard     = TestGuard::new();
     let dummy_span = Span::default();
-    Shed::logic_mut(|l| l.insert_alias("foo", &"foo --verbose".into(), dummy_span));
+    Shed::logic_mut(|l| l.insert_alias(b"foo", &"foo --verbose".into(), dummy_span));
 
     let result = expand_aliases("foo");
     // After first expansion: "foo --verbose", then "foo" is in already_expanded
@@ -391,7 +387,7 @@ mod tests {
     // argument position (the trailing `g`).
     let _guard = TestGuard::new();
     let sp     = Span::default();
-    Shed::logic_mut(|l| l.insert_alias("g", &"git".into(), sp));
+    Shed::logic_mut(|l| l.insert_alias(b"g", &"git".into(), sp));
 
     let result = expand_aliases("g status; g log && g diff | g show g");
     assert_eq!(result, "git status; git log && git diff | git show g");
@@ -404,8 +400,8 @@ mod tests {
     let _guard = TestGuard::new();
     let sp     = Span::default();
     Shed::logic_mut(|l| {
-      l.insert_alias("a", &"b".into(), sp);
-      l.insert_alias("b", &"c".into(), sp);
+      l.insert_alias(b"a", &"b".into(), sp);
+      l.insert_alias(b"b", &"c".into(), sp);
     });
 
     assert_eq!(expand_aliases("a"), "c");
@@ -415,7 +411,7 @@ mod tests {
   fn alias_not_expanded_in_argument_position() {
     let _guard = TestGuard::new();
     let sp     = Span::default();
-    Shed::logic_mut(|l| l.insert_alias("ls", &"ls --color".into(), sp));
+    Shed::logic_mut(|l| l.insert_alias(b"ls", &"ls --color".into(), sp));
 
     // `ls` as an argument to `echo` must stay literal.
     assert_eq!(expand_aliases("echo ls"), "echo ls");

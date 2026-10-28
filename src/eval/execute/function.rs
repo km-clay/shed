@@ -58,7 +58,7 @@ impl super::Dispatcher {
     }
 
     let func = ShFunc::defined(body, blame).with_ctx(tree[*ctx].clone());
-    Shed::logic_mut(|l| l.insert_func(&func_name.to_str_lossy(), func)); // Store the AST
+    Shed::logic_mut(|l| l.insert_func(func_name, func)); // Store the AST
     if Shed::term(Terminal::interactive) {
       Shed::meta_mut(|m| {
         m.set_last_was_func_def(true);
@@ -122,7 +122,7 @@ impl super::Dispatcher {
       (name, tree[func_name].span)
     };
 
-    let Some(sh_func) = Shed::logic(|l| l.get_func(&func_name.to_str_lossy())) else {
+    let Some(sh_func) = Shed::logic(|l| l.get_func(&func_name)) else {
       return Err(sherr!(
           InternalErr @ blame,
           "Failed to find function '{func_name}'"
@@ -132,7 +132,7 @@ impl super::Dispatcher {
     let (func_body, func_src_ctx) = match sh_func {
       ShFunc::Defined { logic, ctx, .. } => (logic, ctx),
       ShFunc::Autoload(src) => {
-        Shed::logic_mut(|l| l.remove_func(&func_name.to_str_lossy())); // remove autoload from the table
+        Shed::logic_mut(|l| l.remove_func(&func_name)); // remove autoload from the table
         src.source()?;
 
         // retry, passing func by value
@@ -203,7 +203,7 @@ impl super::Dispatcher {
 
     // getopts OPTIND variable
     // scoped per-script and per-function call
-    set_var!("OPTIND", VarKind::Int(1); LOCAL).ok();
+    set_var!(b"OPTIND", VarKind::Int(1); LOCAL).ok();
 
     let Some(root) = func_body.get_root() else {
       return Err(sherr!(

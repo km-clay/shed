@@ -60,7 +60,7 @@ impl super::Builtin for Pipe {
     });
 
     let array = vec![varstr!("{rfd}"), varstr!("{wfd}")];
-    set_var!(&array_name.to_str_lossy(), arr(array))?;
+    set_var!(&array_name, arr(array))?;
 
     util::with_status(0)
   }
