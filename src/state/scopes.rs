@@ -4,6 +4,7 @@
 //! `local` declarations) that variable lookups walk.
 
 use std::cell::OnceCell;
+use std::sync::Arc;
 use std::collections::VecDeque;
 use std::os::unix::ffi::OsStringExt;
 
@@ -35,7 +36,7 @@ pub(crate) struct ScopeStack {
   /// The bottom scope is the global variable space.
   /// Scopes that come after that are pushed in functions,
   /// and only contain variables that are defined using `local`.
-  scopes: Vec<VarTab>,
+  scopes: Vec<Arc<VarTab>>,
   depth : u32,
 
   /// Global parameters such as $!, $$, etc
@@ -51,31 +52,39 @@ impl ScopeStack {
     new
   }
   pub(crate) fn from_frame(frame: VarTab) -> Self {
+    Self::from_shared(vec![Arc::new(frame)])
+  }
+  /// Adopt another stack's scopes by sharing them. Each scope is cloned
+  /// copy-on-write the first time this stack writes to it.
+  pub(crate) fn from_shared(scopes: Vec<Arc<VarTab>>) -> Self {
     let mut new = Self::default();
-    new.scopes.push(frame);
+    new.scopes = scopes;
     let shell_name = std::env::args_os()
       .next()
       .map_or_else(|| ShStr::from("shed"), |a| ShStr::from(a.into_vec()));
     new.global_params.insert(ShellParam::ShellName, shell_name);
     new
   }
+  pub(crate) fn share_scopes(&self) -> Vec<Arc<VarTab>> {
+    self.scopes.clone()
+  }
   pub(crate) fn descend(&mut self, argv: Option<Vec<ShStr>>) {
     let mut new_vars = VarTab::bare();
     if let Some(argv) = argv {
       new_vars.extend_args(argv);
     }
-    self.scopes.push(new_vars);
+    self.scopes.push(Arc::new(new_vars));
     self.depth += 1;
   }
   pub(crate) fn descend_with_ceiling(&mut self, argv: Option<Vec<ShStr>>) {
     self.descend(argv);
-    if let Some(scope) = self.scopes.last_mut() {
+    if let Some(scope) = self.scopes.last_mut().map(Arc::make_mut) {
       scope.set_kind(vars::ScopeKind::Ceiling);
     }
   }
   pub(crate) fn descend_into_function(&mut self, argv: Option<Vec<ShStr>>) {
     self.descend(argv);
-    if let Some(scope) = self.scopes.last_mut() {
+    if let Some(scope) = self.scopes.last_mut().map(Arc::make_mut) {
       scope.set_kind(vars::ScopeKind::Function);
     }
   }
@@ -84,7 +93,7 @@ impl ScopeStack {
   /// Unsets all global variables that are not managed by the shell, and then restores
   /// the env vars inherited by the shell so that critical vars like `PATH` and `HOME` are not unset
   pub(super) fn forget_userspace_globals(&mut self, exclude: &[ShStr]) {
-    let Some(scope) = self.scopes.first_mut() else {
+    let Some(scope) = self.scopes.first_mut().map(Arc::make_mut) else {
       return;
     };
     scope
@@ -105,7 +114,7 @@ impl ScopeStack {
     self.cur_scope_mut().take_deferred_cmds();
   }
   pub(crate) fn put_var(&mut self, name: &[u8], var: Var) {
-    let Some(scope) = self.scopes.first_mut() else {
+    let Some(scope) = self.scopes.first_mut().map(Arc::make_mut) else {
       return;
     };
 
@@ -130,7 +139,7 @@ impl ScopeStack {
     self.scopes.last().unwrap()
   }
   pub(crate) fn cur_scope_mut(&mut self) -> &mut VarTab {
-    self.scopes.last_mut().unwrap()
+    Arc::make_mut(self.scopes.last_mut().unwrap())
   }
   pub(crate) fn sh_argv(&self) -> &VecDeque<ShStr> {
     for scope in self.scopes_rev() {
@@ -146,14 +155,14 @@ impl ScopeStack {
     self.cur_scope().sh_argv()
   }
   fn find_scope_idx<F: Fn(&VarTab) -> bool>(&self, f: F) -> Option<usize> {
-    self.scopes.iter().rposition(f)
+    self.scopes.iter().rposition(|s| f(s))
   }
   fn local_scope_idx(&self) -> Option<usize> {
     self.find_scope_idx(|s| s.is_function() || s.is_ceiling())
   }
   pub(crate) fn sh_argv_scope_mut(&mut self) -> &mut VarTab {
     let idx = self.find_scope_idx(VarTab::is_function).unwrap_or(0);
-    self.scopes.get_mut(idx).unwrap()
+    Arc::make_mut(self.scopes.get_mut(idx).unwrap())
   }
   pub(crate) fn sh_argv_scope(&self) -> &VarTab {
     let idx = self.find_scope_idx(VarTab::is_function).unwrap_or(0);
@@ -210,23 +219,6 @@ impl ScopeStack {
     }
 
     flat
-  }
-  pub(crate) fn flatten_to_frame(&self) -> VarTab {
-    let mut frame = VarTab::bare();
-
-    for scope in self.scopes_rev() {
-      for (var_name, var) in scope.vars() {
-        frame.put_var(var_name, var.clone());
-      }
-    }
-
-    let argv_scope = self.sh_argv_scope();
-    for (param, val) in argv_scope.params() {
-      frame.set_param(*param, val);
-    }
-    frame.sh_argv_mut().clone_from(argv_scope.sh_argv());
-
-    frame
   }
   pub(crate) fn has_deferred_cmds(&self) -> bool {
     self.cur_scope().has_deferred_cmds()
@@ -328,7 +320,7 @@ impl ScopeStack {
   pub(crate) fn declare_var_novalue(&mut self, var_name: &[u8], flags: VarFlags) -> ShResult<()> {
     if flags.contains(VarFlags::LOCAL) {
       let idx = self.local_scope_idx().unwrap_or(0);
-      let Some(scope) = self.scopes.get_mut(idx) else {
+      let Some(scope) = self.scopes.get_mut(idx).map(Arc::make_mut) else {
         return Err(sherr!(ExecFail, "No local scope available to set variable '{}'", var_name.to_str_lossy()));
       };
       if scope.var_exists(var_name) {
@@ -404,7 +396,7 @@ impl ScopeStack {
   ) -> ShResult<()> {
     if flags.contains(VarFlags::LOCAL) || self.writes_are_local() {
       let idx_scope = self.local_scope_idx().unwrap_or(0);
-      let Some(scope) = self.scopes.get_mut(idx_scope) else {
+      let Some(scope) = self.scopes.get_mut(idx_scope).map(Arc::make_mut) else {
         return Ok(());
       };
       return scope.set_index(var_name, idx, val);
@@ -428,9 +420,9 @@ impl ScopeStack {
     let pos = self
       .scopes
       .iter()
-      .rposition(VarTab::is_ceiling)
+      .rposition(|s| s.is_ceiling())
       .unwrap_or(0);
-    self.scopes.get_mut(pos)
+    self.scopes.get_mut(pos).map(Arc::make_mut)
   }
   /// The scope that is targeted by bare var assignments
   ///
@@ -439,7 +431,7 @@ impl ScopeStack {
       && Shed::meta(MetaTab::in_func)
       && let Some(idx) = self.local_scope_idx()
     {
-      return self.scopes.get_mut(idx);
+      return self.scopes.get_mut(idx).map(Arc::make_mut);
     }
     self.ceiling_mut()
   }
@@ -451,7 +443,7 @@ impl ScopeStack {
   }
   fn set_var_local(&mut self, var_name: &[u8], val: VarKind, flags: VarFlags) -> ShResult<()> {
     let idx = self.local_scope_idx().unwrap_or(0);
-    let Some(scope) = self.scopes.get_mut(idx) else {
+    let Some(scope) = self.scopes.get_mut(idx).map(Arc::make_mut) else {
       return Err(
         sherr!(ExecFail, "No local scope available to set variable '{}'", var_name.to_str_lossy()),
       );
@@ -759,34 +751,34 @@ impl ScopeStack {
     let skip = self
       .scopes
       .iter()
-      .rposition(VarTab::is_ceiling)
+      .rposition(|s| s.is_ceiling())
       .unwrap_or(0);
-    self.scopes.iter().skip(skip).rev()
+    self.scopes.iter().skip(skip).rev().map(|s| &**s)
   }
   pub(crate) fn bounded_scopes_rev_mut(&mut self) -> impl Iterator<Item = &mut VarTab> {
     let skip = self
       .scopes
       .iter()
-      .rposition(VarTab::is_ceiling)
+      .rposition(|s| s.is_ceiling())
       .unwrap_or(0);
-    self.scopes.iter_mut().skip(skip).rev()
+    self.scopes.iter_mut().skip(skip).rev().map(Arc::make_mut)
   }
 
   /// Reverse walk that ignores ceilings. Use for reads that should fall
   /// through subshell barriers (e.g. `$HOME` inside `$(...)`); for writes
   /// use `bounded_scopes_rev_mut` instead so subshell mutations stay local.
   pub(crate) fn scopes_rev(&self) -> impl Iterator<Item = &VarTab> {
-    self.scopes.iter().rev()
+    self.scopes.iter().rev().map(|s| &**s)
   }
 
   pub(crate) fn scopes_rev_mut(&mut self) -> impl Iterator<Item = &mut VarTab> {
-    self.scopes.iter_mut().rev()
+    self.scopes.iter_mut().rev().map(Arc::make_mut)
   }
 
   /// Forward walk (outermost to innermost). Use when emitting all scope
   /// contents in shadowing order, e.g. building envp.
   pub(crate) fn scopes_iter(&self) -> impl Iterator<Item = &VarTab> {
-    self.scopes.iter()
+    self.scopes.iter().map(|s| &**s)
   }
 
   pub(crate) fn try_get_var(&self, var_name: &[u8]) -> Option<ShStr> {

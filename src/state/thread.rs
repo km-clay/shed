@@ -17,7 +17,7 @@ use crate::{
 };
 
 pub(crate) struct ForkSpec {
-  frame      : VarTab,
+  frame      : Vec<Arc<VarTab>>,
   sinks      : Sinks,
   ast        : Arc<Ast>,
   shopts     : ShOpts,
@@ -61,7 +61,7 @@ impl StageResult {
 impl super::Shed {
   pub(crate) fn fork_spec(sinks: Sinks, ast: Arc<Ast>) -> ForkSpec {
     super::SHED.with(|shed| ForkSpec {
-      frame: shed.var_scopes.borrow().flatten_to_frame(),
+      frame: shed.var_scopes.borrow().share_scopes(),
       sinks,
       ast,
       shopts: shed.shopts.borrow().clone(),
@@ -90,7 +90,7 @@ impl super::Shed {
       pipe_frames,
     } = spec;
     super::SHED.with(|shed| {
-      *shed.var_scopes.borrow_mut() = scopes::ScopeStack::from_frame(frame);
+      *shed.var_scopes.borrow_mut() = scopes::ScopeStack::from_shared(frame);
       *shed.sinks.borrow_mut() = sinks;
       *shed.shopts.borrow_mut() = shopts;
       *shed.call_context.borrow_mut() = context;
