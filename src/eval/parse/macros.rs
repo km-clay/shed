@@ -79,11 +79,11 @@ macro_rules! node {
     if $parser.last_consumed_was_sep() {
       flags |= $crate::eval::parse::node::NdFlags::PUNCTUATED;
     }
-    let context = Some(
+    let context = (!$parser.context.is_empty()).then(|| {
       $parser
         .tree
-        .alloc_labels($parser.context.clone().into_iter()),
-    );
+        .alloc_labels($parser.context.clone().into_iter())
+    });
     $crate::eval::parse::node::Node {
       class: $class,
       flags,
@@ -97,11 +97,11 @@ macro_rules! node {
     if $parser.last_consumed_was_sep() {
       flags |= $crate::eval::parse::node::NdFlags::PUNCTUATED;
     }
-    let context = Some(
+    let context = (!$parser.context.is_empty()).then(|| {
       $parser
         .tree
-        .alloc_labels($parser.context.clone().into_iter()),
-    );
+        .alloc_labels($parser.context.clone().into_iter())
+    });
     $crate::eval::parse::node::Node {
       class: $class,
       flags,
