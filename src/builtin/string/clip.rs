@@ -1,10 +1,6 @@
 use crate::{
-  procio, sherr,
-  state::vars::ShStr,
-  two_way_display,
-  util::{
-    strops::ShStrDisplay,
-    ui::{self, Justify},
+  procio, sherr, state::vars::ShStr, two_way_display, util::{
+    strops::{ParseBytes, ShStrDisplay}, ui::{self, Justify},
   },
 };
 
@@ -57,8 +53,9 @@ impl ClipSpec {
     let limit = arguments
       .next()
       .map(|w| {
-        w.parse::<usize>()
-          .map_err(|v| sherr!(ParseErr ? w.span(), "invalid limit '{v}'"))
+        let span = w.span();
+        w.parse_bytes::<usize>()
+          .map_err(|()| sherr!(ParseErr ? span, "invalid limit '{w}'"))
       })
       .transpose()?;
 
@@ -70,7 +67,7 @@ impl ClipSpec {
     let justify = args
       .opt_value("justify")
       .map(|j| {
-        j.parse::<Justify>().map_err(|v| {
+        j.parse_bytes::<Justify>().map_err(|v| {
           sherr!(ParseErr @ args.opt_span("justify").unwrap(), "invalid justify value '{v}'")
         })
       })

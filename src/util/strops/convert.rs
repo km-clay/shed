@@ -59,6 +59,114 @@ const CLOCK_FORMATS: [&str; 6] = [
 const MODIFIERS: &[u8] = b"-_0^#:.";
 const UTF8_CONTINUATION: RangeInclusive<u8> = 0x80..=0xBF;
 
+pub(crate) const fn can_not_overflow<T>(radix: u32, is_signed: bool, digits: &[u8]) -> bool {
+  radix <= 16 && digits.len() <= size_of::<T>() * 2 - (is_signed as usize)
+}
+
+/// Like [`FromStr`](std::str::FromStr), but for byte slices.
+///
+/// Used with types like [`ShStr`] which are backed by bytes rather than UTF-8 strings. The [`ParseBytes`] trait is a convenience wrapper for types that implement `FromBytes`.
+pub(crate) trait FromBytes {
+  type Error;
+  fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
+  where
+    Self: Sized;
+}
+
+macro_rules! unchecked_int_loop {
+  ($int_ty:ty, $op:tt, $digits:ident) => {{
+    let mut acc: $int_ty = 0;
+
+    for &b in $digits {
+      if !b.is_ascii_digit() {
+        return Err(());
+      }
+      acc = acc * 10 $op (b - b'0') as $int_ty;
+    }
+
+    acc
+  }};
+}
+
+macro_rules! checked_int_loop {
+  ($int_ty:ty, $op:ident, $digits:ident) => {{
+    let mut acc: $int_ty = 0;
+
+    for &b in $digits {
+      if !b.is_ascii_digit() {
+        return Err(());
+      }
+      acc = acc.checked_mul(10)
+        .ok_or(())?
+        .$op((b - b'0') as $int_ty)
+        .ok_or(())?;
+    }
+
+    acc
+  }};
+}
+
+macro_rules! integer_from_bytes {
+  ($($int_ty:ty),+ $(,)?) => {
+    $(
+      impl FromBytes for $int_ty {
+        type Error = ();
+        fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error> {
+          let src = bytes.as_ref();
+          #[allow(unused_comparisons)]
+          let is_signed = 0 > <$int_ty>::MIN;
+
+          let (is_positive, digits) = match src {
+            [] | [b'+' | b'-'] => return Err(()),
+            [b'+', rest @ ..] => (true, rest),
+            [b'-', rest @ ..] => {
+              if !is_signed {
+                return Err(());
+              }
+              (false, rest)
+            }
+            _ => (true, src)
+          };
+
+          if can_not_overflow::<$int_ty>(10, is_signed, digits) {
+            if is_positive {
+              Ok(unchecked_int_loop!($int_ty, +, digits))
+            } else {
+              Ok(unchecked_int_loop!($int_ty, -, digits))
+            }
+          } else {
+            if is_positive {
+              Ok(checked_int_loop!($int_ty, checked_add, digits))
+            } else {
+              Ok(checked_int_loop!($int_ty, checked_sub, digits))
+            }
+          }
+        }
+      }
+    )+
+  };
+}
+
+integer_from_bytes!(i8, i16, i32, i64, i128, isize);
+integer_from_bytes!(u8, u16, u32, u64, u128, usize);
+
+/// A convenience trait for types that implement [`FromBytes`].
+///
+/// Adds the [`parse_bytes`](ParseBytes::parse_bytes) method to any type that can be referenced as a byte slice.
+pub(crate) trait ParseBytes {
+  /// Attempt to parse a byte slice into a type that implements [`FromBytes`].
+  fn parse_bytes<P: FromBytes>(&self) -> Result<P, P::Error>;
+}
+
+impl<T: AsRef<[u8]>> ParseBytes for T {
+  fn parse_bytes<P: FromBytes>(&self) -> Result<P, P::Error>
+  where
+    Self: Sized,
+  {
+    P::from_bytes(self)
+  }
+}
+
 /// chrono's strftime rejects specifiers that glibc passes through untouched
 /// (`%N`, `%Q`, ...), and its `Display` impl signals that by failing, which
 /// `to_string()` turns into a panic. bash emits unknown specifiers literally,

@@ -4,13 +4,8 @@ use chrono::{DateTime, Utc};
 use nix::libc;
 
 use crate::{
-  eval::execute,
-  opt, sherr, signal,
-  state::{Shed, vars::ShStr},
-  util::{
-    self,
-    error::{ShResult, ShResultExt},
-    strops,
+  eval::execute, opt, sherr, signal, state::{Shed, vars::ShStr}, util::{
+    self, error::{ShResult, ShResultExt}, strops::{self, ParseBytes},
   },
 };
 
@@ -72,8 +67,8 @@ impl Count {
   }
   fn parse(s: &ShStr, opt: &str) -> ShResult<Self> {
     let n = s
-      .parse::<i32>()
-      .map_err(|v| sherr!(ParseErr, "invalid {opt} value: '{v}'"))?;
+      .parse_bytes::<i32>()
+      .map_err(|()| sherr!(ParseErr, "invalid {opt} value: '{s}'"))?;
     match n.cmp(&-1) {
       Ordering::Less    => Err(sherr!(ParseErr, "{opt} value must be -1 or greater")),
       Ordering::Equal   => Ok(Self::Infinite),
@@ -146,8 +141,8 @@ impl EverySpec {
     let times = args
       .opt_value("times")
       .map(|v| {
-        v.parse::<u32>()
-          .map_err(|v| {
+        v.parse_bytes::<u32>()
+          .map_err(|()| {
             sherr!(ParseErr @ args.opt_span("times").unwrap(), "invalid times value: '{v}'")
           })
           .with_code(2)

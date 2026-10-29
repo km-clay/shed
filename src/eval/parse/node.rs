@@ -304,25 +304,51 @@ fn contains_sub_intro(src: &[u8]) -> bool {
       .any(|w| w[1] == b'(' && matches!(w[0], b'$' | b'<' | b'>'))
 }
 
-enum ForkReport {
+#[derive(Clone, Debug)]
+pub(crate) enum ForkReport {
   Simple(bool),
-  Detailed(Vec<ForkBlame>),
+  Detailed(Rc<[ForkBlame]>),
+}
+
+impl ForkReport {
+  fn does_fork(&self) -> bool {
+    match self {
+      ForkReport::Simple(b) => *b,
+      ForkReport::Detailed(rep) => rep.iter().any(|b| matches!(b.behavior(), ForkBehavior::Always)),
+    }
+  }
+
+  fn report(&self) -> Option<Rc<[ForkBlame]>> {
+    match self {
+      ForkReport::Simple(_) => None,
+      ForkReport::Detailed(rep) => Some(rep.clone()),
+    }
+  }
 }
 
 pub(crate) fn node_forks(tree: &Ast, node_id: NodeId) -> bool {
-  let ForkReport::Simple(forks) = node_fork_behavior(tree, node_id, true) else {
-    unreachable!()
-  };
+  if let Some(does_fork) = Shed::meta(|m| m.fork_memo_for(node_id).map(ForkReport::does_fork)) {
+    return does_fork
+  }
 
-  forks
+  let behavior = node_fork_behavior(tree, node_id, true);
+
+  let does_fork = behavior.does_fork();
+  Shed::meta_mut(|m| m.memoize_fork_behavior(node_id, tree.node_count(), behavior));
+
+  does_fork
 }
 
-pub(crate) fn node_fork_report(tree: &Ast, node_id: NodeId) -> Vec<ForkBlame> {
-  let ForkReport::Detailed(rep) = node_fork_behavior(tree, node_id, false) else {
-    unreachable!()
-  };
+pub(crate) fn node_fork_report(tree: &Ast, node_id: NodeId) -> Rc<[ForkBlame]> {
+  if let Some(report) = Shed::meta(|m| m.fork_memo_for(node_id).and_then(ForkReport::report)) {
+    return report
+  }
 
-  rep
+  let behavior = node_fork_behavior(tree, node_id, false);
+
+  Shed::meta_mut(|m| m.memoize_fork_behavior(node_id, tree.node_count(), behavior.clone()));
+
+  behavior.report().expect("node_fork_behavior should return a Detailed report when simple is false")
 }
 
 fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
@@ -384,7 +410,7 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
       .flags
       .contains(NdFlags::BACKGROUND | NdFlags::FORK_BUILTINS)
     {
-      acc.push(ForkBlame::external(span));
+      blame!(ForkBlame::external(span));
       return;
     }
 
@@ -471,17 +497,10 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
 
         // Cache miss: function exists, is Defined, is_internal is None.
         // Mark Checking and clone the body in a single borrow.
-        let Some(logic) = Shed::logic_mut(|l| match l.get_func_mut(&func_name) {
-          Some(ShFunc::Defined {
-            logic, is_internal, ..
-          }) => {
-            *is_internal = Some(IsInternal::Checking);
-            Some(logic.clone())
-          }
-          _ => None,
-        }) else {
+        let Some(logic) = Shed::logic_mut(|l| l.begin_internal_check(&func_name)) else {
           return;
         };
+
         let Some(root) = logic.get_root() else {
           // this should basically always return something. if not
           // we can just return. There's nothing to check
@@ -494,11 +513,7 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
         } else {
           ForkBehavior::Always
         };
-        Shed::logic_mut(|l| {
-          if let Some(func) = l.get_func_mut(&func_name) {
-            func.set_is_internal(IsInternal::Resolved(behavior)).ok();
-          }
-        });
+        Shed::logic_mut(|l| l.set_func_internal(&func_name, IsInternal::Resolved(behavior)));
         blame!(ForkBlame::command(span, behavior));
       }
       NdRule::Subshell { .. } => blame!(ForkBlame::subshell(span, ForkBehavior::Always)),
@@ -509,6 +524,6 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
   if simple {
     ForkReport::Simple(has_fork)
   } else {
-    ForkReport::Detailed(acc)
+    ForkReport::Detailed(acc.into())
   }
 }

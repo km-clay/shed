@@ -2,26 +2,22 @@ use std::{
   cmp::Ordering, collections::VecDeque, fs, os::unix::fs::MetadataExt, path::PathBuf, str::FromStr,
 };
 
+use bstr::ByteSlice;
 use nix::{
   sys::stat::{self, SFlag},
   unistd::{self, AccessFlags},
 };
 
 use crate::{
-  eval::lex::TkRule,
-  expand::{
+  eval::lex::TkRule, expand::{
     Expander, Word, case, escape, glob,
     stream::{Marker, Quote, Unit},
     var,
-  },
-  match_loop, set_var, sherr,
-  state::{
+  }, match_loop, set_var, sherr, state::{
     Shed,
     vars::{ShStr, VarKind},
-  },
-  util::{
-    error::{ShErr, ShResult},
-    strops::QuoteState,
+  }, util::{
+    error::{ShErr, ShResult}, strops::{FromBytes, ParseBytes, QuoteState},
   },
 };
 
@@ -71,35 +67,39 @@ pub(crate) enum UnaryOp {
   IsFloat,   // -F
 }
 
-impl FromStr for UnaryOp {
-  type Err = ShErr;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
+impl FromBytes for UnaryOp {
+  type Error = ShErr;
+  fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
+    where
+      Self: Sized
+  {
+    let s = bytes.as_ref();
     match s {
-      "-e" | "-a" => Ok(Self::Exists),
-      "-d"        => Ok(Self::Directory),
-      "-f"        => Ok(Self::File),
-      "-h" | "-L" => Ok(Self::Symlink),
-      "-r"        => Ok(Self::Readable),
-      "-w"        => Ok(Self::Writable),
-      "-x"        => Ok(Self::Executable),
-      "-s"        => Ok(Self::NonEmpty),
-      "-p"        => Ok(Self::NamedPipe),
-      "-S"        => Ok(Self::Socket),
-      "-b"        => Ok(Self::BlockSpecial),
-      "-c"        => Ok(Self::CharSpecial),
-      "-k"        => Ok(Self::Sticky),
-      "-o"        => Ok(Self::OptSet),
-      "-O"        => Ok(Self::UIDOwner),
-      "-G"        => Ok(Self::GIDOwner),
-      "-N"        => Ok(Self::ModifiedSinceStatusChange),
-      "-u"        => Ok(Self::SetUID),
-      "-g"        => Ok(Self::SetGID),
-      "-t"        => Ok(Self::Terminal),
-      "-n"        => Ok(Self::NonNull),
-      "-z"        => Ok(Self::Null),
-      "-i"        => Ok(Self::IsInteger),
-      "-F"        => Ok(Self::IsFloat),
-      _           => Err(sherr!(SyntaxErr, "Invalid unary test operator '{s}'")),
+      b"-e" | b"-a" => Ok(Self::Exists),
+      b"-d"        => Ok(Self::Directory),
+      b"-f"        => Ok(Self::File),
+      b"-h" | b"-L" => Ok(Self::Symlink),
+      b"-r"        => Ok(Self::Readable),
+      b"-w"        => Ok(Self::Writable),
+      b"-x"        => Ok(Self::Executable),
+      b"-s"        => Ok(Self::NonEmpty),
+      b"-p"        => Ok(Self::NamedPipe),
+      b"-S"        => Ok(Self::Socket),
+      b"-b"        => Ok(Self::BlockSpecial),
+      b"-c"        => Ok(Self::CharSpecial),
+      b"-k"        => Ok(Self::Sticky),
+      b"-o"        => Ok(Self::OptSet),
+      b"-O"        => Ok(Self::UIDOwner),
+      b"-G"        => Ok(Self::GIDOwner),
+      b"-N"        => Ok(Self::ModifiedSinceStatusChange),
+      b"-u"        => Ok(Self::SetUID),
+      b"-g"        => Ok(Self::SetGID),
+      b"-t"        => Ok(Self::Terminal),
+      b"-n"        => Ok(Self::NonNull),
+      b"-z"        => Ok(Self::Null),
+      b"-i"        => Ok(Self::IsInteger),
+      b"-F"        => Ok(Self::IsFloat),
+      _           => Err(sherr!(SyntaxErr, "Invalid unary test operator '{}'", s.to_str_lossy())),
     }
   }
 }
@@ -139,27 +139,31 @@ pub(crate) enum BinaryOp {
   File(FileOp),
 }
 
-impl FromStr for BinaryOp {
-  type Err = ShErr;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
+impl FromBytes for BinaryOp {
+  type Error = ShErr;
+  fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
+    where
+      Self: Sized
+  {
+    let s = bytes.as_ref();
     match s {
-      "==" | "=" => Ok(Self::String(StringOp::Equal)),
-      "!="       => Ok(Self::String(StringOp::NotEqual)),
-      "=~"       => Ok(Self::String(StringOp::Match)),
-      ">"        => Ok(Self::String(StringOp::Greater)),
-      "<"        => Ok(Self::String(StringOp::Less)),
-      ">="       => Ok(Self::String(StringOp::GreaterEq)),
-      "<="       => Ok(Self::String(StringOp::LessEq)),
-      "-eq"      => Ok(Self::Int(IntOp::Eq)),
-      "-ne"      => Ok(Self::Int(IntOp::Neq)),
-      "-gt"      => Ok(Self::Int(IntOp::Gt)),
-      "-lt"      => Ok(Self::Int(IntOp::Lt)),
-      "-ge"      => Ok(Self::Int(IntOp::Ge)),
-      "-le"      => Ok(Self::Int(IntOp::Le)),
-      "-ot"      => Ok(Self::File(FileOp::OlderThan)),
-      "-nt"      => Ok(Self::File(FileOp::NewerThan)),
-      "-ef"      => Ok(Self::File(FileOp::FileEq)),
-      _          => Err(sherr!(SyntaxErr, "Invalid binary test operator '{s}'")),
+      b"==" | b"=" => Ok(Self::String(StringOp::Equal)),
+      b"!="       => Ok(Self::String(StringOp::NotEqual)),
+      b"=~"       => Ok(Self::String(StringOp::Match)),
+      b">"        => Ok(Self::String(StringOp::Greater)),
+      b"<"        => Ok(Self::String(StringOp::Less)),
+      b">="       => Ok(Self::String(StringOp::GreaterEq)),
+      b"<="       => Ok(Self::String(StringOp::LessEq)),
+      b"-eq"      => Ok(Self::Int(IntOp::Eq)),
+      b"-ne"      => Ok(Self::Int(IntOp::Neq)),
+      b"-gt"      => Ok(Self::Int(IntOp::Gt)),
+      b"-lt"      => Ok(Self::Int(IntOp::Lt)),
+      b"-ge"      => Ok(Self::Int(IntOp::Ge)),
+      b"-le"      => Ok(Self::Int(IntOp::Le)),
+      b"-ot"      => Ok(Self::File(FileOp::OlderThan)),
+      b"-nt"      => Ok(Self::File(FileOp::NewerThan)),
+      b"-ef"      => Ok(Self::File(FileOp::FileEq)),
+      _          => Err(sherr!(SyntaxErr, "Invalid binary test operator '{}'", s.to_str_lossy())),
     }
   }
 }
@@ -245,7 +249,7 @@ pub(crate) fn eval_unary(op: &UnaryOp, operand: Word) -> bool {
   match op {
     UnaryOp::NonNull    => !operand.is_empty(),
     UnaryOp::Null       => operand.is_empty(),
-    UnaryOp::IsInteger  => operand.parse::<i64>().is_ok(),
+    UnaryOp::IsInteger  => operand.parse_bytes::<i64>().is_ok(),
     UnaryOp::Exists     => PathBuf::from(operand).exists(),
     UnaryOp::Directory  => PathBuf::from(operand).metadata().is_ok_and(|m| m.is_dir()),
     UnaryOp::File       => PathBuf::from(operand).metadata().is_ok_and(|m| m.is_file()),
@@ -278,7 +282,7 @@ pub(crate) fn eval_unary(op: &UnaryOp, operand: Word) -> bool {
         .and_then(|v| v.parse::<bool>().ok())
         .unwrap_or(false)
     }),
-    UnaryOp::Terminal => match operand.parse::<i32>() {
+    UnaryOp::Terminal => match operand.parse_bytes::<i32>() {
       Ok(fd) => Shed::sinks(|s| s.get(fd).is_some_and(|s| s.isatty())),
       Err(_) => false,
     },
@@ -469,7 +473,7 @@ impl ParseStream {
     self.peek_tk().is_some_and(|tk| {
       tk.class == TkRule::Str
         && !matches!(tk.slice().as_bytes(), b"]]" | b"(" | b")")
-        && tk.slice().parse::<BinaryOp>().is_err()
+        && tk.slice().parse_bytes::<BinaryOp>().is_err()
     })
   }
 
@@ -482,7 +486,7 @@ impl ParseStream {
   fn parse_test_leaf(&mut self, span: &mut Option<Span>) -> ShResult<ExprId> {
     let l_tk = self.expect_tk_with(span);
 
-    if let Ok(op) = l_tk.slice().parse::<UnaryOp>()
+    if let Ok(op) = l_tk.slice().parse_bytes::<UnaryOp>()
       && self.peek_is_operand()
     {
       let operand = self.expect_tk_with(span);
@@ -494,7 +498,7 @@ impl ParseStream {
 
     let maybe_operator = self
       .peek_tk()
-      .and_then(|t| t.slice().parse::<BinaryOp>().ok());
+      .and_then(|t| t.slice().parse_bytes::<BinaryOp>().ok());
 
     let Some(op) = maybe_operator else {
       return Ok(self.tree.alloc(TestExpr::Truthy { operand: lhs }));

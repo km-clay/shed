@@ -10,7 +10,7 @@
 //! Also handles assignment arithmetic operations like `+=`, `-=`, `*=`, and `/=` for integer and string variables,
 //! as well as array appending for indexed arrays.
 
-use crate::{set_var, state::vars::ShStrSliceExt, varstr};
+use crate::{set_var, state::vars::ShStrSliceExt, util::strops::ParseBytes, varstr};
 use std::collections::VecDeque;
 
 use itertools::Itertools;
@@ -258,7 +258,7 @@ impl super::Dispatcher {
                 bytes.extend_from_slice(&val.value_bytes());
                 *s = bytes.into();
               } else {
-                let n = s.to_str_lossy().parse::<i32>().map_err(|_| {
+                let n = s.parse_bytes::<i32>().map_err(|_| {
                   sherr!(InvalidAssignment @ span, "cannot {op_name} string variable")
                 })?;
                 let other = parse_rhs(span)?;

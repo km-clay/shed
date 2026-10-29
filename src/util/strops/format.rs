@@ -7,9 +7,7 @@ use bitflags::bitflags;
 use bstr::ByteSlice;
 
 use crate::{
-  errln, match_loop, sherr,
-  state::vars::ShStr,
-  util::{self, error::ShResult, strops::ByteCursor, ui},
+  errln, match_loop, sherr, state::vars::ShStr, util::{self, error::ShResult, strops::{ByteCursor, ParseBytes}, ui},
 };
 
 use super::SliceCursor;
@@ -390,9 +388,11 @@ impl<'s, S: StrFmt> StrFormatter<'s, S> {
       digits.push(b);
     }
 
-    let width = ShStr::from(digits)
-      .parse::<usize>()
-      .map_err(|v| sherr!(ParseErr, "invalid width: '{v}'"))?;
+    let digits = ShStr::from(digits);
+
+    let width = digits
+      .parse_bytes::<usize>()
+      .map_err(|()| sherr!(ParseErr, "invalid width: '{digits}'"))?;
 
     Ok(width)
   }

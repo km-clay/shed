@@ -1,10 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-  expand::{Words, arithmetic::Num, glob::Pattern},
-  set_var,
-  state::params,
-  util::strops,
+  expand::{Words, arithmetic::Num, glob::Pattern}, set_var, state::params, util::strops::{self, ParseBytes},
 };
 use bstr::ByteSlice;
 use itertools::Itertools;
@@ -449,7 +446,7 @@ fn handle_len_expansion(raw: &[u8], allow_side_effects: bool) -> ShResult<SegStr
     return Ok(Shed::vars(|v| v.get_param(ShellParam::ArgCount)).into());
   }
 
-  if let Ok(param) = var_spec.to_str_lossy().parse::<ShellParam>() {
+  if let Ok(param) = var_spec.parse_bytes::<ShellParam>() {
     let len = Shed::vars(|v| v.try_get_param(param)).map_or(0, |val| val.chars().count());
     return Ok(varstr!("{len}").into());
   }

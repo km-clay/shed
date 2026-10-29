@@ -4,22 +4,12 @@ use bstr::ByteSlice;
 use itertools::Itertools;
 
 use crate::{
-  HashSet,
-  eval::lex::Span,
-  expand::Word,
-  opt,
-  procio::{self, ScratchGuard, Sink},
-  sherr, shopt,
-  state::{
+  HashSet, eval::lex::Span, expand::Word, opt, procio::{self, ScratchGuard, Sink}, sherr, shopt, state::{
     Shed,
     vars::{ShStr, VarFlags, VarKind},
-  },
-  util::{
-    self,
-    error::ShResultExt,
-    strops::{self, FloatSpec, IntSpec},
-  },
-  varstr,
+  }, util::{
+    self, error::ShResultExt, strops::{self, FloatSpec, IntSpec, ParseBytes},
+  }, varstr,
 };
 
 use super::{BuiltinArgs, ShResult, opt::OptSpec};
@@ -177,7 +167,7 @@ impl SpecType {
 
       match kind.as_bytes() {
         b"str" => {
-          if let Ok(len) = len_type.parse::<usize>() {
+          if let Ok(len) = len_type.parse_bytes::<usize>() {
             return Ok(SpecType::Str(SpecStr::Len(SpecLen::Static(len))));
           }
           let int_ty = IntSpec::parse_int(&len_type)?;
@@ -185,7 +175,7 @@ impl SpecType {
           return Ok(SpecType::Str(SpecStr::Len(SpecLen::Dynamic(int_ty))));
         }
         b"raw" => {
-          if let Ok(len) = len_type.parse::<usize>() {
+          if let Ok(len) = len_type.parse_bytes::<usize>() {
             return Ok(SpecType::Raw(SpecLen::Static(len)));
           }
           let int_ty = IntSpec::parse_int(&len_type)?;
@@ -203,9 +193,9 @@ impl SpecType {
       _ => match ty.as_bytes() {
         b"str" => Ok(SpecType::Str(SpecStr::NullTerm)),
         b"*"   => Ok(SpecType::ToEnd),
-        _ => match ty.parse::<usize>() {
+        _ => match ty.parse_bytes::<usize>() {
           Ok(raw) => Ok(SpecType::Raw(SpecLen::Static(raw))),
-          Err(e)  => Err(sherr!(ParseErr, "invalid field type '{e}'")),
+          Err(())  => Err(sherr!(ParseErr, "invalid field type '{ty}'")),
         },
       },
     }
@@ -371,8 +361,8 @@ impl SpecType {
 
   fn write_int(spec: IntSpec, data: &ShStr) -> ShResult<ShStr> {
     let val = data
-      .parse::<i128>()
-      .map_err(|e| sherr!(ParseErr, "expected an integer, got '{e}'"))?;
+      .parse_bytes::<i128>()
+      .map_err(|()| sherr!(ParseErr, "expected an integer, got '{data}'"))?;
 
     spec.check_range(val)?;
 

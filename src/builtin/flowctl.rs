@@ -1,17 +1,9 @@
 use std::{iter::Peekable, vec};
 
 use crate::{
-  HashMap,
-  eval::execute,
-  expand::Word,
-  opt, sherr,
-  state::{Shed, logic::TrapTarget},
-  util::{
-    self,
-    error::{self, ShErr, ShErrKind, ShResult, ShResultExt},
-    strops::{self, ByteCursor, Field, FieldParams, SliceCursor, StrFmt},
-  },
-  varstr,
+  HashMap, eval::execute, expand::Word, opt, sherr, state::{Shed, logic::TrapTarget}, util::{
+    self, error::{self, ShErr, ShErrKind, ShResult, ShResultExt}, strops::{self, ByteCursor, Field, FieldParams, ParseBytes, SliceCursor, StrFmt},
+  }, varstr,
 };
 use bstr::ByteSlice;
 
@@ -261,8 +253,8 @@ impl super::Builtin for Raise {
       match opt.key() {
         "code" => {
           let c = opt.value()?;
-          let code_arg = c.parse::<i32>().map_err(|v| {
-            sherr!(SyntaxErr @ opt.span(), "Invalid exit code: expected a number, got '{v}'")
+          let code_arg = c.parse_bytes::<i32>().map_err(|()| {
+            sherr!(SyntaxErr @ opt.span(), "Invalid exit code: expected a number, got '{c}'")
           })?;
 
           code = code_arg;

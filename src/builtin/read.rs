@@ -5,22 +5,13 @@ use bstr::ByteSlice;
 use nix::poll::PollTimeout;
 
 use crate::{
-  builtin::quote,
-  expand::{Word, alias},
-  match_loop, out,
-  procio::{self, Sink},
-  sherr, signal,
-  state::{
+  builtin::quote, expand::{Word, alias}, match_loop, out, procio::{self, Sink}, sherr, signal, state::{
     Shed, params,
     terminal::Terminal,
     vars::{ShStr, VarFlags, VarKind},
-  },
-  util::{
-    self,
-    error::{ShErrKind, ShResult, ShResultExt},
-    strops, ui,
-  },
-  varstr,
+  }, util::{
+    self, error::{ShErrKind, ShResult, ShResultExt}, strops::{self, ParseBytes}, ui,
+  }, varstr,
 };
 
 use super::{super::procio::Sinks, opt::OptSpec};
@@ -70,8 +61,8 @@ impl super::Builtin for Read {
         "n-chars" => {
           let n = opt.value()?;
           let bytes = n
-            .parse::<usize>()
-            .map_err(|n| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
+            .parse_bytes::<usize>()
+            .map_err(|()| sherr!(ExecFail @ opt.span(), "invalid byte count '{n}'"))?;
           max_bytes = Some(bytes);
         }
         "prompt" => {

@@ -5,6 +5,7 @@
 
 use bitflags::bitflags;
 use chrono::{DateTime, Local};
+use itertools::Itertools;
 use std::{
   cell::RefCell,
   collections::VecDeque,
@@ -565,6 +566,19 @@ impl Shed {
     access_mut!(SHED, meta, f)
   }
 
+  pub(crate) fn try_meta_mut<T, F>(f: F) -> Option<T>
+  where
+    F: FnOnce(&mut meta::MetaTab) -> T,
+  {
+    SHED.try_with(|shed| {
+      shed
+        .meta
+        .try_borrow_mut()
+        .map(|mut m| f(&mut m))
+        .ok()
+    }).ok().flatten()
+  }
+
   /// Read from the logic table
   #[track_caller]
   pub(crate) fn logic<T, F>(f: F) -> T
@@ -711,9 +725,10 @@ impl Shed {
     }
 
     let blames = node::node_fork_report(tree, node_id)
-      .into_iter()
+      .iter()
       .filter(|b| matches!(b.behavior(), ForkBehavior::Always))
-      .collect();
+      .cloned()
+      .collect_vec();
 
     SHED.with(|shed| {
       let mut profile = shed.fork_profile.borrow_mut();

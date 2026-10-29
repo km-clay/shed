@@ -1,3 +1,5 @@
+use crate::util::strops::ParseBytes;
+
 use super::{
   Shed, sherr,
   util::{error::ShResult, with_status},
@@ -11,10 +13,10 @@ impl super::Builtin for Shift {
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {
     let count = args.arguments().next().map_or(Ok(1), |st| {
-      st.parse::<usize>().map_err(|e| {
+      st.parse_bytes::<usize>().map_err(|()| {
         sherr!(
           ExecFail ? st.span(),
-          "Expected a number in shift args, found: {e}",
+          "Expected a number in shift args, found: {st}",
         )
       })
     })?;

@@ -1,13 +1,7 @@
 use crate::{
-  errln,
-  expand::escape,
-  procio, sherr,
-  state::{Shed, logic::TrapTarget},
-  util::{
-    self,
-    error::{ShResult, ShResultExt},
-  },
-  varstr,
+  errln, expand::escape, procio, sherr, state::{Shed, logic::TrapTarget}, util::{
+    self, error::{ShResult, ShResultExt}, strops::ParseBytes,
+  }, varstr,
 };
 
 use super::opt::OptSpec;
@@ -79,7 +73,7 @@ impl super::Builtin for Trap {
 
     // if the first operand is an unsigned integer, every operand is a trap target
     // to reset to its default action. e.g. `trap 0 2`, `trap 2 EXIT`, etc
-    if arg_vec.first().is_some_and(|a| a.parse::<usize>().is_ok()) {
+    if arg_vec.first().is_some_and(|a| a.parse_bytes::<usize>().is_ok()) {
       for arg in arg_vec {
         let target = TrapTarget::parse(&arg).option_promote(arg.span())?;
         Shed::logic_mut(|l| l.remove_trap(target));

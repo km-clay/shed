@@ -35,27 +35,16 @@ use smallvec::SmallVec;
 use smol_str::{SmolStr, SmolStrBuilder};
 
 use crate::{
-  HashMap,
-  eval::{
+  HashMap, eval::{
     lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
     parse::ast::Ast,
-  },
-  expand::{
+  }, expand::{
     Expander, Word, arithmetic, escape,
     stream::{Marker, Quote, SegStream, Unit},
     var,
-  },
-  match_loop, procio,
-  readline::Candidate,
-  sherr,
-  state::{self, Shed, params, paths},
-  util::{
-    self,
-    error::{LabelBuilder, ShResult},
-    random,
-    strops::{ByteCursor, QuoteState, SliceCursor},
-  },
-  varstr,
+  }, match_loop, procio, readline::Candidate, sherr, state::{self, Shed, params, paths}, util::{
+    self, error::{LabelBuilder, ShResult}, random, strops::{ByteCursor, FromBytes, ParseBytes, QuoteState, SliceCursor},
+  }, varstr,
 };
 
 use super::{meta::MetaTab, scopes::ScopeStack, terminal::Terminal};
@@ -307,6 +296,13 @@ pub(crate) enum ShellParam {
 }
 
 impl ShellParam {
+  pub(crate) fn is_param(value: &[u8]) -> bool {
+    let Some(first) = value.first() else {
+      return false
+    };
+    matches!(first, b'$' | b'!' | b'0' | b'@' | b'*' | b'#') || first.is_ascii_digit()
+  }
+
   pub(crate) fn is_global(&self) -> bool {
     matches!(self, Self::ShPid | Self::LastJob | Self::ShellName)
   }
@@ -338,20 +334,25 @@ impl Display for ShellParam {
   }
 }
 
-impl FromStr for ShellParam {
-  type Err = ();
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s {
-      "$" => Ok(Self::ShPid),
-      "!" => Ok(Self::LastJob),
-      "0" => Ok(Self::ShellName),
-      "@" => Ok(Self::AllArgs),
-      "*" => Ok(Self::AllArgsStr),
-      "#" => Ok(Self::ArgCount),
-      n if let Ok(idx) = n.parse::<usize>() => Ok(Self::Pos(idx)),
-      _ => Err(()),
+impl FromBytes for ShellParam {
+    type Error = ();
+
+    fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
+      where
+        Self: Sized {
+          let bytes = bytes.as_ref();
+          match bytes {
+            b"$" => Ok(Self::ShPid),
+            b"!" => Ok(Self::LastJob),
+            b"0" => Ok(Self::ShellName),
+            b"@" => Ok(Self::AllArgs),
+            b"*" => Ok(Self::AllArgsStr),
+            b"#" => Ok(Self::ArgCount),
+            _ => ShStr::from(bytes)
+              .parse_bytes::<usize>()
+              .map(Self::Pos)
+          }
     }
-  }
 }
 
 bitflags! {
@@ -402,11 +403,11 @@ impl ArrIndex {
         && s[1..].chars().all(|c| c.is_ascii_digit()) =>
       {
         let idx = ShStr::from(&s[1..]);
-        let idx = idx.parse::<usize>().unwrap();
+        let idx = idx.parse_bytes::<usize>().unwrap();
         Ok(Self::FromBack(idx))
       }
       _ if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) => {
-        let idx = s.parse::<usize>().unwrap();
+        let idx = s.parse_bytes::<usize>().unwrap();
         Ok(Self::Literal(idx))
       }
       // Anything else — variable references, arithmetic expressions,
@@ -465,7 +466,7 @@ impl VarName {
   fn slice_component(part: &SegStream) -> Option<usize> {
     var::expand_raw(None, &mut part.cursor())
       .map_or_else(|_| part.content(), |sg| sg.content())
-      .parse::<usize>()
+      .parse_bytes::<usize>()
       .ok()
   }
   pub(crate) fn parse_stream(
@@ -1937,7 +1938,7 @@ impl VarTab {
     }
   }
   pub(crate) fn var_exists(&self, var_name: &[u8]) -> bool {
-    if let Ok(param) = var_name.to_str_lossy().parse::<ShellParam>() {
+    if ShellParam::is_param(var_name) && let Ok(param) = ShellParam::from_bytes(var_name) {
       return self.params.contains_key(&param);
     }
     self.vars.contains_key(var_name)
@@ -2197,7 +2198,6 @@ mod shell_param_fmt_tests {
 
   #[test]
   fn every_variant_round_trips_through_from_str() {
-    use std::str::FromStr;
     let cases = [
       ShellParam::ShPid,
       ShellParam::LastJob,
@@ -2209,7 +2209,7 @@ mod shell_param_fmt_tests {
     ];
     for v in cases {
       let s      = v.to_string();
-      let parsed = ShellParam::from_str(&s).unwrap();
+      let parsed = s.as_bytes().parse_bytes::<ShellParam>().unwrap();
       assert_eq!(parsed, v, "round-trip mismatch for {v:?} via {s:?}");
     }
   }

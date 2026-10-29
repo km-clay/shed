@@ -3,19 +3,11 @@ use std::iter::Peekable;
 use bstr::ByteSlice;
 
 use crate::{
-  errln,
-  expand::{Word, escape},
-  procio, sherr, shopt,
-  state::vars::ShStr,
-  util::{
-    self,
-    error::ShResult,
-    strops::{
-      self, Base, ByteCursor, Case, Count, Field, FieldParams, FmtFlags, ParseRadix, Sign,
-      SliceCursor, StrFmt, StrFormatter,
+  errln, expand::{Word, escape}, procio, sherr, shopt, state::vars::ShStr, util::{
+    self, error::ShResult, strops::{
+      self, Base, ByteCursor, Case, Count, Field, FieldParams, FmtFlags, ParseBytes, ParseRadix, Sign, SliceCursor, StrFmt, StrFormatter,
     },
-  },
-  varstr,
+  }, varstr,
 };
 
 enum Conversion {
@@ -74,7 +66,7 @@ impl StrFmt for PrintfFmt {
     let Some(arg) = src.next_word() else {
       return Ok(0);
     };
-    Ok(arg.parse::<isize>().unwrap_or(0))
+    Ok(arg.parse_bytes::<isize>().unwrap_or(0))
   }
 
   fn parse_conv(&self, cur: &mut SliceCursor) -> ShResult<Conversion> {
@@ -445,7 +437,7 @@ fn render_strftime(src: &mut PrintfArgs, format: &[u8]) -> ShResult<Field> {
   use crate::state::{Shed, meta::MetaTab};
   use chrono::{Local, TimeZone};
   let arg       = src.next_word().unwrap_or_else(|| ShStr::from("-1"));
-  let secs: i64 = arg.parse().unwrap_or(-1);
+  let secs = arg.parse_bytes::<i64>().unwrap_or(-1);
 
   let dt = if secs == -1 {
     // Current time

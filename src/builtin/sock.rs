@@ -1,4 +1,4 @@
-use crate::set_var;
+use crate::{set_var, util::strops::ParseBytes};
 use std::{
   io,
   net::{IpAddr, TcpListener, TcpStream},
@@ -301,8 +301,8 @@ impl SockOpts {
         "port" => {
           let arg = opt.value()?;
           let port = arg
-            .parse::<u16>()
-            .map_err(|v| sherr!(ExecFail, "Invalid port number '{v}'").with_code(2))?;
+            .parse_bytes::<u16>()
+            .map_err(|()| sherr!(ExecFail, "Invalid port number '{arg}'").with_code(2))?;
 
           tcp_port = Some(port);
         }

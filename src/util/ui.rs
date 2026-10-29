@@ -4,12 +4,14 @@
 
 use std::sync::OnceLock;
 use std::{fmt::Write, str::FromStr};
+use bstr::ByteSlice;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 use yansi::{Paint, Painted, Style};
 
 use crate::state::vars::ShStr;
 use crate::util::error::ShErr;
+use crate::util::strops::FromBytes;
 use crate::varstr;
 use crate::{
   match_loop, sherr,
@@ -534,14 +536,18 @@ pub(crate) enum Justify {
   Right,
 }
 
-impl FromStr for Justify {
-  type Err = ShErr;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s.to_lowercase().as_str() {
-      "left"   => Ok(Justify::Left),
-      "center" => Ok(Justify::Center),
-      "right"  => Ok(Justify::Right),
-      _        => Err(sherr!(ParseErr, "invalid justification '{s}'")),
+impl FromBytes for Justify {
+  type Error = ShErr;
+  fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
+    where
+      Self: Sized
+  {
+    let src = bytes.as_ref();
+    match src.to_ascii_lowercase().as_slice() {
+      b"left"   => Ok(Justify::Left),
+      b"center" => Ok(Justify::Center),
+      b"right"  => Ok(Justify::Right),
+      _        => Err(sherr!(ParseErr, "invalid justification '{}'", src.to_str_lossy())),
     }
   }
 }

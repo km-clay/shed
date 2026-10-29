@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{
   procio::RedirSpec,
-  state::SourceHandle,
+  state::{Shed, SourceHandle},
   util::error::{LabelBuilder, ShResult},
 };
 
@@ -42,7 +42,7 @@ static AST_GENERATION: AtomicU32 = AtomicU32::new(0);
 /// If you know how many tokens this thing is going to parse, construct it using
 /// [`Ast::with_capacity()`], this saves us from having to contsantly resize 10 vectors
 /// during the parse.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Ast {
   nodes      : Vec<Node>,         // all ast nodes
   roots      : Vec<NodeId>,       // top-level statements (entry points)
@@ -64,8 +64,20 @@ pub(crate) struct Ast {
 impl Ast {
   pub(crate) fn new() -> Self {
     Self {
+      nodes: vec![],
+      roots: vec![],
+      tokens: vec![],
+      redirs: vec![],
+      child_nodes: vec![],
+      case_nodes: vec![],
+      cond_nodes: vec![],
+      conjuncts: vec![],
+      test_exprs: vec![],
+      spans: vec![],
+      labels: vec![],
+
       id: AST_GENERATION.fetch_add(1, Ordering::SeqCst),
-      ..Default::default()
+      source: None,
     }
   }
   pub(crate) fn with_source(mut self, source: SourceHandle) -> Self {
@@ -424,6 +436,10 @@ impl Ast {
     }
     Ok(())
   }
+
+  pub(crate) fn node_count(&self) -> usize {
+    self.nodes.len()
+  }
 }
 
 impl Clone for Ast {
@@ -441,9 +457,15 @@ impl Clone for Ast {
       conjuncts: self.conjuncts.clone(),
       spans: self.spans.clone(),
       labels: self.labels.clone(),
-      id: self.id,
+      id: AST_GENERATION.fetch_add(1, Ordering::SeqCst),
       source: new_src,
     }
+  }
+}
+
+impl Drop for Ast {
+  fn drop(&mut self) {
+    Shed::try_meta_mut(|m| m.drop_fork_memos_for(self.id));
   }
 }
 
@@ -468,6 +490,14 @@ macro_rules! arenas {
       impl $ty {
         pub(super) fn new(id: u32, ast_id: u32) -> Self {
           Self { id, ast_id }
+        }
+        #[allow(dead_code)]
+        pub(crate) fn slot(self) -> usize {
+          self.id as usize
+        }
+        #[allow(dead_code)]
+        pub(crate) fn ast_id(self) -> u32 {
+          self.ast_id
         }
       }
       impl Index<$ty> for super::Ast {

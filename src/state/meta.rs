@@ -4,13 +4,7 @@
 //! `$PATH` table ([`PathTable`], [`Utility`]), and loop/fork depth guards.
 
 use std::{
-  collections::{VecDeque, vec_deque},
-  ffi::CString,
-  fmt::Write,
-  os::{fd::OwnedFd, unix::ffi::OsStrExt},
-  path::{Path, PathBuf},
-  rc::Rc,
-  time::{Duration, Instant},
+  collections::{VecDeque, vec_deque}, ffi::CString, fmt::Write, os::{fd::OwnedFd, unix::ffi::OsStrExt}, path::{Path, PathBuf}, rc::Rc, time::{Duration, Instant},
 };
 
 use nix::{
@@ -24,18 +18,10 @@ use nix::{
 use regex::Regex;
 
 use crate::{
-  HashMap, HashSet,
-  expand::{
+  HashMap, HashSet, eval::parse::{ast::NodeId, node::ForkReport}, expand::{
     alias,
     glob::{GlobOpts, Pattern},
-  },
-  match_loop,
-  readline::{Candidate, CompSpec},
-  sherr,
-  state::{Shed, params, paths, vars::ShStr},
-  system_msg,
-  util::{error::ShResult, ui},
-  var,
+  }, match_loop, readline::{Candidate, CompSpec}, sherr, state::{Shed, params, paths, vars::ShStr}, system_msg, util::{error::ShResult, ui}, var,
 };
 
 use super::{
@@ -594,6 +580,74 @@ impl Drop for RedirForkGuard {
   }
 }
 
+#[derive(Debug, Clone, Default)]
+struct ForkMemo {
+  hot: Option<(u32, Vec<Option<ForkReport>>)>,
+  cold: HashMap<u32, Vec<Option<ForkReport>>>,
+}
+
+impl ForkMemo {
+  fn get(&self, node: NodeId) -> Option<&ForkReport> {
+    let tree = self
+      .get_hot(node.ast_id())
+      .or_else(|| self.cold.get(&node.ast_id()))?;
+
+    tree.get(node.slot())?.as_ref()
+  }
+
+  fn get_hot(&self, ast_id: u32) -> Option<&Vec<Option<ForkReport>>> {
+    self.hot.as_ref().and_then(|(id, cache)| (*id == ast_id).then_some(cache))
+  }
+
+  fn focus(&mut self, ast_id: u32, slots: usize) {
+    if self.hot.as_ref().is_some_and(|(id, _)| *id == ast_id) {
+      return;
+    }
+
+    if let Some((old_id, old)) = self.hot.take() {
+      self.cold.insert(old_id, old);
+    }
+
+    let tree = self.cold.remove(&ast_id).unwrap_or_else(|| vec![None; slots]);
+    self.hot = Some((ast_id, tree));
+  }
+
+  fn insert(&mut self, node_id: NodeId, slots: usize, report: ForkReport) {
+    self.focus(node_id.ast_id(), slots);
+
+    let Some((_, tree)) = self.hot.as_mut() else {
+      return;
+    };
+
+    if tree.len() < slots {
+      tree.resize(slots, None);
+    }
+
+    let Some(slot) = tree.get_mut(node_id.slot()) else {
+      return;
+    };
+
+    match slot {
+      None | Some(ForkReport::Simple(_)) => *slot = Some(report),
+      Some(ForkReport::Detailed(_)) => {}
+    }
+  }
+
+
+  fn clear(&mut self) {
+    self.hot = None;
+    self.cold.clear();
+  }
+
+  fn drop_tree(&mut self, ast_id: u32) {
+    if self.hot.as_ref().is_some_and(|(id,_)| *id == ast_id) {
+      self.hot = None;
+    }
+
+    self.cold.remove(&ast_id);
+  }
+}
+
 /// Miscellaneous global data storage
 #[derive(Debug)]
 #[expect(clippy::struct_excessive_bools)]
@@ -644,6 +698,7 @@ pub(crate) struct MetaTab {
   xtrace_depth : usize,
   fork_builtins: bool,
   fork_redirs  : bool,
+  fork_memo    : ForkMemo,
 
   // completion candidates given by compadd
   comp_add_candidates: Vec<Candidate>,
@@ -682,10 +737,11 @@ impl Clone for MetaTab {
       xtrace_depth: self.xtrace_depth,
       fork_builtins: self.fork_builtins,
       fork_redirs: self.fork_redirs,
+      fork_memo: ForkMemo::default(),
       envp_cache: self.envp_cache.clone(),
       comp_add_candidates: self.comp_add_candidates.clone(),
       regexes: self.regexes.clone(),
-      path_cache: self.path_cache.clone(),
+      path_cache: PathTable::new(),
       comp_specs: self.comp_specs.clone(),
       pending_widget_keys: self.pending_widget_keys.clone(),
       last_was_func_def: self.last_was_func_def,
@@ -718,6 +774,7 @@ impl Default for MetaTab {
       xtrace_depth: 0,
       fork_builtins: false,
       fork_redirs: false,
+      fork_memo: ForkMemo::default(),
       envp_cache: None,
       procsub_stack: vec![],
       comp_add_candidates: vec![],
@@ -757,6 +814,22 @@ impl MetaTab {
   }
   pub(crate) fn take_poll_timeout(&mut self) -> Option<PollTimeout> {
     self.main_loop_timeout.take()
+  }
+
+  pub(crate) fn fork_memo_for(&self, node: NodeId) -> Option<&ForkReport> {
+    self.fork_memo.get(node)
+  }
+
+  pub(crate) fn drop_fork_memos_for(&mut self, ast_id: u32) {
+    self.fork_memo.drop_tree(ast_id);
+  }
+
+  pub(crate) fn clear_fork_memo(&mut self) {
+    self.fork_memo.clear();
+  }
+
+  pub(crate) fn memoize_fork_behavior(&mut self, node: NodeId, slots: usize, behavior: ForkReport) {
+    self.fork_memo.insert(node, slots, behavior);
   }
 
   pub(crate) fn set_last_cmdsub_status(&mut self, status: i32) {

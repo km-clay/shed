@@ -1,9 +1,7 @@
 use std::io;
 
 use crate::{
-  opt, outln, sherr,
-  state::Shed,
-  util::{self, error::ShResult},
+  opt, outln, sherr, state::Shed, util::{self, error::ShResult, strops::ParseBytes},
 };
 
 use super::opt::OptSpec;
@@ -40,8 +38,8 @@ impl super::Builtin for Seek {
       return Err(sherr!(ExecFail @ span, "missing required argument 'fd'",).with_code(2));
     };
 
-    let fd = fd.parse::<u32>().map_err(|v| {
-      sherr!(ExecFail ? fd.span(), "invalid file descriptor `{v}`")
+    let fd = fd.parse_bytes::<u32>().map_err(|()| {
+      sherr!(ExecFail ? fd.span(), "invalid file descriptor `{fd}`")
         .with_code(2)
         .with_note("file descriptors are non-negative integers".into())
     })?;

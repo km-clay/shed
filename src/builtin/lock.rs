@@ -3,9 +3,7 @@ use std::os::fd::AsRawFd;
 use nix::libc;
 
 use crate::{
-  opt, sherr, signal,
-  state::Shed,
-  util::{self, error::ShResult},
+  opt, sherr, signal, state::Shed, util::{self, error::ShResult, strops::ParseBytes},
 };
 
 use super::opt::OptSpec;
@@ -33,8 +31,8 @@ impl super::Builtin for Lock {
       );
     }
 
-    let fd = arg.parse::<i32>().map_err(|v| {
-      let mut err = sherr!(ExecFail ? arg.span(), "invalid file descriptor `{v}`").with_code(2);
+    let fd = arg.parse_bytes::<i32>().map_err(|()| {
+      let mut err = sherr!(ExecFail ? arg.span(), "invalid file descriptor `{arg}`").with_code(2);
       if arg.contains(&b'/') {
         err = err.with_note("lock expects a file descriptor, not a path".into());
       }

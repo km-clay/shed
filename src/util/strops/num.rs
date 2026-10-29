@@ -7,11 +7,7 @@ use std::{
 };
 
 use crate::{
-  expand::arithmetic::{Num, uNum},
-  sherr,
-  state::{params, vars::ShStr},
-  util::error::{ShResult, ShResultExt},
-  varstr,
+  expand::arithmetic::{Num, uNum}, sherr, state::{params, vars::ShStr}, util::{error::{ShResult, ShResultExt}, strops::{FromBytes, ParseBytes}}, varstr,
 };
 
 use super::{ByteCursor, SliceCursor};
@@ -256,12 +252,16 @@ impl Deref for Sign {
   }
 }
 
-impl FromStr for Sign {
-  type Err = ();
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
+impl FromBytes for Sign {
+  type Error = ();
+  fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
+    where
+      Self: Sized
+  {
+    let s = bytes.as_ref();
     match s {
-      "0" => Ok(Self(false)),
-      "1" => Ok(Self(true)),
+      b"0" => Ok(Self(false)),
+      b"1" => Ok(Self(true)),
       _   => Err(()),
     }
   }
@@ -406,15 +406,19 @@ impl FloatSpec {
   }
 
   pub(crate) fn encode_triple(self, s: &[u8], e: &[u8], m: &[u8]) -> ShResult<Vec<u8>> {
-    let sign = ShStr::from(s)
-      .parse::<Sign>()
-      .map_err(|v| sherr!(ParseErr, "invalid sign: '{v}'"))?;
-    let exp = ShStr::from(e)
-      .parse::<Num>()
-      .map_err(|v| sherr!(ParseErr, "invalid exponent: '{v}'"))?;
-    let mant = ShStr::from(m)
-      .parse::<uNum>()
-      .map_err(|v| sherr!(ParseErr, "invalid mantissa: '{v}'"))?;
+    let s = ShStr::from(s);
+    let e = ShStr::from(e);
+    let m = ShStr::from(m);
+
+    let sign = s
+      .parse_bytes::<Sign>()
+      .map_err(|()| sherr!(ParseErr, "invalid sign: '{s}'"))?;
+    let exp = e
+      .parse_bytes::<Num>()
+      .map_err(|()| sherr!(ParseErr, "invalid exponent: '{e}'"))?;
+    let mant = m
+      .parse_bytes::<uNum>()
+      .map_err(|()| sherr!(ParseErr, "invalid mantissa: '{m}'"))?;
 
     let bias      = (1 << (self.exp_bits - 1)) - 1;
     let exp_mask  = (1 << self.exp_bits) - 1;

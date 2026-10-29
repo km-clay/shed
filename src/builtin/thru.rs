@@ -4,16 +4,8 @@ use std::{fs, io, sync::Arc};
 use nix::libc::STDOUT_FILENO;
 
 use crate::{
-  builtin::{BuiltinArgs, opt::OptSpec},
-  errln,
-  expand::Word,
-  opt,
-  procio::{self, OsSink, RedirSpec, RedirType, Sink},
-  sherr, signal,
-  state::vars::ShStr,
-  util::{
-    self,
-    error::{ShErr, ShResult},
+  builtin::{BuiltinArgs, opt::OptSpec}, errln, expand::Word, opt, procio::{self, OsSink, RedirSpec, RedirType, Sink}, sherr, signal, state::vars::ShStr, util::{
+    self, error::{ShErr, ShResult}, strops::ParseBytes,
   },
 };
 
@@ -323,15 +315,15 @@ impl Thru {
           .opt_span("take")
           .or_else(|| args.opt_span("limit"))
           .unwrap();
-        s.parse::<usize>()
-          .map_err(|v| sherr!(InvalidOpt @ span, "invalid limit: '{v}'").with_code(2))
+        s.parse_bytes::<usize>()
+          .map_err(|()| sherr!(InvalidOpt @ span, "invalid limit: '{s}'").with_code(2))
       })
       .transpose()?;
     let skip = args
       .opt_value("skip")
       .map(|s| {
-        s.parse::<usize>().map_err(|v| {
-          sherr!(InvalidOpt @ args.opt_span("skip").unwrap(), "invalid skip: '{v}'").with_code(2)
+        s.parse_bytes::<usize>().map_err(|()| {
+          sherr!(InvalidOpt @ args.opt_span("skip").unwrap(), "invalid skip: '{s}'").with_code(2)
         })
       })
       .transpose()?;

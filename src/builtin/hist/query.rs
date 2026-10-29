@@ -8,13 +8,7 @@ use std::{
 use rusqlite::ToSql;
 
 use crate::{
-  HashSet,
-  builtin::opt::Opt,
-  expand::escape,
-  readline::{HistEntry, History},
-  sherr,
-  state::{Shed, vars::ShStr},
-  util::{error::ShResult, strops::TimeReader},
+  HashSet, builtin::opt::Opt, expand::escape, readline::{HistEntry, History}, sherr, state::{Shed, vars::ShStr}, util::{error::ShResult, strops::{ParseBytes, TimeReader}},
 };
 
 use super::entry_obj;
@@ -230,10 +224,10 @@ impl HistQuery {
         "with-token"  => new.with_token = (value(opt), negated),
         "with-status" => {
           let arg = opt.value()?;
-          match arg.parse::<i32>() {
+          match arg.parse_bytes::<i32>() {
             Ok(s) => new.with_status = (Some(s), negated),
-            Err(a) => {
-              return Err(sherr!(ParseErr, "Invalid status code for {opt}: {a}",));
+            Err(()) => {
+              return Err(sherr!(ParseErr, "Invalid status code for {opt}: {arg}",));
             }
           }
         }
@@ -249,14 +243,14 @@ impl HistQuery {
         }
         "limit" => {
           let arg = opt.value()?;
-          new.limit = Some(arg.parse().unwrap_or(u64::MAX));
+          new.limit = Some(arg.parse_bytes().unwrap_or(u64::MAX));
         }
         opt_key @ ("lines-gt" | "lines-lt") => {
           let is_gt = opt_key == "lines-gt";
           let arg   = opt.value()?;
           let count = arg
-            .parse::<u64>()
-            .map_err(|v| sherr!(ParseErr, "Invalid number for {opt}: {v}"))?;
+            .parse_bytes::<u64>()
+            .map_err(|()| sherr!(ParseErr, "Invalid number for {opt}: {arg}"))?;
 
           if is_gt {
             new.lines_gt = (Some(count), negated);

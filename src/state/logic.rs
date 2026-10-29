@@ -9,6 +9,7 @@ use std::fmt::{self, Display};
 use std::sync::Arc;
 
 use crate::builtin::ForkBehavior;
+use crate::state::Shed;
 use crate::util::error::{LabelBuilder, ShResult};
 use crate::varstr;
 use crate::{
@@ -428,6 +429,7 @@ impl LogTab {
   pub(crate) fn insert_func(&mut self, name: &[u8], src: ShFunc) {
     self.functions.insert(name.into(), src);
     self.invalidate_internal_cache();
+    Shed::try_meta_mut(|m| m.clear_fork_memo());
   }
   pub(crate) fn insert_trap(&mut self, target: TrapTarget, command: ShStr) {
     self.traps.insert(target, command);
@@ -453,12 +455,23 @@ impl LogTab {
   pub(crate) fn get_func_ref(&self, name: &[u8]) -> Option<&ShFunc> {
     self.functions.get(name)
   }
-  pub(crate) fn get_func_mut(&mut self, name: &[u8]) -> Option<&mut ShFunc> {
-    self.functions.get_mut(name)
+  pub(crate) fn set_func_internal(&mut self, name: &[u8], is_internal: IsInternal) {
+    if let Some(func) = self.functions.get_mut(name) {
+      func.set_is_internal(is_internal).ok();
+    }
+  }
+  pub(crate) fn begin_internal_check(&mut self, name: &[u8]) -> Option<Arc<Ast>> {
+    let ShFunc::Defined { logic, is_internal, .. } = self.functions.get_mut(name)? else {
+      return None;
+    };
+
+    *is_internal = Some(IsInternal::Checking);
+    Some(logic.clone())
   }
   pub(crate) fn remove_func(&mut self, name: &[u8]) -> Option<ShFunc> {
     let func = self.functions.remove(name);
     self.invalidate_internal_cache();
+    Shed::try_meta_mut(|m| m.clear_fork_memo());
     func
   }
   pub(crate) fn take_comp_autoload(&mut self, name: &[u8]) -> Option<AutoloadSrc> {

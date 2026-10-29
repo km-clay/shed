@@ -16,7 +16,7 @@ use super::{
   sherr,
   vars::{self, ArrIndex, ShellParam, Var, VarFlags, VarKind, VarKindTag, VarName, VarTab},
 };
-use crate::expand::Words;
+use crate::{expand::Words, util::strops::ParseBytes};
 use crate::{
   HashMap,
   state::vars::{ShStr, ShStrSliceExt},
@@ -191,25 +191,25 @@ impl ScopeStack {
         return true;
       }
     }
-    if let Ok(param) = var_name.to_str_lossy().parse::<ShellParam>() {
+    if ShellParam::is_param(var_name) && let Ok(param) = var_name.parse_bytes::<ShellParam>() {
       return self.global_params.contains_key(&param);
     }
     false
   }
   pub(crate) fn flatten_vars(&self) -> HashMap<ShStr, Var> {
-    let scope_vars = self
+    let mut flat: HashMap<ShStr, Var> = self
       .scopes_iter()
       .flat_map(VarTab::vars)
-      .map(|(k, v)| (k.clone(), v.clone()));
+      .map(|(k, v)| (k.clone(), v.clone()))
+      .collect();
 
-    let env_vars = std::env::vars_os().map(|(k, v)| (k.into(), v.into()));
+    for (k, v) in std::env::vars_os() {
+      flat
+        .entry(ShStr::from(k.into_vec()))
+        .or_insert_with(|| Var::new(VarKind::Str(ShStr::from(v.into_vec())), VarFlags::EXPORT));
+    }
 
-    scope_vars
-      .chain(env_vars)
-      .fold(HashMap::default(), |mut acc, (k, v)| {
-        acc.insert(k, v);
-        acc
-      })
+    flat
   }
   pub(crate) fn flatten_to_frame(&self) -> VarTab {
     let mut frame = VarTab::bare();
@@ -790,7 +790,7 @@ impl ScopeStack {
   }
 
   pub(crate) fn try_get_var(&self, var_name: &[u8]) -> Option<ShStr> {
-    if let Ok(param) = var_name.to_str_lossy().parse::<ShellParam>() {
+    if ShellParam::is_param(var_name) && let Ok(param) = var_name.parse_bytes::<ShellParam>() {
       return self.try_get_param(param);
     }
     for scope in self.scopes_rev() {
@@ -804,7 +804,7 @@ impl ScopeStack {
     None
   }
   pub(crate) fn try_take_var(&mut self, var_name: &[u8]) -> ShResult<Option<Var>> {
-    if let Ok(param) = var_name.to_str_lossy().parse::<ShellParam>() {
+    if ShellParam::is_param(var_name) && let Ok(param) = var_name.parse_bytes::<ShellParam>() {
       return Ok(self.try_take_param(param)?.map(Var::from));
     }
     for scope in self.bounded_scopes_rev_mut() {
