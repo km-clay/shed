@@ -18,7 +18,7 @@ static SRC_GENERATION: AtomicI32 = AtomicI32::new(0);
 
 thread_local! {
   /// A strong reference to the last source accessed in the [`SOURCES`] map.
-  static LAST_SOURCE: RefCell<Option<(SourceId, Arc<Source>)>> = const { RefCell::new(None) };
+  static LAST_SOURCE: RefCell<Option<SourceHandle>> = const { RefCell::new(None) };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -46,7 +46,8 @@ impl Display for SourceId {
 ///
 /// As long as at least one handle exists, the `Source` will remain alive. When all handles are dropped, the `Source` will
 /// be dropped as well. Any [`Spans`](crate::eval::lex::Span) that still refer to the dropped source will cause a panic if
-/// they are used, so it's important to manage the lifetimes of `SourceHandle`s carefully.
+/// they are used, so it's important to manage the lifetimes of `SourceHandle`s carefully. [`StrongSpans`](StrongSpan) can
+/// be used to extend the lifetime of a `Span` by keeping a `SourceHandle` alive for as long as the `StrongSpan` exists.
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub(crate) struct SourceHandle {
   ptr: Arc<Source>,
@@ -69,6 +70,23 @@ impl SourceHandle {
     Self {
       ptr: Arc::clone(&self.ptr),
       id : self.id,
+    }
+  }
+}
+
+impl Drop for SourceHandle {
+  fn drop(&mut self) {
+    // now we check to see if nothing else references this source
+    if Arc::strong_count(&self.ptr) != 1 {
+      return;
+    }
+
+    // take a write lock. no reader can upgrade while we hold this
+    // so the strong count is a reliable measurement past this point
+    let mut reg = SOURCES.write().unwrap();
+
+    if Arc::strong_count(&self.ptr) == 1 {
+      reg.sources.remove(&self.id);
     }
   }
 }
@@ -131,13 +149,15 @@ impl ariadne::Span for StrongSpan {
 /// Returns `None` if the source has been dropped.
 pub(crate) fn handle_for(id: SourceId) -> Option<SourceHandle> {
   LAST_SOURCE.with(|slot| {
-    if let Some((s_id, src)) = &*slot.borrow() && *s_id == id {
-      return Some(SourceHandle { ptr: Arc::clone(src), id });
+    if let Some(handle) = &*slot.borrow() && handle.id == id {
+      return Some(handle.share_handle());
     }
 
     let src = SOURCES.read().unwrap().get_source(id)?;
-    *slot.borrow_mut() = Some((id, Arc::clone(&src)));
-    Some(SourceHandle { ptr: src, id })
+    let handle = SourceHandle { ptr: src, id };
+    let shared = handle.share_handle();
+    *slot.borrow_mut() = Some(handle);
+    Some(shared)
   })
 }
 
@@ -209,14 +229,14 @@ pub(crate) fn slice_source(span: Span) -> Option<ShStr> {
   let end   = span.end();
   let id    = span.source();
   let source = LAST_SOURCE.with(|slot| {
-    if let Some((s_id, src)) = &*slot.borrow()
-      && *s_id == id
+    if let Some(handle) = &*slot.borrow()
+      && handle.id == id
     {
-      return Some(Arc::clone(src));
+      return Some(Arc::clone(&handle.ptr));
     }
 
     let src = SOURCES.read().unwrap().get_source(id)?;
-    *slot.borrow_mut() = Some((id, Arc::clone(&src)));
+    *slot.borrow_mut() = Some(SourceHandle { ptr: Arc::clone(&src), id });
     Some(src)
   })?;
 
