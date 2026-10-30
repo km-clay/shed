@@ -4,7 +4,13 @@
 //! `$PATH` table ([`PathTable`], [`Utility`]), and loop/fork depth guards.
 
 use std::{
-  collections::{VecDeque, vec_deque}, ffi::CString, fmt::Write, os::{fd::OwnedFd, unix::ffi::OsStrExt}, path::{Path, PathBuf}, rc::Rc, time::{Duration, Instant},
+  collections::{VecDeque, vec_deque},
+  ffi::CString,
+  fmt::Write,
+  os::{fd::OwnedFd, unix::ffi::OsStrExt},
+  path::{Path, PathBuf},
+  rc::Rc,
+  time::{Duration, Instant},
 };
 
 use nix::{
@@ -18,10 +24,19 @@ use nix::{
 use regex::Regex;
 
 use crate::{
-  HashMap, HashSet, eval::parse::{ast::NodeId, node::ForkReport}, expand::{
+  HashMap, HashSet,
+  eval::parse::{ast::NodeId, node::ForkReport},
+  expand::{
     alias,
     glob::{GlobOpts, Pattern},
-  }, match_loop, readline::{Candidate, CompSpec}, sherr, state::{Shed, params, paths, vars::ShStr}, system_msg, util::{error::ShResult, ui}, var,
+  },
+  match_loop,
+  readline::{Candidate, CompSpec},
+  sherr,
+  state::{Shed, params, paths, vars::ShStr},
+  system_msg,
+  util::{error::ShResult, ui},
+  var,
 };
 
 use super::{
@@ -582,7 +597,7 @@ impl Drop for RedirForkGuard {
 
 #[derive(Debug, Clone, Default)]
 struct ForkMemo {
-  hot: Option<(u32, Vec<Option<ForkReport>>)>,
+  hot : Option<(u32, Vec<Option<ForkReport>>)>,
   cold: HashMap<u32, Vec<Option<ForkReport>>>,
 }
 
@@ -596,7 +611,10 @@ impl ForkMemo {
   }
 
   fn get_hot(&self, ast_id: u32) -> Option<&Vec<Option<ForkReport>>> {
-    self.hot.as_ref().and_then(|(id, cache)| (*id == ast_id).then_some(cache))
+    self
+      .hot
+      .as_ref()
+      .and_then(|(id, cache)| (*id == ast_id).then_some(cache))
   }
 
   fn focus(&mut self, ast_id: u32, slots: usize) {
@@ -608,7 +626,10 @@ impl ForkMemo {
       self.cold.insert(old_id, old);
     }
 
-    let tree = self.cold.remove(&ast_id).unwrap_or_else(|| vec![None; slots]);
+    let tree = self
+      .cold
+      .remove(&ast_id)
+      .unwrap_or_else(|| vec![None; slots]);
     self.hot = Some((ast_id, tree));
   }
 
@@ -629,10 +650,9 @@ impl ForkMemo {
 
     match slot {
       None | Some(ForkReport::Simple(_)) => *slot = Some(report),
-      Some(ForkReport::Detailed(_)) => {}
+      Some(ForkReport::Detailed(_))      => {}
     }
   }
-
 
   fn clear(&mut self) {
     self.hot = None;
@@ -640,7 +660,7 @@ impl ForkMemo {
   }
 
   fn drop_tree(&mut self, ast_id: u32) {
-    if self.hot.as_ref().is_some_and(|(id,_)| *id == ast_id) {
+    if self.hot.as_ref().is_some_and(|(id, _)| *id == ast_id) {
       self.hot = None;
     }
 

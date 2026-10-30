@@ -19,7 +19,9 @@ use super::{
   util::error::ShResult,
 };
 use crate::{
-  HashMap, state::{Shed, db, thread}, util::random::Uuid,
+  HashMap,
+  state::{Shed, db, thread},
+  util::random::Uuid,
 };
 
 #[derive(Debug, Clone)]

@@ -64,19 +64,19 @@ pub(crate) struct Ast {
 impl Ast {
   pub(crate) fn new() -> Self {
     Self {
-      nodes: vec![],
-      roots: vec![],
-      tokens: vec![],
-      redirs: vec![],
+      nodes      : vec![],
+      roots      : vec![],
+      tokens     : vec![],
+      redirs     : vec![],
       child_nodes: vec![],
-      case_nodes: vec![],
-      cond_nodes: vec![],
-      conjuncts: vec![],
-      test_exprs: vec![],
-      spans: vec![],
-      labels: vec![],
+      case_nodes : vec![],
+      cond_nodes : vec![],
+      conjuncts  : vec![],
+      test_exprs : vec![],
+      spans      : vec![],
+      labels     : vec![],
 
-      id: AST_GENERATION.fetch_add(1, Ordering::SeqCst),
+      id    : AST_GENERATION.fetch_add(1, Ordering::SeqCst),
       source: None,
     }
   }

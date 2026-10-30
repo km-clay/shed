@@ -8,7 +8,16 @@ use std::{
 use rusqlite::ToSql;
 
 use crate::{
-  HashSet, builtin::opt::Opt, expand::escape, readline::{HistEntry, History}, sherr, state::{Shed, vars::ShStr}, util::{error::ShResult, strops::{ParseBytes, TimeReader}},
+  HashSet,
+  builtin::opt::Opt,
+  expand::escape,
+  readline::{HistEntry, History},
+  sherr,
+  state::{Shed, vars::ShStr},
+  util::{
+    error::ShResult,
+    strops::{ParseBytes, TimeReader},
+  },
 };
 
 use super::entry_obj;

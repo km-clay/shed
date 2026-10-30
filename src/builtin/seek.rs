@@ -1,7 +1,9 @@
 use std::io;
 
 use crate::{
-  opt, outln, sherr, state::Shed, util::{self, error::ShResult, strops::ParseBytes},
+  opt, outln, sherr,
+  state::Shed,
+  util::{self, error::ShResult, strops::ParseBytes},
 };
 
 use super::opt::OptSpec;

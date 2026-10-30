@@ -1,9 +1,17 @@
 use std::{iter::Peekable, vec};
 
 use crate::{
-  HashMap, eval::execute, expand::Word, opt, sherr, state::{Shed, logic::TrapTarget}, util::{
-    self, error::{self, ShErr, ShErrKind, ShResult, ShResultExt}, strops::{self, ByteCursor, Field, FieldParams, ParseBytes, SliceCursor, StrFmt},
-  }, varstr,
+  HashMap,
+  eval::execute,
+  expand::Word,
+  opt, sherr,
+  state::{Shed, logic::TrapTarget},
+  util::{
+    self,
+    error::{self, ShErr, ShErrKind, ShResult, ShResultExt},
+    strops::{self, ByteCursor, Field, FieldParams, ParseBytes, SliceCursor, StrFmt},
+  },
+  varstr,
 };
 use bstr::ByteSlice;
 

@@ -2,9 +2,9 @@
 //!
 //! color/decoration parsing, ANSI rendering, box-drawing glyphs, and display-width ([`calc_str_width`] / [`truncate_visual`]).
 
-use std::sync::OnceLock;
-use std::fmt::Write;
 use bstr::ByteSlice;
+use std::fmt::Write;
+use std::sync::OnceLock;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 use yansi::{Paint, Painted, Style};
@@ -539,15 +539,15 @@ pub(crate) enum Justify {
 impl FromBytes for Justify {
   type Error = ShErr;
   fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
-    where
-      Self: Sized
+  where
+    Self: Sized,
   {
     let src = bytes.as_ref();
     match src.to_ascii_lowercase().as_slice() {
       b"left"   => Ok(Justify::Left),
       b"center" => Ok(Justify::Center),
       b"right"  => Ok(Justify::Right),
-      _        => Err(sherr!(ParseErr, "invalid justification '{}'", src.to_str_lossy())),
+      _         => Err(sherr!(ParseErr, "invalid justification '{}'", src.to_str_lossy())),
     }
   }
 }

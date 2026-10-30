@@ -6,7 +6,14 @@ use std::{
 };
 
 use crate::{
-  expand::arithmetic::{Num, uNum}, sherr, state::{params, vars::ShStr}, util::{error::{ShResult, ShResultExt}, strops::{FromBytes, ParseBytes}}, varstr,
+  expand::arithmetic::{Num, uNum},
+  sherr,
+  state::{params, vars::ShStr},
+  util::{
+    error::{ShResult, ShResultExt},
+    strops::{FromBytes, ParseBytes},
+  },
+  varstr,
 };
 
 use super::{ByteCursor, SliceCursor};
@@ -254,14 +261,14 @@ impl Deref for Sign {
 impl FromBytes for Sign {
   type Error = ();
   fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
-    where
-      Self: Sized
+  where
+    Self: Sized,
   {
     let s = bytes.as_ref();
     match s {
       b"0" => Ok(Self(false)),
       b"1" => Ok(Self(true)),
-      _   => Err(()),
+      _    => Err(()),
     }
   }
 }

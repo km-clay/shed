@@ -3,11 +3,19 @@ use std::iter::Peekable;
 use bstr::ByteSlice;
 
 use crate::{
-  errln, expand::{Word, escape}, procio, sherr, shopt, state::vars::ShStr, util::{
-    self, error::ShResult, strops::{
-      self, Base, ByteCursor, Case, Count, Field, FieldParams, FmtFlags, ParseBytes, ParseRadix, Sign, SliceCursor, StrFmt, StrFormatter,
+  errln,
+  expand::{Word, escape},
+  procio, sherr, shopt,
+  state::vars::ShStr,
+  util::{
+    self,
+    error::ShResult,
+    strops::{
+      self, Base, ByteCursor, Case, Count, Field, FieldParams, FmtFlags, ParseBytes, ParseRadix,
+      Sign, SliceCursor, StrFmt, StrFormatter,
     },
-  }, varstr,
+  },
+  varstr,
 };
 
 enum Conversion {
@@ -436,7 +444,7 @@ fn render_shell_quote(src: &mut PrintfArgs) -> Field {
 fn render_strftime(src: &mut PrintfArgs, format: &[u8]) -> ShResult<Field> {
   use crate::state::{Shed, meta::MetaTab};
   use chrono::{Local, TimeZone};
-  let arg       = src.next_word().unwrap_or_else(|| ShStr::from("-1"));
+  let arg  = src.next_word().unwrap_or_else(|| ShStr::from("-1"));
   let secs = arg.parse_bytes::<i64>().unwrap_or(-1);
 
   let dt = if secs == -1 {

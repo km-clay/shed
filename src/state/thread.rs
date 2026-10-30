@@ -1,4 +1,7 @@
-use std::{cell::Cell, sync::{Arc, atomic::Ordering}};
+use std::{
+  cell::Cell,
+  sync::{Arc, atomic::Ordering},
+};
 
 use nix::sys::signal::Signal;
 

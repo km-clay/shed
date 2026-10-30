@@ -1,9 +1,13 @@
 use std::{
-  cell::RefCell, convert::Into, os::fd::{AsFd, BorrowedFd, OwnedFd}, sync::{
+  cell::RefCell,
+  convert::Into,
+  os::fd::{AsFd, BorrowedFd, OwnedFd},
+  sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
     mpsc,
-  }, thread::JoinHandle,
+  },
+  thread::JoinHandle,
 };
 
 use nix::{
@@ -13,7 +17,14 @@ use nix::{
 };
 
 use crate::{
-  defer, exec_term, procio, queue_term, readline::Pos, sherr, state::{terminal::{CursorStyle, TermCap, Terminal}, thread}, util::{error::ShResult, ui},
+  defer, exec_term, procio, queue_term,
+  readline::Pos,
+  sherr,
+  state::{
+    terminal::{CursorStyle, TermCap, Terminal},
+    thread,
+  },
+  util::{error::ShResult, ui},
 };
 
 use super::{

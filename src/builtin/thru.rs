@@ -4,8 +4,17 @@ use std::{fs, io, sync::Arc};
 use nix::libc::STDOUT_FILENO;
 
 use crate::{
-  builtin::{BuiltinArgs, opt::OptSpec}, errln, expand::Word, opt, procio::{self, OsSink, RedirSpec, RedirType, Sink}, sherr, signal, state::vars::ShStr, util::{
-    self, error::{ShErr, ShResult}, strops::ParseBytes,
+  builtin::{BuiltinArgs, opt::OptSpec},
+  errln,
+  expand::Word,
+  opt,
+  procio::{self, OsSink, RedirSpec, RedirType, Sink},
+  sherr, signal,
+  state::vars::ShStr,
+  util::{
+    self,
+    error::{ShErr, ShResult},
+    strops::ParseBytes,
   },
 };
 

@@ -9,7 +9,9 @@
 //! It also includes error handling for common execution errors such as command not found, permission denied, and exec format errors.
 
 use std::{
-  convert::Infallible, ffi::{CStr, CString}, sync::{Arc, atomic::Ordering},
+  convert::Infallible,
+  ffi::{CStr, CString},
+  sync::{Arc, atomic::Ordering},
 };
 
 use nix::{
@@ -17,7 +19,10 @@ use nix::{
   unistd::{self, ForkResult, Pid},
 };
 
-use crate::state::{self, ForkKind, thread::{self, enter_thread}};
+use crate::state::{
+  self, ForkKind,
+  thread::{self, enter_thread},
+};
 use crate::{
   HashSet, autocmd, builtin,
   eval::parse::NdFlags,

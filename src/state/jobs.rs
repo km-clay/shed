@@ -4,17 +4,22 @@
 //! [`JobStack`]), and renders their wait status ([`DisplayWaitStatus`]).
 
 use std::{
-  fmt, os::{
+  fmt,
+  os::{
     fd::{AsFd, BorrowedFd, OwnedFd},
     unix::thread::JoinHandleExt,
-  }, sync::{
+  },
+  sync::{
     Arc, Weak,
     atomic::{AtomicBool, Ordering},
-  }, thread::JoinHandle,
+  },
+  thread::JoinHandle,
 };
 
 use crate::{
-  defer, procio::{self, Sink}, state::thread::{self, StageResult},
+  defer,
+  procio::{self, Sink},
+  state::thread::{self, StageResult},
 };
 use ariadne::Fmt;
 use bitflags::bitflags;

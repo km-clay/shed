@@ -7,11 +7,16 @@ use nix::{
 };
 
 use crate::{
-  eval::lex::Span, outln, sherr, state::{
+  eval::lex::Span,
+  outln, sherr,
+  state::{
     Shed,
     vars::{VarFlags, VarKind},
-  }, util::{
-    self, error::{ShResult, ShResultExt}, strops::{self, ParseBytes},
+  },
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+    strops::{self, ParseBytes},
   },
 };
 
@@ -35,9 +40,9 @@ impl RLimits {
 
     let parse_opt = |o: &Opt| -> ShResult<u64> {
       let arg = o.value()?;
-      let val = arg
-        .parse_bytes::<u64>()
-        .map_err(|()| sherr!(ParseErr @ o.span(), "invalid argument for {o}: {arg}",).with_code(2))?;
+      let val = arg.parse_bytes::<u64>().map_err(|()| {
+        sherr!(ParseErr @ o.span(), "invalid argument for {o}: {arg}",).with_code(2)
+      })?;
       Ok(val)
     };
 

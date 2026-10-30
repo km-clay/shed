@@ -4,9 +4,9 @@
 //! `local` declarations) that variable lookups walk.
 
 use std::cell::OnceCell;
-use std::sync::Arc;
 use std::collections::VecDeque;
 use std::os::unix::ffi::OsStringExt;
+use std::sync::Arc;
 
 use bstr::ByteSlice;
 use itertools::Itertools;
@@ -17,11 +17,11 @@ use super::{
   sherr,
   vars::{self, ArrIndex, ShellParam, Var, VarFlags, VarKind, VarKindTag, VarName, VarTab},
 };
-use crate::{expand::Words, util::strops::ParseBytes};
 use crate::{
   HashMap,
   state::vars::{ShStr, ShStrSliceExt},
 };
+use crate::{expand::Words, util::strops::ParseBytes};
 use crate::{shopt, varstr};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,7 +60,10 @@ impl ScopeStack {
   /// Adopt another stack's scopes by sharing them. Each scope is cloned
   /// copy-on-write the first time this stack writes to it.
   pub(crate) fn from_shared(scopes: Vec<Arc<VarTab>>) -> Self {
-    let mut new = Self { scopes, ..Default::default() };
+    let mut new = Self {
+      scopes,
+      ..Default::default()
+    };
 
     let shell_name = std::env::args_os()
       .next()
@@ -204,7 +207,9 @@ impl ScopeStack {
         return true;
       }
     }
-    if ShellParam::is_param(var_name) && let Ok(param) = var_name.parse_bytes::<ShellParam>() {
+    if ShellParam::is_param(var_name)
+      && let Ok(param) = var_name.parse_bytes::<ShellParam>()
+    {
       return self.global_params.contains_key(&param);
     }
     false
@@ -786,7 +791,9 @@ impl ScopeStack {
   }
 
   pub(crate) fn try_get_var(&self, var_name: &[u8]) -> Option<ShStr> {
-    if ShellParam::is_param(var_name) && let Ok(param) = var_name.parse_bytes::<ShellParam>() {
+    if ShellParam::is_param(var_name)
+      && let Ok(param) = var_name.parse_bytes::<ShellParam>()
+    {
       return self.try_get_param(param);
     }
     for scope in self.scopes_rev() {
@@ -800,7 +807,9 @@ impl ScopeStack {
     None
   }
   pub(crate) fn try_take_var(&mut self, var_name: &[u8]) -> ShResult<Option<Var>> {
-    if ShellParam::is_param(var_name) && let Ok(param) = var_name.parse_bytes::<ShellParam>() {
+    if ShellParam::is_param(var_name)
+      && let Ok(param) = var_name.parse_bytes::<ShellParam>()
+    {
       return Ok(self.try_take_param(param)?.map(Var::from));
     }
     for scope in self.bounded_scopes_rev_mut() {

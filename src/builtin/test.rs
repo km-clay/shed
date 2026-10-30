@@ -3,8 +3,13 @@ use crate::{
     execute,
     lex::{Span, Tk, TkVecUtils},
     parse::dbracket::{BinaryOp, UnaryOp, eval_binary, eval_unary},
-  }, expand::Word, sherr, util::{
-    self, error::{ShResult, ShResultExt}, strops::ParseBytes,
+  },
+  expand::Word,
+  sherr,
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+    strops::ParseBytes,
   },
 };
 
@@ -163,7 +168,8 @@ impl<'a> ArgvParser<'a> {
       if STOP_TOKENS.contains(&tok.as_ref()) {
         // if this is true, this token refers to the right hand side of a test
         // and is therefore literal.
-        let is_rhs = self.pos - start == 2 && self.argv[start + 1].parse_bytes::<BinaryOp>().is_ok();
+        let is_rhs =
+          self.pos - start == 2 && self.argv[start + 1].parse_bytes::<BinaryOp>().is_ok();
 
         if is_rhs {
           self.advance();
@@ -198,17 +204,17 @@ fn eval_leaf(leaf: &[Word], extended: bool) -> ShResult<bool> {
     2 => {
       // Arity-2: `-OP OPERAND`.
       let op = &leaf[0];
-      let op = op
-        .parse_bytes::<UnaryOp>()
-        .map_err(|_| sherr!(SyntaxErr @ major_span, "bad unary operator: '{}'", op.to_str_lossy()))?;
+      let op = op.parse_bytes::<UnaryOp>().map_err(|_| {
+        sherr!(SyntaxErr @ major_span, "bad unary operator: '{}'", op.to_str_lossy())
+      })?;
       Ok(eval_unary(&op, leaf[1].clone()))
     }
     3 => {
       // Arity-3: `LHS OP RHS`.
       let op = &leaf[1];
-      let op = op
-        .parse_bytes::<BinaryOp>()
-        .map_err(|_| sherr!(SyntaxErr @ major_span, "bad binary operator: '{}'", op.to_str_lossy()))?;
+      let op = op.parse_bytes::<BinaryOp>().map_err(|_| {
+        sherr!(SyntaxErr @ major_span, "bad binary operator: '{}'", op.to_str_lossy())
+      })?;
       eval_binary(&op, &leaf[0], &leaf[2], extended)
     }
     _ => Err(sherr!(
@@ -223,10 +229,10 @@ fn eval_leaf(leaf: &[Word], extended: bool) -> ShResult<bool> {
 mod tests {
   use crate::state;
   use crate::tests::testutil::{TestGuard, test_input};
-use crate::util::strops::FromBytes;
-  use std::fs;
+  use crate::util::strops::FromBytes;
   use bstr::ByteSlice;
-use tempfile::{NamedTempFile, TempDir};
+  use std::fs;
+  use tempfile::{NamedTempFile, TempDir};
 
   // ===================== Unary: file tests =====================
 
@@ -730,10 +736,14 @@ use tempfile::{NamedTempFile, TempDir};
   fn parse_unary_ops() {
     use super::UnaryOp;
     for op in [
-      b"-e", b"-d", b"-f", b"-h", b"-L", b"-r", b"-w", b"-x", b"-s", b"-p", b"-S", b"-b", b"-c", b"-k", b"-O",
-      b"-G", b"-N", b"-u", b"-g", b"-t", b"-n", b"-z",
+      b"-e", b"-d", b"-f", b"-h", b"-L", b"-r", b"-w", b"-x", b"-s", b"-p", b"-S", b"-b", b"-c",
+      b"-k", b"-O", b"-G", b"-N", b"-u", b"-g", b"-t", b"-n", b"-z",
     ] {
-      assert!(UnaryOp::from_bytes(op).is_ok(), "failed to parse {}", op.to_str_lossy());
+      assert!(
+        UnaryOp::from_bytes(op).is_ok(),
+        "failed to parse {}",
+        op.to_str_lossy()
+      );
     }
   }
 
@@ -747,10 +757,18 @@ use tempfile::{NamedTempFile, TempDir};
   fn parse_binary_ops() {
     use super::BinaryOp;
     for op in [b"==", b"!=", b"=~"] {
-      assert!(BinaryOp::from_bytes(op).is_ok(), "failed to parse {}", op.to_str_lossy());
+      assert!(
+        BinaryOp::from_bytes(op).is_ok(),
+        "failed to parse {}",
+        op.to_str_lossy()
+      );
     }
     for op in [b"-eq", b"-ne", b"-gt", b"-lt", b"-ge", b"-le"] {
-      assert!(BinaryOp::from_bytes(op).is_ok(), "failed to parse {}", op.to_str_lossy());
+      assert!(
+        BinaryOp::from_bytes(op).is_ok(),
+        "failed to parse {}",
+        op.to_str_lossy()
+      );
     }
   }
 

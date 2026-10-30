@@ -461,7 +461,10 @@ impl LogTab {
     }
   }
   pub(crate) fn begin_internal_check(&mut self, name: &[u8]) -> Option<Arc<Ast>> {
-    let ShFunc::Defined { logic, is_internal, .. } = self.functions.get_mut(name)? else {
+    let ShFunc::Defined {
+      logic, is_internal, ..
+    } = self.functions.get_mut(name)?
+    else {
       return None;
     };
 

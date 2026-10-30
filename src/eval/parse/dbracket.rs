@@ -1,6 +1,4 @@
-use std::{
-  cmp::Ordering, collections::VecDeque, fs, os::unix::fs::MetadataExt, path::PathBuf
-};
+use std::{cmp::Ordering, collections::VecDeque, fs, os::unix::fs::MetadataExt, path::PathBuf};
 
 use bstr::ByteSlice;
 use nix::{
@@ -9,15 +7,20 @@ use nix::{
 };
 
 use crate::{
-  eval::lex::TkRule, expand::{
+  eval::lex::TkRule,
+  expand::{
     Expander, Word, case, escape, glob,
     stream::{Marker, Quote, Unit},
     var,
-  }, match_loop, set_var, sherr, state::{
+  },
+  match_loop, set_var, sherr,
+  state::{
     Shed,
     vars::{ShStr, VarKind},
-  }, util::{
-    error::{ShErr, ShResult}, strops::{FromBytes, ParseBytes, QuoteState},
+  },
+  util::{
+    error::{ShErr, ShResult},
+    strops::{FromBytes, ParseBytes, QuoteState},
   },
 };
 
@@ -70,36 +73,36 @@ pub(crate) enum UnaryOp {
 impl FromBytes for UnaryOp {
   type Error = ShErr;
   fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
-    where
-      Self: Sized
+  where
+    Self: Sized,
   {
     let s = bytes.as_ref();
     match s {
       b"-e" | b"-a" => Ok(Self::Exists),
-      b"-d"        => Ok(Self::Directory),
-      b"-f"        => Ok(Self::File),
+      b"-d"         => Ok(Self::Directory),
+      b"-f"         => Ok(Self::File),
       b"-h" | b"-L" => Ok(Self::Symlink),
-      b"-r"        => Ok(Self::Readable),
-      b"-w"        => Ok(Self::Writable),
-      b"-x"        => Ok(Self::Executable),
-      b"-s"        => Ok(Self::NonEmpty),
-      b"-p"        => Ok(Self::NamedPipe),
-      b"-S"        => Ok(Self::Socket),
-      b"-b"        => Ok(Self::BlockSpecial),
-      b"-c"        => Ok(Self::CharSpecial),
-      b"-k"        => Ok(Self::Sticky),
-      b"-o"        => Ok(Self::OptSet),
-      b"-O"        => Ok(Self::UIDOwner),
-      b"-G"        => Ok(Self::GIDOwner),
-      b"-N"        => Ok(Self::ModifiedSinceStatusChange),
-      b"-u"        => Ok(Self::SetUID),
-      b"-g"        => Ok(Self::SetGID),
-      b"-t"        => Ok(Self::Terminal),
-      b"-n"        => Ok(Self::NonNull),
-      b"-z"        => Ok(Self::Null),
-      b"-i"        => Ok(Self::IsInteger),
-      b"-F"        => Ok(Self::IsFloat),
-      _           => Err(sherr!(SyntaxErr, "Invalid unary test operator '{}'", s.to_str_lossy())),
+      b"-r"         => Ok(Self::Readable),
+      b"-w"         => Ok(Self::Writable),
+      b"-x"         => Ok(Self::Executable),
+      b"-s"         => Ok(Self::NonEmpty),
+      b"-p"         => Ok(Self::NamedPipe),
+      b"-S"         => Ok(Self::Socket),
+      b"-b"         => Ok(Self::BlockSpecial),
+      b"-c"         => Ok(Self::CharSpecial),
+      b"-k"         => Ok(Self::Sticky),
+      b"-o"         => Ok(Self::OptSet),
+      b"-O"         => Ok(Self::UIDOwner),
+      b"-G"         => Ok(Self::GIDOwner),
+      b"-N"         => Ok(Self::ModifiedSinceStatusChange),
+      b"-u"         => Ok(Self::SetUID),
+      b"-g"         => Ok(Self::SetGID),
+      b"-t"         => Ok(Self::Terminal),
+      b"-n"         => Ok(Self::NonNull),
+      b"-z"         => Ok(Self::Null),
+      b"-i"         => Ok(Self::IsInteger),
+      b"-F"         => Ok(Self::IsFloat),
+      _             => Err(sherr!(SyntaxErr, "Invalid unary test operator '{}'", s.to_str_lossy())),
     }
   }
 }
@@ -142,28 +145,28 @@ pub(crate) enum BinaryOp {
 impl FromBytes for BinaryOp {
   type Error = ShErr;
   fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
-    where
-      Self: Sized
+  where
+    Self: Sized,
   {
     let s = bytes.as_ref();
     match s {
       b"==" | b"=" => Ok(Self::String(StringOp::Equal)),
-      b"!="       => Ok(Self::String(StringOp::NotEqual)),
-      b"=~"       => Ok(Self::String(StringOp::Match)),
-      b">"        => Ok(Self::String(StringOp::Greater)),
-      b"<"        => Ok(Self::String(StringOp::Less)),
-      b">="       => Ok(Self::String(StringOp::GreaterEq)),
-      b"<="       => Ok(Self::String(StringOp::LessEq)),
-      b"-eq"      => Ok(Self::Int(IntOp::Eq)),
-      b"-ne"      => Ok(Self::Int(IntOp::Neq)),
-      b"-gt"      => Ok(Self::Int(IntOp::Gt)),
-      b"-lt"      => Ok(Self::Int(IntOp::Lt)),
-      b"-ge"      => Ok(Self::Int(IntOp::Ge)),
-      b"-le"      => Ok(Self::Int(IntOp::Le)),
-      b"-ot"      => Ok(Self::File(FileOp::OlderThan)),
-      b"-nt"      => Ok(Self::File(FileOp::NewerThan)),
-      b"-ef"      => Ok(Self::File(FileOp::FileEq)),
-      _          => Err(sherr!(SyntaxErr, "Invalid binary test operator '{}'", s.to_str_lossy())),
+      b"!="        => Ok(Self::String(StringOp::NotEqual)),
+      b"=~"        => Ok(Self::String(StringOp::Match)),
+      b">"         => Ok(Self::String(StringOp::Greater)),
+      b"<"         => Ok(Self::String(StringOp::Less)),
+      b">="        => Ok(Self::String(StringOp::GreaterEq)),
+      b"<="        => Ok(Self::String(StringOp::LessEq)),
+      b"-eq"       => Ok(Self::Int(IntOp::Eq)),
+      b"-ne"       => Ok(Self::Int(IntOp::Neq)),
+      b"-gt"       => Ok(Self::Int(IntOp::Gt)),
+      b"-lt"       => Ok(Self::Int(IntOp::Lt)),
+      b"-ge"       => Ok(Self::Int(IntOp::Ge)),
+      b"-le"       => Ok(Self::Int(IntOp::Le)),
+      b"-ot"       => Ok(Self::File(FileOp::OlderThan)),
+      b"-nt"       => Ok(Self::File(FileOp::NewerThan)),
+      b"-ef"       => Ok(Self::File(FileOp::FileEq)),
+      _            => Err(sherr!(SyntaxErr, "Invalid binary test operator '{}'", s.to_str_lossy())),
     }
   }
 }

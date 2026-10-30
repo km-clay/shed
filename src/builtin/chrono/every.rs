@@ -4,8 +4,13 @@ use chrono::{DateTime, Utc};
 use nix::libc;
 
 use crate::{
-  eval::execute, opt, sherr, signal, state::{Shed, vars::ShStr}, util::{
-    self, error::{ShResult, ShResultExt}, strops::{self, ParseBytes},
+  eval::execute,
+  opt, sherr, signal,
+  state::{Shed, vars::ShStr},
+  util::{
+    self,
+    error::{ShResult, ShResultExt},
+    strops::{self, ParseBytes},
   },
 };
 

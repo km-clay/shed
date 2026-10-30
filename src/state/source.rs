@@ -149,11 +149,13 @@ impl ariadne::Span for StrongSpan {
 /// Returns `None` if the source has been dropped.
 pub(crate) fn handle_for(id: SourceId) -> Option<SourceHandle> {
   LAST_SOURCE.with(|slot| {
-    if let Some(handle) = &*slot.borrow() && handle.id == id {
+    if let Some(handle) = &*slot.borrow()
+      && handle.id == id
+    {
       return Some(handle.share_handle());
     }
 
-    let src = SOURCES.read().unwrap().get_source(id)?;
+    let src    = SOURCES.read().unwrap().get_source(id)?;
     let handle = SourceHandle { ptr: src, id };
     let shared = handle.share_handle();
     *slot.borrow_mut() = Some(handle);
@@ -236,7 +238,10 @@ pub(crate) fn slice_source(span: Span) -> Option<ShStr> {
     }
 
     let src = SOURCES.read().unwrap().get_source(id)?;
-    *slot.borrow_mut() = Some(SourceHandle { ptr: Arc::clone(&src), id });
+    *slot.borrow_mut() = Some(SourceHandle {
+      ptr: Arc::clone(&src),
+      id,
+    });
     Some(src)
   })?;
 

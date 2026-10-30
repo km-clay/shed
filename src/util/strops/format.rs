@@ -7,7 +7,14 @@ use bitflags::bitflags;
 use bstr::ByteSlice;
 
 use crate::{
-  errln, match_loop, sherr, state::vars::ShStr, util::{self, error::ShResult, strops::{ByteCursor, ParseBytes}, ui},
+  errln, match_loop, sherr,
+  state::vars::ShStr,
+  util::{
+    self,
+    error::ShResult,
+    strops::{ByteCursor, ParseBytes},
+    ui,
+  },
 };
 
 use super::SliceCursor;

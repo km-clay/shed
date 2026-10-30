@@ -35,16 +35,27 @@ use smallvec::SmallVec;
 use smol_str::{SmolStr, SmolStrBuilder};
 
 use crate::{
-  HashMap, eval::{
+  HashMap,
+  eval::{
     lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
     parse::ast::Ast,
-  }, expand::{
+  },
+  expand::{
     Expander, Word, arithmetic, escape,
     stream::{Marker, Quote, SegStream, Unit},
     var,
-  }, match_loop, procio, readline::Candidate, sherr, state::{self, Shed, params, paths}, util::{
-    self, error::{LabelBuilder, ShResult}, random, strops::{ByteCursor, FromBytes, ParseBytes, QuoteState, SliceCursor},
-  }, varstr,
+  },
+  match_loop, procio,
+  readline::Candidate,
+  sherr,
+  state::{self, Shed, params, paths},
+  util::{
+    self,
+    error::{LabelBuilder, ShResult},
+    random,
+    strops::{ByteCursor, FromBytes, ParseBytes, QuoteState, SliceCursor},
+  },
+  varstr,
 };
 
 use super::{meta::MetaTab, scopes::ScopeStack, terminal::Terminal};
@@ -298,7 +309,7 @@ pub(crate) enum ShellParam {
 impl ShellParam {
   pub(crate) fn is_param(value: &[u8]) -> bool {
     let Some(first) = value.first() else {
-      return false
+      return false;
     };
     matches!(first, b'$' | b'!' | b'0' | b'@' | b'*' | b'#') || first.is_ascii_digit()
   }
@@ -335,24 +346,23 @@ impl Display for ShellParam {
 }
 
 impl FromBytes for ShellParam {
-    type Error = ();
+  type Error = ();
 
-    fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
-      where
-        Self: Sized {
-          let bytes = bytes.as_ref();
-          match bytes {
-            b"$" => Ok(Self::ShPid),
-            b"!" => Ok(Self::LastJob),
-            b"0" => Ok(Self::ShellName),
-            b"@" => Ok(Self::AllArgs),
-            b"*" => Ok(Self::AllArgsStr),
-            b"#" => Ok(Self::ArgCount),
-            _ => ShStr::from(bytes)
-              .parse_bytes::<usize>()
-              .map(Self::Pos)
-          }
+  fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Self::Error>
+  where
+    Self: Sized,
+  {
+    let bytes = bytes.as_ref();
+    match bytes {
+      b"$" => Ok(Self::ShPid),
+      b"!" => Ok(Self::LastJob),
+      b"0" => Ok(Self::ShellName),
+      b"@" => Ok(Self::AllArgs),
+      b"*" => Ok(Self::AllArgsStr),
+      b"#" => Ok(Self::ArgCount),
+      _    => ShStr::from(bytes).parse_bytes::<usize>().map(Self::Pos),
     }
+  }
 }
 
 bitflags! {
@@ -1939,7 +1949,9 @@ impl VarTab {
     }
   }
   pub(crate) fn var_exists(&self, var_name: &[u8]) -> bool {
-    if ShellParam::is_param(var_name) && let Ok(param) = ShellParam::from_bytes(var_name) {
+    if ShellParam::is_param(var_name)
+      && let Ok(param) = ShellParam::from_bytes(var_name)
+    {
       return self.params.contains_key(&param);
     }
     self.vars.contains_key(var_name)

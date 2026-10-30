@@ -5,13 +5,23 @@ use bstr::ByteSlice;
 use nix::poll::PollTimeout;
 
 use crate::{
-  builtin::quote, expand::{Word, alias}, match_loop, out, procio::{self, Sink}, sherr, signal, state::{
+  builtin::quote,
+  expand::{Word, alias},
+  match_loop, out,
+  procio::{self, Sink},
+  sherr, signal,
+  state::{
     Shed, params,
     terminal::Terminal,
     vars::{ShStr, VarFlags, VarKind},
-  }, util::{
-    self, error::{ShErrKind, ShResult, ShResultExt}, strops::{self, ParseBytes}, ui,
-  }, varstr,
+  },
+  util::{
+    self,
+    error::{ShErrKind, ShResult, ShResultExt},
+    strops::{self, ParseBytes},
+    ui,
+  },
+  varstr,
 };
 
 use super::{super::procio::Sinks, opt::OptSpec};

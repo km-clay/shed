@@ -3,7 +3,9 @@ use std::os::fd::AsRawFd;
 use nix::libc;
 
 use crate::{
-  opt, sherr, signal, state::Shed, util::{self, error::ShResult, strops::ParseBytes},
+  opt, sherr, signal,
+  state::Shed,
+  util::{self, error::ShResult, strops::ParseBytes},
 };
 
 use super::opt::OptSpec;

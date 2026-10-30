@@ -3144,7 +3144,10 @@ pub(crate) mod tests {
     assert_eq!(g2.len(), super::Scratch::GLOBAL_SCRATCH_BUF_SIZE);
   }
 
-  use crate::{state::thread, tests::testutil::{TestGuard, has_cmd, has_cmds, test_input}};
+  use crate::{
+    state::thread,
+    tests::testutil::{TestGuard, has_cmd, has_cmds, test_input},
+  };
   use pretty_assertions::assert_eq;
 
   // Run a command line and assert its captured stdout. `needs` skips the test

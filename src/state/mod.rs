@@ -20,18 +20,25 @@ use std::{
 };
 
 use crate::{
-  HashMap, builtin::ForkBehavior, eval::{
+  HashMap,
+  builtin::ForkBehavior,
+  eval::{
     lex::Span,
     parse::{
       ast::{Ast, NodeId},
       node,
     },
-  }, procio, socket::SocketRequest, state::{jobs::Outcome, source::StrongSpan, vars::ShStr}, util::error, varstr,
+  },
+  procio,
+  socket::SocketRequest,
+  state::{jobs::Outcome, source::StrongSpan, vars::ShStr},
+  util::error,
+  varstr,
 };
 
 use super::{
-  autocmd, builtin, errln, eval, expand, keys, match_loop, readline, sherr,
-  shopt as shopt_macro, signal, socket,
+  autocmd, builtin, errln, eval, expand, keys, match_loop, readline, sherr, shopt as shopt_macro,
+  signal, socket,
   state::vars::{VarFlags, VarKind},
   try_var, two_way_display,
   util::{
@@ -450,20 +457,20 @@ impl Shed {
       logic,
       terminal,
 
-      meta       : RefCell::new(meta::MetaTab::new()),
-      jobs       : RefCell::new(jobs::JobTab::new()),
-      timers     : RefCell::new(timers::Timers::new()),
+      meta: RefCell::new(meta::MetaTab::new()),
+      jobs: RefCell::new(jobs::JobTab::new()),
+      timers: RefCell::new(timers::Timers::new()),
       pipe_frames: RefCell::new(procio::PipeFrames::default()),
-      shopts     : RefCell::new(shopt::ShOpts::default()),
+      shopts: RefCell::new(shopt::ShOpts::default()),
       status_code: AtomicI32::new(0),
 
       status_msg_queue: RefCell::new(VecDeque::new()),
-      status_msg_hist : RefCell::new(VecDeque::new()),
+      status_msg_hist: RefCell::new(VecDeque::new()),
 
       system_msg_queue: RefCell::new(VecDeque::new()),
-      system_msg_hist : RefCell::new(VecDeque::new()),
+      system_msg_hist: RefCell::new(VecDeque::new()),
 
-      socket     : RefCell::new(None),
+      socket: RefCell::new(None),
       subscribers: RefCell::new(vec![]),
 
       call_context: RefCell::new(vec![]),
@@ -472,7 +479,7 @@ impl Shed {
       sinks: RefCell::new(procio::Sinks::new()),
 
       #[cfg(test)]
-      saved             : RefCell::new(None),
+      saved: RefCell::new(None),
     }
   }
 
@@ -580,13 +587,10 @@ impl Shed {
   where
     F: FnOnce(&mut meta::MetaTab) -> T,
   {
-    SHED.try_with(|shed| {
-      shed
-        .meta
-        .try_borrow_mut()
-        .map(|mut m| f(&mut m))
-        .ok()
-    }).ok().flatten()
+    SHED
+      .try_with(|shed| shed.meta.try_borrow_mut().map(|mut m| f(&mut m)).ok())
+      .ok()
+      .flatten()
   }
 
   /// Read from the logic table

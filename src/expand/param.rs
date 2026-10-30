@@ -1,7 +1,10 @@
 use std::rc::Rc;
 
 use crate::{
-  expand::{Words, arithmetic::Num, glob::Pattern}, set_var, state::params, util::strops::{self, ParseBytes},
+  expand::{Words, arithmetic::Num, glob::Pattern},
+  set_var,
+  state::params,
+  util::strops::{self, ParseBytes},
 };
 use bstr::ByteSlice;
 use itertools::Itertools;

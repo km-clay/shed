@@ -314,13 +314,15 @@ impl ForkReport {
   fn does_fork(&self) -> bool {
     match self {
       ForkReport::Simple(b) => *b,
-      ForkReport::Detailed(rep) => rep.iter().any(|b| matches!(b.behavior(), ForkBehavior::Always)),
+      ForkReport::Detailed(rep) => rep
+        .iter()
+        .any(|b| matches!(b.behavior(), ForkBehavior::Always)),
     }
   }
 
   fn report(&self) -> Option<Rc<[ForkBlame]>> {
     match self {
-      ForkReport::Simple(_) => None,
+      ForkReport::Simple(_)     => None,
       ForkReport::Detailed(rep) => Some(rep.clone()),
     }
   }
@@ -328,10 +330,10 @@ impl ForkReport {
 
 pub(crate) fn node_forks(tree: &Ast, node_id: NodeId) -> bool {
   if let Some(does_fork) = Shed::meta(|m| m.fork_memo_for(node_id).map(ForkReport::does_fork)) {
-    return does_fork
+    return does_fork;
   }
 
-  let behavior = node_fork_behavior(tree, node_id, true);
+  let behavior  = node_fork_behavior(tree, node_id, true);
 
   let does_fork = behavior.does_fork();
   Shed::meta_mut(|m| m.memoize_fork_behavior(node_id, tree.node_count(), behavior));
@@ -341,14 +343,16 @@ pub(crate) fn node_forks(tree: &Ast, node_id: NodeId) -> bool {
 
 pub(crate) fn node_fork_report(tree: &Ast, node_id: NodeId) -> Rc<[ForkBlame]> {
   if let Some(report) = Shed::meta(|m| m.fork_memo_for(node_id).and_then(ForkReport::report)) {
-    return report
+    return report;
   }
 
   let behavior = node_fork_behavior(tree, node_id, false);
 
   Shed::meta_mut(|m| m.memoize_fork_behavior(node_id, tree.node_count(), behavior.clone()));
 
-  behavior.report().expect("node_fork_behavior should return a Detailed report when simple is false")
+  behavior
+    .report()
+    .expect("node_fork_behavior should return a Detailed report when simple is false")
 }
 
 fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {

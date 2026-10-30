@@ -96,7 +96,8 @@ macro_rules! checked_int_loop {
       if !b.is_ascii_digit() {
         return Err(());
       }
-      acc = acc.checked_mul(10)
+      acc = acc
+        .checked_mul(10)
         .ok_or(())?
         .$op((b - b'0') as $int_ty)
         .ok_or(())?;

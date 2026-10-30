@@ -4,12 +4,22 @@ use bstr::ByteSlice;
 use itertools::Itertools;
 
 use crate::{
-  HashSet, eval::lex::Span, expand::Word, opt, procio::{self, ScratchGuard, Sink}, sherr, shopt, state::{
+  HashSet,
+  eval::lex::Span,
+  expand::Word,
+  opt,
+  procio::{self, ScratchGuard, Sink},
+  sherr, shopt,
+  state::{
     Shed,
     vars::{ShStr, VarFlags, VarKind},
-  }, util::{
-    self, error::ShResultExt, strops::{self, FloatSpec, IntSpec, ParseBytes},
-  }, varstr,
+  },
+  util::{
+    self,
+    error::ShResultExt,
+    strops::{self, FloatSpec, IntSpec, ParseBytes},
+  },
+  varstr,
 };
 
 use super::{BuiltinArgs, ShResult, opt::OptSpec};
@@ -195,7 +205,7 @@ impl SpecType {
         b"*"   => Ok(SpecType::ToEnd),
         _ => match ty.parse_bytes::<usize>() {
           Ok(raw) => Ok(SpecType::Raw(SpecLen::Static(raw))),
-          Err(())  => Err(sherr!(ParseErr, "invalid field type '{ty}'")),
+          Err(()) => Err(sherr!(ParseErr, "invalid field type '{ty}'")),
         },
       },
     }

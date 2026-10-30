@@ -1,6 +1,10 @@
 use crate::{
-  procio, sherr, state::vars::ShStr, two_way_display, util::{
-    strops::{ParseBytes, ShStrDisplay}, ui::{self, Justify},
+  procio, sherr,
+  state::vars::ShStr,
+  two_way_display,
+  util::{
+    strops::{ParseBytes, ShStrDisplay},
+    ui::{self, Justify},
   },
 };
 
