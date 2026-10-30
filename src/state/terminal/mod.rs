@@ -151,6 +151,48 @@ const COOKED_TEARDOWN: [TermCtl; 3] = [
 ];
 
 impl Terminal {
+  pub(crate) fn detached() -> Self {
+    Self {
+      tty: None,
+      reader: parse::PollReader::new(),
+      input_buf: String::new(),
+      bracketed_paste: false,
+      kitty_kbd_proto: false,
+      report_focus: false,
+      alt_buffer: false,
+      cursor_style: CursorStyle::Default,
+      interactive: false,
+      cursor_visible: true,
+      mouse_enabled: false,
+      raw_mode: false,
+      termios_stack: vec![],
+      term_caps: TermCap::empty(),
+      xt_version: None,
+      t_cols: 80,
+      t_rows: 24,
+      scroll_region: ScrollRegionState::Unset,
+      last_bell: None,
+      last_input: None,
+      test_mode: false,
+      prompt_extent: None,
+      prompt_cleared: false,
+    }
+  }
+  pub(crate) fn new() -> Self {
+    let tty: Option<RawFd> = TTY_FILENO
+      .as_ref()
+      .filter(|fd| unistd::isatty(fd.as_fd()).unwrap_or(false))
+      .map(AsRawFd::as_raw_fd);
+    let (cols, rows) = tty.map_or((80, 24), get_win_size);
+
+    Self {
+      tty,
+      t_cols: cols as usize,
+      t_rows: rows as usize,
+      ..Self::detached()
+    }
+  }
+
   pub(crate) fn execute_control(&mut self, ctl: &TermCtl) -> ShResult<()> {
     use TermCtl as Ctl;
     match ctl {
@@ -276,40 +318,6 @@ impl Terminal {
     }
     *switch = on;
     true
-  }
-
-  pub(crate) fn new() -> Self {
-    let tty: Option<RawFd> = TTY_FILENO
-      .as_ref()
-      .filter(|fd| unistd::isatty(fd.as_fd()).unwrap_or(false))
-      .map(AsRawFd::as_raw_fd);
-    let (cols, rows) = tty.map_or((80, 24), get_win_size);
-
-    Self {
-      tty,
-      reader: parse::PollReader::new(),
-      input_buf: String::new(),
-      bracketed_paste: false,
-      kitty_kbd_proto: false,
-      report_focus: false,
-      alt_buffer: false,
-      cursor_style: CursorStyle::Default,
-      interactive: false,
-      cursor_visible: true,
-      mouse_enabled: false,
-      raw_mode: false,
-      termios_stack: vec![],
-      term_caps: TermCap::empty(),
-      xt_version: None,
-      t_cols: cols as usize,
-      t_rows: rows as usize,
-      scroll_region: ScrollRegionState::Unset,
-      last_bell: None,
-      last_input: None,
-      test_mode: false,
-      prompt_extent: None,
-      prompt_cleared: false,
-    }
   }
 
   pub(crate) fn reset_last_input(&mut self) {

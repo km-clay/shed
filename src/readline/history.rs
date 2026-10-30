@@ -19,9 +19,7 @@ use super::{
   util::error::ShResult,
 };
 use crate::{
-  HashMap,
-  state::{Shed, db},
-  util::random::Uuid,
+  HashMap, state::{Shed, db, thread}, util::random::Uuid,
 };
 
 #[derive(Debug, Clone)]
@@ -387,7 +385,7 @@ impl History {
     // (added by push during load) as the authoritative newer entry.
     let table  = hist.table.clone();
     let branch = hist.branch.clone();
-    std::thread::spawn(move || {
+    thread::spawn_thread(move || {
       do_something_that_opens_fds_that_we_cant_access_hack(MIN_INTERNAL_FD, || {
         let Some(conn) = db::get_db_conn() else {
           return;
@@ -1048,7 +1046,7 @@ impl History {
   pub(crate) fn set_status(&self, token: Uuid, runtime: Option<Duration>, status: i32) {
     let table = self.table.clone();
 
-    std::thread::spawn(move || {
+    thread::spawn_thread(move || {
       do_something_that_opens_fds_that_we_cant_access_hack(MIN_INTERNAL_FD, || {
         let Some(conn) = db::get_db_conn() else {
           return;

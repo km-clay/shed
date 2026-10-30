@@ -1,13 +1,9 @@
 use std::{
-  cell::RefCell,
-  convert::Into,
-  os::fd::{AsFd, BorrowedFd, OwnedFd},
-  sync::{
+  cell::RefCell, convert::Into, os::fd::{AsFd, BorrowedFd, OwnedFd}, sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
     mpsc,
-  },
-  thread,
+  }, thread::JoinHandle,
 };
 
 use nix::{
@@ -17,11 +13,7 @@ use nix::{
 };
 
 use crate::{
-  defer, exec_term, procio, queue_term,
-  readline::Pos,
-  sherr,
-  state::terminal::{CursorStyle, TermCap, Terminal},
-  util::{error::ShResult, ui},
+  defer, exec_term, procio, queue_term, readline::Pos, sherr, state::{terminal::{CursorStyle, TermCap, Terminal}, thread}, util::{error::ShResult, ui},
 };
 
 use super::{
@@ -522,7 +514,7 @@ pub(crate) struct CandidateStream {
   rx     : mpsc::Receiver<Vec<Candidate>>,
   wake_rd: OwnedFd,
   cancel : Arc<AtomicBool>,
-  handle : Option<thread::JoinHandle<()>>,
+  handle : Option<JoinHandle<()>>,
 }
 
 impl CandidateStream {
@@ -538,7 +530,7 @@ impl CandidateStream {
       wake: wake_wr,
       cancel: Arc::clone(&cancel),
     };
-    let handle = thread::spawn(move || producer(sink));
+    let handle = thread::spawn_thread(move || producer(sink));
     Ok(Self {
       rx,
       wake_rd,

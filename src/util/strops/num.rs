@@ -3,7 +3,6 @@
 use std::{
   fmt::{Display, LowerExp},
   ops::Deref,
-  str::FromStr,
 };
 
 use crate::{

@@ -20,23 +20,17 @@ use std::{
 };
 
 use crate::{
-  HashMap,
-  builtin::ForkBehavior,
-  eval::{
+  HashMap, builtin::ForkBehavior, eval::{
     lex::Span,
     parse::{
       ast::{Ast, NodeId},
       node,
     },
-  },
-  socket::SocketRequest,
-  state::{jobs::Outcome, source::StrongSpan, vars::ShStr},
-  util::error,
-  varstr,
+  }, procio, socket::SocketRequest, state::{jobs::Outcome, source::StrongSpan, vars::ShStr}, util::error, varstr,
 };
 
 use super::{
-  autocmd, builtin, errln, eval, expand, keys, match_loop, procio, readline, sherr,
+  autocmd, builtin, errln, eval, expand, keys, match_loop, readline, sherr,
   shopt as shopt_macro, signal, socket,
   state::vars::{VarFlags, VarKind},
   try_var, two_way_display,
@@ -70,7 +64,7 @@ pub(crate) use source::{
 };
 
 thread_local! {
-  static SHED: Shed = Shed::new();
+  static SHED: Shed = Shed::init();
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -435,15 +429,31 @@ pub(super) struct Shed {
 }
 
 impl Shed {
-  pub(crate) fn new() -> Self {
+  fn init() -> Self {
+    let (var_scopes, logic, terminal) = if thread::in_thread() {
+      // we are in a thread. lets get empty versions of these
+      (
+        RefCell::new(scopes::ScopeStack::empty()),
+        RefCell::new(logic::LogTab::default()),
+        RefCell::new(terminal::Terminal::detached()),
+      )
+    } else {
+      // we are in the main thread. call the initializing constructors
+      (
+        RefCell::new(scopes::ScopeStack::new()),
+        RefCell::new(logic::LogTab::new()),
+        RefCell::new(terminal::Terminal::new()),
+      )
+    };
     Self {
-      jobs       : RefCell::new(jobs::JobTab::new()),
-      var_scopes : RefCell::new(scopes::ScopeStack::new()),
+      var_scopes,
+      logic,
+      terminal,
+
       meta       : RefCell::new(meta::MetaTab::new()),
-      logic      : RefCell::new(logic::LogTab::new()),
+      jobs       : RefCell::new(jobs::JobTab::new()),
       timers     : RefCell::new(timers::Timers::new()),
-      pipe_frames: RefCell::new(crate::procio::PipeFrames::default()),
-      terminal   : RefCell::new(terminal::Terminal::new()),
+      pipe_frames: RefCell::new(procio::PipeFrames::default()),
       shopts     : RefCell::new(shopt::ShOpts::default()),
       status_code: AtomicI32::new(0),
 
@@ -591,14 +601,14 @@ impl Shed {
   #[track_caller]
   pub(crate) fn pipe_frames<T, F>(f: F) -> T
   where
-    F: FnOnce(&crate::procio::PipeFrames) -> T,
+    F: FnOnce(&procio::PipeFrames) -> T,
   {
     access!(SHED, pipe_frames, f)
   }
 
   pub(crate) fn pipe_frames_mut<T, F>(f: F) -> T
   where
-    F: FnOnce(&mut crate::procio::PipeFrames) -> T,
+    F: FnOnce(&mut procio::PipeFrames) -> T,
   {
     access_mut!(SHED, pipe_frames, f)
   }
@@ -1085,7 +1095,7 @@ impl Shed {
 
 impl Default for Shed {
   fn default() -> Self {
-    Self::new()
+    Self::init()
   }
 }
 

@@ -1,4 +1,4 @@
-use std::sync::{Arc, atomic::Ordering};
+use std::{cell::Cell, sync::{Arc, atomic::Ordering}};
 
 use nix::sys::signal::Signal;
 
@@ -15,6 +15,31 @@ use crate::{
   },
   util::error::LabelBuilder,
 };
+
+thread_local! {
+  static IN_THREAD: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(crate) fn enter_thread() {
+  IN_THREAD.with(|f| f.set(true));
+}
+
+pub(crate) fn in_thread() -> bool {
+  IN_THREAD.with(|f| f.get())
+}
+
+/// Wrapper for [`std::thread::spawn`], used to hook our own logic into the thread handling
+pub(crate) fn spawn_thread<T, F>(f: F) -> std::thread::JoinHandle<T>
+where
+  F: FnOnce() -> T,
+  F: Send + 'static,
+  T: Send + 'static,
+{
+  std::thread::spawn(|| {
+    enter_thread();
+    f()
+  })
+}
 
 pub(crate) struct ForkSpec {
   frame      : Vec<Arc<VarTab>>,

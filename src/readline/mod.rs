@@ -10,7 +10,6 @@ use std::{
     atomic::{AtomicBool, Ordering},
     mpsc,
   },
-  thread,
   time::Instant,
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -18,6 +17,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::defer;
 use crate::readline::editmode::ExNdRule;
+use crate::state::thread;
 use crate::util::strops::ShStrDisplay;
 use crate::util::ui::Justify;
 use crate::{
@@ -499,7 +499,7 @@ impl HintWorker {
     let cancel        = Arc::new(AtomicBool::new(false));
     let worker_cancel = Arc::clone(&cancel);
 
-    thread::spawn(move || {
+    thread::spawn_thread(move || {
       Shed::install(spec);
       let mut completer = SimpleCompleter::default();
       while let Ok(mut request) = request_rx.recv() {

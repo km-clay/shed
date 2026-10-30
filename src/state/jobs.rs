@@ -4,22 +4,17 @@
 //! [`JobStack`]), and renders their wait status ([`DisplayWaitStatus`]).
 
 use std::{
-  fmt,
-  os::{
+  fmt, os::{
     fd::{AsFd, BorrowedFd, OwnedFd},
     unix::thread::JoinHandleExt,
-  },
-  sync::{
+  }, sync::{
     Arc, Weak,
     atomic::{AtomicBool, Ordering},
-  },
-  thread,
+  }, thread::JoinHandle,
 };
 
 use crate::{
-  defer,
-  procio::{self, Sink},
-  state::thread::StageResult,
+  defer, procio::{self, Sink}, state::thread::{self, StageResult},
 };
 use ariadne::Fmt;
 use bitflags::bitflags;
@@ -192,7 +187,7 @@ impl JobMember {
 
 #[derive(Debug)]
 enum StageStatus {
-  Running(std::thread::JoinHandle<StageResult>),
+  Running(JoinHandle<StageResult>),
   Complete(Box<StageResult>),
   Panicked,
 }
@@ -235,7 +230,7 @@ impl fmt::Debug for StageThread {
 }
 
 impl StageThread {
-  pub(crate) fn new(handle: std::thread::JoinHandle<StageResult>) -> Self {
+  pub(crate) fn new(handle: JoinHandle<StageResult>) -> Self {
     Self {
       status   : Some(StageStatus::Running(handle)),
       command  : None,
@@ -529,7 +524,7 @@ pub(crate) struct JobData {
 /// Watcher thread that handles SIGINT and SIGTSTP for threaded builtins
 #[derive(Debug)]
 pub(crate) struct Watcher {
-  handle : Option<thread::JoinHandle<()>>,
+  handle : Option<JoinHandle<()>>,
   done_wr: Option<OwnedFd>,
 }
 
@@ -541,7 +536,7 @@ impl Watcher {
     wake: BorrowedFd<'static>,
   ) -> ShResult<Self> {
     let (done_rd, done_wr) = procio::pipes_high_nonblocking()?;
-    let handle = thread::spawn(move || Self::watcher_loop(channels, workers, wake, done_rd));
+    let handle = thread::spawn_thread(move || Self::watcher_loop(channels, workers, wake, done_rd));
     Ok(Self {
       handle : Some(handle),
       done_wr: Some(done_wr),

@@ -3112,7 +3112,8 @@ pub(crate) mod tests {
     let handles: Vec<_> = (0..2)
       .map(|_| {
         let barrier = Arc::clone(&barrier);
-        std::thread::spawn(move || {
+
+        thread::spawn_thread(move || {
           let mut g   = ScratchGuard::take_scratch();
           let     ptr = g.as_mut_ptr() as usize;
           barrier.wait(); // both threads hold a guard past this point
@@ -3143,7 +3144,7 @@ pub(crate) mod tests {
     assert_eq!(g2.len(), super::Scratch::GLOBAL_SCRATCH_BUF_SIZE);
   }
 
-  use crate::tests::testutil::{TestGuard, has_cmd, has_cmds, test_input};
+  use crate::{state::thread, tests::testutil::{TestGuard, has_cmd, has_cmds, test_input}};
   use pretty_assertions::assert_eq;
 
   // Run a command line and assert its captured stdout. `needs` skips the test

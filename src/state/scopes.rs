@@ -54,14 +54,18 @@ impl ScopeStack {
   pub(crate) fn from_frame(frame: VarTab) -> Self {
     Self::from_shared(vec![Arc::new(frame)])
   }
+  pub(crate) fn empty() -> Self {
+    Self::from_frame(VarTab::bare())
+  }
   /// Adopt another stack's scopes by sharing them. Each scope is cloned
   /// copy-on-write the first time this stack writes to it.
   pub(crate) fn from_shared(scopes: Vec<Arc<VarTab>>) -> Self {
-    let mut new = Self::default();
-    new.scopes = scopes;
+    let mut new = Self { scopes, ..Default::default() };
+
     let shell_name = std::env::args_os()
       .next()
       .map_or_else(|| ShStr::from("shed"), |a| ShStr::from(a.into_vec()));
+
     new.global_params.insert(ShellParam::ShellName, shell_name);
     new
   }

@@ -1561,7 +1561,11 @@ impl VarTab {
     let home_fallback;
     let username_fallback;
     let uid;
-    if let Some(user) = User::from_uid(Uid::current()).ok().flatten() {
+    static CURRENT_USER: std::sync::OnceLock<Option<User>> = std::sync::OnceLock::new();
+    let cached_user = CURRENT_USER
+      .get_or_init(|| User::from_uid(Uid::current()).ok().flatten())
+      .clone();
+    if let Some(user) = cached_user {
       home_fallback = user.dir;
       username_fallback = user.name;
       uid = user.uid;
@@ -1889,9 +1893,6 @@ impl VarTab {
   pub(crate) fn put_var(&mut self, name: &[u8], var: Var) {
     // zero-validation insertion of variables
     self.vars.insert(name.into(), var);
-  }
-  pub(crate) fn params(&self) -> &HashMap<ShellParam, ShStr> {
-    &self.params
   }
   pub(crate) fn set_var(&mut self, var_name: &[u8], val: VarKind, flags: VarFlags) -> ShResult<()> {
     let flags = if SHELL_MANAGED_VARS.contains(&var_name) {

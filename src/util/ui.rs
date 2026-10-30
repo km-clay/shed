@@ -3,7 +3,7 @@
 //! color/decoration parsing, ANSI rendering, box-drawing glyphs, and display-width ([`calc_str_width`] / [`truncate_visual`]).
 
 use std::sync::OnceLock;
-use std::{fmt::Write, str::FromStr};
+use std::fmt::Write;
 use bstr::ByteSlice;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;

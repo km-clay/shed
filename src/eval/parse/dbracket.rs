@@ -1,5 +1,5 @@
 use std::{
-  cmp::Ordering, collections::VecDeque, fs, os::unix::fs::MetadataExt, path::PathBuf, str::FromStr,
+  cmp::Ordering, collections::VecDeque, fs, os::unix::fs::MetadataExt, path::PathBuf
 };
 
 use bstr::ByteSlice;

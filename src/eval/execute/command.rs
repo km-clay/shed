@@ -9,10 +9,7 @@
 //! It also includes error handling for common execution errors such as command not found, permission denied, and exec format errors.
 
 use std::{
-  convert::Infallible,
-  ffi::{CStr, CString},
-  sync::Arc,
-  thread,
+  convert::Infallible, ffi::{CStr, CString}, sync::{Arc, atomic::Ordering},
 };
 
 use nix::{
@@ -20,7 +17,7 @@ use nix::{
   unistd::{self, ForkResult, Pid},
 };
 
-use crate::state::ForkKind;
+use crate::state::{self, ForkKind, thread::{self, enter_thread}};
 use crate::{
   HashSet, autocmd, builtin,
   eval::parse::NdFlags,
@@ -339,7 +336,7 @@ impl super::Dispatcher {
     let source               = self.source_name.clone();
     let (notif_rd, notif_wr) = procio::pipes_high_nonblocking()?;
 
-    let handle = thread::spawn(move || {
+    let handle = thread::spawn_thread(move || {
       let _notif = notif_wr; // give this to the thread.
       // when this drops, notif_rd will
       // be notified. this is the thread
@@ -347,6 +344,7 @@ impl super::Dispatcher {
 
       let ast    = Shed::install(spec);
       procio::arm_stage_var_writes();
+
       let     root = ast.get_root().unwrap();
       let mut d    = super::Dispatcher::new(source);
       d.job_stack.new_job();
