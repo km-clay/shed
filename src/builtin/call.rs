@@ -33,7 +33,7 @@ impl super::Builtin for Call {
       return Err(sherr!(ExecFail @ args.cmd_span(), "expected a command"));
     };
 
-    let lambda            = std::mem::replace(&mut arg_vec[0], Word::from("call"));
+    let lambda            = std::mem::take(&mut arg_vec[0]);
     let _arg_guard        = guards::function_scope_guard(Some(arg_vec));
     let _func_depth_guard = Shed::meta_mut(MetaTab::enter_func);
 
