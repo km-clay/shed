@@ -1,6 +1,6 @@
 use crate::{
   eval::execute::exec_nonint,
-  expand::{self, Word, subshell},
+  expand::{self, subshell},
   set_var, sherr,
   state::{Shed, meta::MetaTab, vars::VarKind},
   util::{

@@ -1,4 +1,4 @@
-use crate::{HashMap, eval::lex::Span, state::vars::ShStr};
+use crate::{HashMap, eval::lex::Span, state::vars::ShStr, util::strops::SliceCursor};
 use std::{
   cell::RefCell,
   fmt::Display,
@@ -57,6 +57,10 @@ pub(crate) struct SourceHandle {
 impl SourceHandle {
   pub(crate) fn get_id(&self) -> SourceId {
     self.id
+  }
+
+  pub(crate) fn get_cursor(&self) -> SliceCursor<'_> {
+    SliceCursor::new(&self.ptr.content)
   }
 
   /// Create a clone of the inner `Arc<Source>` that this `SourceHandle` wraps

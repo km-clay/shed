@@ -291,8 +291,16 @@ pub(crate) trait ByteCursor {
   /// The byte at the current position + `n`, without advancing.
   fn peek_nth(&self, n: usize) -> Option<u8>;
   /// Consume the byte at the current position, advancing by one. Equivalent to `next_byte()`, but doesn't return the byte.
+  fn bump_n(&mut self, n: usize) {
+    for _ in 0..n {
+      if self.peek_byte().is_none() {
+        break;
+      }
+      self.next_byte();
+    }
+  }
   fn bump(&mut self) {
-    self.next_byte();
+    self.bump_n(1);
   }
   /// Consume and return the byte at the current position if it satisfies the predicate `f`.
   /// Returns `None` if the byte does not satisfy `f` or if there is no byte to consume.
@@ -308,7 +316,7 @@ pub(crate) trait ByteCursor {
       return false;
     };
     if f(b) {
-      self.next_byte();
+      self.bump();
       true
     } else {
       false
@@ -332,25 +340,110 @@ pub(crate) trait ByteCursor {
   }
 }
 
+/// Used for saving positional data without holding the borrow
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct SliceCursorData {
+  min: usize,
+  max: usize,
+  pos: usize,
+}
+
+impl From<SliceCursor<'_>> for SliceCursorData {
+  fn from(cursor: SliceCursor<'_>) -> Self {
+    Self {
+      min: cursor.min,
+      max: cursor.max,
+      pos: cursor.pos,
+    }
+  }
+}
+
 /// A [`ByteCursor`] over a borrowed byte slice, tracking its own position.
 ///
 /// This struct provides a broad interface for performing lexical analysis
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct SliceCursor<'a> {
   bytes: &'a [u8],
+  min: usize,
+  max: usize,
   pos  : usize,
 }
 
+#[expect(dead_code)]
 impl<'a> SliceCursor<'a> {
   pub(crate) fn new(bytes: &'a [u8]) -> Self {
-    Self { bytes, pos: 0 }
+    Self {
+      bytes,
+      min: 0,
+      max: bytes.len(),
+      pos: 0,
+    }
+  }
+  pub(crate) fn load_data(&mut self, data: SliceCursorData) {
+    self.min = data.min;
+    self.max = data.max;
+    self.pos = data.pos;
   }
   /// Number of bytes consumed so far.
   pub(crate) fn pos(&self) -> usize {
     self.pos
   }
 
+  pub(crate) fn set_min(&mut self, min: usize) {
+    self.min = min;
+    if self.pos < min {
+      self.pos = min;
+    }
+  }
+
+  pub(crate) fn set_max(&mut self, max: usize) {
+    self.max = max;
+    if self.pos > max {
+      self.pos = max;
+    }
+  }
+
+  pub(crate) fn constrain(&mut self, min: usize, max: usize) {
+    self.set_min(min);
+    self.set_max(max);
+  }
+
+  /// Seek to an absolute cursor position
+  pub(crate) fn seek(&mut self, pos: usize) -> usize {
+    self.pos = pos.clamp(self.min, self.max);
+    self.pos
+  }
+  /// Seek to an offset from the current cursor position
+  pub(crate) fn seek_rel(&mut self, off: isize) -> usize {
+    self.seek(self.pos.saturating_add_signed(off));
+    self.pos
+  }
+  /// Seek to an offset from the end of the slice
+  pub(crate) fn seek_end(&mut self, pos: usize) -> usize {
+    self.seek(self.max.saturating_sub(pos));
+    self.pos
+  }
+
+  /// Borrows the source slice that the cursor was created with
+  ///
+  /// Is not constrained by the cursor's min/max bounds, and may
+  /// contain bytes that have already been consumed.
+  pub(crate) fn source(&self) -> &'a [u8] {
+    self.bytes
+  }
+
+  /// Borrows the slice of bytes that the cursor is currently constrained to
+  pub(crate) fn slice(&self) -> &'a [u8] {
+    &self.bytes[self.min..self.max]
+  }
+
+  /// Consumes the cursor and returns the slice of bytes that have not yet been consumed
+  ///
+  /// The returned slice is constrained by the cursor's min/max bounds.
   pub(crate) fn into_slice(self) -> &'a [u8] {
-    &self.bytes[self.pos..]
+    let start = self.min.max(self.pos);
+    let end = self.max;
+    &self.bytes[start..end]
   }
 
   /// Consume bytes at the current position while they satisfy the predicate `f`
@@ -382,14 +475,24 @@ impl<'a> SliceCursor<'a> {
     }
     res
   }
+
+  pub(crate) fn get_byte(&self, pos: usize) -> Option<u8> {
+    (pos >= self.min && pos < self.max)
+      .then(|| self.bytes.get(pos).copied())
+      .flatten()
+  }
+
+  pub(crate) fn remaining(&self) -> usize {
+    self.max.saturating_sub(self.pos)
+  }
 }
 
 impl ByteCursor for SliceCursor<'_> {
   fn peek_byte(&self) -> Option<u8> {
-    self.bytes.get(self.pos).copied()
+    self.get_byte(self.pos)
   }
   fn peek_nth(&self, n: usize) -> Option<u8> {
-    self.bytes.get(self.pos + n).copied()
+    self.get_byte(self.pos + n)
   }
   fn next_byte(&mut self) -> Option<u8> {
     let b = self.peek_byte()?;

@@ -107,6 +107,7 @@ impl Palette {
       CtxTkRule::Comment => self.comment,
       CtxTkRule::Keyword | CtxTkRule::Subshell | CtxTkRule::Arithmetic => self.keyword,
       CtxTkRule::CmdSub
+      | CtxTkRule::CmdLiteral
       | CtxTkRule::BacktickSub
       | CtxTkRule::ProcSubIn
       | CtxTkRule::ProcSubOut

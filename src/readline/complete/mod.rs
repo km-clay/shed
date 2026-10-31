@@ -204,6 +204,7 @@ impl CompStrat {
       CtxTkRule::AssignmentRight
       | CtxTkRule::ArrayLiteral
       | CtxTkRule::CmdSub
+      | CtxTkRule::CmdLiteral
       | CtxTkRule::BacktickSub
       | CtxTkRule::ProcSubIn
       | CtxTkRule::ProcSubOut
@@ -264,6 +265,7 @@ impl CompStrat {
       | CtxTkRule::Argument
       | CtxTkRule::ArgumentFile
       | CtxTkRule::CmdSub
+      | CtxTkRule::CmdLiteral
       | CtxTkRule::BacktickSub
       | CtxTkRule::ProcSubIn
       | CtxTkRule::ProcSubOut

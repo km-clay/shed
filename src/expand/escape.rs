@@ -8,20 +8,12 @@ use bstr::ByteSlice;
 use smallvec::SmallVec;
 
 use crate::{
-  eval::lex,
-  expand::{
+  eval::lex, expand::{
     stream::{ProcSubKind, SegCursor},
     var,
-  },
-  match_loop, sherr,
-  state::vars::ShStr,
-  try_var,
-  util::{
-    self,
-    error::ShResult,
-    strops::{ByteCursor, QuoteState, SliceCursor},
-  },
-  varstr,
+  }, match_loop, sherr, state::vars::ShStr, try_var, util::{
+    self, error::ShResult, strops::{self, ByteCursor, QuoteState, SliceCursor},
+  }, varstr,
 };
 
 use super::stream::{Marker, Quote, SegStream, Unit};
@@ -292,9 +284,9 @@ fn read_paren_body(stream: &mut SegCursor, out: &mut SegStream, close: Marker) {
   }
 
   let closer = if rest.starts_with(b"(") {
-    crate::util::strops::scan_paren_body(&rest)
+    strops::scan_paren_body(&rest)
   } else {
-    lex::scan_cmd_sub_body(&rest)
+    lex::scan_cmd_sub_bytes(&rest)
   };
 
   let Some(closer) = closer else {
