@@ -315,7 +315,7 @@ pub(crate) fn eval_binary(op: &BinaryOp, lhs: &Word, rhs: &Word, extended: bool)
       StringOp::Equal | StringOp::NotEqual => {
         let polarity = matches!(str_op, StringOp::Equal);
         let is_eq = if extended {
-          let pat = Shed::meta_mut(|m| m.get_glob(rhs.as_bytes()));
+          let pat = Shed::cache_mut(|c| c.get_glob(rhs.as_bytes()));
           pat.is_match(lhs.as_bytes())
         } else {
           lhs == rhs
@@ -325,7 +325,7 @@ pub(crate) fn eval_binary(op: &BinaryOp, lhs: &Word, rhs: &Word, extended: bool)
       }
       StringOp::Match => {
         let cleaned = glob::replace_posix_classes(&rhs.to_str_lossy());
-        let re = Shed::meta_mut(|m| m.get_regex(&cleaned))
+        let re = Shed::cache_mut(|c| c.get_regex(&cleaned))
           .map_err(|e| sherr!(SyntaxErr ? rhs.span(), "Invalid regex: {e}"))?;
 
         if let Some(caps) = re.captures(&lhs.to_str_lossy()) {

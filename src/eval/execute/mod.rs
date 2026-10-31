@@ -5,8 +5,7 @@
 //! handling, and error propagation.
 
 use super::{
-  lex::{self, KEYWORDS, Span, Tk, TkFlags},
-  parse::{
+  lex::{self, KEYWORDS, LexFlags, Span, Tk, TkFlags}, parse::{
     self,
     ast::{Ast, NodeId},
   },
@@ -14,7 +13,7 @@ use super::{
 use crate::{
   builtin::{self, BUILTIN_NAMES},
   errln,
-  state::{self, ForkKind},
+  state::{self, ForkKind, cache::CacheTab},
 };
 use crate::{
   eval::parse::{NdFlags, NdRule, ParsedSrc},
@@ -183,7 +182,7 @@ impl ExecArgs {
       .into()
   }
   pub(crate) fn get_envp() -> Rc<[CString]> {
-    Shed::meta_mut(MetaTab::get_envp)
+    Shed::cache_mut(CacheTab::get_envp)
   }
 }
 
@@ -230,7 +229,7 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
 
   let expanded = alias::expand_aliases(input);
   let mut parser = ParsedSrc::with_name(source_name, expanded.into())
-    .with_lex_flags(super::lex::LexFlags::empty());
+    .with_lex_flags(LexFlags::empty());
 
   if let Err(errors) = parser.parse_src() {
     for error in errors {
@@ -295,14 +294,19 @@ pub(crate) fn exec_input(mut input: ShStr, source_name: Option<ShStr>) -> ShResu
   if !interactive || !Shed::shopts(|o| o.prompt.expand_aliases) {
     input = alias::expand_aliases(&input.to_str_lossy()).into();
   }
+
+  if let Some(tree) = Shed::cache(|c| c.get_ast(&input)) {
+    return dispatch_ast(source_name, &tree);
+  }
+
   let lex_flags = if interactive {
-    super::lex::LexFlags::INTERACTIVE
+    LexFlags::INTERACTIVE
   } else {
-    super::lex::LexFlags::empty()
+    LexFlags::empty()
   };
 
-  let     source_name = source_name.unwrap_or("<unknown>".into());
-  let mut parser      = ParsedSrc::with_name(source_name.clone(), input).with_lex_flags(lex_flags);
+  let mut parser = ParsedSrc::with_name(source_name.clone().unwrap_or("<unknown>".into()), input)
+    .with_lex_flags(lex_flags);
 
   if let Err(errors) = parser.parse_src() {
     for error in errors {
@@ -312,8 +316,13 @@ pub(crate) fn exec_input(mut input: ShStr, source_name: Option<ShStr>) -> ShResu
     return Ok(());
   }
 
-  let mut dispatcher = Dispatcher::new(source_name.clone());
-  dispatcher.begin_dispatch(&parser.ast)
+  dispatch_ast(source_name, &parser.into_ast())
+}
+
+pub(crate) fn dispatch_ast(source_name: Option<ShStr>, ast: &Ast) -> ShResult<()> {
+  let     source_name = source_name.unwrap_or("<unknown>".into());
+  let mut dispatcher  = Dispatcher::new(source_name.clone());
+  dispatcher.begin_dispatch(ast)
 }
 
 pub(crate) struct Dispatcher {

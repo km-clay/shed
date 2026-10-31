@@ -329,26 +329,26 @@ impl ForkReport {
 }
 
 pub(crate) fn node_forks(tree: &Ast, node_id: NodeId) -> bool {
-  if let Some(does_fork) = Shed::meta(|m| m.fork_memo_for(node_id).map(ForkReport::does_fork)) {
+  if let Some(does_fork) = Shed::cache(|c| c.fork_memo_for(node_id).map(ForkReport::does_fork)) {
     return does_fork;
   }
 
   let behavior  = node_fork_behavior(tree, node_id, true);
 
   let does_fork = behavior.does_fork();
-  Shed::meta_mut(|m| m.memoize_fork_behavior(node_id, tree.node_count(), behavior));
+  Shed::cache_mut(|c| c.memoize_fork_behavior(node_id, tree.node_count(), behavior));
 
   does_fork
 }
 
 pub(crate) fn node_fork_report(tree: &Ast, node_id: NodeId) -> Rc<[ForkBlame]> {
-  if let Some(report) = Shed::meta(|m| m.fork_memo_for(node_id).and_then(ForkReport::report)) {
+  if let Some(report) = Shed::cache(|c| c.fork_memo_for(node_id).and_then(ForkReport::report)) {
     return report;
   }
 
   let behavior = node_fork_behavior(tree, node_id, false);
 
-  Shed::meta_mut(|m| m.memoize_fork_behavior(node_id, tree.node_count(), behavior.clone()));
+  Shed::cache_mut(|c| c.memoize_fork_behavior(node_id, tree.node_count(), behavior.clone()));
 
   behavior
     .report()

@@ -275,7 +275,7 @@ fn trim_param(
     .no_glob()
     .expand_for_glob()?;
 
-  let pattern = Shed::meta_mut(|m| m.get_glob(&expanded));
+  let pattern = Shed::cache_mut(|c| c.get_glob(&expanded));
 
   let trimmed = words.map_content(|word| {
     let range = {
@@ -333,7 +333,7 @@ impl ReplaceSpec {
       .expand_for_glob()?;
 
     Ok(Some(Self {
-      pat    : Shed::meta_mut(|m| m.get_glob(&expanded_search)),
+      pat    : Shed::cache_mut(|c| c.get_glob(&expanded_search)),
       replace: expanded_replace,
     }))
   }

@@ -10,35 +10,21 @@ use nix::{sys::signal::Signal, unistd::Pid};
 use std::io::{self, Read};
 
 use crate::{
-  builtin::opt::Arg,
-  defer, errln,
-  eval::{
+  builtin::opt::Arg, defer, errln, eval::{
     execute::{self, AssignBehavior, Dispatcher},
     lex::{KEYWORDS, Span, Tk, TkRule},
     parse::{
       NdFlags, NdRule,
       ast::{Ast, NodeId},
     },
-  },
-  expand::{Word, arithmetic, escape},
-  lifecycle, outln,
-  procio::{self, RedirSet, SinkIo, Sinks},
-  sherr, shopt, signal,
-  state::{
-    Shed, cmd,
-    jobs::ChildProc,
-    meta::{MetaTab, UtilKind},
-    params, shopt as shopts,
-    terminal::Terminal,
-    vars::ShStr,
-  },
-  util::{
+  }, expand::{Word, arithmetic, escape}, lifecycle, outln, procio::{self, RedirSet, SinkIo, Sinks}, sherr, shopt, signal, state::{
+    Shed, cache::CacheTab, cmd, jobs::ChildProc, meta::{MetaTab, UtilKind}, params, shopt as shopts, terminal::Terminal, vars::ShStr,
+  }, util::{
     self,
     error::{ShErrKind, ShResult, ShResultExt},
     guards,
     strops::ShStrDisplay,
-  },
-  varstr,
+  }, varstr,
 };
 
 mod alias;
@@ -98,6 +84,7 @@ mod trap;
 mod varcmds;
 mod vice;
 mod zd;
+mod call;
 
 pub(crate) use argv::{BuiltinArgs, join_raw_args};
 pub(crate) use help::HELP_PAGE_INSTALL_DIR;
@@ -134,6 +121,7 @@ register_builtins! {
   b"bg"         => jobctl  ::Bg,
   b"break"      => flowctl ::Break,
   b"builtin"    => self    ::BuiltinBuiltin,
+  b"call"       => call    ::Call,
   b"cd"         => cd      ::Cd,
   b"chrono"     => chrono  ::Chrono,
   b"clone"      => varcmds ::Clone,
@@ -1014,10 +1002,10 @@ impl Builtin for CommandBuiltin {
       };
       // TODO: Find a way to do this that doesn't involve forcing a full PATH rehash twice
       defer! {
-        Shed::meta_mut(MetaTab::rehash_path_cache);
+        Shed::cache_mut(CacheTab::rehash_path_cache);
       }
       params::with_vars([("PATH".into(), default_path)], || {
-        Shed::meta_mut(MetaTab::rehash_path_cache);
+        Shed::cache_mut(CacheTab::rehash_path_cache);
         Self::execute_inner(print_path, print_type, &sub_ast, root, dispatcher)
       })
     } else {
@@ -1108,10 +1096,7 @@ pub(crate) mod tests {
   use tempfile::TempDir;
 
   use crate::{
-    assert_status_eq,
-    eval::execute::exec_nonint,
-    state::{self, Shed, cmd, vars::VarFlags},
-    tests::testutil::{TestGuard, canon, has_cmd, test_input},
+    assert_status_eq, eval::execute::exec_nonint, state::{self, Shed, cache::CacheTab, cmd, vars::VarFlags}, tests::testutil::{TestGuard, canon, has_cmd, test_input},
   };
 
   // ===================== exit status propagation =====================
@@ -1414,7 +1399,7 @@ pub(crate) mod tests {
     let _g = TestGuard::new();
     // Force the exact post-pipeline state: pristine cache, then resolve one
     // command so $PATH is marked seen with only `cat` cached.
-    state::Shed::meta_mut(state::meta::MetaTab::clear_path_cache);
+    Shed::cache_mut(CacheTab::clear_path_cache);
     let _ = cmd::lookup_cmd(b"cat");
     assert!(
       cmd::which_util(b"env").is_some(),

@@ -4,16 +4,10 @@
 //! special parameters (`IFS`, `PS4`, …), and startup vars (`SHLVL`, version info).
 
 use crate::{
-  HashMap,
-  eval::lex::TkFlags,
-  expand::Expander,
-  state::{Shed, meta::MetaTab, vars::ShStr},
-  try_var,
-  util::{
+  HashMap, eval::lex::TkFlags, expand::Expander, state::{Shed, cache::CacheTab, vars::ShStr}, try_var, util::{
     self, guards,
     strops::{ByteCursor, QuoteState, SliceCursor},
-  },
-  varstr,
+  }, varstr,
 };
 
 #[cfg(not(target_os = "android"))]
@@ -245,7 +239,7 @@ fn adjust_sh_lvl(lvl: i32) -> ShResult<()> {
   let sh_lvl = Var::new(VarKind::string(varstr!("{new}")), VarFlags::EXPORT);
 
   Shed::vars_mut(|v| v.put_var(b"SHLVL", sh_lvl));
-  Shed::meta_mut(MetaTab::clear_envp);
+  Shed::cache_mut(CacheTab::env_changed);
 
   Ok(())
 }

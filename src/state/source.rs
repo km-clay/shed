@@ -77,6 +77,7 @@ impl SourceHandle {
 impl Drop for SourceHandle {
   fn drop(&mut self) {
     // now we check to see if nothing else references this source
+    // by extending Arc's reference counting machinery
     if Arc::strong_count(&self.ptr) != 1 {
       return;
     }

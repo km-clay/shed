@@ -5,7 +5,6 @@
 
 use std::{
   collections::{VecDeque, vec_deque},
-  ffi::CString,
   fmt::Write,
   os::{fd::OwnedFd, unix::ffi::OsStrExt},
   path::{Path, PathBuf},
@@ -21,22 +20,8 @@ use nix::{
     time::TimeVal,
   },
 };
-use regex::Regex;
-
 use crate::{
-  HashMap, HashSet,
-  eval::parse::{ast::NodeId, node::ForkReport},
-  expand::{
-    alias,
-    glob::{GlobOpts, Pattern},
-  },
-  match_loop,
-  readline::{Candidate, CompSpec},
-  sherr,
-  state::{Shed, params, paths, vars::ShStr},
-  system_msg,
-  util::{error::ShResult, ui},
-  var,
+  HashMap, HashSet, expand::alias, match_loop, readline::{Candidate, CompSpec}, sherr, state::{Shed, params, paths, vars::ShStr}, system_msg, util::{error::ShResult, ui}, var,
 };
 
 use super::{
@@ -44,8 +29,8 @@ use super::{
   jobs::Job,
   keys::KeyEvent,
   logic::AutoCmdKind,
-  vars::{VarFlags, VarKind},
 };
+
 #[derive(Debug)]
 pub(crate) struct CmdTimer {
   wall_start: Instant,
@@ -422,43 +407,6 @@ impl Utility {
   }
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct PathTable {
-  index: HashMap<ShStr, PathBuf>,
-}
-
-impl PathTable {
-  pub(crate) fn new() -> Self {
-    Self::default()
-  }
-  pub(crate) fn hash_path_list(&mut self, path_list: &[u8]) {
-    self.index.clear();
-    for entry in paths::path_list_entries(path_list) {
-      if !paths::is_executable_file(&entry) {
-        continue;
-      }
-      let name = entry.file_name();
-
-      self
-        .index
-        .entry(name.as_bytes().into())
-        .or_insert_with(|| entry.path());
-    }
-  }
-  pub(crate) fn lookup(&self, cmd: &[u8]) -> Option<&Path> {
-    self.index.get(cmd).map(PathBuf::as_path)
-  }
-  pub(crate) fn insert(&mut self, name: &[u8], path: PathBuf) {
-    self.index.insert(name.into(), path);
-  }
-  pub(crate) fn entries(&self) -> impl Iterator<Item = (&ShStr, &PathBuf)> {
-    self.index.iter()
-  }
-  pub(crate) fn clear(&mut self) {
-    self.index.clear();
-  }
-}
-
 /// Automatically manages loop depth in the meta table.
 ///
 /// When dropped, decrements the loop depth in the meta table.
@@ -490,35 +438,6 @@ pub(crate) struct XtraceGuard;
 impl Drop for XtraceGuard {
   fn drop(&mut self) {
     Shed::meta_mut(MetaTab::xtrace_ascend);
-  }
-}
-
-#[derive(Debug, Clone, Default)]
-struct RegexCache {
-  regexes: HashMap<String, Rc<Regex>>,
-  globs  : HashMap<Rc<[u8]>, Rc<Pattern>>,
-}
-
-impl RegexCache {
-  pub(crate) fn new() -> Self {
-    Self::default()
-  }
-  pub(crate) fn get_regex(&mut self, pat: &str) -> Result<Rc<Regex>, String> {
-    if let Some(rx) = self.regexes.get(pat) {
-      return Ok(Rc::clone(rx));
-    }
-    let rx = Rc::new(Regex::new(pat).map_err(|e| e.to_string())?);
-    self.regexes.insert(pat.to_string(), Rc::clone(&rx));
-    Ok(rx)
-  }
-  pub(crate) fn get_glob(&mut self, pat: &[u8]) -> Rc<Pattern> {
-    if let Some(p) = self.globs.get(pat) {
-      return p.clone();
-    }
-    // `case`/`[[ == ]]` matching is case-sensitive (no `nocasematch` shopt).
-    let p = Rc::from(Pattern::compile(pat, GlobOpts::new()));
-    self.globs.insert(p.orig().clone(), p.clone());
-    p
   }
 }
 
@@ -595,79 +514,6 @@ impl Drop for RedirForkGuard {
   }
 }
 
-#[derive(Debug, Clone, Default)]
-struct ForkMemo {
-  hot : Option<(u32, Vec<Option<ForkReport>>)>,
-  cold: HashMap<u32, Vec<Option<ForkReport>>>,
-}
-
-impl ForkMemo {
-  fn get(&self, node: NodeId) -> Option<&ForkReport> {
-    let tree = self
-      .get_hot(node.ast_id())
-      .or_else(|| self.cold.get(&node.ast_id()))?;
-
-    tree.get(node.slot())?.as_ref()
-  }
-
-  fn get_hot(&self, ast_id: u32) -> Option<&Vec<Option<ForkReport>>> {
-    self
-      .hot
-      .as_ref()
-      .and_then(|(id, cache)| (*id == ast_id).then_some(cache))
-  }
-
-  fn focus(&mut self, ast_id: u32, slots: usize) {
-    if self.hot.as_ref().is_some_and(|(id, _)| *id == ast_id) {
-      return;
-    }
-
-    if let Some((old_id, old)) = self.hot.take() {
-      self.cold.insert(old_id, old);
-    }
-
-    let tree = self
-      .cold
-      .remove(&ast_id)
-      .unwrap_or_else(|| vec![None; slots]);
-    self.hot = Some((ast_id, tree));
-  }
-
-  fn insert(&mut self, node_id: NodeId, slots: usize, report: ForkReport) {
-    self.focus(node_id.ast_id(), slots);
-
-    let Some((_, tree)) = self.hot.as_mut() else {
-      return;
-    };
-
-    if tree.len() < slots {
-      tree.resize(slots, None);
-    }
-
-    let Some(slot) = tree.get_mut(node_id.slot()) else {
-      return;
-    };
-
-    match slot {
-      None | Some(ForkReport::Simple(_)) => *slot = Some(report),
-      Some(ForkReport::Detailed(_))      => {}
-    }
-  }
-
-  fn clear(&mut self) {
-    self.hot = None;
-    self.cold.clear();
-  }
-
-  fn drop_tree(&mut self, ast_id: u32) {
-    if self.hot.as_ref().is_some_and(|(id, _)| *id == ast_id) {
-      self.hot = None;
-    }
-
-    self.cold.remove(&ast_id);
-  }
-}
-
 /// Miscellaneous global data storage
 #[derive(Debug)]
 #[expect(clippy::struct_excessive_bools)]
@@ -692,16 +538,6 @@ pub(crate) struct MetaTab {
   // getopts char offset for opts like -abc
   getopts_offset: usize,
 
-  old_path  : Option<ShStr>,
-  // utility cache - commands, functions, aliases, etc
-  path_cache: PathTable,
-
-  // Regex cache
-  // Vanilla regexes
-  regexes: RegexCache,
-
-  // envp cache - environment variables for execve
-  envp_cache: Option<Rc<[CString]>>,
   // programmable completion specs
   // NOTE: these arent on `LogTab` because we'd have to make
   // `CompSpec` send+sync otherwise
@@ -718,7 +554,6 @@ pub(crate) struct MetaTab {
   xtrace_depth : usize,
   fork_builtins: bool,
   fork_redirs  : bool,
-  fork_memo    : ForkMemo,
 
   // completion candidates given by compadd
   comp_add_candidates: Vec<Candidate>,
@@ -751,17 +586,12 @@ impl Clone for MetaTab {
       runtime_stop: self.runtime_stop,
       dir_stack: self.dir_stack.clone(),
       getopts_offset: self.getopts_offset,
-      old_path: self.old_path.clone(),
       loop_depth: self.loop_depth,
       func_depth: self.func_depth,
       xtrace_depth: self.xtrace_depth,
       fork_builtins: self.fork_builtins,
       fork_redirs: self.fork_redirs,
-      fork_memo: ForkMemo::default(),
-      envp_cache: self.envp_cache.clone(),
       comp_add_candidates: self.comp_add_candidates.clone(),
-      regexes: self.regexes.clone(),
-      path_cache: PathTable::new(),
       comp_specs: self.comp_specs.clone(),
       pending_widget_keys: self.pending_widget_keys.clone(),
       last_was_func_def: self.last_was_func_def,
@@ -788,18 +618,13 @@ impl Default for MetaTab {
       last_job: None,
       dir_stack: VecDeque::new(),
       getopts_offset: 0,
-      old_path: None,
       loop_depth: 0,
       func_depth: 0,
       xtrace_depth: 0,
       fork_builtins: false,
       fork_redirs: false,
-      fork_memo: ForkMemo::default(),
-      envp_cache: None,
       procsub_stack: vec![],
       comp_add_candidates: vec![],
-      regexes: RegexCache::new(),
-      path_cache: PathTable::new(),
       comp_specs: HashMap::default(),
       pending_widget_keys: vec![],
       last_was_func_def: false,
@@ -834,22 +659,6 @@ impl MetaTab {
   }
   pub(crate) fn take_poll_timeout(&mut self) -> Option<PollTimeout> {
     self.main_loop_timeout.take()
-  }
-
-  pub(crate) fn fork_memo_for(&self, node: NodeId) -> Option<&ForkReport> {
-    self.fork_memo.get(node)
-  }
-
-  pub(crate) fn drop_fork_memos_for(&mut self, ast_id: u32) {
-    self.fork_memo.drop_tree(ast_id);
-  }
-
-  pub(crate) fn clear_fork_memo(&mut self) {
-    self.fork_memo.clear();
-  }
-
-  pub(crate) fn memoize_fork_behavior(&mut self, node: NodeId, slots: usize, behavior: ForkReport) {
-    self.fork_memo.insert(node, slots, behavior);
   }
 
   pub(crate) fn set_last_cmdsub_status(&mut self, status: i32) {
@@ -1093,12 +902,6 @@ impl MetaTab {
     let exp = alias::expand_keymap(keys);
     self.pending_widget_keys = exp;
   }
-  pub(crate) fn get_regex(&mut self, pat: &str) -> Result<Rc<Regex>, String> {
-    self.regexes.get_regex(pat)
-  }
-  pub(crate) fn get_glob(&mut self, pat: &[u8]) -> Rc<Pattern> {
-    self.regexes.get_glob(pat)
-  }
   pub(crate) fn take_pending_widget_keys(&mut self) -> Option<Vec<KeyEvent>> {
     if self.pending_widget_keys.is_empty() {
       None
@@ -1160,87 +963,6 @@ impl MetaTab {
       }
     }
     files
-  }
-  pub(crate) fn clear_envp(&mut self) {
-    self.envp_cache = None;
-  }
-  pub(crate) fn get_envp(&mut self) -> Rc<[CString]> {
-    if let Some(envp) = &self.envp_cache {
-      return Rc::clone(envp);
-    }
-
-    // Walk scopes outermost-to-innermost so inner bindings shadow outer
-    // ones in the flat map. Libc env is not consulted, so shell writes
-    // outside this builder can't desync the env children inherit.
-    let mut flat: HashMap<ShStr, ShStr> = HashMap::default();
-    Shed::vars(|v| {
-      for scope in v.scopes_iter() {
-        for (name, var) in scope.vars() {
-          if var.flags().contains(VarFlags::EXPORT)
-            && let VarKind::Str(s) = var.kind()
-          {
-            flat.insert(name.clone(), s.clone());
-          }
-        }
-      }
-    });
-
-    let envp: Vec<CString> = flat
-      .into_iter()
-      .map(|(k, v)| {
-        let mut bytes = ShStr::with_capacity(k.len() + v.len() + 2);
-        bytes.push_slice(k.as_bytes());
-        bytes.push(b'=');
-        bytes.push_slice(v.as_bytes());
-
-        bytes.to_cstring_lossy()
-      })
-      .collect();
-
-    self.envp_cache = Some(Rc::from(envp.as_slice()));
-
-    self.get_envp()
-  }
-
-  /// Look up an external command in the PATH cache. Returns `None` for a
-  /// cache miss; callers that want to populate the cache on miss should
-  /// call [`try_rehash_path_cache`](Self::try_rehash_path_cache) first.
-  pub(crate) fn lookup_cached_cmd(&self, cmd: &[u8]) -> Option<&Path> {
-    self.path_cache.lookup(cmd)
-  }
-
-  pub(crate) fn path_cache(&self) -> &PathTable {
-    &self.path_cache
-  }
-
-  pub(crate) fn rehash_path_cache(&mut self) {
-    let path = var!(b"PATH");
-    self.old_path = Some(path.clone());
-    self.path_cache.hash_path_list(&path);
-  }
-
-  pub(crate) fn clear_path_cache(&mut self) {
-    self.old_path = None;
-    self.path_cache.clear();
-  }
-
-  pub(crate) fn try_rehash_path_cache(&mut self) {
-    let path = var!(b"PATH");
-    if self.old_path.as_ref().is_none_or(|old| *old != path) {
-      self.old_path = Some(path.clone());
-      self.path_cache.hash_path_list(&path);
-    }
-  }
-  pub(crate) fn invalidate_path_cache_if_stale(&mut self) {
-    let path = var!(b"PATH");
-    if self.old_path.as_ref().is_none_or(|old| *old != path) {
-      self.old_path = Some(path);
-      self.path_cache.clear();
-    }
-  }
-
-  pub(crate) fn cache_cmd(&mut self, name: &[u8], path: PathBuf) {
-    self.path_cache.insert(name, path);
   }
   pub(crate) fn start_timer(&mut self) {
     self.runtime_start = Some(Instant::now());

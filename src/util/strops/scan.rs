@@ -405,6 +405,16 @@ pub(crate) fn scan_parens<C: ByteCursor>(c: &mut C, depth: usize) -> bool {
   scan_delims(b'(', c, depth)
 }
 
+/// Offset of the `)` that closes a `(...)` body, given the bytes *after* the
+/// opening paren. Quote-aware but not grammar-aware: a `case` pattern's `)`
+/// closes it early, so prefer `lex::scan_cmd_sub_body` for shell command
+/// bodies and use this only where the body is not a command list (e.g. the
+/// arithmetic `$((...))` form).
+pub(crate) fn scan_paren_body(body: &[u8]) -> Option<usize> {
+  let mut cursor = SliceCursor::new(body);
+  scan_parens(&mut cursor, 1).then(|| cursor.pos() - 1)
+}
+
 /// Scan a balanced `[...]`; see [`scan_parens`]. Does not recurse into
 /// `$(...)`, so a literal `]` in a command substitution closes early.
 pub(crate) fn scan_brackets<C: ByteCursor>(c: &mut C, depth: usize) -> bool {

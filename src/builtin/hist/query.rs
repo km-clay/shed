@@ -93,7 +93,7 @@ impl HistQuery {
     let mut entries = hist.query_scoped(&conditions, &tail, &param_refs)?;
 
     if let (Some(pat), not) = &self.matches {
-      let re = match Shed::meta_mut(|m| m.get_regex(&pat.to_str_lossy())) {
+      let re = match Shed::cache_mut(|c| c.get_regex(&pat.to_str_lossy())) {
         Ok(re) => re,
         Err(e) => return Err(sherr!(ParseErr, "{e}")),
       };

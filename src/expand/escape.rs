@@ -210,6 +210,13 @@ fn unescape_with(stream: SegStream, flags: ExpandFlags) -> SegStream {
           out.push_byte(b'}');
           param_depth = param_depth.saturating_sub(1);
         }
+        b'^' if cursor.peek_byte() == Some(b'(')
+          && flags.contains(ExpandFlags::SUBSHELL)
+          && param_depth == 0 =>
+        {
+          cursor.next();
+          read_paren_body(&mut cursor, &mut out, Marker::Quote(Quote::Single));
+        }
         b'(' if flags.contains(ExpandFlags::SUBSHELL) && param_depth == 0 => {
           read_subsh(&mut cursor, &mut out);
         }
@@ -266,59 +273,41 @@ fn read_varsub(stream: &mut SegCursor, out: &mut SegStream) -> bool {
 
 fn read_subsh(stream: &mut SegCursor, out: &mut SegStream) {
   out.push_marker(Marker::Subshell);
+  read_paren_body(stream, out, Marker::Subshell);
+}
 
+/// Copy a parenthesised body into `out`, stopping at its closing `)`, then
+/// push `close`.
+///
+/// A body that opens with `(` is the arithmetic `$((...))` form and is
+/// delimited by paren balance; anything else is a command list and goes
+/// through the lexer, so a `case` pattern's `)` does not close it early.
+fn read_paren_body(stream: &mut SegCursor, out: &mut SegStream, close: Marker) {
   let mut peeker        = *stream;
   let mut rest: Vec<u8> = vec![];
   while let Some(b) = peeker.next_byte() {
     rest.push(b);
   }
 
-  if !rest.starts_with(b"(")
-    && let Some(close) = lex::scan_cmd_sub_body(&rest)
-  {
-    out.push_bytes(&rest[..close]);
-    out.push_marker(Marker::Subshell);
-    for _ in 0..=close {
-      stream.next();
-    }
-    return;
-  }
+  let closer = if rest.starts_with(b"(") {
+    crate::util::strops::scan_paren_body(&rest)
+  } else {
+    lex::scan_cmd_sub_body(&rest)
+  };
 
-  let mut paren_count = 1;
-  let mut qt          = QuoteState::default();
-  match_loop!(stream.next() => unit, {
-    Unit::Byte(b) => match b {
-      b'\\' => {
-        out.push_byte(b'\\');
-        if let Some(next) = stream.next_byte() {
-          out.push_byte(next);
-        }
-      }
-      b'\'' if !qt.in_double() => {
-        qt.toggle_single();
-        out.push_byte(b'\'');
-      }
-      b'"' if !qt.in_single() => {
-        qt.toggle_double();
-        out.push_byte(b'"');
-      }
-      b if qt.in_quote() => out.push_byte(b),
-      b'(' => {
-        paren_count += 1;
-        out.push_byte(b'(');
-      }
-      b')' => {
-        paren_count -= 1;
-        if paren_count == 0 {
-          out.push_marker(Marker::Subshell);
-          break;
-        }
-        out.push_byte(b')');
-      }
-      b => out.push_byte(b),
-    }
-    Unit::Mark(m) => out.push_marker(m),
-  });
+  let Some(closer) = closer else {
+    // Unterminated, e.g. a partial interactive line: take what is there.
+    out.push_bytes(&rest);
+    out.push_marker(close);
+    while stream.next().is_some() {}
+    return;
+  };
+
+  out.push_bytes(&rest[..closer]);
+  out.push_marker(close);
+  for _ in 0..=closer {
+    stream.next();
+  }
 }
 
 fn read_sng_quote(stream: &mut SegCursor, out: &mut SegStream) {
@@ -561,45 +550,8 @@ pub(crate) fn read_hex(stream: &mut SegCursor, out: &mut SegStream) {
 fn read_proc_sub(stream: &mut SegCursor, out: &mut SegStream, input: bool) {
   let kind = ProcSubKind::from(input);
   stream.next();
-  let mut paren_count = 1;
   out.push_marker(Marker::ProcSub(kind));
-  let mut qt = QuoteState::default();
-
-  match_loop!(stream.next_byte() => subsh_ch, {
-    b'\\' => {
-      out.push_byte(subsh_ch);
-      if let Some(next_ch) = stream.next_byte() {
-        out.push_byte(next_ch);
-      }
-    }
-
-    b'\'' if !qt.in_double() => {
-      qt.toggle_single();
-      out.push_byte(subsh_ch);
-    }
-    b'"' if !qt.in_single() => {
-      qt.toggle_double();
-      out.push_byte(subsh_ch);
-    }
-    byte if qt.in_quote() => out.push_byte(byte),
-
-    b'$' if stream.peek_byte() == Some(b'\'') => {
-      out.push_byte(subsh_ch);
-    }
-    b'(' => {
-      out.push_byte(subsh_ch);
-      paren_count += 1;
-    }
-    b')' => {
-      paren_count -= 1;
-      if paren_count <= 0 {
-        out.push_marker(Marker::ProcSub(kind));
-        break;
-      }
-      out.push_byte(subsh_ch);
-    }
-    _ => out.push_byte(subsh_ch),
-  });
+  read_paren_body(stream, out, Marker::ProcSub(kind));
 }
 
 fn read_backtick(stream: &mut SegCursor, out: &mut SegStream, in_dquote: bool) {
@@ -1222,5 +1174,45 @@ mod expand_ansi_c_tests {
   #[test]
   fn mixed_escapes_and_literals() {
     assert_eq!(expand_ansi_c("line1\\nline2\\tcol2"), "line1\nline2\tcol2");
+  }
+}
+
+#[cfg(test)]
+mod cmd_literal_tests {
+  // `^(...)` is a quoting form: at runtime it behaves exactly like `'...'`,
+  // yielding the body as text rather than running it.
+  //
+  // The `caret_*` cases pin that `^` keeps its other meanings. They do not
+  // cover the `param_depth == 0` guard on the arm: `${x^}` has `^` before `}`,
+  // so the arm cannot fire there either way, and shed does not implement
+  // `${x^pattern}`, which is the only form that would put `^(` inside `${}`.
+  // The guard is defensive against that form landing later.
+
+  crate::test_input! {
+    literal_yields_its_body     : "printf '%s' ^(echo hi)"       => "echo hi";
+    literal_is_not_expanded     : "printf '%s' ^(echo $HOME)"    => "echo $HOME";
+    literal_keeps_single_quotes : "printf '%s' ^(echo 'a b')"    => "echo 'a b'";
+    literal_keeps_double_quotes : r#"printf '%s' ^(echo "a b")"# => r#"echo "a b""#;
+    literal_does_not_split      : "printf '%s' ^(a;b)"           => "a;b";
+    literal_keeps_pipes         : "printf '%s' ^(a|b)"           => "a|b";
+    literal_empty_body          : "printf '<%s>' ^()"            => "<>";
+    literal_concatenates        : "printf '%s' foo^(a)baz"       => "fooabaz";
+    literal_is_one_word         : "printf '<%s>' ^(a b)"         => "<a b>";
+
+    // the body is text, so an inner `^(...)` is just more text
+    literal_does_not_nest       : "printf '%s' ^(echo ^(inner))" => "echo ^(inner)";
+
+    // quoted, not run: executing the body would print RAN instead of its source
+    literal_is_not_executed     : "printf '<%s>' ^(echo RAN)"    => "<echo RAN>";
+
+    // the text is shell code, so `eval` runs it -- including through a variable
+    literal_runs_under_eval     : "eval ^(echo hi)"              => "hi\n";
+    literal_via_variable        : "x=^(echo hi); eval \"$x\""    => "hi\n";
+    literal_case_body_runs      : "eval ^(case x in x) echo m ;; esac)" => "m\n";
+
+    // `^` keeps its other meanings
+    caret_case_conversion_one   : "x=abc; printf '%s' \"${x^}\""  => "Abc";
+    caret_case_conversion_all   : "x=abc; printf '%s' \"${x^^}\"" => "ABC";
+    caret_is_xor_in_arithmetic  : "printf '%s' $((2^3))"          => "1";
   }
 }

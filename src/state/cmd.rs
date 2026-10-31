@@ -9,16 +9,9 @@ use bstr::ByteSlice;
 use itertools::Itertools;
 
 use crate::{
-  HashSet,
-  builtin::{self, BUILTIN_NAMES},
-  state::{
-    Shed,
-    meta::{MetaTab, Utility},
-    paths,
-    vars::ShStr,
-  },
-  util::strops::{self},
-  var,
+  HashSet, builtin::{self, BUILTIN_NAMES}, state::{
+    Shed, cache::CacheTab, meta::{MetaTab, Utility}, paths, vars::ShStr,
+  }, util::strops::{self}, var,
 };
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.
@@ -27,9 +20,9 @@ pub(crate) fn lookup_cmd(cmd: &[u8]) -> Option<PathBuf> {
     let p = PathBuf::from(ShStr::from(cmd));
     return p.is_file().then_some(p);
   }
-  let path = Shed::meta_mut(|m| {
-    m.invalidate_path_cache_if_stale();
-    if let Some(p) = m.lookup_cached_cmd(cmd) {
+  let path = Shed::cache_mut(|c| {
+    c.invalidate_path_cache_if_stale();
+    if let Some(p) = c.lookup_cached_cmd(cmd) {
       return Some(p.to_path_buf());
     }
     None
@@ -40,7 +33,7 @@ pub(crate) fn lookup_cmd(cmd: &[u8]) -> Option<PathBuf> {
   let path_env = var!(b"PATH");
   let resolved = paths::resolve_in_path(&path_env, cmd)?;
 
-  Shed::meta_mut(|m| m.cache_cmd(cmd, resolved.clone()));
+  Shed::cache_mut(|c| c.cache_cmd(cmd, resolved.clone()));
   Some(resolved)
 }
 
@@ -65,7 +58,7 @@ pub(crate) fn which_util(name: &[u8]) -> Option<Rc<Utility>> {
 
 pub(crate) fn try_hash() {
   if Shed::shopts(|o| o.set.hashall) {
-    Shed::meta_mut(MetaTab::try_rehash_path_cache);
+    Shed::cache_mut(CacheTab::try_rehash_path_cache);
   }
 }
 

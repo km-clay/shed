@@ -372,7 +372,7 @@ impl LineBuf {
   pub(crate) fn search_match_spans(&self) -> Vec<Range<usize>> {
     if let Some(pat) = self.pending_search.as_ref()
       && !pat.is_empty()
-      && let Ok(re) = Shed::meta_mut(|m| m.get_regex(&pat.to_str_lossy()))
+      && let Ok(re) = Shed::cache_mut(|c| c.get_regex(&pat.to_str_lossy()))
     {
       let buf       = self.to_string();
       let positions = self.byte_positions();

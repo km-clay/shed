@@ -34,7 +34,7 @@ impl Builtin for Timezone {
     let target = if raw.is_empty() {
       None
     } else if use_re {
-      let re = Shed::meta_mut(|m| m.get_regex(&raw))
+      let re = Shed::cache_mut(|c| c.get_regex(&raw))
         .map_err(|_| sherr!(ParseErr ? arg.span(), "invalid regex pattern: {raw}").with_code(2))?;
       Some(Target::Regex(re))
     } else {

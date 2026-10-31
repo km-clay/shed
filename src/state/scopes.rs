@@ -18,8 +18,7 @@ use super::{
   vars::{self, ArrIndex, ShellParam, Var, VarFlags, VarKind, VarKindTag, VarName, VarTab},
 };
 use crate::{
-  HashMap,
-  state::vars::{ShStr, ShStrSliceExt},
+  HashMap, state::{cache::CacheTab, vars::{ShStr, ShStrSliceExt}},
 };
 use crate::{expand::Words, util::strops::ParseBytes};
 use crate::{shopt, varstr};
@@ -137,7 +136,7 @@ impl ScopeStack {
           .values()
           .any(|v| v.flags().contains(VarFlags::EXPORT))
       }) {
-        Shed::meta_mut(MetaTab::clear_envp);
+        Shed::cache_mut(CacheTab::env_changed);
       }
       self.depth -= 1;
     }

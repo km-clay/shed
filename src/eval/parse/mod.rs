@@ -4,8 +4,7 @@
 
 use bitflags::bitflags;
 use std::{
-  collections::VecDeque,
-  fmt::{self, Debug},
+  collections::VecDeque, fmt::{self, Debug}, sync::Arc,
 };
 
 pub(crate) mod node;
@@ -31,11 +30,7 @@ use crate::{
   eval::parse::{
     ast::{Ast, NodeId},
     node::LabelCtx,
-  },
-  match_loop, procio, sherr,
-  state::{self, SourceHandle, vars::ShStr},
-  two_way_display,
-  util::error::{ShErr, ShResult},
+  }, match_loop, procio, sherr, state::{self, Shed, SourceHandle, vars::ShStr}, two_way_display, util::error::{ShErr, ShResult},
 };
 
 use super::lex::{self, LexFlags, LexStream, Span, Tk, TkFlags, TkRule};
@@ -49,6 +44,10 @@ pub(crate) struct ParsedSrc {
   pub parse_flags: ParseFlags,
   pub context    : LabelCtx,
 }
+
+/// Source name given to a substitution body parsed on its own, shared by every
+/// path that populates the AST cache so a cached body always renders the same.
+pub(crate) const SUB_BODY_SOURCE: &str = "subshell";
 
 impl ParsedSrc {
   pub(crate) fn new(src: ShStr) -> Self {
@@ -107,6 +106,23 @@ impl ParsedSrc {
       }
     }
 
+    if !self.lex_flags.intersects(LexFlags::LEX_UNFINISHED)
+      && !self.parse_flags.contains(ParseFlags::IGNORE_SUBS)
+    {
+      for span in stream.sub_bodies() {
+        if let Err(mut sub_errors) = self.validate_cmd_literal(*span) {
+          let offset = span.start();
+          for error in &mut sub_errors {
+            error.remap_spans(|inner| {
+              Span::new(offset + inner.start(), offset + inner.end(), span.source())
+            });
+          }
+
+          errors.append(&mut sub_errors);
+        }
+      }
+    }
+
     let mut parser = ParseStream::new(tokens, self.context.clone()).with_flags(self.parse_flags);
 
     match_loop!(parser.next() => parse_result, {
@@ -126,6 +142,23 @@ impl ParsedSrc {
     self.ast = parser.tree.with_source(self.src.share_handle());
     Ok(())
   }
+
+  fn validate_cmd_literal(&self, span: Span) -> Result<(), Vec<ShErr>> {
+    let body = span.slice();
+    if Shed::cache(|c| c.has_ast_for(&body)) {
+      return Ok(()); // already validated
+    }
+
+    // Must match the name `subshell::get_subshell_ast` uses: either may be the
+    // one that caches a given body, and the cached AST's source is what a
+    // runtime diagnostic inside it renders against.
+    let mut parsed = Self::with_name(SUB_BODY_SOURCE.into(), span.slice());
+    parsed.parse_src()?;
+
+    Shed::cache_mut(|c| c.cache_ast(body, Arc::new(parsed.into_ast())));
+    Ok(())
+  }
+
   pub(crate) fn into_ast(self) -> Ast {
     self.ast
   }
@@ -134,8 +167,9 @@ impl ParsedSrc {
 bitflags! {
   #[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Hash,PartialOrd,Ord)]
   pub(crate) struct ParseFlags: u32 {
-    const INCOMPLETE = 1 << 0; // Whether to error
-    const ERR_RETURN = 1 << 1; // Return on first error instead of continuing
+    const INCOMPLETE  = 1 << 0; // Whether to error
+    const ERR_RETURN  = 1 << 1; // Return on first error instead of continuing
+    const IGNORE_SUBS = 1 << 2; // Do not validate subshells like $(...) or >(...)
   }
 }
 

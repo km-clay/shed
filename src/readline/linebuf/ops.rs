@@ -1014,7 +1014,7 @@ impl super::LineBuf {
       _ => (0, self.lines.len().saturating_sub(1)),
     };
 
-    let re = match Shed::meta_mut(|m| m.get_regex(re)) {
+    let re = match Shed::cache_mut(|c| c.get_regex(re)) {
       Ok(re) => re,
       Err(e) => {
         status_msg!("{e}");

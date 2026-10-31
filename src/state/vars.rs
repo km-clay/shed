@@ -35,27 +35,19 @@ use smallvec::SmallVec;
 use smol_str::{SmolStr, SmolStrBuilder};
 
 use crate::{
-  HashMap,
-  eval::{
+  HashMap, eval::{
     lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
     parse::ast::Ast,
-  },
-  expand::{
+  }, expand::{
     Expander, Word, arithmetic, escape,
     stream::{Marker, Quote, SegStream, Unit},
     var,
-  },
-  match_loop, procio,
-  readline::Candidate,
-  sherr,
-  state::{self, Shed, params, paths},
-  util::{
+  }, match_loop, procio, readline::Candidate, sherr, state::{self, Shed, cache::CacheTab, params, paths}, util::{
     self,
     error::{LabelBuilder, ShResult},
     random,
     strops::{ByteCursor, FromBytes, ParseBytes, QuoteState, SliceCursor},
-  },
-  varstr,
+  }, varstr,
 };
 
 use super::{meta::MetaTab, scopes::ScopeStack, terminal::Terminal};
@@ -1738,7 +1730,7 @@ impl VarTab {
       && var.flags.contains(VarFlags::EXPORT)
     {
       var.flags.remove(VarFlags::EXPORT);
-      Shed::meta_mut(MetaTab::clear_envp);
+      Shed::cache_mut(CacheTab::env_changed);
     }
   }
   pub(crate) fn try_get_local(&self, var_name: &[u8]) -> Option<ShStr> {
@@ -1783,7 +1775,7 @@ impl VarTab {
         return Err(sherr!(ExecFail, "cannot unset readonly variable '{var_name}'"));
       }
       if var.flags.contains(VarFlags::EXPORT) {
-        Shed::meta_mut(MetaTab::clear_envp);
+        Shed::cache_mut(CacheTab::env_changed);
       }
     }
     Ok(self.vars.remove(var_name))
@@ -1923,12 +1915,12 @@ impl VarTab {
           var.mark_for_export();
         }
 
-        Shed::meta_mut(MetaTab::clear_envp);
+        Shed::cache_mut(CacheTab::env_changed);
       }
     } else {
       let mut var = Var::new(val, flags);
       if flags.contains(VarFlags::EXPORT) {
-        Shed::meta_mut(MetaTab::clear_envp);
+        Shed::cache_mut(CacheTab::env_changed);
         var.mark_for_export();
       }
       self.vars.insert(var_name.into(), var);
@@ -1944,7 +1936,7 @@ impl VarTab {
         flags.contains(VarFlags::EXPORT) && !var.flags.contains(VarFlags::EXPORT);
       var.flags |= flags;
       if newly_exported {
-        Shed::meta_mut(MetaTab::clear_envp);
+        Shed::cache_mut(CacheTab::env_changed);
       }
     }
   }

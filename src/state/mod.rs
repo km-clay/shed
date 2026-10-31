@@ -64,6 +64,7 @@ pub(super) mod terminal;
 pub(super) mod thread;
 pub(crate) mod timers;
 pub(super) mod vars;
+pub(super) mod cache;
 
 pub(crate) use source::{
   SourceHandle, SourceId, get_source, get_source_name, handle_for, register_named_source,
@@ -403,6 +404,8 @@ pub(super) struct Shed {
   terminal   : RefCell<terminal::Terminal>,
   /// The shell configuration options
   shopts     : RefCell<shopt::ShOpts>,
+  /// Assorted data caches
+  cache: RefCell<cache::CacheTab>,
   /// The last exit status code, used by `$?`
   status_code: AtomicI32,
 
@@ -462,6 +465,7 @@ impl Shed {
       timers: RefCell::new(timers::Timers::new()),
       pipe_frames: RefCell::new(procio::PipeFrames::default()),
       shopts: RefCell::new(shopt::ShOpts::default()),
+      cache: RefCell::new(cache::CacheTab::new()),
       status_code: AtomicI32::new(0),
 
       status_msg_queue: RefCell::new(VecDeque::new()),
@@ -583,12 +587,29 @@ impl Shed {
     access_mut!(SHED, meta, f)
   }
 
-  pub(crate) fn try_meta_mut<T, F>(f: F) -> Option<T>
+  /// Read from the metadata table
+  #[track_caller]
+  pub(crate) fn cache<T, F>(f: F) -> T
   where
-    F: FnOnce(&mut meta::MetaTab) -> T,
+    F: FnOnce(&cache::CacheTab) -> T,
+  {
+    access!(SHED, cache, f)
+  }
+  /// Mutate the metadata table
+  #[track_caller]
+  pub(crate) fn cache_mut<T, F>(f: F) -> T
+  where
+    F: FnOnce(&mut cache::CacheTab) -> T,
+  {
+    access_mut!(SHED, cache, f)
+  }
+
+  pub(crate) fn try_cache_mut<T, F>(f: F) -> Option<T>
+  where
+    F: FnOnce(&mut cache::CacheTab) -> T,
   {
     SHED
-      .try_with(|shed| shed.meta.try_borrow_mut().map(|mut m| f(&mut m)).ok())
+      .try_with(|shed| shed.cache.try_borrow_mut().map(|mut m| f(&mut m)).ok())
       .ok()
       .flatten()
   }
@@ -1041,7 +1062,7 @@ impl Shed {
           .var_scopes
           .borrow_mut()
           .forget_userspace_globals(&spec.exclude_vars);
-        shed.meta.borrow_mut().clear_envp();
+        shed.cache.borrow_mut().env_changed();
       }
       if flags.contains(ForgetFlags::DEFERRED) {
         shed.var_scopes.borrow_mut().clear_deferred_cmds();
@@ -1114,6 +1135,7 @@ impl Shed {
       timers: RefCell::new(self.timers.borrow().clone()),
       pipe_frames: RefCell::new(self.pipe_frames.borrow().clone()),
       shopts: RefCell::new(self.shopts.borrow().clone()),
+      cache: RefCell::new(cache::CacheTab::new()),
       terminal: RefCell::new(self.terminal.borrow().clone()),
       status_msg_queue: RefCell::new(self.status_msg_queue.borrow().clone()),
       status_msg_hist: RefCell::new(self.status_msg_hist.borrow().clone()),

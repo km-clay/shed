@@ -2039,3 +2039,59 @@ fn continuation_inside_arithmetic_still_joins() {
   .unwrap();
   assert_eq!(guard.read_output(), "arm trigger\n3\n");
 }
+
+// ===================== substitution body validation =====================
+//
+// A substitution body is parsed when the enclosing script is parsed, so a
+// syntax error inside one is reported before anything runs. `get_ast` goes
+// through `parse_src`, so these assert the validation pass directly.
+
+#[test]
+fn bad_cmd_literal_body_fails_to_parse() {
+  assert!(get_ast("eval ^(if x; do y; done)").is_err());
+}
+
+#[test]
+fn bad_cmd_sub_body_fails_to_parse() {
+  assert!(get_ast("x=$(if x; do y; done)").is_err());
+  assert!(get_ast(r#"x="$(if x; do y; done)""#).is_err());
+  assert!(get_ast("cat <(if x; do y; done)").is_err());
+}
+
+#[test]
+fn good_bodies_parse() {
+  assert!(get_ast("eval ^(echo ok)").is_ok());
+  assert!(get_ast("x=$(echo ok)").is_ok());
+  assert!(get_ast("cat <(echo ok)").is_ok());
+}
+
+// The body is parsed as a whole program, so a `case` arm is fine but a
+// fragment is not.
+#[test]
+fn body_must_be_a_complete_program() {
+  assert!(get_ast("eval ^(case x in x) echo m ;; esac)").is_ok());
+  assert!(get_ast("eval ^(if x; then)").is_err());
+}
+
+#[test]
+fn nested_bad_body_fails_to_parse() {
+  assert!(get_ast("eval ^(eval ^(if x; do y; done))").is_err());
+  assert!(get_ast("x=$( $(if x; do y; done) )").is_err());
+}
+
+// Quoted text is data, not code. A quoted heredoc in particular is how a
+// script emits another script, and must never be validated.
+#[test]
+fn quoted_bodies_are_not_validated() {
+  assert!(get_ast("echo '^(if x; do y; done)'").is_ok());
+  assert!(get_ast(r#"echo "^(if x; do y; done)""#).is_ok());
+  assert!(get_ast("echo '$(if x; do y; done)'").is_ok());
+  assert!(get_ast("cat <<'EOF'\n$(if x; do y; done)\nEOF\n").is_ok());
+}
+
+// Backticks and arithmetic are left alone, matching bash.
+#[test]
+fn backticks_and_arithmetic_are_not_validated() {
+  assert!(get_ast("x=`if x; do y; done`").is_ok());
+  assert!(get_ast("echo $((1 +* 2))").is_ok());
+}

@@ -10,8 +10,9 @@ use std::sync::Arc;
 
 use crate::builtin::ForkBehavior;
 use crate::state::Shed;
+use crate::state::cache::CacheTab;
 use crate::util::error::{LabelBuilder, ShResult};
-use crate::varstr;
+use crate::{two_way_display, varstr};
 use crate::{
   HashMap,
   autoload::{self, AutoloadSrc, Autoloader},
@@ -145,12 +146,6 @@ impl ShFunc {
   }
 }
 
-#[derive(Clone, Debug)]
-struct ShLambda {
-  src   : Arc<Ast>,
-  source: Span,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum AutoCmdKind {
   PreCmd,
@@ -201,7 +196,7 @@ impl AutoCmdKind {
   }
 }
 
-crate::two_way_display!(AutoCmdKind,
+two_way_display!(AutoCmdKind,
   PreCmd              <=> "pre-cmd";
   PostCmd             <=> "post-cmd";
   PreChangeDir        <=> "pre-change-dir";
@@ -288,7 +283,6 @@ pub(crate) struct LogTab {
   comp_autoloads: HashMap<ShStr, AutoloadSrc>,
   aliases       : HashMap<ShStr, ShAlias>,
   ex_aliases    : HashMap<ShStr, ShAlias>,
-  lambdas       : HashMap<ShStr, ShLambda>,
 
   traps   : HashMap<TrapTarget, ShStr>,
   keymaps : Vec<KeyMap>,
@@ -301,15 +295,11 @@ impl LogTab {
     new.register_autoload_funcs();
     new
   }
-  pub(crate) fn get_lambda(&mut self, body: &[u8]) -> ShResult<Arc<Ast>> {
-    if let Some(tree) = self.lambdas.get(body) {
-      return Ok(tree.src.clone());
-    }
-    todo!()
-  }
   pub(super) fn forget(&mut self, flags: ForgetFlags) {
     if flags.contains(ForgetFlags::FUNCS) {
       self.functions.clear();
+      self.invalidate_internal_cache();
+      Shed::try_cache_mut(CacheTab::funcs_changed);
       self.register_autoload_funcs();
     }
     if flags.contains(ForgetFlags::COMPS) {
@@ -429,7 +419,7 @@ impl LogTab {
   pub(crate) fn insert_func(&mut self, name: &[u8], src: ShFunc) {
     self.functions.insert(name.into(), src);
     self.invalidate_internal_cache();
-    Shed::try_meta_mut(|m| m.clear_fork_memo());
+    Shed::try_cache_mut(CacheTab::funcs_changed);
   }
   pub(crate) fn insert_trap(&mut self, target: TrapTarget, command: ShStr) {
     self.traps.insert(target, command);
@@ -474,7 +464,7 @@ impl LogTab {
   pub(crate) fn remove_func(&mut self, name: &[u8]) -> Option<ShFunc> {
     let func = self.functions.remove(name);
     self.invalidate_internal_cache();
-    Shed::try_meta_mut(|m| m.clear_fork_memo());
+    Shed::try_cache_mut(CacheTab::funcs_changed);
     func
   }
   pub(crate) fn take_comp_autoload(&mut self, name: &[u8]) -> Option<AutoloadSrc> {

@@ -348,7 +348,7 @@ impl super::Dispatcher {
               break 'outer;
             }
           } else {
-            let pattern = Shed::meta_mut(|m| m.get_glob(pattern_exp.as_bytes()));
+            let pattern = Shed::cache_mut(|c| c.get_glob(pattern_exp.as_bytes()));
             if pattern.is_match(pattern_raw.as_bytes()) {
               let _guard = guards::shared_scope_guard();
               s.dispatch_node(tree, *body)?;

@@ -645,9 +645,9 @@ fn command_utils() -> Vec<Utility> {
     utils.extend(l.funcs().keys().cloned().map(Utility::function));
   });
   utils.extend(BUILTIN_NAMES.iter().map(|n| Utility::builtin((*n).into())));
-  Shed::meta(|m| {
+  Shed::cache(|c| {
     utils.extend(
-      m.path_cache()
+      c.path_cache()
         .entries()
         .map(|(name, path)| Utility::command(name.clone(), path.clone())),
     );

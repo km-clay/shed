@@ -1,22 +1,11 @@
 use std::{
-  os::fd::{AsFd, AsRawFd},
-  sync::Arc,
+  os::fd::{AsFd, AsRawFd}, sync::Arc,
 };
 
 use crate::{
-  errln,
-  eval::{
-    execute,
-    lex::Span,
-    parse::{ParsedSrc, node},
-  },
-  expand::arithmetic,
-  lifecycle,
-  procio::{self, OsSink, RedirType, Sinks},
-  readline::{self, NestedSub},
-  sherr, shopt,
-  state::{ForkKind, Shed, meta::MetaTab, terminal::Terminal, vars::ShStr},
-  util::{error::ShResult, guards},
+  errln, eval::{
+    execute, lex::Span, parse::{ParseFlags, ParsedSrc, ast::Ast, node},
+  }, expand::arithmetic, lifecycle, procio::{self, OsSink, RedirType, Sinks}, readline::{self, NestedSub}, sherr, shopt, state::{ForkKind, Shed, meta::MetaTab, terminal::Terminal, vars::ShStr}, util::{error::ShResult, guards},
 };
 
 use bstr::ByteSlice;
@@ -89,14 +78,30 @@ pub(crate) fn expand_proc_sub(span: Option<Span>, raw: &str, is_input: bool) -> 
   }
 }
 
-pub(crate) fn is_internal(raw: &[u8]) -> bool {
-  let mut parser = ParsedSrc::with_name("is_internal check".into(), raw.into());
-
-  if parser.parse_src().is_err() {
-    return false;
+pub(crate) fn get_subshell_ast(raw: &[u8]) -> Option<Arc<Ast>> {
+  if let Some(tree) = Shed::cache(|c| c.get_ast(raw)) {
+    return Some(tree);
   }
 
-  let     ast   = parser.into_ast();
+  let mut parser = ParsedSrc::with_name(crate::eval::parse::SUB_BODY_SOURCE.into(), raw.into())
+    .with_parse_flags(ParseFlags::IGNORE_SUBS);
+
+  if parser.parse_src().is_err() {
+    return None;
+  }
+
+  let tree = Arc::new(parser.into_ast());
+  Shed::cache_mut(|c| c.cache_ast(raw.into(), tree.clone()));
+
+  Some(tree)
+
+}
+
+pub(crate) fn is_internal(raw: &[u8]) -> bool {
+  let Some(ast) = get_subshell_ast(raw) else {
+    return false;
+  };
+
   let     roots = ast.roots();
 
   let mut forks = false;
@@ -244,6 +249,22 @@ mod tests {
   // path; a genuinely all-builtin body (even with all-builtin nesting) must
   // stay in-process. Output alone can't distinguish the paths, so gate the
   // decision directly.
+
+  // `is_internal` walks a function body to decide whether it forks, which
+  // means following calls to other functions. Two functions calling each
+  // other must not send that walk into unbounded recursion -- the
+  // `IsInternal::Checking` marker is the guard, and losing it stack-overflows
+  // on input whose runtime recursion is perfectly bounded.
+  #[test]
+  fn is_internal_survives_mutually_recursive_functions() {
+    let _g = TestGuard::new();
+    test_input(r#"a() { if [ "$1" = stop ]; then echo a-stop; return; fi; b stop; }"#).unwrap();
+    test_input(r#"b() { if [ "$1" = stop ]; then echo b-stop; return; fi; a stop; }"#).unwrap();
+
+    // the verdict itself does not matter; terminating does
+    let _ = is_internal(b"a");
+    test_input("x=$(a); printf '%s' \"$x\"").unwrap();
+  }
 
   #[test]
   fn is_internal_plain_builtin_body() {

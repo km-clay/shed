@@ -80,6 +80,9 @@ impl Ast {
       source: None,
     }
   }
+  pub(crate) fn id(&self) -> u32 {
+    self.id
+  }
   pub(crate) fn with_source(mut self, source: SourceHandle) -> Self {
     self.source = Some(source);
     self
@@ -465,7 +468,7 @@ impl Clone for Ast {
 
 impl Drop for Ast {
   fn drop(&mut self) {
-    Shed::try_meta_mut(|m| m.drop_fork_memos_for(self.id));
+    Shed::try_cache_mut(|c| c.drop_fork_memos_for(self.id));
   }
 }
 

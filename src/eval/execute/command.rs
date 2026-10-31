@@ -11,7 +11,7 @@
 use std::{
   convert::Infallible,
   ffi::{CStr, CString},
-  sync::{Arc, atomic::Ordering},
+  sync::Arc,
 };
 
 use nix::{
@@ -20,8 +20,8 @@ use nix::{
 };
 
 use crate::state::{
-  self, ForkKind,
-  thread::{self, enter_thread},
+  ForkKind,
+  thread,
 };
 use crate::{
   HashSet, autocmd, builtin,

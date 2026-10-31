@@ -3,7 +3,7 @@ use itertools::Itertools;
 use crate::{
   expand::escape,
   procio, sherr,
-  state::{Shed, meta::MetaTab, paths},
+  state::{Shed, cache::CacheTab, paths},
   util::{self, error::ShResult},
 };
 
@@ -36,8 +36,8 @@ impl super::Builtin for Hash {
     }
 
     if args.no_arguments() && args.no_options() {
-      let entries = Shed::meta(|m| {
-        m.path_cache()
+      let entries = Shed::cache(|c| {
+        c.path_cache()
           .entries()
           .map(|(name, path)| (name.clone(), path.clone()))
           .collect_vec()
@@ -52,20 +52,20 @@ impl super::Builtin for Hash {
       }
     }
 
-    Shed::meta_mut(|m| {
+    Shed::cache_mut(|c| {
       if clear {
-        m.clear_path_cache();
+        c.clear_path_cache();
       }
       if refresh {
-        m.rehash_path_cache();
+        c.rehash_path_cache();
       }
     });
 
     if !args.no_arguments() {
-      Shed::meta_mut(MetaTab::rehash_path_cache);
-      Shed::meta(|m| -> ShResult<()> {
+      Shed::cache_mut(CacheTab::rehash_path_cache);
+      Shed::cache(|c| -> ShResult<()> {
         for arg in args.arguments() {
-          if m.lookup_cached_cmd(arg).is_none() {
+          if c.lookup_cached_cmd(arg).is_none() {
             return Err(sherr!(NotFound, "Command not found: {arg}").option_promote(arg.span()));
           }
         }
@@ -79,13 +79,13 @@ impl super::Builtin for Hash {
 
 #[cfg(test)]
 mod hash_tests {
-  use crate::state::meta::MetaTab;
+  use crate::state::cache::CacheTab;
   use crate::state::{self, Shed};
   use crate::tests::testutil::{TestGuard, has_cmd, test_input};
 
   /// Strip cached utilities so each test starts from a known state.
   fn clear_cache() {
-    Shed::meta_mut(MetaTab::clear_path_cache);
+    Shed::cache_mut(CacheTab::clear_path_cache);
   }
 
   // ─── no args, no opts → list cached commands ────────────────────

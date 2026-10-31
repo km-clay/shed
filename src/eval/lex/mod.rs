@@ -427,21 +427,21 @@ bitflags! {
   /// These are used to disambiguate string tokens, which can be keywords, command names, subshells, etc.
   #[derive(Debug,Clone,Copy,PartialEq,Default)]
   pub struct TkFlags: u32 {
-    const KEYWORD      = 0b0000_0000_0000_0001;
-    const OPENER       = 0b0000_0000_0000_0010;
-    const IS_CMD       = 0b0000_0000_0000_0100;
-    const IS_SUBSH     = 0b0000_0000_0000_1000;
-    const IS_OP        = 0b0000_0000_0010_0000;
-    const ASSIGN       = 0b0000_0000_0100_0000;
-    const BUILTIN      = 0b0000_0000_1000_0000;
-    const IS_PROCSUB   = 0b0000_0001_0000_0000;
-    const IS_HEREDOC   = 0b0000_0010_0000_0000;
-    const LIT_HEREDOC  = 0b0000_0100_0000_0000;
-    const TAB_HEREDOC  = 0b0000_1000_0000_0000;
-    const IS_ARITH     = 0b0001_0000_0000_0000;
-    const FUNCNAME		 = 0b0010_0000_0000_0000;
-    const REDIR_ALL		 = 0b0100_0000_0000_0000;
-    const HERESTRING	 = 0b1000_0000_0000_0000;
+    const KEYWORD      = 1 << 0;
+    const OPENER       = 1 << 1;
+    const IS_CMD       = 1 << 2;
+    const IS_SUBSH     = 1 << 3;
+    const IS_OP        = 1 << 4;
+    const ASSIGN       = 1 << 5;
+    const BUILTIN      = 1 << 6;
+    const IS_PROCSUB   = 1 << 7;
+    const IS_HEREDOC   = 1 << 8;
+    const LIT_HEREDOC  = 1 << 9;
+    const TAB_HEREDOC  = 1 << 10;
+    const IS_ARITH     = 1 << 11;
+    const FUNCNAME		 = 1 << 12;
+    const REDIR_ALL		 = 1 << 13;
+    const HERESTRING	 = 1 << 14;
   }
 }
 
@@ -456,7 +456,6 @@ bitflags! {
     const LEX_UNFINISHED_QUOTES   = 1 << 2;
     /// The next string-type token is a command name
     const NEXT_IS_CMD    = 1 << 3;
-    /// Only lex strings; used in expansions
     /// The lexer has not produced any tokens yet
     const FRESH          = 1 << 5;
     /// The lexer has no more tokens to produce
@@ -631,6 +630,7 @@ struct LexState {
   subsh_start: Option<usize>,
   case_depth: usize,
   heredoc_skip: Option<usize>,
+  sub_bodies: usize, // vector length
   flags: LexFlags,
 }
 
@@ -647,6 +647,8 @@ impl LexState {
     stream.case_depth = self.case_depth;
     stream.heredoc_skip = self.heredoc_skip;
     stream.flags = self.flags;
+
+    stream.sub_bodies.truncate(self.sub_bodies);
   }
 }
 
@@ -663,6 +665,7 @@ impl From<&LexStream<'_>> for LexState {
       subsh_start: lexer.subsh_start,
       case_depth: lexer.case_depth,
       heredoc_skip: lexer.heredoc_skip,
+      sub_bodies: lexer.sub_bodies.len(),
       flags: lexer.flags,
     }
   }
@@ -689,6 +692,7 @@ pub(crate) struct LexStream<'a> {
   case_depth: usize,
   dbracket_depth: usize,
   heredoc_skip: Option<usize>,
+  sub_bodies: Vec<Span>,
   flags: LexFlags,
 }
 
@@ -715,7 +719,11 @@ impl<'a> LexStream<'a> {
       heredoc_skip: None,
       case_depth: 0,
       dbracket_depth: 0,
+      sub_bodies: vec![]
     }
+  }
+  pub(crate) fn sub_bodies(&self) -> &[Span] {
+    &self.sub_bodies
   }
   /// Returns a slice of the source input using the given range
   /// Returns None if the range is out of the bounds of the string slice
@@ -1252,12 +1260,15 @@ impl<'a> LexStream<'a> {
           Some(close) => {
             let consumed = close + 1; // include the closing `)`
             self.inc_cursor(consumed);
+
+            let literal = self.get_span(paren_pos..self.cursor - 1);
+            self.sub_bodies.push(literal);
           }
           None if !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) => {
             return Err(lex_err!(
                 self,
                 paren_pos - 1..paren_pos,
-                "Unclosed subshell",
+                "Unclosed command substitution",
             ));
           }
           None => {
@@ -1295,6 +1306,34 @@ impl<'a> LexStream<'a> {
         break
       }
 
+      b'^' if self.peek_nth(1) == Some(b'(') => {
+        // command literal
+        self.inc_cursor(2);
+
+        let paren_pos = self.cursor;
+        match scan_cmd_sub_body(self.slice(self.cursor..).unwrap_or_default()) {
+          Some(close) => {
+            let consumed = close + 1; // include the closing `)`
+            self.inc_cursor(consumed);
+
+            let literal = self.get_span(paren_pos..self.cursor - 1);
+            self.sub_bodies.push(literal);
+          }
+          None if !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) => {
+            return Err(lex_err!(
+                self,
+                paren_pos - 1..paren_pos,
+                "Unclosed command literal",
+            ));
+          }
+          None => {
+            // Tolerant of partial input (e.g. tab completion): consume the rest.
+            let rest = self.slice(self.cursor..).unwrap_or_default();
+            self.inc_cursor(rest.len());
+          }
+        }
+      }
+
       b'<' | b'>' => {
         // maybe process substitution? '[[' binary operator?
         if self.peek_nth(1) != Some(b'(') {
@@ -1309,12 +1348,26 @@ impl<'a> LexStream<'a> {
         // it's a process sub
         self.inc_cursor(2); // '<' or '>', then '('
         let paren_pos = self.cursor;
-        if !strops::scan_parens(self, 1) && !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) {
-          return Err(lex_err!(
-              self,
-              paren_pos - 1..paren_pos,
-              "Unclosed subshell",
-          ));
+        match scan_cmd_sub_body(self.slice(self.cursor..).unwrap_or_default()) {
+          Some(close) => {
+            let consumed = close + 1; // include the closing `)`
+            self.inc_cursor(consumed);
+
+            let literal = self.get_span(paren_pos..self.cursor - 1);
+            self.sub_bodies.push(literal);
+          }
+          None if !self.flags.contains(LexFlags::LEX_UNFINISHED_STRUCTURES) => {
+            return Err(lex_err!(
+                self,
+                paren_pos - 1..paren_pos,
+                "Unclosed process substitution",
+            ));
+          }
+          None => {
+            // Tolerant of partial input (e.g. tab completion): consume the rest.
+            let rest = self.slice(self.cursor..).unwrap_or_default();
+            self.inc_cursor(rest.len());
+          }
         }
       }
 
@@ -1435,6 +1488,7 @@ impl<'a> LexStream<'a> {
   /// The second step of normal word lexing
   fn interpret(&mut self, start: usize) -> ShResult<Tk> {
     let mut new_tk = self.get_token(start..self.cursor, TkRule::Str);
+
     if self.quote_state.in_quote() && !self.flags.contains(LexFlags::LEX_UNFINISHED_QUOTES) {
       return Err(sherr!(
           ParseErr @ new_tk.span,
@@ -1954,6 +2008,18 @@ mod tests {
       .unwrap_or_default()
   }
 
+  /// Bodies the lexer recorded for parse-time validation, as source text.
+  fn sub_body_texts(src: &str) -> Vec<String> {
+    let     handle = state::register_source(src);
+    let mut lex    = LexStream::new(&handle, LexFlags::empty());
+    while lex.next().is_some() {}
+    lex
+      .sub_bodies()
+      .iter()
+      .map(|s| s.slice().to_str_lossy().into_owned())
+      .collect()
+  }
+
   fn lex_toks(handle: &SourceHandle) -> Vec<Tk> {
     LexStream::new(handle, LexFlags::LEX_UNFINISHED)
       .filter_map(Result::ok)
@@ -2216,4 +2282,55 @@ mod tests {
       b"echo \"(( x\"\necho ab"
     );
   }
+
+  // ===================== substitution body spans =====================
+  //
+  // `parse_src` validates these spans, so a body that is mis-delimited or not
+  // recorded at all silently loses its parse-time syntax check.
+
+  #[test]
+  fn body_recorded_for_every_paren_form() {
+    assert_eq!(sub_body_texts("x=$(a)"),   ["a"]);
+    assert_eq!(sub_body_texts("cat <(b)"), ["b"]);
+    assert_eq!(sub_body_texts("cat >(c)"), ["c"]);
+    assert_eq!(sub_body_texts("eval ^(d)"), ["d"]);
+  }
+
+  // A bare paren count stops at the `)` closing a `case` pattern; the
+  // case-aware scanner has to take the whole body. Regressed twice.
+  #[test]
+  fn case_arm_paren_does_not_close_a_body() {
+    let body = "case x in x) echo m ;; esac";
+    assert_eq!(sub_body_texts(&format!("eval ^({body})")), [body]);
+    assert_eq!(sub_body_texts(&format!("cat <({body})")),  [body]);
+    assert_eq!(sub_body_texts(&format!("x=$({body})")),    [body]);
+  }
+
+  #[test]
+  fn body_delimiter_ignores_quoted_parens() {
+    assert_eq!(sub_body_texts(r#"eval ^(echo "a)b")"#), [r#"echo "a)b""#]);
+  }
+
+  #[test]
+  fn several_bodies_in_one_word_are_each_recorded() {
+    assert_eq!(sub_body_texts("echo ^(a)^(b)"), ["a", "b"]);
+    assert_eq!(sub_body_texts("echo x^(a)y"),   ["a"]);
+  }
+
+  // Quoting suppresses a command literal, but not a command substitution:
+  // `$(` stays live inside double quotes.
+  #[test]
+  fn quoting_suppresses_literals_but_not_cmd_subs() {
+    assert!(sub_body_texts("echo '^(a)'").is_empty());
+    assert!(sub_body_texts(r#"echo "^(a)""#).is_empty());
+    assert!(sub_body_texts("echo '$(a)'").is_empty());
+    assert_eq!(sub_body_texts(r#"echo "$(a)""#), ["a"]);
+  }
+
+  // Arithmetic takes the paren-count path and is deliberately not validated.
+  #[test]
+  fn arithmetic_is_not_recorded_as_a_body() {
+    assert!(sub_body_texts("echo $((1 + 2))").is_empty());
+  }
+
 }

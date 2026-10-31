@@ -213,7 +213,7 @@ impl super::LineBuf {
   ) -> ShResult<()> {
     let line_nums = self.lines_for_address(range)?;
 
-    let re = match Shed::meta_mut(|m| m.get_regex(old)) {
+    let re = match Shed::cache_mut(|c| c.get_regex(old)) {
       Ok(re) => re,
       Err(e) => {
         status_msg!("{e}");

@@ -84,7 +84,33 @@ executable with a shebang line:
           `\v`    vertical tab        `\'`    single quote
           `\xNN`  hex byte            `\nnn`  octal byte
 
-  1.5 When to Quote                              *script-when-to-quote*
+  1.5 Command Quoting                            *script-command-quote*
+
+      `^(...)` quotes shell code. At runtime it behaves exactly like
+      single quotes: nothing inside is expanded, and the result is a
+      simple string rather than a command that runs.
+
+          ```x=^(echo "$HOME")
+             echo "$x"               # prints: echo "$HOME"```
+
+      This can be used with commands like |eval|(builtin-eval) that
+      take strings to be parsed as shell commands. The text contained
+      in the parenthesis is parsed and validated as shell syntax, so
+      the shell's parser can catch syntax errors in these strings before
+      the script runs.
+
+          ```eval 'if x; do y; done'     # fails at runtime
+             eval ^(if x; do y; done)    # fails at parse time```
+
+      `shed` parses the entire input upfront before executing it, so
+      if the contained syntax is invalid, nothing will be executed.
+
+      The body is literal text, so a `^(...)` written inside one is
+      just more text rather than a nested quote:
+
+          ```echo ^(echo ^(inner))   # prints: echo ^(inner)```
+
+  1.6 When to Quote                              *script-when-to-quote*
 
       As a rule of thumb: always double-quote variable expansions
       unless you specifically want word splitting or globbing.
@@ -96,7 +122,8 @@ executable with a shebang line:
              cp "$file" /tmp/```
 
       Use single quotes for strings that should not be expanded at
-      all, and `$'...'` when you need escape sequences.
+      all, `$'...'` when you need escape sequences, and `^(...)` when
+      the string is shell code you want checked at parse time.
 
 ==============================================================================
 2. Command Lists                                 *script-lists*

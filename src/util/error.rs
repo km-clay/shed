@@ -318,6 +318,9 @@ impl LabelBuilder {
   pub(crate) fn span(&self) -> Span {
     *self.span
   }
+  pub(crate) fn set_span(&mut self, span: Span) {
+    self.span = span.upgrade();
+  }
 }
 
 impl From<LabelBuilder> for ariadne::Label<StrongSpan> {
@@ -494,6 +497,17 @@ impl ShErr {
 
   pub(crate) fn force_promote(self, span: Span) -> Self {
     self.promote_inner(span, Self::blame)
+  }
+
+  /// Rewrite every span this error carries, including its labels.
+  pub(crate) fn remap_spans(&mut self, f: impl Fn(Span) -> Span) {
+    if let Some(src_span) = &self.src_span {
+      self.src_span = Some(f(**src_span).upgrade());
+    }
+    for label in &mut self.labels {
+      let remapped = f(label.span());
+      label.set_span(remapped);
+    }
   }
 
   /// Collapse nested labels
