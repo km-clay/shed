@@ -7,24 +7,40 @@
 
 use bstr::ByteSlice;
 use nix::{sys::signal::Signal, unistd::Pid};
-use std::io::{self, Read};
+use std::{io::{self, Read}, ops::{BitOr, BitOrAssign}};
 
 use crate::{
-  builtin::opt::Arg, defer, errln, eval::{
+  builtin::opt::Arg,
+  defer, errln,
+  eval::{
     execute::{self, AssignBehavior, Dispatcher},
     lex::{KEYWORDS, Span, Tk, TkRule},
     parse::{
       NdFlags, NdRule,
       ast::{Ast, NodeId},
     },
-  }, expand::{Word, arithmetic, escape}, lifecycle, outln, procio::{self, RedirSet, SinkIo, Sinks}, sherr, shopt, signal, state::{
-    Shed, cache::CacheTab, cmd, jobs::ChildProc, meta::{MetaTab, UtilKind}, params, shopt as shopts, terminal::Terminal, vars::ShStr,
-  }, util::{
+  },
+  expand::{Word, arithmetic, escape},
+  lifecycle, outln,
+  procio::{self, RedirSet, SinkIo, Sinks},
+  sherr, shopt, signal,
+  state::{
+    Shed,
+    cache::CacheTab,
+    cmd,
+    jobs::ChildProc,
+    meta::{MetaTab, UtilKind},
+    params, shopt as shopts,
+    terminal::Terminal,
+    vars::ShStr,
+  },
+  util::{
     self,
     error::{ShErrKind, ShResult, ShResultExt},
     guards,
     strops::ShStrDisplay,
-  }, varstr,
+  },
+  varstr,
 };
 
 mod alias;
@@ -32,6 +48,7 @@ pub(crate) mod argv;
 mod arrops;
 mod autocmd;
 mod autoload;
+mod call;
 mod cd;
 mod chrono;
 mod complete;
@@ -84,7 +101,6 @@ mod trap;
 mod varcmds;
 mod vice;
 mod zd;
-mod call;
 
 pub(crate) use argv::{BuiltinArgs, join_raw_args};
 pub(crate) use help::HELP_PAGE_INSTALL_DIR;
@@ -238,11 +254,131 @@ pub(crate) fn setup(
   builtin.setup_builtin(tree, node_id, dispatcher)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Whether or not a node forks.
+///
+/// A `Literal` verdict refers to nodes made of static text,
+/// while `Dynamic` refers to nodes that contain stuff that gets expanded at runtime.
+///
+/// `Literal` verdicts get cached, `Dynamic` ones do not.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ForkVerdict {
+  Literal(bool),
+  Dynamic(bool)
+}
+
+impl Default for ForkVerdict {
+  /// Creates a `ForkVerdict::Literal(false)`
+  fn default() -> Self {
+    Self::Literal(false)
+  }
+}
+
+impl ForkVerdict {
+  pub(crate) const fn forks(self) -> bool {
+    match self {
+      Self::Literal(forks) | Self::Dynamic(forks) => forks,
+    }
+  }
+  pub(crate) const fn is_dynamic(self) -> bool {
+    matches!(self, Self::Dynamic(_))
+  }
+
+  pub(crate) const fn make_dynamic(self) -> Self {
+    let (Self::Literal(forks) | Self::Dynamic(forks)) = self;
+
+    Self::Dynamic(forks)
+  }
+}
+
+impl BitOr for ForkVerdict {
+  type Output = Self;
+  /// Combine two fork verdicts with a logical OR.
+  ///
+  /// If either verdict is dynamic, dynamic wins.
+  /// The wrapped boolean is or'd directly.
+  fn bitor(self, other: Self) -> Self::Output {
+    let forks = self.forks() || other.forks();
+    if self.is_dynamic() || other.is_dynamic() {
+      Self::Dynamic(forks)
+    } else {
+      Self::Literal(forks)
+    }
+  }
+}
+
+impl BitOrAssign for ForkVerdict {
+  /// Combine two fork verdicts with a logical OR.
+  ///
+  /// If either verdict is dynamic, dynamic wins.
+  /// The wrapped boolean is or'd directly.
+  fn bitor_assign(&mut self, rhs: Self) {
+    *self = *self | rhs;
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum ForkBehavior {
-  Never,
-  Subshell,
-  Always,
+  Resolved(ForkVerdict),
+  InPipeline,
+  Check(fn(&[Tk]) -> ForkBehavior),
+}
+
+impl ForkBehavior {
+  pub(crate) fn resolve(self, args: &[Tk], is_pipeline_cmd: bool) -> ForkVerdict {
+    let behavior = match self.decide_subshell(is_pipeline_cmd) {
+      ForkBehavior::Check(get) => {
+        let mut behavior = get(args).decide_subshell(is_pipeline_cmd);
+        let mut i        = 1;
+
+        while let ForkBehavior::Check(get) = behavior {
+          if i >= 1000 {
+            behavior = ForkBehavior::literal(true);
+            break;
+          }
+          let new_args = args.get(i..).unwrap_or_default();
+          behavior = get(new_args).decide_subshell(is_pipeline_cmd);
+          i += 1;
+        }
+
+        behavior
+      }
+      other => other,
+    };
+
+    let Self::Resolved(verdict) = behavior else {
+      unreachable!("returned unresolved fork behavior from ForkBehavior::resolve")
+    };
+
+    verdict
+  }
+  fn decide_subshell(self, is_pipeline_cmd: bool) -> Self {
+    match self {
+      Self::InPipeline => Self::literal(is_pipeline_cmd),
+      _ => self,
+    }
+  }
+
+  /// A literal fork verdict. The parameter determines whether the builtin forks or not.
+  ///
+  /// `true` means it does fork. "Literal" means the result is cached for later.
+  pub(crate) const fn literal(forks: bool) -> Self {
+    Self::Resolved(ForkVerdict::Literal(forks))
+  }
+  /// A dynamic fork verdict. The parameter determines whether the builtin forks or not.
+  ///
+  /// `true` means it does fork. "Dynamic" means the result is not cached for later.
+  pub(crate) const fn dynamic(forks: bool) -> Self {
+    Self::Resolved(ForkVerdict::Dynamic(forks))
+  }
+  pub(crate) const fn forks(self) -> bool {
+    matches!(self, Self::Resolved(ForkVerdict::Literal(true) | ForkVerdict::Dynamic(true)))
+  }
+}
+
+impl From<ForkVerdict> for ForkBehavior {
+  fn from(value: ForkVerdict) -> Self {
+    Self::Resolved(value)
+  }
 }
 
 pub(crate) fn fork_behavior_for(name: &[u8]) -> Option<ForkBehavior> {
@@ -294,7 +430,7 @@ pub(crate) trait Builtin: Sync {
   /// Overridden by commands like `eval` and `command` that result in forking execution as a side effect.
   /// `exit` also overrides this, so it doesn't stop the parent shell in subshells
   fn fork_behavior(&self) -> ForkBehavior {
-    ForkBehavior::Never
+    ForkBehavior::literal(false)
   }
 
   /// Used by `BuiltinRouter` for builtins that have nested subcommands
@@ -846,6 +982,21 @@ impl Builtin for BuiltinBuiltin {
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
     unreachable!("this one operates on the node directly")
   }
+  fn fork_behavior(&self) -> ForkBehavior {
+    ForkBehavior::Check(|args| {
+      let Some(command) = args.first() else {
+        return ForkBehavior::literal(false);
+      };
+      let Some(builtin) = lookup_builtin(&command.slice()) else {
+        return ForkBehavior::literal(true);
+      };
+
+      match builtin.fork_behavior() {
+        ForkBehavior::Check(get) => get(args.get(1..).unwrap_or_default()),
+        behavior => behavior,
+      }
+    })
+  }
   fn setup_builtin(
     &self,
     tree: &Ast,
@@ -912,7 +1063,7 @@ fn expand_argv(argv: &[Tk]) -> ShResult<Vec<Tk>> {
 pub(crate) struct CommandBuiltin;
 impl Builtin for CommandBuiltin {
   fn fork_behavior(&self) -> ForkBehavior {
-    ForkBehavior::Always
+    ForkBehavior::literal(true)
   }
 
   fn execute(&self, _args: BuiltinArgs) -> ShResult<()> {
@@ -1096,7 +1247,10 @@ pub(crate) mod tests {
   use tempfile::TempDir;
 
   use crate::{
-    assert_status_eq, eval::execute::exec_nonint, state::{self, Shed, cache::CacheTab, cmd, vars::VarFlags}, tests::testutil::{TestGuard, canon, has_cmd, test_input},
+    assert_status_eq,
+    eval::execute::exec_nonint,
+    state::{self, Shed, cache::CacheTab, cmd, vars::VarFlags},
+    tests::testutil::{TestGuard, canon, has_cmd, test_input},
   };
 
   // ===================== exit status propagation =====================

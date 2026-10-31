@@ -20,7 +20,7 @@ use crate::{
   },
 };
 
-use super::opt::{Opt, OptSpec};
+use super::{ForkBehavior, opt::{Opt, OptSpec}};
 
 struct RLimits {
   fds  : Option<u64>,
@@ -208,8 +208,8 @@ fn format_symbolic(bits: stat::mode_t) -> String {
 
 pub(super) struct UMask;
 impl super::Builtin for UMask {
-  fn fork_behavior(&self) -> super::ForkBehavior {
-    super::ForkBehavior::Subshell
+  fn fork_behavior(&self) -> ForkBehavior {
+    ForkBehavior::InPipeline
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![OptSpec::new_short("symbolic", b'S')]

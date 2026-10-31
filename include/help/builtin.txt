@@ -13,6 +13,7 @@ The following builtins are available:
   `autocmd`     register hooks for shell events             |builtin-autocmd|
   `autoload`    load functions/completions lazily           |builtin-autoload|
   `bg`          resume a stopped job in the background      |builtin-bg|
+  `call`        execute anonymous shell functions           |builtin-call|
   `cd`          change the working directory                |builtin-cd|
   `chrono`      timers, sleeps, time formatting, intervals  |builtin-chrono|
   `clone`       copy a variable's value to other names      |builtin-clone|
@@ -389,6 +390,36 @@ BUILTIN                                          *builtin-builtin* *builtin-cmd*
 
       ```cd() { builtin cd "$@" && ls; }```   wrap cd without recursing
       ```builtin echo hello```                bypass any user-defined echo
+
+==============================================================================
+CALL                                             *builtin-call* *call*
+
+  `call {command} [arg ...]`
+
+  Execute `{command}` as a shell function, with the remaining `{arg}`s available
+  as the positional parameters `$1`, `$2` and so on. `$#` and `$@` describe those
+  arguments, and `$0` is left alone.
+
+  `{command}` is a single word, not joined from several like `eval`. The
+  usual form is a |command literal|(script-command-quote), which is checked at parse time:
+
+      ```call ^(printf '%s\n' "$1") hello```
+
+  Because the body runs in a function scope, `local` declares variables
+  that do not outlive the call, and `return` ends the call rather than
+  the enclosing function. Ordinary assignments still reach the caller.
+  |getopts|(builtin-getopts) starts fresh, as `OPTIND` is scoped per call.
+
+  The exit status is the status of the last command in `{command}`, or the
+  operand of `return` when the body returns. It is an error to call with
+  no `{command}`.
+
+  Examples:
+
+      ```call ^(echo hi)```                      run a command literal
+      ```call ^(printf '[%s]' "$@") a b```       pass positional arguments
+      ```f=^(echo from a variable); call "$f"``` call a stored body
+      ```call 'echo quoted body'```              any single word works
 
 ==============================================================================
 CD                                               *builtin-cd* *cd*

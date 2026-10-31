@@ -19,14 +19,10 @@ use super::{
 };
 
 use crate::{
-  builtin::{ForkBehavior, fork_behavior_for},
-  expand::subshell,
-  readline::{NestedSub, nested_subs},
-  state::{
+  builtin::{ForkBehavior, ForkVerdict, fork_behavior_for}, expand::subshell, readline::{NestedSub, nested_subs}, state::{
     ForkBlame, Shed,
     logic::{IsInternal, ShFunc},
-  },
-  util::error::LabelBuilder,
+  }, util::error::LabelBuilder,
 };
 
 use super::{ast::NodeId, lex::Tk, two_way_display};
@@ -306,17 +302,17 @@ fn contains_sub_intro(src: &[u8]) -> bool {
 
 #[derive(Clone, Debug)]
 pub(crate) enum ForkReport {
-  Simple(bool),
+  Simple(ForkVerdict),
   Detailed(Rc<[ForkBlame]>),
 }
 
 impl ForkReport {
-  fn does_fork(&self) -> bool {
+  fn verdict(&self) -> ForkVerdict {
     match self {
-      ForkReport::Simple(b) => *b,
+      ForkReport::Simple(v) => *v,
       ForkReport::Detailed(rep) => rep
         .iter()
-        .any(|b| matches!(b.behavior(), ForkBehavior::Always)),
+        .fold(ForkVerdict::default(), |acc, b| acc | b.verdict())
     }
   }
 
@@ -328,17 +324,19 @@ impl ForkReport {
   }
 }
 
-pub(crate) fn node_forks(tree: &Ast, node_id: NodeId) -> bool {
-  if let Some(does_fork) = Shed::cache(|c| c.fork_memo_for(node_id).map(ForkReport::does_fork)) {
-    return does_fork;
+pub(crate) fn node_verdict(tree: &Ast, node_id: NodeId) -> ForkVerdict {
+  if let Some(verdict) = Shed::cache(|c| c.fork_memo_for(node_id).map(ForkReport::verdict)) {
+    return verdict;
   }
 
   let behavior  = node_fork_behavior(tree, node_id, true);
+  let verdict = behavior.verdict();
 
-  let does_fork = behavior.does_fork();
-  Shed::cache_mut(|c| c.memoize_fork_behavior(node_id, tree.node_count(), behavior));
+  if let ForkVerdict::Literal(_) = verdict {
+    Shed::cache_mut(|c| c.memoize_fork_behavior(node_id, tree.node_count(), behavior));
+  }
 
-  does_fork
+  verdict
 }
 
 pub(crate) fn node_fork_report(tree: &Ast, node_id: NodeId) -> Rc<[ForkBlame]> {
@@ -347,26 +345,27 @@ pub(crate) fn node_fork_report(tree: &Ast, node_id: NodeId) -> Rc<[ForkBlame]> {
   }
 
   let behavior = node_fork_behavior(tree, node_id, false);
-
-  Shed::cache_mut(|c| c.memoize_fork_behavior(node_id, tree.node_count(), behavior.clone()));
-
-  behavior
+  let report = behavior
     .report()
-    .expect("node_fork_behavior should return a Detailed report when simple is false")
+    .expect("node_fork_behavior should return a Detailed report when simple is false");
+
+  if let ForkVerdict::Literal(_) = behavior.verdict() {
+    Shed::cache_mut(|c| c.memoize_fork_behavior(node_id, tree.node_count(), behavior));
+  }
+
+  report
 }
 
 fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
-  let     src      = tree.span_for(node_id).slice();
-  let mut acc      = vec![];
-  let mut has_fork = false;
+  let     src     = tree.span_for(node_id).slice();
+  let mut acc     = vec![];
+  let mut verdict = ForkVerdict::Literal(false);
 
   macro_rules! blame {
     ($blame:expr) => {{
-      if let ForkBehavior::Always = $blame.behavior() {
-        has_fork = true;
-      }
+      verdict |= $blame.verdict();
 
-      if simple && has_fork {
+      if simple && verdict.forks() && verdict.is_dynamic() {
         return;
       }
       if !simple {
@@ -377,28 +376,21 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
 
   if contains_sub_intro(src.as_bytes()) {
     for sub in nested_subs(src.as_bytes()) {
-      match sub {
-        NestedSub::Proc(span) => {
-          if simple {
-            return ForkReport::Simple(true);
-          }
-          acc.push(ForkBlame::proc_sub(span, ForkBehavior::Always));
-        }
+      let blame = match sub {
+        NestedSub::Proc(span) => ForkBlame::proc_sub(span, ForkVerdict::Literal(true)),
         NestedSub::Cmd(span, body) => {
-          let is_internal = subshell::is_internal(body.as_bytes());
-
-          if simple && !is_internal {
-            return ForkReport::Simple(true);
-          }
-
-          let behavior = if is_internal {
-            ForkBehavior::Never
-          } else {
-            ForkBehavior::Always
-          };
-
-          acc.push(ForkBlame::command_sub(span, behavior));
+          let verdict = subshell::verdict_for(body.as_bytes());
+          ForkBlame::command_sub(span, verdict)
         }
+      };
+
+      verdict |= blame.verdict();
+
+      if simple && verdict.forks() && verdict.is_dynamic() {
+        return ForkReport::Simple(verdict);
+      }
+      if !simple {
+        acc.push(blame);
       }
     }
   }
@@ -406,7 +398,7 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
   tree.walk_tree(node_id, &mut |id, tree| {
     let node = &tree[id];
     let span = tree.span_for(id);
-    if simple && has_fork {
+    if simple && verdict.forks() && verdict.is_dynamic() {
       return;
     }
 
@@ -426,18 +418,13 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
         }
         if !classify::is_func_node(id, tree) {
           if classify::is_builtin(id, tree) {
+            let arguments   = tree[*argv].get(1..).unwrap_or_default();
+            let is_pipe_cmd = node.flags.contains(NdFlags::PIPE_CMD);
             let behavior = node
               .get_command()
               .and_then(|name| fork_behavior_for(tree[name].slice().as_bytes()))
-              .unwrap_or(ForkBehavior::Never);
-
-            let behavior = match behavior {
-              ForkBehavior::Subshell if node.flags.contains(NdFlags::PIPE_CMD) => {
-                ForkBehavior::Always
-              }
-              ForkBehavior::Subshell => ForkBehavior::Never,
-              other => other,
-            };
+              .unwrap_or(ForkBehavior::Resolved(ForkVerdict::Literal(false)))
+              .resolve(arguments, is_pipe_cmd);
 
             blame!(ForkBlame::builtin(span, behavior));
           } else {
@@ -469,7 +456,7 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
           && src.source().is_err()
         {
           // failed to source; we read this as a command
-          blame!(ForkBlame::function(span, ForkBehavior::Always));
+          blame!(ForkBlame::function(span, ForkVerdict::Literal(true)));
           return;
         }
 
@@ -483,7 +470,7 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
           match func {
             ShFunc::Defined { is_internal, .. } => match is_internal {
               Some(IsInternal::Resolved(b)) => Some(Some(*b)),
-              Some(IsInternal::Checking)    => Some(Some(ForkBehavior::Never)),
+              Some(IsInternal::Checking)    => Some(Some(ForkVerdict::default())),
               None => None,
             },
             ShFunc::Autoload(_) => Some(None),
@@ -512,21 +499,18 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
         };
 
         let body_src = logic.span_for(root).slice();
-        let behavior = if subshell::is_internal(body_src.as_bytes()) {
-          ForkBehavior::Never
-        } else {
-          ForkBehavior::Always
-        };
+        let behavior = subshell::verdict_for(body_src.as_bytes());
+
         Shed::logic_mut(|l| l.set_func_internal(&func_name, IsInternal::Resolved(behavior)));
         blame!(ForkBlame::command(span, behavior));
       }
-      NdRule::Subshell { .. } => blame!(ForkBlame::subshell(span, ForkBehavior::Always)),
+      NdRule::Subshell { .. } => blame!(ForkBlame::subshell(span, ForkVerdict::Literal(true))),
       _ => {}
     }
   });
 
   if simple {
-    ForkReport::Simple(has_fork)
+    ForkReport::Simple(verdict)
   } else {
     ForkReport::Detailed(acc.into())
   }

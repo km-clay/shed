@@ -3,7 +3,7 @@ use std::{
 };
 
 use crate::{
-  errln, eval::{
+  builtin::ForkVerdict, errln, eval::{
     execute, lex::Span, parse::{ParseFlags, ParsedSrc, ast::Ast, node},
   }, expand::arithmetic, lifecycle, procio::{self, OsSink, RedirType, Sinks}, readline::{self, NestedSub}, sherr, shopt, state::{ForkKind, Shed, meta::MetaTab, terminal::Terminal, vars::ShStr}, util::{error::ShResult, guards},
 };
@@ -97,30 +97,28 @@ pub(crate) fn get_subshell_ast(raw: &[u8]) -> Option<Arc<Ast>> {
 
 }
 
-pub(crate) fn is_internal(raw: &[u8]) -> bool {
+pub(crate) fn verdict_for(raw: &[u8]) -> ForkVerdict {
   let Some(ast) = get_subshell_ast(raw) else {
-    return false;
+    return ForkVerdict::Literal(true);
   };
 
   let     roots = ast.roots();
+  let mut verdict = ForkVerdict::default();
 
-  let mut forks = false;
   for root in roots.iter().copied() {
-    if node::node_forks(&ast, root) {
-      forks = true;
-      break;
-    }
+    verdict |= node::node_verdict(&ast, root);
   }
 
-  let has_forking_sub = readline::nested_subs(raw).into_iter().any(|sub| match sub {
-    NestedSub::Proc(_)      => true,
-    NestedSub::Cmd(_, body) => !is_internal(body.as_bytes()),
-  });
-  if has_forking_sub {
-    return false;
+  for sub in readline::nested_subs(raw) {
+    let sub_verdict = match sub {
+      NestedSub::Proc(_) => ForkVerdict::Literal(true),
+      NestedSub::Cmd(_, body) => verdict_for(body.as_bytes()),
+    };
+
+    verdict |= sub_verdict;
   }
 
-  !forks
+  verdict
 }
 
 pub(crate) fn internal_cmd_sub(raw: &[u8]) -> ShResult<ShStr> {
@@ -163,7 +161,7 @@ pub(crate) fn expand_cmd_sub(span: Option<Span>, raw: &[u8]) -> ShResult<ShStr> 
   // command subs add an xtrace layer
   let _xtrace = Shed::meta_mut(MetaTab::xtrace_descend);
 
-  if is_internal(raw) {
+  if !verdict_for(raw).forks() {
     return internal_cmd_sub(raw);
   }
 
@@ -233,6 +231,10 @@ pub(crate) fn expand_cmd_sub(span: Option<Span>, raw: &[u8]) -> ShResult<ShStr> 
 mod tests {
   use super::*;
   use crate::tests::testutil::{TestGuard, test_input};
+
+  fn is_internal(raw: &[u8]) -> bool {
+    !verdict_for(raw).forks()
+  }
 
   // ===================== Command Substitution (TestGuard) =====================
 

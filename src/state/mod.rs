@@ -20,20 +20,13 @@ use std::{
 };
 
 use crate::{
-  HashMap,
-  builtin::ForkBehavior,
-  eval::{
+  HashMap, builtin::ForkVerdict, eval::{
     lex::Span,
     parse::{
       ast::{Ast, NodeId},
       node,
     },
-  },
-  procio,
-  socket::SocketRequest,
-  state::{jobs::Outcome, source::StrongSpan, vars::ShStr},
-  util::error,
-  varstr,
+  }, procio, socket::SocketRequest, state::{jobs::Outcome, source::StrongSpan, vars::ShStr}, util::error, varstr,
 };
 
 use super::{
@@ -170,7 +163,7 @@ impl ForkStat {
     for blame in self.blames {
       let ForkBlame {
         span,
-        behavior: _,
+        verdict: _,
         kind,
       } = blame;
       let msg = varstr!("forked here, {}", kind.name());
@@ -188,41 +181,41 @@ impl ForkStat {
 #[derive(Debug, Clone)]
 pub(crate) struct ForkBlame {
   span    : StrongSpan,
-  behavior: ForkBehavior,
+  verdict: ForkVerdict,
   kind    : ForkKind,
 }
 
 impl ForkBlame {
-  pub(crate) fn new(span: Span, behavior: ForkBehavior, kind: ForkKind) -> Self {
+  pub(crate) fn new(span: Span, verdict: ForkVerdict, kind: ForkKind) -> Self {
     Self {
       span: span.upgrade(),
-      behavior,
+      verdict,
       kind,
     }
   }
   pub(crate) fn external(span: Span) -> Self {
-    Self::new(span, ForkBehavior::Always, ForkKind::Command)
+    Self::new(span, ForkVerdict::Literal(true), ForkKind::Command)
   }
-  pub(crate) fn command(span: Span, behavior: ForkBehavior) -> Self {
+  pub(crate) fn command(span: Span, behavior: ForkVerdict) -> Self {
     Self::new(span, behavior, ForkKind::Command)
   }
-  pub(crate) fn builtin(span: Span, behavior: ForkBehavior) -> Self {
+  pub(crate) fn builtin(span: Span, behavior: ForkVerdict) -> Self {
     Self::new(span, behavior, ForkKind::Builtin)
   }
-  pub(crate) fn function(span: Span, behavior: ForkBehavior) -> Self {
+  pub(crate) fn function(span: Span, behavior: ForkVerdict) -> Self {
     Self::new(span, behavior, ForkKind::Function)
   }
-  pub(crate) fn subshell(span: Span, behavior: ForkBehavior) -> Self {
+  pub(crate) fn subshell(span: Span, behavior: ForkVerdict) -> Self {
     Self::new(span, behavior, ForkKind::Subshell)
   }
-  pub(crate) fn command_sub(span: Span, behavior: ForkBehavior) -> Self {
+  pub(crate) fn command_sub(span: Span, behavior: ForkVerdict) -> Self {
     Self::new(span, behavior, ForkKind::CommandSub)
   }
-  pub(crate) fn proc_sub(span: Span, behavior: ForkBehavior) -> Self {
+  pub(crate) fn proc_sub(span: Span, behavior: ForkVerdict) -> Self {
     Self::new(span, behavior, ForkKind::ProcSub)
   }
-  pub(crate) fn behavior(&self) -> ForkBehavior {
-    self.behavior
+  pub(crate) fn verdict(&self) -> ForkVerdict {
+    self.verdict
   }
 }
 
@@ -761,7 +754,7 @@ impl Shed {
 
     let blames = node::node_fork_report(tree, node_id)
       .iter()
-      .filter(|b| matches!(b.behavior(), ForkBehavior::Always))
+      .filter(|b| b.verdict().forks())
       .cloned()
       .collect_vec();
 

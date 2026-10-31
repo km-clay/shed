@@ -22,13 +22,10 @@ use std::{
 };
 
 use crate::{
-  eval::lex::{Span, Tk, TkFlags, TkRule},
-  match_loop, sherr, shopt,
-  state::{
+  eval::lex::{Span, Tk, TkFlags, TkRule}, expand::stream::{Marker, ProcSubKind}, match_loop, sherr, shopt, state::{
     params,
     vars::{ShStr, ShStrSliceExt},
-  },
-  util::error::{ShResult, ShResultExt},
+  }, util::error::{ShResult, ShResultExt},
 };
 
 use stream::Quote;
@@ -142,6 +139,21 @@ impl From<Span> for Word {
   fn from(value: Span) -> Self {
     Self::new(value.slice()).with_span(value)
   }
+}
+
+pub(crate) fn resolve_text(word: &Tk) -> Option<Word> {
+  const UNSAFE: [Marker; 3] = [
+    Marker::Subshell,
+    Marker::ProcSub(ProcSubKind::In),
+    Marker::ProcSub(ProcSubKind::Out),
+  ];
+
+  let seg = escape::unescape_str(&word.slice());
+  if UNSAFE.iter().any(|m| seg.contains_marker(*m)) || seg.has_glob_meta() {
+    return None;
+  }
+
+  word.expand_to_words_pure().ok()
 }
 
 impl From<Tk> for Word {

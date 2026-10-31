@@ -84,9 +84,9 @@ executable with a shebang line:
           `\v`    vertical tab        `\'`    single quote
           `\xNN`  hex byte            `\nnn`  octal byte
 
-  1.5 Command Quoting                            *script-command-quote*
+  1.5 Command Literals                            *script-command-literal*
 
-      `^(...)` quotes shell code. At runtime it behaves exactly like
+      `^(...)` "quotes" shell code. At runtime it behaves exactly like
       single quotes: nothing inside is expanded, and the result is a
       simple string rather than a command that runs.
 

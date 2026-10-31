@@ -84,7 +84,7 @@ pub(super) enum JobBehavior {
 pub(super) struct Fg;
 impl super::Builtin for Fg {
   fn fork_behavior(&self) -> super::ForkBehavior {
-    super::ForkBehavior::Subshell
+    super::ForkBehavior::InPipeline
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     continue_job(&args, &JobBehavior::Foregound)
@@ -94,7 +94,7 @@ impl super::Builtin for Fg {
 pub(super) struct Bg;
 impl super::Builtin for Bg {
   fn fork_behavior(&self) -> super::ForkBehavior {
-    super::ForkBehavior::Subshell
+    super::ForkBehavior::InPipeline
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     continue_job(&args, &JobBehavior::Background)
@@ -142,7 +142,7 @@ pub(super) fn continue_job(args: &BuiltinArgs, behavior: &JobBehavior) -> ShResu
 pub(super) struct Jobs;
 impl super::Builtin for Jobs {
   fn fork_behavior(&self) -> super::ForkBehavior {
-    super::ForkBehavior::Subshell
+    super::ForkBehavior::InPipeline
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![
@@ -180,7 +180,7 @@ impl super::Builtin for Jobs {
 pub(super) struct Wait;
 impl super::Builtin for Wait {
   fn fork_behavior(&self) -> super::ForkBehavior {
-    super::ForkBehavior::Subshell
+    super::ForkBehavior::InPipeline
   }
   fn execute(&self, args: BuiltinArgs) -> ShResult<()> {
     let span = args.span();

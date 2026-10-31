@@ -17,7 +17,7 @@ use bstr::ByteSlice;
 
 use yansi::Paint;
 
-use super::opt::OptSpec;
+use super::{ForkBehavior, opt::OptSpec};
 
 struct RaiseFmt;
 
@@ -208,8 +208,8 @@ impl super::Builtin for Exit {
     true
   }
 
-  fn fork_behavior(&self) -> super::ForkBehavior {
-    super::ForkBehavior::Always
+  fn fork_behavior(&self) -> ForkBehavior {
+    ForkBehavior::literal(true)
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {

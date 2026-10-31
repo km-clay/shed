@@ -6,14 +6,16 @@ use crate::{
 };
 use nix::errno::Errno;
 
+use super::ForkBehavior;
+
 pub(super) struct Exec;
 impl super::Builtin for Exec {
   fn is_special(&self) -> bool {
     true
   }
 
-  fn fork_behavior(&self) -> super::ForkBehavior {
-    super::ForkBehavior::Always
+  fn fork_behavior(&self) -> ForkBehavior {
+    ForkBehavior::literal(true)
   }
 
   fn execute(&self, mut args: super::BuiltinArgs) -> ShResult<()> {

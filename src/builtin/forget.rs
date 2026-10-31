@@ -24,7 +24,7 @@ use super::{ForkBehavior, opt::OptSpec};
 pub(super) struct Forget;
 impl super::Builtin for Forget {
   fn fork_behavior(&self) -> ForkBehavior {
-    ForkBehavior::Subshell
+    ForkBehavior::InPipeline
   }
   fn strict_opts(&self) -> bool {
     true

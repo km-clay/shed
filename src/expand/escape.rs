@@ -215,6 +215,7 @@ fn unescape_with(stream: SegStream, flags: ExpandFlags) -> SegStream {
           && param_depth == 0 =>
         {
           cursor.next();
+          out.push_marker(Marker::Quote(Quote::Single));
           read_paren_body(&mut cursor, &mut out, Marker::Quote(Quote::Single));
         }
         b'(' if flags.contains(ExpandFlags::SUBSHELL) && param_depth == 0 => {

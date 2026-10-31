@@ -8,11 +8,10 @@ use nix::sys::signal::Signal;
 use std::fmt::{self, Display};
 use std::sync::Arc;
 
-use crate::builtin::ForkBehavior;
+use crate::builtin::ForkVerdict;
 use crate::state::Shed;
 use crate::state::cache::CacheTab;
 use crate::util::error::{LabelBuilder, ShResult};
-use crate::{two_way_display, varstr};
 use crate::{
   HashMap,
   autoload::{self, AutoloadSrc, Autoloader},
@@ -20,6 +19,7 @@ use crate::{
   sherr,
   state::vars::ShStr,
 };
+use crate::{two_way_display, varstr};
 
 use super::ForgetFlags;
 use super::{
@@ -59,9 +59,9 @@ impl super::vars::ValueBytes for ShAlias {
   }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum IsInternal {
-  Resolved(ForkBehavior),
+  Resolved(ForkVerdict),
   Checking,
 }
 
@@ -129,13 +129,12 @@ impl ShFunc {
       Self::Defined { is_internal: i, .. } => {
         match i {
           Some(IsInternal::Checking) | None => *i = Some(is_internal),
-          Some(IsInternal::Resolved(i)) => {
-            if let IsInternal::Resolved(fork_behavior) = is_internal
-              && (*i) < fork_behavior
-            {
+          Some(IsInternal::Resolved(i)) if !i.forks() => {
+            if let IsInternal::Resolved(fork_behavior) = is_internal {
               *i = fork_behavior;
             }
           }
+          _ => {}
         }
         Ok(())
       }

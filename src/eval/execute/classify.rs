@@ -13,10 +13,7 @@ use std::{
 use bstr::ByteSlice;
 
 use crate::{
-  builtin::{self, ForkBehavior},
-  shopt,
-  state::Shed,
-  try_var, var,
+  builtin, shopt, state::Shed, try_var, var,
 };
 
 use super::{
@@ -118,7 +115,7 @@ pub(crate) fn is_builtin(cmd: NodeId, tree: &Ast) -> bool {
   let cmd = cmd_word.slice();
 
   !is_func(&cmd)
-    && builtin::fork_behavior_for(&cmd).is_some_and(|b| !matches!(b, ForkBehavior::Always))
+    && builtin::fork_behavior_for(&cmd).is_some_and(|b| !b.forks())
     && cmd_word.flags.contains(TkFlags::BUILTIN)
 }
 

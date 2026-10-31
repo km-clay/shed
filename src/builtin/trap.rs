@@ -11,7 +11,7 @@ use crate::{
   varstr,
 };
 
-use super::opt::OptSpec;
+use super::{ForkBehavior, opt::OptSpec};
 
 pub(super) struct Trap;
 impl super::Builtin for Trap {
@@ -19,8 +19,8 @@ impl super::Builtin for Trap {
     true
   }
 
-  fn fork_behavior(&self) -> super::ForkBehavior {
-    super::ForkBehavior::Always
+  fn fork_behavior(&self) -> ForkBehavior {
+    ForkBehavior::literal(true)
   }
 
   fn strict_opts(&self) -> bool {

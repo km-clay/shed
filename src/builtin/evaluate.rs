@@ -1,9 +1,11 @@
 use crate::{
   eval::execute,
-  expand::Word,
+  expand::{self, Word, subshell},
   state::{Shed, meta::MetaTab, params, vars::ShStrSliceExt},
   util::{self, error::ShResult},
 };
+
+use super::ForkBehavior;
 
 pub(super) struct Eval;
 impl super::Builtin for Eval {
@@ -11,8 +13,21 @@ impl super::Builtin for Eval {
     true
   }
 
-  fn fork_behavior(&self) -> super::ForkBehavior {
-    super::ForkBehavior::Always
+  fn fork_behavior(&self) -> ForkBehavior {
+    ForkBehavior::Check(|args| match args {
+      [only] => {
+        // we can only reliably avoid forking if there is a single word.
+        // we join the arguments with IFS, which can change inbetween invocations
+        // and that can cause issues with the fork report cache
+        let Some(text) = expand::resolve_text(only) else {
+          return ForkBehavior::dynamic(true)
+        };
+
+        subshell::verdict_for(&text).make_dynamic().into()
+      }
+      [] => ForkBehavior::dynamic(false),
+      _ => ForkBehavior::dynamic(true),
+    })
   }
 
   fn execute(&self, args: super::BuiltinArgs) -> ShResult<()> {

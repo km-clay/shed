@@ -15,7 +15,7 @@ use super::opt::OptSpec;
 pub(super) struct Cd;
 impl super::Builtin for Cd {
   fn fork_behavior(&self) -> super::ForkBehavior {
-    super::ForkBehavior::Subshell
+    super::ForkBehavior::InPipeline
   }
   fn opts(&self) -> Vec<OptSpec> {
     vec![

@@ -254,7 +254,7 @@ impl super::Dispatcher {
     F: FnMut(&mut Self, &Ast) -> ShResult<()>,
   {
     let fork_builtins   = Shed::meta_mut(MetaTab::take_fork);
-    let fork_var_redirs = fork_builtins || node::node_forks(tree, node_id);
+    let fork_var_redirs = fork_builtins || node::node_verdict(tree, node_id).forks();
     let _redir_forks    = Shed::meta_mut(|m| m.enter_redir_fork(fork_var_redirs));
 
     let blame           = tree.span_for(node_id);
