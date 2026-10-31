@@ -121,7 +121,7 @@ AUTOLOADING                                      *autoloading*
   they cost nothing until they are called.
 
   Your own functions and completions are registered the same way, on
-  demand, with the |autoload|(builtin-autoload) builtin. Startup only 
+  demand, with the |autoload|(builtin-autoload) builtin. Startup only
   registers the bundled set; nothing scans your directories on its own.
 
   A file's stem (its name with any extension removed) is the name it
@@ -237,9 +237,9 @@ QMAP                                             *function-qmap* *qmap*
   do not leak between records.
 
   `-n`    treat the first record as a header. Each field is bound as
-          a local named after its column in addition to the positional
-          `$1`, `$2`, ..., and the header is re-emitted unchanged ahead
-          of the transformed records. See |named-streams|.
+          a local named after its column. The header is re-emitted
+          unchanged ahead of the transformed records.
+          See |named-streams|.
 
   Examples:
 
@@ -265,7 +265,7 @@ QNAME                                            *function-qname* *qname*
 
   `qname {name} [{name} ...]`
 
-  Prepend a header record to a quoted stream. Each {name} becomes one
+  Prepend a header record to a quoted stream. Each `{name}` becomes one
   field of a header record emitted ahead of the input, turning a plain
   stream into a named stream (see |named-streams|). The names are
   encoded with |quote|(builtin-quote) like any other record, and the
@@ -492,10 +492,10 @@ QWHERE                                           *function-qwhere* *qwhere*
 
   The predicate runs in its own function scope.
 
-  `-n`    treat the first record as a header. Each field is also bound
-          as a local named after its column, so the predicate can refer
-          to fields by name, and the header is passed through
-          unfiltered. See |named-streams|.
+  `-n`    treat the first record as a header. Each field is bound as a
+          local named after its column, so the predicate can refer to
+          fields by name, and the header is passed through unfiltered.
+          See |named-streams|.
 
   Inspired by `where` in `nushell`, but evaluates an arbitrary shell
   expression rather than a typed comparison.

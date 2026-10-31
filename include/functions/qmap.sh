@@ -16,11 +16,19 @@ qmap() {
 
     for i in "${!headers[@]}"; do
       # bind positional args to named variables
-      prelude+="${headers[i]}=\"\${$((i + 1))}\"; "
+      name="${headers[i]}"
+
+      # prevent stuff like command sub injection
+      if ! [[ "$name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+        raise "invalid variable name '%(1)'" "$name" --code 2
+      fi
+
+      # use take to move the positional args into named variables
+      prelude+="take $((i + 1)) $name; "
     done
     body="$prelude$body"
 
-    printf '%s\n' "${headers[*]}"
+		quote "${headers[@]}"
   fi
 
   # each record gets its own line
