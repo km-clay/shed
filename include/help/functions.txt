@@ -243,22 +243,22 @@ QMAP                                             *function-qmap* *qmap*
 
   Examples:
 
-      ```producer | qmap 'quote "$1" "extra"'```
+      ```producer | qmap ^(quote "$1" "extra")```
                           append a literal field to every record
 
-      ```producer | qmap 'quote "${1^^}"'```
+      ```producer | qmap ^(quote "${1^^}")```
                           uppercase the first field
 
-      ```producer | qmap 'quote "$2" "$1"'```
+      ```producer | qmap ^(quote "$2" "$1")```
                           swap fields 1 and 2 (assumes 2-field input)
 
-      ```producer | qmap -n 'quote "$name" "$size"'```
+      ```producer | qmap -n ^(quote "$name" "$size")```
                           reference fields by their header names
 
-      ```producer | qmap 'quote "$(realpath "$1")"'```
+      ```producer | qmap ^(quote "$(realpath "$1")")```
                           resolve path in field 1 to its absolute form
 
-  See also: |quoted-streams|, |named-streams|, |function-qwhere|
+  See also: |quoted-streams|, |named-streams|, |function-qwhere|, |script-command-literal|
 
 ==============================================================================
 QNAME                                            *function-qname* *qname*
@@ -480,11 +480,13 @@ QTRIM                                            *function-qtrim* *qtrim*
 
   See also: |str trim|(str-trim), |qmap|(function-qmap)
 
+==============================================================================
+
 QWHERE                                           *function-qwhere* *qwhere*
 
   `qwhere [-n] {predicate}`
 
-  Filter records in a quoted stream. {predicate} is a shell lambda
+  Filter records in a quoted stream. `{predicate}` is a shell lambda
   evaluated per record with fields bound as `$1`, `$2`, etc. Records
   where the predicate exits 0 are passed through unchanged; records
   where it exits non-zero are dropped. The original quoted record
@@ -502,26 +504,27 @@ QWHERE                                           *function-qwhere* *qwhere*
 
   Examples:
 
-      ```producer | qwhere '[ "$1" = "active" ]'```
+      ```producer | qwhere ^([ "$1" = "active" ])```
                           keep records where field 1 equals "active"
 
-      ```producer | qwhere '[ -f "$1" ]'```
+      ```producer | qwhere ^([ -f "$1" ])```
                           keep records whose first field names an
                           existing file
 
-      ```producer | qwhere '[[ "$1" == git* ]]'```
+      ```producer | qwhere ^([[ "$1" == git* ]])```
                           glob match on field 1
 
-      ```producer | qwhere -n '[ "$size" -gt 10 ]'```
+      ```producer | qwhere -n ^([ "$size" -gt 10 ])```
                           filter by a named column
 
-      ```producer | qwhere '[ "${#1}" -gt 10 ]'```
+      ```producer | qwhere ^([ "${#1}" -gt 10 ])```
                           keep records where field 1 is longer than
                           10 characters
 
-  See also: |quoted-streams|, |named-streams|, |function-qmap|
+  See also: |quoted-streams|, |named-streams|, |function-qmap|, |script-command-literal|
 
 ==============================================================================
+
 VERSION                                          *function-version* *version*
 
   `version [-v]`

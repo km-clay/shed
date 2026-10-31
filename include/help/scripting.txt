@@ -759,6 +759,22 @@ executable with a shebang line:
           }
           factorial 5              # prints 120```
 
+  8.6 Higher Order Functions
+
+      Using the |call|(builtin-call) builtin, it is possible to call anonymous
+      shell functions:
+
+      ```call ^(if true; then echo $1; fi) foo # prints 'foo'```
+
+      This means that shell functions can be stored in the same way that any
+      regular string can:
+
+      ```func=^(if true; then echo $1; fi)
+      call "$func" foo # prints 'foo'```
+
+      |Command literals|(script-command-literal) can be used to ensure correct
+      syntax for these functions.
+
 ==============================================================================
 9. Traps                                         *script-traps*
 
