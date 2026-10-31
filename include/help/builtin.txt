@@ -7,97 +7,97 @@ external executables. They have access to shell state (variables, job table, etc
 
 The following builtins are available:
 
-  `accept`      accept a connection on a listening socket   |builtin-accept|
-  `alias`       define or list command aliases              |builtin-alias|
-  `arrops`      array manipulation (push, pop, rotate)      |builtin-arrops|
-  `autocmd`     register hooks for shell events             |builtin-autocmd|
-  `autoload`    load functions/completions lazily           |builtin-autoload|
-  `bg`          resume a stopped job in the background      |builtin-bg|
-  `call`        execute anonymous shell functions           |builtin-call|
-  `cd`          change the working directory                |builtin-cd|
-  `chrono`      timers, sleeps, time formatting, intervals  |builtin-chrono|
-  `clone`       copy a variable's value to other names      |builtin-clone|
-  `compadd`     register completion candidates              |builtin-compadd|
-  `compgen`     emit completion candidates                  |builtin-compgen|
-  `complete`    define custom tab completion rules          |builtin-complete|
-  `declare`     declare variables with type and attributes  |builtin-declare|
-  `dirs`        display the directory stack                 |builtin-dirs|
-  `disown`      remove a job from the job table             |builtin-disown|
-  `echo`        print arguments to stdout                   |builtin-echo|
-  `eval`        evaluate a string as shell input            |builtin-eval|
-  `excmd`       define or list ex-mode command aliases      |builtin-excmd|
-  `exec`        replace the shell process with a command    |builtin-exec|
-  `exit`        exit the shell                              |builtin-exit|
-  `export`      mark variables for export to environment    |builtin-export|
-  `false`       return exit status 1                        |builtin-false|
-  `fc`          edit and re-exec commands from history      |builtin-fc|
-  `fcntl`       get and set file-descriptor flags           |builtin-fcntl|
-  `flog`        write a formatted log message               |builtin-flog|
-  `fg`          bring a job to the foreground               |builtin-fg|
-  `forget`      reset shell state to its launch baseline    |builtin-forget|
-  `fs`          filesystem operations (rename)              |builtin-fs|
-  `genrc`       (re)generate the rc file from live state    |builtin-genrc|
-  `getopts`     parse option flags in scripts               |builtin-getopts|
-  `global`      move a local variable to the global scope   |builtin-global|
-  `hash`        manage the command location cache           |builtin-hash|
-  `help`        display help pages                          |builtin-help|
-  `hist`        query and manage shell history              |builtin-hist|
-  `jobs`        list background jobs                        |builtin-jobs|
-  `keymap`      define custom key bindings                  |builtin-keymap|
-  `kill`        send signals to processes                   |builtin-kill|
-  `len`         print byte, character, or display length    |builtin-len|
-  `listen`      create a listening socket on a descriptor   |builtin-listen|
-  `lock`        take an advisory lock on a descriptor       |builtin-lock|
-  `local`       declare variables local to a function       |builtin-local|
-  `msg`         post a message to the status bar            |builtin-msg|
-  `nextd`       go forward in the directory history         |builtin-nextd|
-  `pack`        encode an array as a byte layout            |builtin-pack|
-  `poll`        wait for readiness on file descriptors      |builtin-poll|
-  `popd`        pop the directory stack                     |builtin-popd|
-  `prevd`       go back in the directory history            |builtin-prevd|
-  `printf`      formatted output                            |builtin-printf|
-  `pushd`       push a directory onto the stack             |builtin-pushd|
-  `pwd`         print the working directory                 |builtin-pwd|
-  `quote`       shell-quote arguments for round-tripping    |builtin-quote|
-  `read`        read a line of input into a variable        |builtin-read|
-  `readfloat`   read a binary float as its parts            |builtin-readfloat|
-  `readint`     read a binary integer as decimal            |builtin-readint|
-  `readkey`     read a single keypress                      |builtin-readkey|
-  `readonly`    mark variables as read-only                 |builtin-readonly|
-  `return`      return from a function                      |builtin-return|
-  `break`       exit a loop                                 |builtin-break|
-  `continue`    skip to the next loop iteration             |builtin-continue|
-  `raise`       raise a user-facing error from a function   |builtin-raise|
-  `scry`        fuzzy-pick a line read from stdin           |builtin-scry|
-  `seek`        seek a file descriptor to a byte offset     |builtin-seek|
-  `set`         set shell options and positional parameters |builtin-set|
-  `stash`       save and recall command snippets            |builtin-stash|
-  `shift`       shift positional parameters                 |builtin-shift|
-  `shopt`       get or set shell options                    |builtin-shopt|
-  `sock`        open a client socket on a file descriptor   |builtin-sock|
-  `source`      execute a file in the current shell         |builtin-source|
-  `stat`        display file or filesystem status           |builtin-stat|
-  `str`         string operations                           |builtin-str|
-  `take`        move a variable's value to another name     |builtin-take|
-  `[[`          evaluate conditional expressions            |builtin-test|
-  `thru`        pass stdin to stdout, optionally tee/limit  |builtin-thru|
-  `times`       print shell and child CPU times             |builtin-times|
-  `trap`        set signal handlers                         |builtin-trap|
-  `true`        return exit status 0                        |builtin-true|
-  `type`        describe how a name would be interpreted    |builtin-type|
-  `typeset`     synonym for `declare`                         |builtin-typeset|
-  `ulimit`      set process resource limits                 |builtin-ulimit|
-  `umask`       set the file creation mask                  |builtin-umask|
-  `unalias`     remove aliases                              |builtin-unalias|
-  `unpack`      decode fields of a byte layout from input   |builtin-unpack|
-  `unquote`     decode shell-quoted input into fields       |builtin-unquote|
-  `unset`       remove variables or functions               |builtin-unset|
-  `vice`        slice and edit text with vim motions        |builtin-vice|
-  `wait`        wait for background jobs to finish          |builtin-wait|
-  `writefloat`  encode a float from its parts               |builtin-writefloat|
-  `writeint`    encode an integer as binary                 |builtin-writeint|
-  `yes`         print lines of 'y' or a string endlessly    |builtin-yes|
-  `zd`          jump to a directory from history            |builtin-zd|
+  `accept`      accept a connection on a listening socket    |builtin-accept|
+  `alias`       define or list command aliases               |builtin-alias|
+  `arrops`      array manipulation (push, pop, rotate)       |builtin-arrops|
+  `autocmd`     register hooks for shell events              |builtin-autocmd|
+  `autoload`    load functions/completions lazily            |builtin-autoload|
+  `bg`          resume a stopped job in the background       |builtin-bg|
+  `call`        execute anonymous shell functions            |builtin-call|
+  `cd`          change the working directory                 |builtin-cd|
+  `chrono`      timers, sleeps, time formatting, intervals   |builtin-chrono|
+  `clone`       copy the value of a variable to other names  |builtin-clone|
+  `compadd`     register completion candidates               |builtin-compadd|
+  `compgen`     emit completion candidates                   |builtin-compgen|
+  `complete`    define custom tab completion rules           |builtin-complete|
+  `declare`     declare variables with type and attributes   |builtin-declare|
+  `dirs`        display the directory stack                  |builtin-dirs|
+  `disown`      remove a job from the job table              |builtin-disown|
+  `echo`        print arguments to stdout                    |builtin-echo|
+  `eval`        evaluate a string as shell input             |builtin-eval|
+  `excmd`       define or list ex-mode command aliases       |builtin-excmd|
+  `exec`        replace the shell process with a command     |builtin-exec|
+  `exit`        exit the shell                               |builtin-exit|
+  `export`      mark variables for export to environment     |builtin-export|
+  `false`       return exit status 1                         |builtin-false|
+  `fc`          edit and re-exec commands from history       |builtin-fc|
+  `fcntl`       get and set file-descriptor flags            |builtin-fcntl|
+  `flog`        write a formatted log message                |builtin-flog|
+  `fg`          bring a job to the foreground                |builtin-fg|
+  `forget`      reset shell state to its launch baseline     |builtin-forget|
+  `fs`          filesystem operations (rename)               |builtin-fs|
+  `genrc`       (re)generate the rc file from live state     |builtin-genrc|
+  `getopts`     parse option flags in scripts                |builtin-getopts|
+  `global`      move a local variable to the global scope    |builtin-global|
+  `hash`        manage the command location cache            |builtin-hash|
+  `help`        display help pages                           |builtin-help|
+  `hist`        query and manage shell history               |builtin-hist|
+  `jobs`        list background jobs                         |builtin-jobs|
+  `keymap`      define custom key bindings                   |builtin-keymap|
+  `kill`        send signals to processes                    |builtin-kill|
+  `len`         print byte, character, or display length     |builtin-len|
+  `listen`      create a listening socket on a descriptor    |builtin-listen|
+  `lock`        take an advisory lock on a descriptor        |builtin-lock|
+  `local`       declare variables local to a function        |builtin-local|
+  `msg`         post a message to the status bar             |builtin-msg|
+  `nextd`       go forward in the directory history          |builtin-nextd|
+  `pack`        encode an array as a byte layout             |builtin-pack|
+  `poll`        wait for readiness on file descriptors       |builtin-poll|
+  `popd`        pop the directory stack                      |builtin-popd|
+  `prevd`       go back in the directory history             |builtin-prevd|
+  `printf`      formatted output                             |builtin-printf|
+  `pushd`       push a directory onto the stack              |builtin-pushd|
+  `pwd`         print the working directory                  |builtin-pwd|
+  `quote`       shell-quote arguments for round-tripping     |builtin-quote|
+  `read`        read a line of input into a variable         |builtin-read|
+  `readfloat`   read a binary float as its parts             |builtin-readfloat|
+  `readint`     read a binary integer as decimal             |builtin-readint|
+  `readkey`     read a single keypress                       |builtin-readkey|
+  `readonly`    mark variables as read-only                  |builtin-readonly|
+  `return`      return from a function                       |builtin-return|
+  `break`       exit a loop                                  |builtin-break|
+  `continue`    skip to the next loop iteration              |builtin-continue|
+  `raise`       raise a user-facing error from a function    |builtin-raise|
+  `scry`        fuzzy-pick a line read from stdin            |builtin-scry|
+  `seek`        seek a file descriptor to a byte offset      |builtin-seek|
+  `set`         set shell options and positional parameters  |builtin-set|
+  `stash`       save and recall command snippets             |builtin-stash|
+  `shift`       shift positional parameters                  |builtin-shift|
+  `shopt`       get or set shell options                     |builtin-shopt|
+  `sock`        open a client socket on a file descriptor    |builtin-sock|
+  `source`      execute a file in the current shell          |builtin-source|
+  `stat`        display file or filesystem status            |builtin-stat|
+  `str`         string operations                            |builtin-str|
+  `take`        move the value of a variable to another name |builtin-take|
+  `[[`          evaluate conditional expressions             |builtin-test|
+  `thru`        pass stdin to stdout, optionally tee/limit   |builtin-thru|
+  `times`       print shell and child CPU times              |builtin-times|
+  `trap`        set signal handlers                          |builtin-trap|
+  `true`        return exit status 0                         |builtin-true|
+  `type`        describe how a name would be interpreted     |builtin-type|
+  `typeset`     synonym for `declare`                        |builtin-typeset|
+  `ulimit`      set process resource limits                  |builtin-ulimit|
+  `umask`       set the file creation mask                   |builtin-umask|
+  `unalias`     remove aliases                               |builtin-unalias|
+  `unpack`      decode fields of a byte layout from input    |builtin-unpack|
+  `unquote`     decode shell-quoted input into fields        |builtin-unquote|
+  `unset`       remove variables or functions                |builtin-unset|
+  `vice`        slice and edit text with vim motions         |builtin-vice|
+  `wait`        wait for background jobs to finish           |builtin-wait|
+  `writefloat`  encode a float from its parts                |builtin-writefloat|
+  `writeint`    encode an integer as binary                  |builtin-writeint|
+  `yes`         print lines of 'y' or a string endlessly     |builtin-yes|
+  `zd`          jump to a directory from history             |builtin-zd|
 
 ==============================================================================
 ALIAS                                            *builtin-alias* *alias*
