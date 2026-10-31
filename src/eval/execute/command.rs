@@ -19,10 +19,7 @@ use nix::{
   unistd::{self, ForkResult, Pid},
 };
 
-use crate::state::{
-  ForkKind,
-  thread,
-};
+use crate::state::{ForkKind, thread};
 use crate::{
   HashSet, autocmd, builtin,
   eval::parse::NdFlags,

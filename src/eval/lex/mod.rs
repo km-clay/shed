@@ -719,7 +719,7 @@ impl<'a> LexStream<'a> {
       heredoc_skip: None,
       case_depth: 0,
       dbracket_depth: 0,
-      sub_bodies: vec![]
+      sub_bodies: vec![],
     }
   }
   pub(crate) fn sub_bodies(&self) -> &[Span] {
@@ -2290,7 +2290,7 @@ mod tests {
 
   #[test]
   fn body_recorded_for_every_paren_form() {
-    assert_eq!(sub_body_texts("x=$(a)"),   ["a"]);
+    assert_eq!(sub_body_texts("x=$(a)"), ["a"]);
     assert_eq!(sub_body_texts("cat <(b)"), ["b"]);
     assert_eq!(sub_body_texts("cat >(c)"), ["c"]);
     assert_eq!(sub_body_texts("eval ^(d)"), ["d"]);
@@ -2302,8 +2302,8 @@ mod tests {
   fn case_arm_paren_does_not_close_a_body() {
     let body = "case x in x) echo m ;; esac";
     assert_eq!(sub_body_texts(&format!("eval ^({body})")), [body]);
-    assert_eq!(sub_body_texts(&format!("cat <({body})")),  [body]);
-    assert_eq!(sub_body_texts(&format!("x=$({body})")),    [body]);
+    assert_eq!(sub_body_texts(&format!("cat <({body})")), [body]);
+    assert_eq!(sub_body_texts(&format!("x=$({body})")), [body]);
   }
 
   #[test]
@@ -2314,7 +2314,7 @@ mod tests {
   #[test]
   fn several_bodies_in_one_word_are_each_recorded() {
     assert_eq!(sub_body_texts("echo ^(a)^(b)"), ["a", "b"]);
-    assert_eq!(sub_body_texts("echo x^(a)y"),   ["a"]);
+    assert_eq!(sub_body_texts("echo x^(a)y"), ["a"]);
   }
 
   // Quoting suppresses a command literal, but not a command substitution:
@@ -2332,5 +2332,4 @@ mod tests {
   fn arithmetic_is_not_recorded_as_a_body() {
     assert!(sub_body_texts("echo $((1 + 2))").is_empty());
   }
-
 }

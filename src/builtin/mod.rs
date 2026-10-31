@@ -7,7 +7,10 @@
 
 use bstr::ByteSlice;
 use nix::{sys::signal::Signal, unistd::Pid};
-use std::{io::{self, Read}, ops::{BitOr, BitOrAssign}};
+use std::{
+  io::{self, Read},
+  ops::{BitOr, BitOrAssign},
+};
 
 use crate::{
   builtin::opt::Arg,
@@ -263,7 +266,7 @@ pub(crate) fn setup(
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ForkVerdict {
   Literal(bool),
-  Dynamic(bool)
+  Dynamic(bool),
 }
 
 impl Default for ForkVerdict {
@@ -371,7 +374,10 @@ impl ForkBehavior {
     Self::Resolved(ForkVerdict::Dynamic(forks))
   }
   pub(crate) const fn forks(self) -> bool {
-    matches!(self, Self::Resolved(ForkVerdict::Literal(true) | ForkVerdict::Dynamic(true)))
+    matches!(
+      self,
+      Self::Resolved(ForkVerdict::Literal(true) | ForkVerdict::Dynamic(true))
+    )
   }
 }
 

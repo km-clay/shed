@@ -22,10 +22,14 @@ use std::{
 };
 
 use crate::{
-  eval::lex::{Span, Tk, TkFlags, TkRule}, expand::stream::{Marker, ProcSubKind}, match_loop, sherr, shopt, state::{
+  eval::lex::{Span, Tk, TkFlags, TkRule},
+  expand::stream::{Marker, ProcSubKind},
+  match_loop, sherr, shopt,
+  state::{
     params,
     vars::{ShStr, ShStrSliceExt},
-  }, util::error::{ShResult, ShResultExt},
+  },
+  util::error::{ShResult, ShResultExt},
 };
 
 use stream::Quote;

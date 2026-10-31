@@ -23,8 +23,8 @@ pub(crate) use quote::QuoteState;
 pub(crate) use scan::{
   ByteCursor, ByteSet, QuotePolicy, SliceCursor, assignment_value, ends_with_unescaped,
   has_unescaped, ifs_split, is_array_literal_assignment, scan_brackets, scan_param_exp,
-  scan_paren_body, scan_parens, split_all_with, split_assignment, split_assignment_raw, split_at_byteset_with,
-  split_at_pat_with, split_at_unescaped, split_tk,
+  scan_paren_body, scan_parens, split_all_with, split_assignment, split_assignment_raw,
+  split_at_byteset_with, split_at_pat_with, split_at_unescaped, split_tk,
 };
 
 /// Folds a slice into an accumulator. Pushes a space (`b' '`) if `i != 0`.

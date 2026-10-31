@@ -12,6 +12,17 @@ use std::{
   time::{Duration, Instant},
 };
 
+use crate::{
+  HashMap, HashSet,
+  expand::alias,
+  match_loop,
+  readline::{Candidate, CompSpec},
+  sherr,
+  state::{Shed, params, paths, vars::ShStr},
+  system_msg,
+  util::{error::ShResult, ui},
+  var,
+};
 use nix::{
   libc::time_t,
   poll::PollTimeout,
@@ -20,16 +31,8 @@ use nix::{
     time::TimeVal,
   },
 };
-use crate::{
-  HashMap, HashSet, expand::alias, match_loop, readline::{Candidate, CompSpec}, sherr, state::{Shed, params, paths, vars::ShStr}, system_msg, util::{error::ShResult, ui}, var,
-};
 
-use super::{
-  autocmd, db,
-  jobs::Job,
-  keys::KeyEvent,
-  logic::AutoCmdKind,
-};
+use super::{autocmd, db, jobs::Job, keys::KeyEvent, logic::AutoCmdKind};
 
 #[derive(Debug)]
 pub(crate) struct CmdTimer {

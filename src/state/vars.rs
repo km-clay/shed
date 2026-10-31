@@ -35,19 +35,27 @@ use smallvec::SmallVec;
 use smol_str::{SmolStr, SmolStrBuilder};
 
 use crate::{
-  HashMap, eval::{
+  HashMap,
+  eval::{
     lex::{LexFlags, LexStream, Tk, TkFlags, TkRule},
     parse::ast::Ast,
-  }, expand::{
+  },
+  expand::{
     Expander, Word, arithmetic, escape,
     stream::{Marker, Quote, SegStream, Unit},
     var,
-  }, match_loop, procio, readline::Candidate, sherr, state::{self, Shed, cache::CacheTab, params, paths}, util::{
+  },
+  match_loop, procio,
+  readline::Candidate,
+  sherr,
+  state::{self, Shed, cache::CacheTab, params, paths},
+  util::{
     self,
     error::{LabelBuilder, ShResult},
     random,
     strops::{ByteCursor, FromBytes, ParseBytes, QuoteState, SliceCursor},
-  }, varstr,
+  },
+  varstr,
 };
 
 use super::{meta::MetaTab, scopes::ScopeStack, terminal::Terminal};

@@ -1,5 +1,9 @@
 use crate::{
-  eval::execute::exec_nonint, expand::{self, Word, subshell}, set_var, sherr, state::{Shed, meta::MetaTab, vars::VarKind}, util::{
+  eval::execute::exec_nonint,
+  expand::{self, Word, subshell},
+  set_var, sherr,
+  state::{Shed, meta::MetaTab, vars::VarKind},
+  util::{
     self,
     error::{ShErrKind, ShResult},
     guards,
@@ -13,10 +17,10 @@ impl super::Builtin for Call {
   fn fork_behavior(&self) -> ForkBehavior {
     ForkBehavior::Check(|args| {
       let Some(first) = args.first() else {
-        return ForkBehavior::dynamic(false)
+        return ForkBehavior::dynamic(false);
       };
       let Some(text) = expand::resolve_text(first) else {
-        return ForkBehavior::dynamic(true)
+        return ForkBehavior::dynamic(true);
       };
 
       subshell::verdict_for(&text).make_dynamic().into()

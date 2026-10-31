@@ -4,10 +4,16 @@
 //! special parameters (`IFS`, `PS4`, …), and startup vars (`SHLVL`, version info).
 
 use crate::{
-  HashMap, eval::lex::TkFlags, expand::Expander, state::{Shed, cache::CacheTab, vars::ShStr}, try_var, util::{
+  HashMap,
+  eval::lex::TkFlags,
+  expand::Expander,
+  state::{Shed, cache::CacheTab, vars::ShStr},
+  try_var,
+  util::{
     self, guards,
     strops::{ByteCursor, QuoteState, SliceCursor},
-  }, varstr,
+  },
+  varstr,
 };
 
 #[cfg(not(target_os = "android"))]

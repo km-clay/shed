@@ -107,8 +107,10 @@ impl super::Dispatcher {
     let     fork_only           = matches!(pipe_style, PipeStyle::Fork);
 
     // If any stage runs internally, the pgid of the job is set to the shell's
-    let has_in_process =
-      self.fg_job && !fork_only && num_cmds > 1 && cmds.iter().any(|c| !node::node_verdict(tree, *c).forks());
+    let has_in_process = self.fg_job
+      && !fork_only
+      && num_cmds > 1
+      && cmds.iter().any(|c| !node::node_verdict(tree, *c).forks());
     if has_in_process {
       self
         .job_stack
@@ -147,7 +149,9 @@ impl super::Dispatcher {
       // instead of using a syscall to create os pipes
       let use_thread_pipes = if let Some((_, n_cmd)) = cmd_iter.peek() {
         let next_node = &tree[**n_cmd];
-        thread_this_stage && !should_fork_segment(next_node) && !node::node_verdict(tree, **n_cmd).forks()
+        thread_this_stage
+          && !should_fork_segment(next_node)
+          && !node::node_verdict(tree, **n_cmd).forks()
       } else {
         false
       };

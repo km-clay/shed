@@ -12,9 +12,7 @@ use std::{
 
 use bstr::ByteSlice;
 
-use crate::{
-  builtin, shopt, state::Shed, try_var, var,
-};
+use crate::{builtin, shopt, state::Shed, try_var, var};
 
 use super::{
   lex::{Tk, TkFlags},

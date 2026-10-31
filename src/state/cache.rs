@@ -1,10 +1,28 @@
-use std::{ffi::CString, os::unix::ffi::OsStrExt, path::{Path, PathBuf}, rc::Rc, sync::Arc};
+use std::{
+  ffi::CString,
+  os::unix::ffi::OsStrExt,
+  path::{Path, PathBuf},
+  rc::Rc,
+  sync::Arc,
+};
 
 use regex::Regex;
 
-use crate::{HashMap, eval::parse::{ast::{Ast, NodeId}, node::ForkReport}, expand::glob::{GlobOpts, Pattern}, state::vars::ShStr, var};
+use crate::{
+  HashMap,
+  eval::parse::{
+    ast::{Ast, NodeId},
+    node::ForkReport,
+  },
+  expand::glob::{GlobOpts, Pattern},
+  state::vars::ShStr,
+  var,
+};
 
-use super::{Shed, paths, vars::{VarFlags, VarKind}};
+use super::{
+  Shed, paths,
+  vars::{VarFlags, VarKind},
+};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PathTable {
@@ -42,7 +60,6 @@ impl PathTable {
     self.index.clear();
   }
 }
-
 
 #[derive(Debug, Clone, Default)]
 struct ForkMemo {
@@ -148,7 +165,7 @@ impl RegexCache {
 
 #[derive(Debug, Clone, Default)]
 struct AstCache {
-  trees: HashMap<ShStr, Arc<Ast>>
+  trees: HashMap<ShStr, Arc<Ast>>,
 }
 
 impl AstCache {
@@ -178,22 +195,22 @@ impl AstCache {
 /// function table is one edit here instead of a hunt through call sites.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CacheTab {
-  fork: ForkMemo,
-  envp: Option<Rc<[CString]>>,
-  regex: RegexCache,
-  ast: AstCache,
-  path: PathTable,
-  old_path  : Option<ShStr>,
+  fork    : ForkMemo,
+  envp    : Option<Rc<[CString]>>,
+  regex   : RegexCache,
+  ast     : AstCache,
+  path    : PathTable,
+  old_path: Option<ShStr>,
 }
 
 impl CacheTab {
   pub(crate) fn new() -> Self {
     Self {
-      fork: ForkMemo::default(),
-      envp: None,
-      regex: RegexCache::new(),
-      ast: AstCache::default(),
-      path: PathTable::new(),
+      fork    : ForkMemo::default(),
+      envp    : None,
+      regex   : RegexCache::new(),
+      ast     : AstCache::default(),
+      path    : PathTable::new(),
       old_path: None,
     }
   }
@@ -276,8 +293,6 @@ impl CacheTab {
     self.fork.drop_tree(ast_id);
   }
 
-
-
   pub(crate) fn memoize_fork_behavior(&mut self, node: NodeId, slots: usize, behavior: ForkReport) {
     self.fork.insert(node, slots, behavior);
   }
@@ -326,5 +341,4 @@ impl CacheTab {
 
     self.get_envp()
   }
-
 }

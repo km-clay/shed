@@ -210,9 +210,10 @@ fn unescape_with(stream: SegStream, flags: ExpandFlags) -> SegStream {
           out.push_byte(b'}');
           param_depth = param_depth.saturating_sub(1);
         }
-        b'^' if cursor.peek_byte() == Some(b'(')
-          && flags.contains(ExpandFlags::SUBSHELL)
-          && param_depth == 0 =>
+        b'^'
+          if cursor.peek_byte() == Some(b'(')
+            && flags.contains(ExpandFlags::SUBSHELL)
+            && param_depth == 0 =>
         {
           cursor.next();
           out.push_marker(Marker::Quote(Quote::Single));

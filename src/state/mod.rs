@@ -20,13 +20,20 @@ use std::{
 };
 
 use crate::{
-  HashMap, builtin::ForkVerdict, eval::{
+  HashMap,
+  builtin::ForkVerdict,
+  eval::{
     lex::Span,
     parse::{
       ast::{Ast, NodeId},
       node,
     },
-  }, procio, socket::SocketRequest, state::{jobs::Outcome, source::StrongSpan, vars::ShStr}, util::error, varstr,
+  },
+  procio,
+  socket::SocketRequest,
+  state::{jobs::Outcome, source::StrongSpan, vars::ShStr},
+  util::error,
+  varstr,
 };
 
 use super::{
@@ -41,6 +48,7 @@ use super::{
   var, writefd,
 };
 
+pub(super) mod cache;
 pub(super) mod cmd;
 pub(super) mod cwd;
 pub(super) mod db;
@@ -57,7 +65,6 @@ pub(super) mod terminal;
 pub(super) mod thread;
 pub(crate) mod timers;
 pub(super) mod vars;
-pub(super) mod cache;
 
 pub(crate) use source::{
   SourceHandle, SourceId, get_source, get_source_name, handle_for, register_named_source,
@@ -180,9 +187,9 @@ impl ForkStat {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ForkBlame {
-  span    : StrongSpan,
+  span   : StrongSpan,
   verdict: ForkVerdict,
-  kind    : ForkKind,
+  kind   : ForkKind,
 }
 
 impl ForkBlame {
@@ -398,7 +405,7 @@ pub(super) struct Shed {
   /// The shell configuration options
   shopts     : RefCell<shopt::ShOpts>,
   /// Assorted data caches
-  cache: RefCell<cache::CacheTab>,
+  cache      : RefCell<cache::CacheTab>,
   /// The last exit status code, used by `$?`
   status_code: AtomicI32,
 

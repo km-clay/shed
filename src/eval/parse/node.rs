@@ -19,10 +19,14 @@ use super::{
 };
 
 use crate::{
-  builtin::{ForkBehavior, ForkVerdict, fork_behavior_for}, expand::subshell, readline::{NestedSub, nested_subs}, state::{
+  builtin::{ForkBehavior, ForkVerdict, fork_behavior_for},
+  expand::subshell,
+  readline::{NestedSub, nested_subs},
+  state::{
     ForkBlame, Shed,
     logic::{IsInternal, ShFunc},
-  }, util::error::LabelBuilder,
+  },
+  util::error::LabelBuilder,
 };
 
 use super::{ast::NodeId, lex::Tk, two_way_display};
@@ -312,7 +316,7 @@ impl ForkReport {
       ForkReport::Simple(v) => *v,
       ForkReport::Detailed(rep) => rep
         .iter()
-        .fold(ForkVerdict::default(), |acc, b| acc | b.verdict())
+        .fold(ForkVerdict::default(), |acc, b| acc | b.verdict()),
     }
   }
 
@@ -329,8 +333,8 @@ pub(crate) fn node_verdict(tree: &Ast, node_id: NodeId) -> ForkVerdict {
     return verdict;
   }
 
-  let behavior  = node_fork_behavior(tree, node_id, true);
-  let verdict = behavior.verdict();
+  let behavior = node_fork_behavior(tree, node_id, true);
+  let verdict  = behavior.verdict();
 
   if let ForkVerdict::Literal(_) = verdict {
     Shed::cache_mut(|c| c.memoize_fork_behavior(node_id, tree.node_count(), behavior));

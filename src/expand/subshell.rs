@@ -1,11 +1,23 @@
 use std::{
-  os::fd::{AsFd, AsRawFd}, sync::Arc,
+  os::fd::{AsFd, AsRawFd},
+  sync::Arc,
 };
 
 use crate::{
-  builtin::ForkVerdict, errln, eval::{
-    execute, lex::Span, parse::{ParseFlags, ParsedSrc, ast::Ast, node},
-  }, expand::arithmetic, lifecycle, procio::{self, OsSink, RedirType, Sinks}, readline::{self, NestedSub}, sherr, shopt, state::{ForkKind, Shed, meta::MetaTab, terminal::Terminal, vars::ShStr}, util::{error::ShResult, guards},
+  builtin::ForkVerdict,
+  errln,
+  eval::{
+    execute,
+    lex::Span,
+    parse::{ParseFlags, ParsedSrc, ast::Ast, node},
+  },
+  expand::arithmetic,
+  lifecycle,
+  procio::{self, OsSink, RedirType, Sinks},
+  readline::{self, NestedSub},
+  sherr, shopt,
+  state::{ForkKind, Shed, meta::MetaTab, terminal::Terminal, vars::ShStr},
+  util::{error::ShResult, guards},
 };
 
 use bstr::ByteSlice;
@@ -94,7 +106,6 @@ pub(crate) fn get_subshell_ast(raw: &[u8]) -> Option<Arc<Ast>> {
   Shed::cache_mut(|c| c.cache_ast(raw.into(), tree.clone()));
 
   Some(tree)
-
 }
 
 pub(crate) fn verdict_for(raw: &[u8]) -> ForkVerdict {
@@ -102,7 +113,7 @@ pub(crate) fn verdict_for(raw: &[u8]) -> ForkVerdict {
     return ForkVerdict::Literal(true);
   };
 
-  let     roots = ast.roots();
+  let     roots   = ast.roots();
   let mut verdict = ForkVerdict::default();
 
   for root in roots.iter().copied() {
@@ -111,7 +122,7 @@ pub(crate) fn verdict_for(raw: &[u8]) -> ForkVerdict {
 
   for sub in readline::nested_subs(raw) {
     let sub_verdict = match sub {
-      NestedSub::Proc(_) => ForkVerdict::Literal(true),
+      NestedSub::Proc(_)      => ForkVerdict::Literal(true),
       NestedSub::Cmd(_, body) => verdict_for(body.as_bytes()),
     };
 

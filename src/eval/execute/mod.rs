@@ -5,7 +5,8 @@
 //! handling, and error propagation.
 
 use super::{
-  lex::{self, KEYWORDS, LexFlags, Span, Tk, TkFlags}, parse::{
+  lex::{self, KEYWORDS, LexFlags, Span, Tk, TkFlags},
+  parse::{
     self,
     ast::{Ast, NodeId},
   },
@@ -228,8 +229,8 @@ pub(crate) fn exec_dash_c(input: &str, args: Vec<String>) -> ShResult<()> {
   });
 
   let expanded = alias::expand_aliases(input);
-  let mut parser = ParsedSrc::with_name(source_name, expanded.into())
-    .with_lex_flags(LexFlags::empty());
+  let mut parser =
+    ParsedSrc::with_name(source_name, expanded.into()).with_lex_flags(LexFlags::empty());
 
   if let Err(errors) = parser.parse_src() {
     for error in errors {

@@ -9,9 +9,17 @@ use bstr::ByteSlice;
 use itertools::Itertools;
 
 use crate::{
-  HashSet, builtin::{self, BUILTIN_NAMES}, state::{
-    Shed, cache::CacheTab, meta::{MetaTab, Utility}, paths, vars::ShStr,
-  }, util::strops::{self}, var,
+  HashSet,
+  builtin::{self, BUILTIN_NAMES},
+  state::{
+    Shed,
+    cache::CacheTab,
+    meta::{MetaTab, Utility},
+    paths,
+    vars::ShStr,
+  },
+  util::strops::{self},
+  var,
 };
 
 /// Parse `arr[idx]` into (name, `raw_index_expr`). Pure parsing, no expansion.

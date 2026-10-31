@@ -20,13 +20,13 @@ impl super::Builtin for Eval {
         // we join the arguments with IFS, which can change inbetween invocations
         // and that can cause issues with the fork report cache
         let Some(text) = expand::resolve_text(only) else {
-          return ForkBehavior::dynamic(true)
+          return ForkBehavior::dynamic(true);
         };
 
         subshell::verdict_for(&text).make_dynamic().into()
       }
       [] => ForkBehavior::dynamic(false),
-      _ => ForkBehavior::dynamic(true),
+      _  => ForkBehavior::dynamic(true),
     })
   }
 

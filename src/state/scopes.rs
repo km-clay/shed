@@ -18,7 +18,11 @@ use super::{
   vars::{self, ArrIndex, ShellParam, Var, VarFlags, VarKind, VarKindTag, VarName, VarTab},
 };
 use crate::{
-  HashMap, state::{cache::CacheTab, vars::{ShStr, ShStrSliceExt}},
+  HashMap,
+  state::{
+    cache::CacheTab,
+    vars::{ShStr, ShStrSliceExt},
+  },
 };
 use crate::{expand::Words, util::strops::ParseBytes};
 use crate::{shopt, varstr};
