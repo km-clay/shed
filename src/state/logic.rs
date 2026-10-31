@@ -124,24 +124,28 @@ impl ShFunc {
   pub(crate) fn is_defined(&self) -> bool {
     matches!(self, Self::Defined { .. })
   }
+  pub(crate) fn clear_is_internal(&mut self) {
+    let Self::Defined { is_internal, .. } = self else {
+      return
+    };
+
+    *is_internal = None;
+  }
   pub(crate) fn set_is_internal(&mut self, is_internal: IsInternal) -> ShResult<()> {
-    match self {
-      Self::Defined { is_internal: i, .. } => {
-        match i {
-          Some(IsInternal::Checking) | None => *i = Some(is_internal),
-          Some(IsInternal::Resolved(i)) if !i.forks() => {
-            if let IsInternal::Resolved(fork_behavior) = is_internal {
-              *i = fork_behavior;
-            }
-          }
-          _ => {}
+    let Self::Defined { is_internal: i, .. } = self else {
+      return Err(sherr!(InternalErr, "Cannot set fork_behavior on autoload function"))
+    };
+
+    match i {
+      Some(IsInternal::Checking) | None => *i = Some(is_internal),
+      Some(IsInternal::Resolved(i)) if !i.forks() => {
+        if let IsInternal::Resolved(fork_behavior) = is_internal {
+          *i = fork_behavior;
         }
-        Ok(())
       }
-      Self::Autoload(_) => {
-        Err(sherr!(InternalErr, "Cannot set fork_behavior on autoload function"))
-      }
+      _ => {}
     }
+    Ok(())
   }
 }
 
@@ -447,6 +451,11 @@ impl LogTab {
   pub(crate) fn set_func_internal(&mut self, name: &[u8], is_internal: IsInternal) {
     if let Some(func) = self.functions.get_mut(name) {
       func.set_is_internal(is_internal).ok();
+    }
+  }
+  pub(crate) fn clear_func_internal(&mut self, name: &[u8]) {
+    if let Some(func) = self.functions.get_mut(name) {
+      func.clear_is_internal();
     }
   }
   pub(crate) fn begin_internal_check(&mut self, name: &[u8]) -> Option<Arc<Ast>> {

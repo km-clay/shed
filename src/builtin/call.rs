@@ -75,6 +75,14 @@ mod tests {
     pipeline_with_external    : r#"call ^(printf hi) | cat | cat"#                    => "hi";
   }
 
+  // A function whose body is `call "$var"` must not have its fork verdict
+  // frozen on first use -- the body can change without the function doing so.
+  // Both pipeline stages have to stay in-process for a stale verdict to be
+  // observable: an external on either side forces real pipes, which hides it.
+  crate::test_input! {
+    fn_verdict_is_not_frozen : r#"body='echo one'; f() { call "$body"; }; f | eval 'read -q x; printf "%s," "$x"'; body='(echo two)'; f | eval 'read -q x; printf "%s," "$x"'"# => "one,two,";
+  }
+
   #[test]
   fn propagates_failure_status() {
     let _g = TestGuard::new();

@@ -505,7 +505,14 @@ fn node_fork_behavior(tree: &Ast, node_id: NodeId, simple: bool) -> ForkReport {
         let body_src = logic.span_for(root).slice();
         let behavior = subshell::verdict_for(body_src.as_bytes());
 
-        Shed::logic_mut(|l| l.set_func_internal(&func_name, IsInternal::Resolved(behavior)));
+        if behavior.is_dynamic() {
+          // dynamic verdict, invalidate any existing cache
+          Shed::logic_mut(|l| l.clear_func_internal(&func_name));
+        } else {
+          // literal verdict, cache the result
+          Shed::logic_mut(|l| l.set_func_internal(&func_name, IsInternal::Resolved(behavior)));
+        }
+
         blame!(ForkBlame::command(span, behavior));
       }
       NdRule::Subshell { .. } => blame!(ForkBlame::subshell(span, ForkVerdict::Literal(true))),
