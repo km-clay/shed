@@ -1775,7 +1775,7 @@ impl VarTab {
   pub(crate) fn try_take_param(&mut self, param: ShellParam) -> Option<ShStr> {
     match param {
       ShellParam::Pos(n) => self.sh_argv.get_mut(n).map(std::mem::take),
-      _ => self.params.get_mut(&param).map(std::mem::take)
+      _ => self.params.get_mut(&param).map(std::mem::take),
     }
   }
   pub(crate) fn try_take_var(&mut self, var_name: &[u8]) -> ShResult<Option<Var>> {

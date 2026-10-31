@@ -1,8 +1,17 @@
 qtable() {
-	local -a widths records fields headers
-	local left i=0 has_names=0
-	local justify="${SQR_TABLE_JUSTIFY:-right}"
-	local SQR_TABLE_MARKER="${SQR_TABLE_MARKER:-…}"
+  local -a widths records fields headers
+  local left i has_names justify SQR_TABLE_MARKER
+  local draw_separator draw_row record_widths
+
+  widths=()
+  records=()
+  fields=()
+  headers=()
+  left=""
+  i=0
+  has_names=0
+	justify="${SQR_TABLE_JUSTIFY:-right}"
+	SQR_TABLE_MARKER="${SQR_TABLE_MARKER:-…}"
 
 	while getopts ":nl" opt; do
 		case "$opt" in
@@ -26,7 +35,7 @@ qtable() {
 
   # draw a row, taking a left, middle, and right separator character
   # e.g. `draw_separator '├' '┼' '┤'`
-	draw_separator() {
+	draw_separator=^(
 		local left="$1"
 		local middle="$2"
 		local right="$3"
@@ -46,10 +55,11 @@ qtable() {
 		done
 
 		echo "$right"
-	}
+  )
 
-	draw_row() {
-		local row=("$@")
+  draw_row=^(
+		local -a row; row=("$@")
+		local col field target_width this_width diff
 
 		printf '│ '
 
@@ -76,10 +86,11 @@ qtable() {
 		done
 
 		printf "\n"
-	}
+  )
 
-	record_widths() {
-		local row=("$@")
+	record_widths=^(
+		local -a row; row=("$@")
+		local col field field_width
 
 		for ((col=0; col < ${#row[@]}; col++)); do
 			field="${row[col]}"
@@ -89,33 +100,30 @@ qtable() {
 				widths[col]=$field_width
 			fi
 		done
-	}
-	defer unset -f draw_separator
-	defer unset -f draw_row
-	defer unset -f record_widths
+  )
 
 	if [ "${#headers[@]}" -gt 0 ]; then
-		record_widths "${headers[@]}"
+		call "$record_widths" "${headers[@]}"
 	fi
 
 	while read -r line; do
 		push records "$line"
 		unquote -a fields "$line"
 
-		record_widths "${fields[@]}"
+		call "$record_widths" "${fields[@]}"
 	done
 
-	local num_records="${#records}"
-	local num_fields="${#widths}"
-	local approx_height=$(( num_records + 6 ))
+	num_records="${#records}"
+	num_fields="${#widths}"
+	approx_height=$(( num_records + 6 ))
 	headers=( "${headers[@]:0:$num_fields}"  )
 
   # Shrink to fit the terminal. Each column costs its width plus two spaces of
   # padding, and the borders add one character per column plus one, so the
   # drawn width is the sum of the widths plus 3n+1.
-	local budget="${SQR_TABLE_WIDTH:-${COLUMNS:-80}}"
-	local min_col=3
-	local total=$(( 3 * num_fields + 1 ))
+	budget="${SQR_TABLE_WIDTH:-${COLUMNS:-80}}"
+	min_col=3
+	total=$(( 3 * num_fields + 1 ))
 
 	for ((i=0; i<num_fields; i++)); do
 		total=$(( total + widths[i] ))
@@ -124,7 +132,9 @@ qtable() {
   # Take from the widest column first, down to the next-widest, so narrow
   # columns keep their size and only the long field is truncated.
 	while (( total > budget )); do
-		local wi=0 w1=0 w2=0
+		wi=0
+    w1=0
+    w2=0
 
 		for ((i=0; i<num_fields; i++)); do
 			if (( widths[i] > w1 )); then
@@ -138,11 +148,11 @@ qtable() {
 
 		(( w1 <= min_col )) && break
 
-		local floor=$min_col
+		floor=$min_col
 		(( w2 > floor )) && floor=$w2
 
-		local take=$(( w1 - floor ))
-		local need=$(( total - budget ))
+		take=$(( w1 - floor ))
+		need=$(( total - budget ))
 
 		(( take > need )) && take=$need
 		(( take < 1 )) && take=1
@@ -151,22 +161,22 @@ qtable() {
 		total=$(( total - take ))
 	done
 
-	draw_separator '╭' '┬' '╮'
+	call "$draw_separator" '╭' '┬' '╮'
 
 	if [ "${#headers[@]}" -gt 0 ]; then
-		draw_row "${headers[@]}"
-		draw_separator '├' '┼' '┤'
+		call "$draw_row" "${headers[@]}"
+		call "$draw_separator" '├' '┼' '┤'
 	fi
 
 	for record in "${records[@]}"; do
 		unquote -a fields "$record"
-		draw_row "${fields[@]}"
+		call "$draw_row" "${fields[@]}"
 	done
 
 	if [ "${#headers[@]}" -gt 0 ] && (( approx_height > LINES )); then
-		draw_separator '├' '┼' '┤'
-		draw_row "${headers[@]}"
+		call "$draw_separator" '├' '┼' '┤'
+		call "$draw_row" "${headers[@]}"
 	fi
 
-	draw_separator '╰' '┴' '╯'
+	call "$draw_separator" '╰' '┴' '╯'
 }

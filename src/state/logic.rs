@@ -126,14 +126,14 @@ impl ShFunc {
   }
   pub(crate) fn clear_is_internal(&mut self) {
     let Self::Defined { is_internal, .. } = self else {
-      return
+      return;
     };
 
     *is_internal = None;
   }
   pub(crate) fn set_is_internal(&mut self, is_internal: IsInternal) -> ShResult<()> {
     let Self::Defined { is_internal: i, .. } = self else {
-      return Err(sherr!(InternalErr, "Cannot set fork_behavior on autoload function"))
+      return Err(sherr!(InternalErr, "Cannot set fork_behavior on autoload function"));
     };
 
     match i {

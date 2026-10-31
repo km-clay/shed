@@ -250,7 +250,7 @@ impl ScopeStack {
   pub(crate) fn read_name(&self, src: &VarName) -> ShResult<Option<VarKind>> {
     let name = src.name();
     if let Ok(ShellParam::Pos(n)) = name.parse_bytes() {
-      return Ok(self.try_get_param(ShellParam::Pos(n)).map(VarKind::string))
+      return Ok(self.try_get_param(ShellParam::Pos(n)).map(VarKind::string));
     }
 
     let Some(idx) = Self::element_of(src)? else {
@@ -266,7 +266,11 @@ impl ScopeStack {
   pub(crate) fn take_name(&mut self, src: &VarName) -> ShResult<Option<VarKind>> {
     let name = src.name();
     if let Ok(ShellParam::Pos(n)) = name.parse_bytes() {
-      return Ok(self.try_take_param(ShellParam::Pos(n))?.map(VarKind::string))
+      return Ok(
+        self
+          .try_take_param(ShellParam::Pos(n))?
+          .map(VarKind::string),
+      );
     }
 
     let Some(idx) = Self::element_of(src)? else {
