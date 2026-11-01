@@ -32,7 +32,11 @@ use crate::{
   eval::parse::{
     ast::{Ast, NodeId},
     node::LabelCtx,
-  }, match_loop, procio, sherr, state::{self, Shed, SourceHandle, vars::ShStr}, two_way_display, util::error::{ShErr, ShResult},
+  },
+  match_loop, procio, sherr,
+  state::{self, Shed, SourceHandle, vars::ShStr},
+  two_way_display,
+  util::error::{ShErr, ShResult},
 };
 
 use super::lex::{self, LexFlags, LexStream, Span, Tk, TkFlags, TkRule};

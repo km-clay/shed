@@ -15,11 +15,19 @@ use bitflags::bitflags;
 use bstr::ByteSlice;
 
 use crate::{
-  assert_sorted, builtin::BUILTIN_NAMES, expand::Word, match_loop, sherr, state::{
+  assert_sorted,
+  builtin::BUILTIN_NAMES,
+  expand::Word,
+  match_loop, sherr,
+  state::{
     self, Shed, SourceHandle, SourceId,
     vars::{ShStr, ShStrSliceExt},
-  }, util::{
-    self, error::ShResult, pos::Pos, strops::{self, ByteCursor, QuoteState, SliceCursor, SliceCursorData, scan_brackets},
+  },
+  util::{
+    self,
+    error::ShResult,
+    pos::Pos,
+    strops::{self, ByteCursor, QuoteState, SliceCursor, SliceCursorData, scan_brackets},
   },
 };
 
@@ -689,7 +697,7 @@ pub(crate) struct LexStream<'a> {
 
 impl<'a> LexStream<'a> {
   pub(crate) fn new(source: &'a SourceHandle, flags: LexFlags) -> Self {
-    let flags = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
+    let flags  = flags | LexFlags::FRESH | LexFlags::NEXT_IS_CMD;
     let cursor = source.get_cursor();
     Self {
       flags,
@@ -1053,10 +1061,7 @@ impl<'a> LexStream<'a> {
       // A previous heredoc on this line already read its body;
       // our body starts where that one ended
       let cur_pos = self.cursor.pos();
-      debug_assert!(
-        skip >= cur_pos,
-        "heredoc_skip is before the current cursor"
-      );
+      debug_assert!(skip >= cur_pos, "heredoc_skip is before the current cursor");
       let skip_offset = skip - cur_pos;
       self.inc_cursor(skip_offset);
 
@@ -1612,7 +1617,9 @@ impl<'a> LexStream<'a> {
     }
     if self.in_brc_grp() {
       self.flags |= LexFlags::STALE;
-      let start = self.brc_grp_start.unwrap_or(self.cursor.pos().saturating_sub(1));
+      let start = self
+        .brc_grp_start
+        .unwrap_or(self.cursor.pos().saturating_sub(1));
       return Some(Err(sherr!(
         ParseErr @ self.get_span(start..self.cursor.pos()),
         "Unclosed brace group",
@@ -1620,7 +1627,9 @@ impl<'a> LexStream<'a> {
     }
     if self.in_subsh() {
       self.flags |= LexFlags::STALE;
-      let start = self.subsh_start.unwrap_or(self.cursor.pos().saturating_sub(1));
+      let start = self
+        .subsh_start
+        .unwrap_or(self.cursor.pos().saturating_sub(1));
       return Some(Err(sherr!(
         ParseErr @ self.get_span(start..self.cursor.pos()),
         "Unclosed subshell",
@@ -1797,7 +1806,7 @@ impl Iterator for LexStream<'_> {
         // negation keyword
         self.inc_cursor(1);
         let     tk_type = TkRule::Bang;
-        let pos = self.cursor.pos();
+        let     pos     = self.cursor.pos();
         let mut tk      = self.get_token((pos - 1)..pos, tk_type);
 
         tk.flags |= TkFlags::KEYWORD;
@@ -1967,7 +1976,7 @@ pub(crate) fn is_cmd_sub(slice: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
 
-use super::*;
+  use super::*;
 
   fn lex_classes(src: &str) -> Vec<TkRule> {
     let handle = state::register_source(src);
@@ -1988,8 +1997,8 @@ use super::*;
 
   /// Bodies the lexer recorded for parse-time validation, as source text.
   fn sub_body_texts(src: &str) -> Vec<String> {
-    let handle = state::register_source(src);
-    let mut lex = LexStream::new(&handle, LexFlags::empty());
+    let     handle = state::register_source(src);
+    let mut lex    = LexStream::new(&handle, LexFlags::empty());
     while lex.next().is_some() {}
     lex
       .sub_bodies()

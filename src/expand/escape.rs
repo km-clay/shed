@@ -8,12 +8,20 @@ use bstr::ByteSlice;
 use smallvec::SmallVec;
 
 use crate::{
-  eval::lex, expand::{
+  eval::lex,
+  expand::{
     stream::{ProcSubKind, SegCursor},
     var,
-  }, match_loop, sherr, state::vars::ShStr, try_var, util::{
-    self, error::ShResult, strops::{self, ByteCursor, QuoteState, SliceCursor},
-  }, varstr,
+  },
+  match_loop, sherr,
+  state::vars::ShStr,
+  try_var,
+  util::{
+    self,
+    error::ShResult,
+    strops::{self, ByteCursor, QuoteState, SliceCursor},
+  },
+  varstr,
 };
 
 use super::stream::{Marker, Quote, SegStream, Unit};

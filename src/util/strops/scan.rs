@@ -364,8 +364,8 @@ impl From<SliceCursor<'_>> for SliceCursorData {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct SliceCursor<'a> {
   bytes: &'a [u8],
-  min: usize,
-  max: usize,
+  min  : usize,
+  max  : usize,
   pos  : usize,
 }
 
@@ -442,7 +442,7 @@ impl<'a> SliceCursor<'a> {
   /// The returned slice is constrained by the cursor's min/max bounds.
   pub(crate) fn into_slice(self) -> &'a [u8] {
     let start = self.min.max(self.pos);
-    let end = self.max;
+    let end   = self.max;
     &self.bytes[start..end]
   }
 

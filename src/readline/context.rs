@@ -758,12 +758,15 @@ impl CtxTk {
       CtxTkRule::ArgumentFile
     } else {
       // regular argument. lets subdivide it further on COMP_WORDBREAKS members
-      let (_, sub_tokens) = scan_subspans(SubSpanCtx {
-        chars: &mut chars,
-        flags: *flags,
-        scan_ctx: &ScanCtx::TOP_LEVEL,
-        term_ctx: TerminatorCtx::Eof,
-      }, span);
+      let (_, sub_tokens) = scan_subspans(
+        SubSpanCtx {
+          chars   : &mut chars,
+          flags   : *flags,
+          scan_ctx: &ScanCtx::TOP_LEVEL,
+          term_ctx: TerminatorCtx::Eof,
+        },
+        span,
+      );
       return vec![Self::new(span, CtxTkRule::Argument, sub_tokens)];
     };
     let scan_ctx = if flags.contains(TkFlags::IS_ARITH) {
@@ -774,8 +777,8 @@ impl CtxTk {
 
     let (_, sub_tokens) = scan_subspans(
       SubSpanCtx {
-        chars: &mut chars,
-        flags: *flags,
+        chars   : &mut chars,
+        flags   : *flags,
         scan_ctx: &scan_ctx,
         term_ctx: TerminatorCtx::Eof,
       },
@@ -947,7 +950,7 @@ fn parse_assignment(span: Span, flags: TkFlags) -> Vec<CtxTk> {
         scan_ctx: &ScanCtx::ARITH,
         term_ctx: TerminatorCtx::Eof,
       },
-      inner_span
+      inner_span,
     );
 
     lhs_sub.push(CtxTk::new(
@@ -988,7 +991,7 @@ fn parse_assignment(span: Span, flags: TkFlags) -> Vec<CtxTk> {
         scan_ctx: &ScanCtx::TOP_LEVEL,
         term_ctx: TerminatorCtx::Eof,
       },
-      inner_span
+      inner_span,
     );
     CtxTk::new(rhs_span, CtxTkRule::ArrayLiteral, inner)
   } else {
@@ -1000,7 +1003,7 @@ fn parse_assignment(span: Span, flags: TkFlags) -> Vec<CtxTk> {
         scan_ctx: &ScanCtx::TOP_LEVEL,
         term_ctx: TerminatorCtx::Eof,
       },
-      rhs_span
+      rhs_span,
     );
     CtxTk::new(rhs_span, CtxTkRule::AssignmentRight, rhs_sub)
   };
@@ -1041,7 +1044,7 @@ fn parse_op_body(
       scan_ctx: &ScanCtx::TOP_LEVEL,
       term_ctx: TerminatorCtx::ParamExpansion,
     },
-    span
+    span,
   );
   *consumed += inner_consumed;
 
@@ -1063,21 +1066,21 @@ fn parse_op_body(
 
 struct SubTokenCtx<'c, 's> {
   subspan_ctx: SubSpanCtx<'c, 's>,
-  span: Span,
-  opener_len: usize,
+  span       : Span,
+  opener_len : usize,
   token_start: usize,
-  consumed: &'c mut usize,
-  rule: CtxTkRule,
+  consumed   : &'c mut usize,
+  rule       : CtxTkRule,
 }
 
 struct SubSpanCtx<'c, 's> {
-  chars: &'c mut Peekable<CharIndices<'s>>,
-  flags: TkFlags,
+  chars   : &'c mut Peekable<CharIndices<'s>>,
+  flags   : TkFlags,
   term_ctx: TerminatorCtx,
   scan_ctx: &'c ScanCtx,
 }
 
-fn get_subtoken(ctx: SubTokenCtx<'_,'_>) -> CtxTk {
+fn get_subtoken(ctx: SubTokenCtx<'_, '_>) -> CtxTk {
   let (inner_consumed, inner) = scan_subspans(ctx.subspan_ctx, ctx.span);
   *ctx.consumed += inner_consumed;
 
@@ -1086,7 +1089,7 @@ fn get_subtoken(ctx: SubTokenCtx<'_,'_>) -> CtxTk {
   CtxTk::new(span, ctx.rule, inner)
 }
 
-fn scan_subspans(ctx: SubSpanCtx<'_,'_>, span: Span) -> (usize, Vec<CtxTk>) {
+fn scan_subspans(ctx: SubSpanCtx<'_, '_>, span: Span) -> (usize, Vec<CtxTk>) {
   use ScanCtx as S;
   let     consumed   = &mut 0;
   let mut sub_tokens = vec![];
@@ -1134,8 +1137,8 @@ fn scan_subspans(ctx: SubSpanCtx<'_,'_>, span: Span) -> (usize, Vec<CtxTk>) {
           subspan_ctx: SubSpanCtx {
             term_ctx: TerminatorCtx::Arith,
             scan_ctx: &ScanCtx::ARITH,
-            chars: &mut *ctx.chars,
-            flags: ctx.flags
+            chars   : &mut *ctx.chars,
+            flags   : ctx.flags,
           },
           consumed,
           span,
@@ -1154,8 +1157,8 @@ fn scan_subspans(ctx: SubSpanCtx<'_,'_>, span: Span) -> (usize, Vec<CtxTk>) {
           subspan_ctx: SubSpanCtx {
             term_ctx: TerminatorCtx::DoubleQuote,
             scan_ctx: &ScanCtx::DOUBLE_QUOTE,
-            chars: &mut *ctx.chars,
-            flags: ctx.flags
+            chars   : &mut *ctx.chars,
+            flags   : ctx.flags,
           },
           consumed,
           span,
@@ -1170,8 +1173,8 @@ fn scan_subspans(ctx: SubSpanCtx<'_,'_>, span: Span) -> (usize, Vec<CtxTk>) {
           subspan_ctx: SubSpanCtx {
             term_ctx: TerminatorCtx::SingleQuote,
             scan_ctx: &ScanCtx::SINGLE_QUOTE,
-            chars: &mut *ctx.chars,
-            flags: ctx.flags
+            chars   : &mut *ctx.chars,
+            flags   : ctx.flags,
           },
           consumed,
           span,
@@ -1239,7 +1242,9 @@ fn scan_subspans(ctx: SubSpanCtx<'_,'_>, span: Span) -> (usize, Vec<CtxTk>) {
             let orig_consumed = *consumed;
             while let Some(&(_, hexp_ch)) = ctx.chars.peek() {
               match hexp_ch {
-                c if c.is_ascii_alphanumeric() || c == '-' || c == '_' => consume(ctx.chars, consumed),
+                c if c.is_ascii_alphanumeric() || c == '-' || c == '_' => {
+                  consume(ctx.chars, consumed)
+                }
                 _ => break,
               };
             }
@@ -1295,8 +1300,8 @@ fn scan_subspans(ctx: SubSpanCtx<'_,'_>, span: Span) -> (usize, Vec<CtxTk>) {
               subspan_ctx: SubSpanCtx {
                 term_ctx: TerminatorCtx::ArithSub,
                 scan_ctx: &ScanCtx::ARITH,
-                chars: &mut *ctx.chars,
-                flags: ctx.flags
+                chars   : &mut *ctx.chars,
+                flags   : ctx.flags,
               },
               span,
               consumed,
@@ -1317,8 +1322,8 @@ fn scan_subspans(ctx: SubSpanCtx<'_,'_>, span: Span) -> (usize, Vec<CtxTk>) {
             SubSpanCtx {
               term_ctx: TerminatorCtx::SingleQuote,
               scan_ctx: &ScanCtx::DOLLAR_QUOTE,
-              chars: &mut *ctx.chars,
-              flags: ctx.flags
+              chars   : &mut *ctx.chars,
+              flags   : ctx.flags,
             },
             span,
           );
@@ -1384,16 +1389,15 @@ fn scan_subspans(ctx: SubSpanCtx<'_,'_>, span: Span) -> (usize, Vec<CtxTk>) {
             let index_start = pos;
             consume(ctx.chars, consumed); // consume '['
             pos += 1;
-            let (inner_consumed, inner) =
-              scan_subspans(
-                SubSpanCtx {
-                  scan_ctx: &ScanCtx::ARITH,
-                  term_ctx: TerminatorCtx::VarIndex,
-                  chars: &mut *ctx.chars,
-                  flags: ctx.flags
-                },
-                span
-              );
+            let (inner_consumed, inner) = scan_subspans(
+              SubSpanCtx {
+                scan_ctx: &ScanCtx::ARITH,
+                term_ctx: TerminatorCtx::VarIndex,
+                chars   : &mut *ctx.chars,
+                flags   : ctx.flags,
+              },
+              span,
+            );
             *consumed += inner_consumed;
             pos += inner_consumed; // includes the closing ']'
             var_sub_tokens.push(CtxTk::new(
