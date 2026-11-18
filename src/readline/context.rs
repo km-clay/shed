@@ -481,6 +481,7 @@ impl CtxTk {
       | TkRule::SubshEnd
       | TkRule::BraceGrpStart
       | TkRule::BraceGrpEnd => Some(CtxTkRule::Operator),
+
       TkRule::Sep     => Some(CtxTkRule::Separator),
       TkRule::Redir   => Some(CtxTkRule::Redirect),
       TkRule::Comment => Some(CtxTkRule::Comment),

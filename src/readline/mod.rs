@@ -658,7 +658,6 @@ impl ShedLine {
     set_editmode_var(&*new.core.mode).ok();
     new.refresh_ui();
 
-    queue_term!(TermCtl::PrintChar('\n')).ok();
     new.print_line(false)?;
     Ok(new)
   }

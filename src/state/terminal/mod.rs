@@ -738,7 +738,7 @@ impl Terminal {
       None             => (None, None),
     };
 
-    if cursor_row.is_none_or(|r| r >= bottom as usize) {
+    if cursor_row.is_some_and(|r| r >= bottom as usize) {
       // Caller invokes us while the scroll region is still Unset (between
       // `cooked_guard` and `_scroll_guard` drops in `exec_pipeline`), so `\n`
       // at terminal bottom triggers a full-screen scroll that pulls gutter
