@@ -1222,8 +1222,15 @@ impl ShedLine {
       ModKeys::SHIFT => -1,
       _              => 1,
     };
-    let line       = self.core.focused_editor().to_string();
-    let cursor_pos = self.core.focused_editor().cursor_byte_pos();
+
+    let buf    = self.core.focused_editor().to_string();
+    let offset = buf.len() - buf.trim_start().len();
+    let line   = buf.get(offset..).unwrap_or(&buf).to_string();
+    let cursor_pos = self
+      .core
+      .focused_editor()
+      .cursor_byte_pos()
+      .saturating_sub(offset);
 
     let mut comp = self
       .completer
